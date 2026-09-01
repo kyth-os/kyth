@@ -287,6 +287,24 @@ fn smb_mount_command(share: String) -> Vec<String> {
     kyth_shared::system::smb::smb_mount_command(&share)
 }
 
+#[tauri::command]
+fn smb_mount(share: String) -> Result<String, String> {
+    let share = share.trim();
+    if share.len() > 2048
+        || !share.starts_with("smb://")
+        || share.chars().any(|character| character.is_control() || character.is_whitespace())
+    {
+        return Err("Enter a valid SMB share such as smb://server/share.".to_string());
+    }
+
+    let argv = kyth_shared::system::smb::smb_mount_command(share);
+    std::process::Command::new(&argv[0])
+        .args(&argv[1..])
+        .spawn()
+        .map_err(|error| format!("could not start the desktop share mount: {error}"))?;
+    Ok(format!("Mount request sent for {share}."))
+}
+
 /// Non-secret metadata saved by the legacy Hub after its root helper has
 /// created a share. Passwords deliberately never enter this file.
 #[derive(Clone, Deserialize, Serialize)]
@@ -1116,6 +1134,7 @@ fn main() {
             mesa_overlay_dry_run,
             smb_browse,
             smb_mount_command,
+            smb_mount,
             smb_configured_shares,
             smb_save_configured_share,
             smb_remove_configured_share,

@@ -78,35 +78,41 @@ pub struct UpdateStatus {
     pub detail: String,
 }
 
-pub fn check_update_status() -> UpdateStatus {
-    let data = crate::system::probe::read_section("bootc-status-data")
-        .or_else(|| crate::system::bootc_query::fetch_status_data());
-    let watcher = read_update_snapshot(600);
-    let watcher_staged = watcher.as_ref().is_some_and(|snapshot| !snapshot.staged_digest.is_empty());
-    let staged = data.as_ref().is_some_and(|value| crate::system::bootc::deployment_present(value, "staged")) || watcher_staged;
-    let rollback = data.as_ref().is_some_and(|value| crate::system::bootc::deployment_present(value, "rollback"));
-    let booted = data.as_ref().and_then(crate::system::registry::booted_image_digest);
-    let branch = crate::system::bootc::current_branch().unwrap_or_else(|| "latest".to_string());
-    let Some(data) = data else {
+fn project_cached_status(data: Option<&serde_json::Value>, watcher: Option<&UpdateSnapshot>) -> UpdateStatus {
+    let staged_from_bootc = data.is_some_and(|value| crate::system::bootc::deployment_present(value, "staged"));
+    let watcher_staged = watcher.is_some_and(|snapshot| !snapshot.staged_digest.is_empty());
+    let staged = staged_from_bootc || watcher_staged;
+    let rollback = data.is_some_and(|value| crate::system::bootc::deployment_present(value, "rollback"));
+    let booted = data.and_then(crate::system::registry::booted_image_digest);
+    let Some(_) = data else {
         return UpdateStatus { booted: None, staged, rollback, remote_digest: None, blocked_reason: Some("Could not read bootc status.".to_string()), retry_cmd: Some("bootc upgrade --check".to_string()), check_state: "error".to_string(), detail: "Could not read bootc status.".to_string() };
     };
-    let registry = crate::system::registry::check_registry_update(&data, &branch, crate::system::bootc_policy::REGISTRY);
-    if registry.state == "error" {
-        return UpdateStatus { booted, staged, rollback, remote_digest: None, blocked_reason: Some(registry.detail.clone()), retry_cmd: Some("bootc upgrade --check".to_string()), check_state: "error".to_string(), detail: registry.detail };
-    }
-    let remote_digest = crate::system::registry::remote_digest_and_timestamp(&registry.manifest_raw).0;
-    let mut check_state = "uptodate".to_string();
-    let mut detail = registry.detail;
-    if let Some(rd) = &remote_digest {
-        if Some(rd) != booted.as_ref() {
-            check_state = "available".to_string();
-        }
-    }
+
+    // Mount/refresh must remain a local read. The explicit "Check for
+    // updates" action owns the live GHCR request; a page visit must not
+    // unexpectedly wait for a registry timeout.
+    let remote_digest = watcher.and_then(|snapshot| {
+        (!snapshot.remote_digest.is_empty()).then(|| snapshot.remote_digest.clone())
+    });
+    let mut check_state = watcher
+        .map(|snapshot| snapshot.system_state().to_string())
+        .unwrap_or_else(|| "idle".to_string());
+    let mut detail = watcher
+        .and_then(|snapshot| snapshot.reason.clone().or_else(|| (!snapshot.output.is_empty()).then(|| snapshot.output.clone())))
+        .unwrap_or_else(|| "No recent update check.".to_string());
     if staged {
         check_state = "available".to_string();
-        if detail.is_empty() { detail = watcher.as_ref().and_then(|snapshot| snapshot.reason.clone()).unwrap_or_else(|| "staged image pending".to_string()); }
+        if detail.is_empty() { detail = watcher.and_then(|snapshot| snapshot.reason.clone()).unwrap_or_else(|| "staged image pending".to_string()); }
     }
     UpdateStatus { booted, staged, rollback, remote_digest, blocked_reason: None, retry_cmd: None, check_state, detail }
+}
+
+pub fn check_update_status() -> UpdateStatus {
+    // This command is used by the page on mount and refresh. Keep it a
+    // cache-only read; the explicit check action owns the live registry call.
+    let data = crate::system::probe::read_section("bootc-status-data");
+    let watcher = read_update_snapshot(600);
+    project_cached_status(data.as_ref(), watcher.as_ref())
 }
 
 #[cfg(test)]
@@ -145,6 +151,27 @@ mod tests {
         assert_eq!(snapshot.system_state(), "available");
         snapshot.staged_digest = "sha256:c".into();
         assert_eq!(snapshot.system_state(), "staged");
+    }
+
+    #[test]
+    fn cached_status_does_not_require_a_registry_probe() {
+        let data = serde_json::json!({
+            "status": {
+                "booted": {"image": {"imageDigest": "sha256:booted"}},
+                "staged": null,
+                "rollback": null
+            }
+        });
+        let watcher = UpdateSnapshot {
+            result: "checked".into(),
+            ts: 100,
+            booted_digest: "sha256:booted".into(),
+            remote_digest: "sha256:booted".into(),
+            ..Default::default()
+        };
+        let status = project_cached_status(Some(&data), Some(&watcher));
+        assert_eq!(status.check_state, "uptodate");
+        assert_eq!(status.remote_digest.as_deref(), Some("sha256:booted"));
     }
 
     #[test]

@@ -1,6 +1,8 @@
 //! Port of `kyth_shared.system.update_availability` — Hub-side 15s deadline.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+pub const AVAILABILITY_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone)]
 pub struct AvailabilityStatus {
@@ -32,28 +34,47 @@ pub fn availability_view(
 }
 
 pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> AvailabilityStatus {
+    let deadline = Instant::now() + AVAILABILITY_TIMEOUT;
+    // Do this cheap local check before either the registry or Flatpak probe.
+    // Otherwise an offline machine burns a remote timeout before we know to
+    // skip network-backed work.
+    let network_offline = matches!(run_nmcli_state().as_deref(), Some("disconnected") | Some("asleep") | Some("unknown"));
     // staged takes precedence — no registry call needed
     let staged = crate::system::bootc::has_staged_update();
     if staged {
-        let (flatpak_count, flatpak_detail) = flatpak_updates_count(use_cached);
+        let (flatpak_count, flatpak_detail) = if network_offline {
+            (0, String::new())
+        } else {
+            flatpak_updates_count_until(use_cached, deadline)
+        };
         return AvailabilityStatus { state: "staged".to_string(), detail: "A staged image is ready to boot.".to_string(), flatpak_count, flatpak_detail, staged: true, manifest_raw: String::new(), blocked_reason: String::new() };
     }
+
+    if network_offline {
+        return AvailabilityStatus {
+            state: "error".to_string(),
+            detail: "Network is unavailable; cannot check for updates.".to_string(),
+            flatpak_count: 0,
+            flatpak_detail: String::new(),
+            staged: false,
+            manifest_raw: String::new(),
+            blocked_reason: "Network is unavailable; retry when connected.".to_string(),
+        };
+    }
+
     let b = branch.map(str::to_string).or_else(crate::system::bootc::current_branch).unwrap_or_else(|| "latest".to_string());
     let status_data = crate::system::probe::read_section("bootc-status-data")
         .or_else(|| crate::system::bootc_query::fetch_status_data());
     let Some(status_data) = status_data else {
         return AvailabilityStatus { state: "error".to_string(), detail: "Could not read bootc status.".to_string(), flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::new(), blocked_reason: String::new() };
     };
-    let registry = crate::system::registry::check_registry_update(&status_data, &b, crate::system::bootc_policy::REGISTRY);
+
+    let remaining = deadline.saturating_duration_since(Instant::now());
+    let registry = crate::system::registry::check_registry_update_with_timeout(&status_data, &b, crate::system::bootc_policy::REGISTRY, remaining);
     if registry.state == "error" {
         return AvailabilityStatus { state: "error".to_string(), detail: registry.detail, flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() };
     }
-    // Flatpak count with nmcli skip if disconnected
-    let nm = run_nmcli_state();
-    if matches!(nm.as_deref(), Some("disconnected") | Some("asleep") | Some("unknown")) {
-        return AvailabilityStatus { state: registry.state, detail: registry.detail, flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() };
-    }
-    let (flatpak_count, flatpak_detail) = flatpak_updates_count(use_cached);
+    let (flatpak_count, flatpak_detail) = flatpak_updates_count_until(use_cached, deadline);
     AvailabilityStatus { state: registry.state, detail: registry.detail, flatpak_count, flatpak_detail, staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() }
 }
 
@@ -61,6 +82,10 @@ pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> Availabil
 /// the shared probe cache so a fresh registry result is not paired with stale
 /// package-manager data.
 pub fn flatpak_updates_count(use_cached: bool) -> (i32, String) {
+    flatpak_updates_count_until(use_cached, Instant::now() + Duration::from_secs(30))
+}
+
+fn flatpak_updates_count_until(use_cached: bool, deadline: Instant) -> (i32, String) {
     if use_cached {
         return (
             crate::system::probe::read_section("flatpak-updates")
@@ -81,7 +106,8 @@ pub fn flatpak_updates_count(use_cached: bool) -> (i32, String) {
             scope.to_string(),
             "--columns=application".to_string(),
         ];
-        match super::process::run_bounded(&argv, Duration::from_secs(15)) {
+        let timeout = deadline.saturating_duration_since(Instant::now());
+        match super::process::run_bounded(&argv, timeout) {
             Ok(output) if output.status.success() => {
                 successful_scope = true;
                 total += String::from_utf8_lossy(&output.stdout)

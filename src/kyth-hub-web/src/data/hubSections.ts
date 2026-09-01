@@ -36,7 +36,7 @@ export const PLAY_SECTIONS: HubSection[] = [
 ];
 
 export const APPS_SECTIONS: HubSection[] = [
-  { key: "App Store", title: "App Store", description: "Install trusted Flatpaks, find familiar app alternatives, manage AppImages, and open specialized tool environments.", Icon: IconGrid },
+  { key: "App Store", title: "App Store", description: "Discover, install, and remove trusted apps from one KythOS software center.", Icon: IconGrid },
   { key: "Work Setup", title: "Work Setup", description: "Set up office, mail, focus sessions, and workday conveniences.", Icon: IconMonitor },
 ];
 

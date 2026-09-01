@@ -576,9 +576,9 @@ export async function fetchSmbBrowse(host?: string | null): Promise<{ ok: boolea
   if (!inTauriShell()) return null;
   try { return await invoke<{ ok: boolean; detail: string }>("smb_browse", { host: host ?? null }); } catch { return null; }
 }
-export async function fetchSmbMountCommand(share: string): Promise<string[] | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string[]>("smb_mount_command", { share }); } catch { return null; }
+export async function mountSmbShare(share: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Share mounting is available from the installed Kyth Hub.");
+  return await invoke<string>("smb_mount", { share });
 }
 export interface ConfiguredNetworkShare {
   name: string;
@@ -985,7 +985,7 @@ export async function fetchFamiliarApps(): Promise<FamiliarApp[] | null> {
   try { return await invoke<FamiliarApp[]>("familiar_apps"); } catch { return null; }
 }
 
-export interface AppStreamApp { id: string; name: string; summary: string }
+export interface AppStreamApp { id: string; name: string; summary: string; icon_url: string }
 export interface AppImageEntry { name: string; path: string; executable: boolean }
 export interface InstallStatus { id: string; state: "running" | "complete" | "failed" | "unknown"; detail: string }
 export async function searchAppStream(query: string): Promise<AppStreamApp[] | null> {
@@ -997,7 +997,7 @@ export async function fetchAppImages(): Promise<AppImageEntry[] | null> {
   try { return await invoke<AppImageEntry[]>("appimage_list"); } catch { return null; }
 }
 
-export interface InstalledFlatpak { id: string; name: string; version: string; branch: string; arch: string; scope: "user" | "system"; }
+export interface InstalledFlatpak { id: string; name: string; version: string; branch: string; arch: string; scope: "user" | "system"; icon_url: string }
 export async function fetchInstalledFlatpaks(): Promise<InstalledFlatpak[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<InstalledFlatpak[]>("installed_flatpaks"); } catch { return null; }

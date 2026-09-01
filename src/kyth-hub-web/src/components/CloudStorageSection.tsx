@@ -1,22 +1,17 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
-  commandText,
   fetchCloudOauthStatus,
   fetchCloudSyncRemotes,
   fetchNetworkSummary,
   fetchNetworkSummaryLive,
-  fetchRcloneOauthCommand,
   openCloudStorageApp,
   type CloudSyncRemote,
   type NetworkSummary,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, CommandLine, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
-// The remotes rclone_oauth_command knows how to configure — the Rust side
-// is the authority on the argv, this list is only which buttons to offer.
-const REMOTES = ["onedrive", "drive", "dropbox"] as const;
 const REMOTE_LABEL: Record<string, string> = {
   onedrive: "OneDrive",
   drive: "Google Drive",
@@ -24,14 +19,13 @@ const REMOTE_LABEL: Record<string, string> = {
 };
 
 // Real "Move In > Cloud Storage" content — the cloud facet of the
-// "network-summary" probe section (see VpnSection's comment), plus
-// rclone's OAuth setup path. The setup command is shown rather than run:
-// rclone's OAuth flow is interactive and needs a terminal of its own.
+// "network-summary" probe section (see VpnSection's comment). Account setup
+// stays in the native Cloud Storage workflow so the Hub remains the place to
+// complete the setup.
 export function CloudStorageSection({ section }: { section: HubSection }) {
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
   const [oauth, setOauth] = useState<{ ok: boolean; detail: string } | null>(null);
   const [syncRemotes, setSyncRemotes] = useState<CloudSyncRemote[] | null>(null);
-  const [setupCmd, setSetupCmd] = useState<{ remote: string; text: string | null } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
 
@@ -92,7 +86,7 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
 
       <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
         <p className="card-copy" style={{ fontSize: 12, margin: "0 0 12px" }}>
-          Connecting an account opens a browser sign-in; the command below runs that flow in a terminal.
+          Connect accounts in the Cloud Storage workspace. Sign-in and saved sync settings stay in the Hub workflow.
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <ActionButton
@@ -100,21 +94,6 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
             disabled={busy !== null}
             onClick={() => run("open-cloud", "Opening the Cloud Storage workflow…", openCloudStorageApp)}
           />
-          {REMOTES.map((remote) => (
-            <ActionButton
-              key={remote}
-              label={busy === remote ? "Preparing…" : `Connect ${REMOTE_LABEL[remote]}`}
-              disabled={busy !== null}
-              onClick={() =>
-                run(remote, "Building the rclone command…", async () => {
-                  const argv = await fetchRcloneOauthCommand(remote);
-                  const text = commandText(argv);
-                  setSetupCmd({ remote, text });
-                  return text ? `Run this to sign in to ${REMOTE_LABEL[remote]}.` : "Could not build the command.";
-                })
-              }
-            />
-          ))}
           <ActionButton
             label={busy === "refresh" ? "Checking…" : "Refresh"}
             disabled={busy !== null}
@@ -133,7 +112,6 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
         <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
           The full workflow includes browser sign-in, saved sync folders, Sync Now, schedules, and logs.
         </p>
-        {setupCmd && <CommandLine label={`${REMOTE_LABEL[setupCmd.remote]} setup`} command={setupCmd.text} />}
         <ActionStatus status={status} />
       </div>
     </LiveSectionCard>

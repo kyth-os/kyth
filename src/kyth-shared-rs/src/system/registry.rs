@@ -61,10 +61,10 @@ pub fn remote_digest_and_timestamp(raw: &[u8]) -> (Option<String>, String) {
     (digest, ts)
 }
 
-fn inspect_raw(ref_name: &str) -> Result<Vec<u8>, String> {
+fn inspect_raw(ref_name: &str, timeout: Duration) -> Result<Vec<u8>, String> {
     let argv = vec!["skopeo", "inspect", "--raw", "--no-creds", &format!("docker://{ref_name}")]
         .into_iter().map(String::from).collect::<Vec<_>>();
-    match super::process::run_bounded(&argv, Duration::from_secs(15)) {
+    match super::process::run_bounded(&argv, timeout) {
         Ok(output) if output.status.success() => Ok(output.stdout),
         Ok(output) => {
             let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
@@ -80,6 +80,15 @@ pub fn check_registry_update(
     branch: &str,
     registry: &str,
 ) -> UpdateCheckResult {
+    check_registry_update_with_timeout(status_data, branch, registry, Duration::from_secs(15))
+}
+
+pub fn check_registry_update_with_timeout(
+    status_data: &Value,
+    branch: &str,
+    registry: &str,
+    timeout: Duration,
+) -> UpdateCheckResult {
     let Some(local_digest) = booted_image_digest(status_data) else {
         return UpdateCheckResult {
             state: "error".to_string(),
@@ -88,7 +97,7 @@ pub fn check_registry_update(
         };
     };
     let reference = format!("{registry}:{branch}");
-    let raw = match inspect_raw(&reference) {
+    let raw = match inspect_raw(&reference, timeout) {
         Ok(raw) => raw,
         Err(detail) => return UpdateCheckResult { state: "error".to_string(), detail, manifest_raw: Vec::new() },
     };

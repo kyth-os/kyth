@@ -1,173 +1,81 @@
 import { useEffect, useMemo, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
-  fetchAppStoreSnapshot,
-  fetchAppImages,
-  fetchFamiliarApps,
-  searchAppStream,
-  installFlatpak,
-  fetchInstallStatus,
-  launchAppImage,
-  fetchInstalledFlatpaks,
-  uninstallFlatpak,
-  makeAppImageExecutable,
-  importAppImage,
-  fetchStarterPacks,
-  fetchKaliStatus,
-  fetchSecHostTools,
-  createKaliBox,
-  exportKaliApps,
-  removeKaliBox,
-  enterKaliTerminal,
-  installSecHostTool,
-  uninstallSecHostTool,
-  launchSecHostTool,
-  type AppStoreSnapshot,
-  type FamiliarApp,
-  type AppImageEntry,
-  type AppStreamApp,
-  type StarterPack,
-  type InstalledFlatpak,
-  type SecHostTool,
+  fetchAppStoreSnapshot, fetchAppImages, fetchFamiliarApps, searchAppStream,
+  installFlatpak, fetchInstallStatus, launchAppImage, fetchInstalledFlatpaks,
+  uninstallFlatpak, makeAppImageExecutable, importAppImage, fetchStarterPacks,
+  fetchKaliStatus, fetchSecHostTools, createKaliBox, exportKaliApps,
+  removeKaliBox, enterKaliTerminal, installSecHostTool, uninstallSecHostTool,
+  launchSecHostTool, type AppStoreSnapshot, type FamiliarApp, type AppImageEntry,
+  type AppStreamApp, type StarterPack, type InstalledFlatpak, type SecHostTool,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
-
-/** The command that installs a pack's preselected apps in one go. Shown
- * rather than spawned: there is no bridge command for it, and adding a
- * generic "run this argv" one would be a new privilege surface for a
- * string the frontend chose. */
-function installCommand(ids: string[]): string | null {
-  if (ids.length === 0) return null;
-  return `flatpak install -y flathub ${ids.join(" ")}`;
-}
+import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
 type SectionRun = (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
 const secBtnStyle = { padding: "6px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 } as const;
 
-// The Kali distrobox lifecycle: create (tiered), enter a terminal, export
-// GUI apps to the host menu, remove. Mirrors page_software_security_kali.py
-// — see security_container.rs for why create/export/remove run as bash
-// scripts rather than plain argv.
+function iconUrlFor(id: string): string {
+  return `https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/${id}.png`;
+}
+
+function initials(name: string, id: string): string {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  if (words.length > 1) return `${words[0][0]}${words[1][0]}`.toUpperCase();
+  return (words[0] || id).slice(0, 2).toUpperCase();
+}
+
+function AppIcon({ name, id, iconUrl }: { name: string; id: string; iconUrl?: string }) {
+  const [failed, setFailed] = useState(false);
+  const source = iconUrl || (id ? iconUrlFor(id) : "");
+  return <div className="app-catalog-icon" aria-hidden="true">
+    {!failed && source ? <img src={source} alt="" onError={() => setFailed(true)} /> : <span>{initials(name, id)}</span>}
+  </div>;
+}
+
+type CardApp = { id: string; name: string; summary: string; icon_url?: string };
+
+function AppCard({ app, installed, busy, onInstall, onUninstall }: {
+  app: CardApp; installed: boolean; busy: string | null;
+  onInstall: (app: CardApp) => void; onUninstall: (app: CardApp) => void;
+}) {
+  const actionId = `${installed ? "uninstall" : "install"}-${app.id}`;
+  return <article className="app-catalog-card">
+    <div className="app-catalog-card-top">
+      <AppIcon name={app.name} id={app.id} iconUrl={app.icon_url} />
+      <div className="app-catalog-card-heading"><h3>{app.name || app.id}</h3><span className="app-catalog-source">Flatpak · Flathub</span></div>
+      {installed && <span className="pill pill-ok app-installed-pill">Installed</span>}
+    </div>
+    <p className="app-catalog-summary">{app.summary || "A trusted application for KythOS."}</p>
+    <div className="app-catalog-card-footer"><span className="app-catalog-id">{app.id}</span>
+      {installed ? <button className="app-action-button app-action-secondary" disabled={busy !== null} onClick={() => onUninstall(app)}>{busy === actionId ? "Removing…" : "Remove"}</button>
+        : <button className="app-action-button app-action-primary" disabled={busy !== null} onClick={() => onInstall(app)}>{busy === actionId ? "Installing…" : "Install"}</button>}
+    </div>
+  </article>;
+}
+
 function KaliCard({ busy, run }: { busy: string | null; run: SectionRun }) {
   const [installed, setInstalled] = useState<boolean | null>(null);
   const [tier, setTier] = useState<"headless" | "default" | "everything">("headless");
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchKaliStatus().then((value) => { if (!cancelled) setInstalled(value); });
-    return () => { cancelled = true; };
-  }, []);
-
-  async function refresh(): Promise<void> {
-    setInstalled(await fetchKaliStatus());
-  }
-
-  return (
-    <div style={{ marginTop: 18, padding: "12px 14px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <p style={{ fontWeight: 700, fontSize: 13, margin: 0, flex: 1 }}>Kali Linux Toolbox</p>
-        {installed != null && <span className={`pill ${installed ? "pill-ok" : "pill-dim"}`}>{installed ? "Installed" : "Not installed"}</span>}
-      </div>
-      <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>
-        Creates a Kali Linux container via distrobox that shares your home directory. Choose a toolset below — the container image is shared regardless of tier.
-      </p>
-      {installed === false && (
-        <div style={{ marginTop: 10 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {([
-              ["headless", "Headless — kali-linux-headless (~150 CLI tools: nmap, metasploit, hashcat, john, hydra, …)"],
-              ["default", "Default — kali-linux-default (headless + GUI tools: Zenmap, Autopsy, Faraday, legion, …)"],
-              ["everything", "Everything — kali-linux-everything (every available Kali tool)"],
-            ] as const).map(([value, label]) => (
-              <label key={value} style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-                <input type="radio" name="kali-tier" checked={tier === value} onChange={() => setTier(value)} />
-                {label}
-              </label>
-            ))}
-          </div>
-          {tier === "everything" && (
-            <p className="card-copy" style={{ fontSize: 11, marginTop: 6 }}>
-              ⚠ kali-linux-everything is extremely large — expect 15–20 GB or more of downloads and a very long install time.
-            </p>
-          )}
-          <button
-            disabled={busy !== null}
-            onClick={() => run("kali-create", "Creating Kali box…", async () => { const result = await createKaliBox(tier); await refresh(); return result; })}
-            style={{ ...secBtnStyle, marginTop: 10 }}
-          >
-            {busy === "kali-create" ? "Creating…" : "Create Kali Box"}
-          </button>
-        </div>
-      )}
-      {installed === true && (
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-          <button disabled={busy !== null} onClick={() => run("kali-enter", "Opening terminal…", enterKaliTerminal)} style={secBtnStyle}>
-            {busy === "kali-enter" ? "Opening…" : "Launch Kali Terminal"}
-          </button>
-          <button disabled={busy !== null} onClick={() => run("kali-export", "Exporting GUI apps…", exportKaliApps)} style={secBtnStyle}>
-            {busy === "kali-export" ? "Exporting…" : "Export Apps to Menu"}
-          </button>
-          <button
-            disabled={busy !== null}
-            onClick={() => run("kali-remove", "Stopping and removing Kali box…", async () => { const result = await removeKaliBox(); await refresh(); return result; })}
-            style={{ ...secBtnStyle, borderColor: "var(--danger, #c0392b)", color: "var(--danger, #c0392b)" }}
-          >
-            {busy === "kali-remove" ? "Removing…" : "Remove Box"}
-          </button>
-        </div>
-      )}
-    </div>
-  );
+  useEffect(() => { let cancelled = false; fetchKaliStatus().then((value) => { if (!cancelled) setInstalled(value); }); return () => { cancelled = true; }; }, []);
+  async function refresh(): Promise<void> { setInstalled(await fetchKaliStatus()); }
+  return <div className="app-special-card">
+    <div className="app-special-heading"><div className="app-special-icon">K</div><div><p className="app-special-title">Kali Linux Toolbox</p><p className="app-special-copy">A ready-to-use security environment managed from Kyth Hub.</p></div>{installed != null && <span className={`pill ${installed ? "pill-ok" : "pill-dim"}`}>{installed ? "Installed" : "Not installed"}</span>}</div>
+    {installed === false && <div className="app-special-controls"><div className="app-choice-row">{([ ["headless", "Headless", "~150 CLI tools"], ["default", "Default", "CLI + GUI tools"], ["everything", "Everything", "All available tools"] ] as const).map(([value, label, detail]) => <label key={value} className={`app-choice ${tier === value ? "app-choice-selected" : ""}`}><input type="radio" name="kali-tier" checked={tier === value} onChange={() => setTier(value)} /><span><strong>{label}</strong><small>{detail}</small></span></label>)}</div><button disabled={busy !== null} onClick={() => run("kali-create", "Creating Kali box…", async () => { const result = await createKaliBox(tier); await refresh(); return result; })} style={secBtnStyle}>{busy === "kali-create" ? "Creating…" : "Create toolbox"}</button></div>}
+    {installed === true && <div className="app-special-actions"><button disabled={busy !== null} onClick={() => run("kali-enter", "Opening terminal…", enterKaliTerminal)} style={secBtnStyle}>{busy === "kali-enter" ? "Opening…" : "Launch terminal"}</button><button disabled={busy !== null} onClick={() => run("kali-export", "Exporting GUI apps…", exportKaliApps)} style={secBtnStyle}>{busy === "kali-export" ? "Exporting…" : "Export apps"}</button><button disabled={busy !== null} onClick={() => run("kali-remove", "Stopping and removing Kali box…", async () => { const result = await removeKaliBox(); await refresh(); return result; })} style={{ ...secBtnStyle, borderColor: "var(--danger, #c0392b)", color: "var(--danger, #c0392b)" }}>{busy === "kali-remove" ? "Removing…" : "Remove toolbox"}</button></div>}
+  </div>;
 }
 
-// Native (Flatpak) host-side security tools: install, launch, uninstall.
-// Mirrors page_software_security_hosttools.py's grid.
 function HostToolsGrid({ busy, run }: { busy: string | null; run: SectionRun }) {
   const [tools, setTools] = useState<SecHostTool[] | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchSecHostTools().then((value) => { if (!cancelled) setTools(value); });
-    return () => { cancelled = true; };
-  }, []);
-
-  async function refresh(): Promise<void> {
-    const fresh = await fetchSecHostTools();
-    if (fresh) setTools(fresh);
-  }
-
+  useEffect(() => { let cancelled = false; fetchSecHostTools().then((value) => { if (!cancelled) setTools(value); }); return () => { cancelled = true; }; }, []);
+  async function refresh(): Promise<void> { const fresh = await fetchSecHostTools(); if (fresh) setTools(fresh); }
   if (!tools || tools.length === 0) return null;
-  return (
-    <div style={{ marginTop: 18 }}>
-      <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Host-side Security Tools</p>
-      <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>
-        These run natively on KythOS as Flatpaks — better Wayland integration and no container overhead for GUI-heavy workflows.
-      </p>
-      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-        {tools.map((tool) => (
-          <div key={tool.flatpak} style={{ padding: "10px 12px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <p style={{ fontWeight: 700, fontSize: 13, margin: 0, flex: 1 }}>{tool.name}</p>
-              {tool.installed ? (
-                <>
-                  <button disabled={busy !== null} onClick={() => run(`sec-launch-${tool.flatpak}`, `Launching ${tool.name}…`, () => launchSecHostTool(tool.flatpak))} style={secBtnStyle}>Launch</button>
-                  <button disabled={busy !== null} onClick={() => run(`sec-uninstall-${tool.flatpak}`, `Uninstalling ${tool.name}…`, async () => { const result = await uninstallSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Uninstall</button>
-                </>
-              ) : (
-                <button disabled={busy !== null} onClick={() => run(`sec-install-${tool.flatpak}`, `Installing ${tool.name}…`, async () => { const result = await installSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Install</button>
-              )}
-            </div>
-            <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>{tool.desc}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
+  return <div className="app-special-list"><p className="app-subsection-label">Host-side security tools</p><p className="app-subsection-copy">Native Flatpak tools with first-class Wayland integration.</p><div className="app-tool-grid">{tools.map((tool) => <div key={tool.flatpak} className="app-tool-card"><AppIcon name={tool.name} id={tool.flatpak} /><div className="app-tool-copy"><strong>{tool.name}</strong><span>{tool.desc}</span></div>{tool.installed ? <div className="app-tool-actions"><button disabled={busy !== null} onClick={() => run(`sec-launch-${tool.flatpak}`, `Launching ${tool.name}…`, () => launchSecHostTool(tool.flatpak))} style={secBtnStyle}>Launch</button><button disabled={busy !== null} onClick={() => run(`sec-uninstall-${tool.flatpak}`, `Uninstalling ${tool.name}…`, async () => { const result = await uninstallSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Remove</button></div> : <button disabled={busy !== null} onClick={() => run(`sec-install-${tool.flatpak}`, `Installing ${tool.name}…`, async () => { const result = await installSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Install</button>}</div>)}</div></div>;
 }
 
-// "Apps > App Store" — flatpak counts, the starter-pack catalog, and the
-// "I used X on Windows" chooser (software_catalog.rs's familiar_apps).
+// Apps is the KythOS software center: discovery and lifecycle actions stay
+// behind typed Tauri commands, while this component only owns presentation.
 export function AppStoreSection({ section }: { section: HubSection }) {
   const [snapshot, setSnapshot] = useState<AppStoreSnapshot | null>(null);
   const [packs, setPacks] = useState<StarterPack[] | null>(null);
@@ -175,244 +83,50 @@ export function AppStoreSection({ section }: { section: HubSection }) {
   const [appImages, setAppImages] = useState<AppImageEntry[] | null>(null);
   const [catalog, setCatalog] = useState<AppStreamApp[] | null>(null);
   const [installed, setInstalled] = useState<InstalledFlatpak[] | null>(null);
-  const [packSelections, setPackSelections] = useState<Record<string, string[]>>({});
   const [appImagePath, setAppImagePath] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogSearching, setCatalogSearching] = useState(false);
-  const [query, setQuery] = useState("");
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchAppStoreSnapshot(), fetchStarterPacks(), fetchFamiliarApps(), fetchAppImages(), fetchInstalledFlatpaks()]).then(([s, p, f, images, apps]) => {
-      if (!cancelled) {
-        setSnapshot(s);
-        setPacks(p);
-        setPackSelections(Object.fromEntries((p ?? []).map((pack) => [pack.name, pack.apps.filter((app) => app.selected).map((app) => app.id)])));
-        setFamiliar(f);
-        setAppImages(images);
-        setInstalled(apps);
-        setLoaded(true);
-      }
-    });
-    return () => {
-      cancelled = true;
-    };
+    Promise.all([fetchAppStoreSnapshot(), fetchStarterPacks(), fetchFamiliarApps(), fetchAppImages(), fetchInstalledFlatpaks()]).then(([s, p, f, images, apps]) => { if (!cancelled) { setSnapshot(s); setPacks(p); setFamiliar(f); setAppImages(images); setInstalled(apps); setLoaded(true); } });
+    return () => { cancelled = true; };
   }, []);
-
   useEffect(() => {
     const q = catalogQuery.trim();
     if (q.length < 2) { setCatalog(null); setCatalogSearching(false); return; }
     let cancelled = false;
-    const timer = window.setTimeout(async () => {
-      setCatalogSearching(true);
-      const apps = await searchAppStream(q);
-      if (!cancelled) {
-        setCatalog(apps ?? []);
-        setCatalogSearching(false);
-      }
-    }, 250);
+    const timer = window.setTimeout(async () => { setCatalogSearching(true); const apps = await searchAppStream(q); if (!cancelled) { setCatalog(apps ?? []); setCatalogSearching(false); } }, 250);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [catalogQuery]);
+  async function refreshInstalled(): Promise<void> { const [nextSnapshot, nextInstalled] = await Promise.all([fetchAppStoreSnapshot(), fetchInstalledFlatpaks()]); if (nextSnapshot) setSnapshot(nextSnapshot); if (nextInstalled) setInstalled(nextInstalled); }
+  async function install(id: string): Promise<string> { const job = await installFlatpak(id); for (let i = 0; i < 60; i += 1) { await new Promise((resolve) => window.setTimeout(resolve, 500)); const state = await fetchInstallStatus(job); if (!state || state.state === "running") continue; if (state.state === "complete") return state.detail; throw new Error(state.detail); } throw new Error("Installation is still running; refresh Apps in a moment."); }
+  async function installPack(pack: StarterPack): Promise<string> { for (const app of pack.apps) await install(app.id); await refreshInstalled(); return `${pack.name} apps installed.`; }
+  async function installAndRefresh(id: string): Promise<string> { const result = await install(id); await refreshInstalled(); return result; }
 
-  async function refreshInstalled(): Promise<void> {
-    const [nextSnapshot, nextInstalled] = await Promise.all([fetchAppStoreSnapshot(), fetchInstalledFlatpaks()]);
-    if (nextSnapshot) setSnapshot(nextSnapshot);
-    if (nextInstalled) setInstalled(nextInstalled);
-  }
-
-  async function install(id: string): Promise<string> {
-    const job = await installFlatpak(id);
-    for (let i = 0; i < 60; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await fetchInstallStatus(job);
-      if (!state || state.state === "running") continue;
-      if (state.state === "complete") return state.detail;
-      throw new Error(state.detail);
-    }
-    throw new Error("Installation is still running; check Flatpak in a moment.");
-  }
-
-  async function installPack(pack: StarterPack): Promise<string> {
-    const ids = packSelections[pack.name] ?? [];
-    if (ids.length === 0) throw new Error("Select at least one app first.");
-    for (const id of ids) await install(id);
-    await refreshInstalled();
-    return `${pack.name} starter pack installed.`;
-  }
-
-  async function installAndRefresh(id: string): Promise<string> {
-    const result = await install(id);
-    await refreshInstalled();
-    return result;
-  }
-
-  const matches = useMemo(() => {
-    if (!familiar) return [];
-    const needle = query.trim().toLowerCase();
-    if (!needle) return familiar.slice(0, 4);
-    return familiar.filter((app) => app.windows_name.toLowerCase().includes(needle)).slice(0, 6);
-  }, [familiar, query]);
-
+  const installedIds = useMemo(() => new Set((installed ?? []).map((app) => app.id)), [installed]);
+  const featured = useMemo(() => { const seen = new Set<string>(); return (packs ?? []).flatMap((pack) => pack.apps.map((app) => ({ id: app.id, name: app.label, summary: app.description }))).filter((app) => { if (seen.has(app.id)) return false; seen.add(app.id); return true; }).slice(0, 8); }, [packs]);
+  const familiarMatches = useMemo(() => { const needle = catalogQuery.trim().toLowerCase(); if (!needle || !familiar) return []; return familiar.filter((app) => app.windows_name.toLowerCase().includes(needle)).slice(0, 3); }, [catalogQuery, familiar]);
   const live = snapshot !== null || packs !== null || familiar !== null || appImages !== null || installed !== null;
-  return (
-    <LiveSectionCard section={section} live={live}>
-      {live ? (
-        <div style={{ marginTop: 20 }}>
-          {snapshot && (
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 16 }}>
-              <div>
-                <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Flatpaks installed</p>
-                <p style={{ margin: "4px 0 0", fontSize: 22, fontWeight: 800 }}>{snapshot.installedCount ?? "—"}</p>
-              </div>
-              <div>
-                <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Updates available</p>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 4 }}>
-                  <span style={{ fontSize: 22, fontWeight: 800 }}>{snapshot.updatesAvailable ?? "—"}</span>
-                  {snapshot.updatesAvailable != null && (
-                    <span className={`pill ${snapshot.updatesAvailable === 0 ? "pill-ok" : "pill-warn"}`}>
-                      {snapshot.updatesAvailable === 0 ? "up to date" : "pending"}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
+  const onInstall = (app: CardApp) => { void run(`install-${app.id}`, `Installing ${app.name}…`, () => installAndRefresh(app.id)); };
+  const onUninstall = (app: CardApp) => { void run(`uninstall-${app.id}`, `Removing ${app.name}…`, async () => { const result = await uninstallFlatpak(app.id); await refreshInstalled(); return result; }); };
 
-          {familiar && familiar.length > 0 && (
-            <div style={{ marginTop: 22 }}>
-              <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>
-                What did you use on Windows?
-              </p>
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Photoshop, Office, Discord…"
-                style={{
-                  marginTop: 8,
-                  width: "100%",
-                  maxWidth: 340,
-                  padding: "8px 12px",
-                  borderRadius: 999,
-                  border: "1px solid var(--hairline)",
-                  background: "var(--card)",
-                  fontSize: 13,
-                }}
-              />
-              <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 12 }}>
-                {matches.map((app) => (
-                  <div key={app.flatpak_id} style={{ padding: "10px 12px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
-                    <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>{app.windows_name}</p>
-                    <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>{app.description}</p>
-                    <CommandLine label={app.flatpak_id} command={installCommand([app.flatpak_id])} />
-                  </div>
-                ))}
-                {matches.length === 0 && (
-                  <p className="card-copy" style={{ fontSize: 12 }}>
-                    Nothing in the built-in map matches “{query}” — search Discover for it instead.
-                  </p>
-                )}
-              </div>
-            </div>
-          )}
-
-          {packs && packs.length > 0 && (
-            <div style={{ marginTop: 22 }}>
-              <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Starter packs</p>
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-                {packs.map((pack) => (
-                  <div key={pack.name} style={{ padding: "10px 12px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
-                    <p style={{ fontWeight: 700, fontSize: 13, margin: 0 }}>{pack.name}</p>
-                    <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>{pack.desc}</p>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                      {pack.apps.map((a) => (
-                        <label key={a.id} className="pill pill-dim" title={a.description} style={{ cursor: "pointer" }}>
-                          <input type="checkbox" checked={(packSelections[pack.name] ?? []).includes(a.id)} onChange={(event) => setPackSelections((current) => ({ ...current, [pack.name]: event.target.checked ? [...(current[pack.name] ?? []), a.id] : (current[pack.name] ?? []).filter((id) => id !== a.id) }))} /> {a.label}
-                        </label>
-                      ))}
-                    </div>
-                    <button disabled={busy !== null} onClick={() => run(`pack-${pack.name}`, `Installing ${pack.name}…`, () => installPack(pack))} style={{ marginTop: 10, padding: "6px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>{busy === `pack-${pack.name}` ? "Installing…" : "Install selected"}</button>
-                    <CommandLine
-                      label="Install this pack"
-                      command={installCommand((packSelections[pack.name] ?? []).map((id) => id))}
-                    />
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <div style={{ marginTop: 22 }}>
-            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Search Flathub</p>
-            <input value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Search apps…" style={{ marginTop: 8, width: "100%", maxWidth: 340, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 13 }} />
-            {catalogSearching && <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>Searching Flathub…</p>}
-            {catalog && <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 10 }}>
-              {catalog.map((app) => <div key={app.id} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
-                <div style={{ flex: 1 }}><p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>{app.name}</p><p className="card-copy" style={{ margin: "2px 0 0", fontSize: 11 }}>{app.summary || app.id}</p></div>
-                <button disabled={busy !== null} onClick={() => run(`install-${app.id}`, `Installing ${app.name}…`, () => installAndRefresh(app.id))} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12.5 }}>{busy === `install-${app.id}` ? "Installing…" : "Install"}</button>
-              </div>)}
-              {catalog.length === 0 && <p className="card-copy" style={{ fontSize: 12 }}>No Flathub matches.</p>}
-            </div>}
-          </div>
-
-          {appImages && appImages.length > 0 && <div style={{ marginTop: 22 }}>
-            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>AppImages found</p>
-            {appImages.map((app) => <div key={app.path} style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 6 }}><p className="card-copy" style={{ flex: 1, fontSize: 12, margin: 0 }}>{app.name} — {app.executable ? "ready to run" : "not executable yet"}</p>{app.executable ? <button disabled={busy !== null} onClick={() => run(`launch-${app.path}`, `Launching ${app.name}…`, () => launchAppImage(app.path))} style={{ padding: "5px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>Launch</button> : <button disabled={busy !== null} onClick={() => run(`chmod-${app.path}`, `Making ${app.name} executable…`, async () => { const result = await makeAppImageExecutable(app.path); setAppImages((current) => current?.map((item) => item.path === app.path ? { ...item, executable: true } : item) ?? current); return result; })} style={{ padding: "5px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>Make executable</button>}</div>)}
-          </div>}
-
-          <div style={{ marginTop: 22 }}>
-            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Import an AppImage</p>
-            <p className="card-copy" style={{ fontSize: 12, marginTop: 5 }}>Enter a path from Downloads, Applications, or .local/bin. It is copied into Applications and made executable.</p>
-            <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-              <input value={appImagePath} onChange={(event) => setAppImagePath(event.target.value)} placeholder="/home/you/Downloads/app.AppImage" style={{ flex: 1, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 12 }} />
-              <button disabled={busy !== null || !appImagePath.trim()} onClick={() => run("import-appimage", "Importing AppImage…", async () => { const result = await importAppImage(appImagePath.trim()); setAppImagePath(""); const fresh = await fetchAppImages(); if (fresh) setAppImages(fresh); return result; })} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>Import</button>
-            </div>
-          </div>
-
-          {installed && <div style={{ marginTop: 22 }}>
-            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Installed Flatpaks</p>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginTop: 8 }}>
-              {installed.map((app) => <div key={`${app.scope}:${app.id}`} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 10px", border: "1px solid var(--hairline)", borderRadius: 9 }}><span style={{ flex: 1, fontSize: 12 }}><strong>{app.name || app.id}</strong><span className="card-copy"> — {app.id} · {app.scope}</span></span><button disabled={busy !== null} onClick={() => run(`uninstall-${app.scope}-${app.id}`, `Uninstalling ${app.name || app.id}…`, async () => { const result = await uninstallFlatpak(app.id); setInstalled((current) => current?.filter((item) => !(item.id === app.id && item.scope === app.scope)) ?? current); return result; })} style={{ padding: "5px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 }}>Uninstall</button></div>)}
-              {installed.length === 0 && <p className="card-copy" style={{ fontSize: 12 }}>No installed Flatpak applications found.</p>}
-            </div>
-          </div>}
-
-          <div style={{ marginTop: 22 }}>
-            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Security</p>
-            <KaliCard busy={busy} run={run} />
-            <HostToolsGrid busy={busy} run={run} />
-          </div>
-
-          <div style={{ marginTop: 22 }}>
-            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Developer, creator, and specialized environments</p>
-            <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>
-              The old Hub grouped these tools separately from the general store. They remain opt-in recipes so the action and its system impact are visible before anything changes.
-            </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-              <RecipeButton recipe="setup-kyth-dev-box" label="Set up Kyth developer box" busy={busy} run={run} />
-              <RecipeButton recipe="ai-dev-status" label="AI development status" busy={busy} run={run} />
-              <RecipeButton recipe="ai-dev-setup" label="Set up AI development" busy={busy} run={run} />
-              <RecipeButton recipe="setup-waydroid" label="Set up Waydroid" busy={busy} run={run} />
-              <RecipeButton recipe="remove-waydroid" label="Remove Waydroid" busy={busy} run={run} />
-            </div>
-          </div>
-        </div>
-      ) : (
-        <SectionFallbackNote loaded={loaded} />
-      )}
-
-      <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
-        <p className="card-copy" style={{ fontSize: 12, margin: "0 0 12px" }}>
-          Apps with a KythOS recipe install without needing a terminal.
-        </p>
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <RecipeButton recipe="install-vscode" label="VS Code" busy={busy} run={run} />
-          <RecipeButton recipe="install-boxbuddy" label="BoxBuddy" busy={busy} run={run} />
-          <RecipeButton recipe="install-jetbrains-toolbox" label="JetBrains Toolbox" busy={busy} run={run} />
-        </div>
-        <ActionStatus status={status} />
-      </div>
-    </LiveSectionCard>
-  );
+  return <LiveSectionCard section={section} live={live}>
+    {live ? <div className="app-store-content">
+      <div className="app-store-hero"><div><span className="app-eyebrow">Kyth software center</span><h2>Find your next app</h2><p>Discover trusted Flatpaks, install them in one click, and keep your desktop organized from one place.</p></div><div className="app-store-hero-art"><span>✦</span><i /><i /><i /></div></div>
+      <div className="app-store-search-wrap"><label htmlFor="app-store-search" className="app-search-label">Search applications</label><div className="app-store-search"><span aria-hidden="true">⌕</span><input id="app-store-search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Search apps, tools, and games…" autoComplete="off" />{catalogQuery && <button className="app-search-clear" onClick={() => setCatalogQuery("")} aria-label="Clear app search">×</button>}</div><p className="app-search-hint">Searches the Flathub catalog through the native Kyth bridge.</p></div>
+      <div className="app-stat-row"><div><span>Installed apps</span><strong>{snapshot?.installedCount ?? installed?.length ?? "—"}</strong></div><div><span>Updates ready</span><strong>{snapshot?.updatesAvailable ?? "—"}</strong></div><div><span>App source</span><strong>Flathub</strong></div></div>
+      {catalogQuery.trim().length >= 2 ? <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Discover</span><h2>Search results</h2></div>{catalog && <span className="app-result-count">{catalog.length} matches</span>}</div>{catalogSearching && <div className="app-loading-state"><span className="app-spinner" /> Searching Flathub…</div>}{!catalogSearching && catalog && <div className="app-card-grid">{catalog.map((app) => <AppCard key={app.id} app={app} installed={installedIds.has(app.id)} busy={busy} onInstall={onInstall} onUninstall={onUninstall} />)}</div>}{!catalogSearching && catalog?.length === 0 && <div className="app-empty-state"><strong>No apps found</strong><span>Try a broader search, or check the spelling.</span></div>}{familiarMatches.length > 0 && <div className="app-alternative-note"><strong>Looking for {familiarMatches[0].windows_name}?</strong><span>{familiarMatches[0].description}</span><button className="app-link-button" onClick={() => setCatalogQuery(familiarMatches[0].flatpak_id)}>View alternative</button></div>}</section> : <>
+        <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Curated for KythOS</span><h2>Popular apps</h2></div><span className="app-result-count">One-click install</span></div><div className="app-card-grid">{featured.map((app) => <AppCard key={app.id} app={app} installed={installedIds.has(app.id)} busy={busy} onInstall={onInstall} onUninstall={onUninstall} />)}</div></section>
+        {packs && packs.length > 0 && <section className="app-catalog-section app-packs-section"><div className="app-section-heading"><div><span className="app-eyebrow">Get set up faster</span><h2>Starter collections</h2></div></div><div className="app-pack-grid">{packs.map((pack) => <article key={pack.name} className="app-pack-card"><div className="app-pack-art"><span>{pack.name.slice(0, 1)}</span><b /><b /><b /></div><div className="app-pack-body"><h3>{pack.name}</h3><p>{pack.desc}</p><div className="app-pack-apps">{pack.apps.map((app) => <span key={app.id} className={installedIds.has(app.id) ? "app-pack-app-installed" : ""}>{app.label}</span>)}</div><button className="app-action-button app-action-primary" disabled={busy !== null} onClick={() => void run(`pack-${pack.name}`, `Installing ${pack.name}…`, () => installPack(pack))}>{busy === `pack-${pack.name}` ? "Installing…" : "Install collection"}</button></div></article>)}</div></section>}
+      </>}
+      {installed && <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Your library</span><h2>Installed on this device</h2></div><span className="app-result-count">{installed.length} apps</span></div>{installed.length > 0 ? <div className="app-card-grid">{installed.map((app) => <AppCard key={`${app.scope}:${app.id}`} app={{ id: app.id, name: app.name || app.id, summary: `${app.scope} install · ${app.version || "current"}`, icon_url: app.icon_url }} installed busy={busy} onInstall={onInstall} onUninstall={onUninstall} />)}</div> : <div className="app-empty-state"><strong>Your app library is empty</strong><span>Search above to install your first Flatpak.</span></div>}</section>}
+      {appImages && appImages.length > 0 && <section className="app-secondary-section"><div className="app-section-heading"><div><span className="app-eyebrow">Other apps</span><h2>AppImages</h2></div><span className="app-result-count">{appImages.length} available</span></div><div className="app-image-grid">{appImages.map((app) => <article key={app.path} className="app-image-card"><AppIcon name={app.name} id="" /><div className="app-image-card-body"><strong>{app.name}</strong><span>{app.executable ? "Ready to launch" : "Needs permission before launch"}</span><small>{app.path}</small></div>{app.executable ? <button className="app-action-button app-action-secondary" disabled={busy !== null} onClick={() => void run(`launch-${app.path}`, `Launching ${app.name}…`, () => launchAppImage(app.path))}>Launch</button> : <button className="app-action-button app-action-primary" disabled={busy !== null} onClick={() => void run(`chmod-${app.path}`, `Making ${app.name} executable…`, async () => { const result = await makeAppImageExecutable(app.path); setAppImages((current) => current?.map((item) => item.path === app.path ? { ...item, executable: true } : item) ?? current); return result; })}>Make runnable</button>}</article>)}</div></section>}
+      <section className="app-secondary-section"><div className="app-section-heading"><div><span className="app-eyebrow">Bring your own</span><h2>Import an AppImage</h2></div></div><p className="app-subsection-copy">Copy an AppImage from Downloads into your Applications folder and make it ready to run.</p><div className="app-import-row"><input value={appImagePath} onChange={(event) => setAppImagePath(event.target.value)} placeholder="/home/you/Downloads/app.AppImage" /><button className="app-action-button app-action-primary" disabled={busy !== null || !appImagePath.trim()} onClick={() => void run("import-appimage", "Importing AppImage…", async () => { const result = await importAppImage(appImagePath.trim()); setAppImagePath(""); const fresh = await fetchAppImages(); if (fresh) setAppImages(fresh); return result; })}>Import</button></div></section>
+      <section className="app-secondary-section"><div className="app-section-heading"><div><span className="app-eyebrow">Advanced environments</span><h2>Specialized tools</h2></div></div><KaliCard busy={busy} run={run} /><HostToolsGrid busy={busy} run={run} /><div className="app-special-card app-dev-card"><p className="app-special-title">Developer and mobile environments</p><p className="app-special-copy">Set up optional Kyth development, AI, and Android tooling with native Hub actions.</p><div className="app-special-actions"><RecipeButton recipe="setup-kyth-dev-box" label="Kyth developer box" busy={busy} run={run} /><RecipeButton recipe="ai-dev-status" label="AI development status" busy={busy} run={run} /><RecipeButton recipe="ai-dev-setup" label="Set up AI development" busy={busy} run={run} /><RecipeButton recipe="setup-waydroid" label="Set up Waydroid" busy={busy} run={run} /><RecipeButton recipe="remove-waydroid" label="Remove Waydroid" busy={busy} run={run} /></div></div></section>
+    </div> : <SectionFallbackNote loaded={loaded} />}
+    <div className="app-footer-actions"><p className="app-subsection-copy">More KythOS applications</p><div className="app-special-actions"><RecipeButton recipe="install-vscode" label="VS Code" busy={busy} run={run} /><RecipeButton recipe="install-boxbuddy" label="BoxBuddy" busy={busy} run={run} /><RecipeButton recipe="install-jetbrains-toolbox" label="JetBrains Toolbox" busy={busy} run={run} /></div><ActionStatus status={status} /></div>
+  </LiveSectionCard>;
 }

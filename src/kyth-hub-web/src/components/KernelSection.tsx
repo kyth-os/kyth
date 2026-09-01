@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { fetchKernelFlavor, runPrivilegedAction } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, CommandLine, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
 const FLAVOR_LABEL: Record<string, string> = {
   fedora: "Fedora (default)",
@@ -46,16 +46,12 @@ export function KernelSection({ section }: { section: HubSection }) {
         <p className="card-copy" style={{ fontSize: 12, margin: "0 0 12px" }}>
           The CachyOS kernel is the gaming default; Fedora's is the conservative fallback. Switching stages a new
           deployment and takes effect on reboot. Progress stays in this Hub window, and authentication appears in a
-          normal desktop dialog — the flavour is part of the command, and a bare <code>switch-kernel</code> would
-          silently mean Fedora.
+          normal desktop dialog.
         </p>
-        <CommandLine label="Switch to the CachyOS kernel" command="ujust switch-kernel cachy" />
-        <CommandLine label="Switch to the Fedora kernel" command="ujust switch-kernel fedora" />
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
           {(["cachy", "fedora"] as const).map((target) => <ActionButton key={target} label={busy === `kernel-${target}` ? "Staging…" : `Switch to ${FLAVOR_LABEL[target]}`} disabled={busy !== null || flavor === target} onClick={() => run(`kernel-${target}`, `Staging ${target} kernel…`, () => runPrivilegedAction("kernel_switch", { flavor: target }))} />)}
         </div>
         <ActionStatus status={status} />
-        <CommandLine label="Kernel arguments (status, or balanced/performance/gaming)" command="ujust kargs-apply status" />
       </div>
     </LiveSectionCard>
   );

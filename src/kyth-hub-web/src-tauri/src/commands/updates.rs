@@ -343,12 +343,69 @@ pub(crate) struct UpdateHealthResponse {
     pub(crate) detail: String,
 }
 
-#[tauri::command]
-pub(crate) fn update_health() -> UpdateHealthResponse {
+fn native_health_fallback() -> Option<(String, String, String)> {
+    // Prefer the same disk cache used by the rest of the Hub, but recover on
+    // systems whose probe service has not populated it yet. This is still a
+    // bounded native read and runs inside update_health's blocking worker.
+    let status_data = kyth_shared::system::probe::read_section("bootc-status-data")
+        .or_else(kyth_shared::system::bootc_query::fetch_status_data)?;
+    let digest = kyth_shared::system::registry::booted_image_digest(&status_data)?;
+    let os_release = std::fs::read_to_string("/usr/lib/os-release")
+        .or_else(|_| std::fs::read_to_string("/etc/os-release"))
+        .ok()?;
+    let identity_ok = os_release.lines().any(|line| line.trim() == "ID=kythos" || line.trim() == "ID=\"kythos\"");
+    let runtime = kyth_shared::system::boot_runtime::boot_runtime_checks_with_deadline(
+        std::time::Duration::from_secs(5),
+        std::time::Duration::from_millis(100),
+    );
+    let mut failures = runtime
+        .iter()
+        .filter(|check| !check.passed)
+        .map(|check| format!("{}: {}", check.name, check.detail))
+        .collect::<Vec<_>>();
+    if !identity_ok {
+        failures.push("KythOS identity: /usr/lib/os-release is not ID=kythos".to_string());
+    }
+    if failures.is_empty() {
+        Some((
+            "healthy".to_string(),
+            format!("Native boot checks passed for {digest}; no persistent boot-health record was available."),
+            digest,
+        ))
+    } else {
+        Some((
+            "unhealthy".to_string(),
+            format!("Native boot checks failed: {}", failures.join("; ")),
+            digest,
+        ))
+    }
+}
+
+fn update_health_response() -> UpdateHealthResponse {
     let state = kyth_shared::system::boot_health::read_default_state();
+    if state.status == "unknown"
+        && state.current_digest.is_empty()
+        && state.last_healthy_digest.is_empty()
+        && state.updated_at == 0
+    {
+        if let Some((status, detail, digest)) = native_health_fallback() {
+            return UpdateHealthResponse {
+                status,
+                pending_digest: state.pending_digest,
+                last_healthy_digest: digest,
+                failures: state.failures,
+                quarantined: state.quarantined.len(),
+                detail,
+            };
+        }
+    }
     let invariants = state.invariants();
     let detail = if invariants.is_empty() {
-        format!("Boot health is {} · {} quarantined digest(s).", state.status, state.quarantined.len())
+        if state.status == "unknown" {
+            "Boot health has not been recorded yet; native checks could not establish a live result.".to_string()
+        } else {
+            format!("Boot health is {} · {} quarantined digest(s).", state.status, state.quarantined.len())
+        }
     } else {
         format!("Boot health state needs attention: {}", invariants.join(", "))
     };
@@ -360,4 +417,18 @@ pub(crate) fn update_health() -> UpdateHealthResponse {
         quarantined: state.quarantined.len(),
         detail,
     }
+}
+
+#[tauri::command]
+pub(crate) async fn update_health() -> UpdateHealthResponse {
+    tauri::async_runtime::spawn_blocking(update_health_response)
+        .await
+        .unwrap_or_else(|_| UpdateHealthResponse {
+            status: "unknown".to_string(),
+            pending_digest: String::new(),
+            last_healthy_digest: String::new(),
+            failures: 0,
+            quarantined: 0,
+            detail: "Native boot-health check could not complete.".to_string(),
+        })
 }

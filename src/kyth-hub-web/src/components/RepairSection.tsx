@@ -1,13 +1,11 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
-  commandText,
   fetchBootcSnapshot,
   fetchBtrfsHealth,
   fetchDeploymentHistory,
   fetchMemoryPressure,
   fetchRecoveryStatus,
-  fetchRollbackCommand,
   fetchSnapshotCount,
   fetchSnapshotTimeline,
   invokeBootcRollback,
@@ -18,7 +16,7 @@ import {
   type SnapshotRow,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
 function ago(timestamp: string | null | undefined): string | null {
   if (!timestamp) return null;
@@ -44,7 +42,6 @@ export function RepairSection({ section }: { section: HubSection }) {
   const [snapshots, setSnapshots] = useState<number | null>(null);
   const [btrfs, setBtrfs] = useState<{ status: string; detail: string } | null>(null);
   const [memory, setMemory] = useState<{ status: string; detail: string } | null>(null);
-  const [rollbackCmd, setRollbackCmd] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
 
@@ -58,8 +55,7 @@ export function RepairSection({ section }: { section: HubSection }) {
       fetchSnapshotTimeline(20),
       fetchBtrfsHealth(),
       fetchMemoryPressure(),
-      fetchRollbackCommand().then(commandText),
-    ]).then(([snap, rec, hist, count, rows, fs, mem, cmd]) => {
+    ]).then(([snap, rec, hist, count, rows, fs, mem]) => {
       if (!cancelled) {
         setSnapshot(snap);
         setRecovery(rec);
@@ -68,7 +64,6 @@ export function RepairSection({ section }: { section: HubSection }) {
         setTimeline(rows);
         setBtrfs(fs);
         setMemory(mem);
-        setRollbackCmd(cmd);
         setLoaded(true);
       }
     });
@@ -198,10 +193,6 @@ export function RepairSection({ section }: { section: HubSection }) {
             }
           />
         </div>
-        <CommandLine label="Rollback from a terminal" command={rollbackCmd} />
-        {recovery?.clear_quarantine_cmd && (
-          <CommandLine label="Retry the quarantined update (clears the quarantine)" command={recovery.clear_quarantine_cmd} />
-        )}
         <ActionStatus status={status} />
       </div>
     </LiveSectionCard>

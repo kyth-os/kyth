@@ -2,19 +2,18 @@ import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
   addNetworkShare,
-  commandText,
   fetchConfiguredNetworkShares,
   fetchNetworkSummary,
   fetchNetworkSummaryLive,
   fetchSmbBrowse,
-  fetchSmbMountCommand,
+  mountSmbShare,
   openNetworkSharesApp,
   removeNetworkShare,
   type ConfiguredNetworkShare,
   type NetworkSummary,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, CommandLine, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
 const fieldStyle = { padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 13, minWidth: 180 } as const;
 const initialForm = { name: "", server: "", share_path: "", mount_point: "", username: "", password: "", domain: "", auto_mount: true, mount_now: true };
@@ -26,7 +25,6 @@ export function NetworkSharesSection({ section }: { section: HubSection }) {
   const [configured, setConfigured] = useState<ConfiguredNetworkShare[]>([]);
   const [host, setHost] = useState("");
   const [share, setShare] = useState("");
-  const [mountCmd, setMountCmd] = useState<string | null>(null);
   const [form, setForm] = useState(initialForm);
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
@@ -109,9 +107,9 @@ export function NetworkSharesSection({ section }: { section: HubSection }) {
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12, alignItems: "center" }}>
           <input value={share} onChange={(event) => setShare(event.target.value)} placeholder="smb://server/share" style={{ ...fieldStyle, minWidth: 260 }} />
-          <ActionButton label="Show temporary mount command" disabled={busy !== null || share.trim().length === 0} onClick={() => run("mount", "Building the mount command…", async () => { const text = commandText(await fetchSmbMountCommand(share.trim())); setMountCmd(text); return text ? "Copy this for a temporary user-session mount." : "Could not build a mount command."; })} />
+          <ActionButton label={busy === "mount" ? "Mounting…" : "Mount share"} disabled={busy !== null || share.trim().length === 0} onClick={() => run("mount", "Mounting the share…", async () => { const detail = await mountSmbShare(share.trim()); setShare(""); return detail; })} />
         </div>
-        <CommandLine label="Temporary mount command" command={mountCmd} />
+        <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>The Hub asks the desktop for credentials when needed and mounts the share for this session.</p>
         <ActionStatus status={status} />
       </div>
     </LiveSectionCard>

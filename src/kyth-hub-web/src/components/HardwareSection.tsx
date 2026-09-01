@@ -1,8 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
-  commandText,
-  fetchFirmwareDevicesCommand,
   fetchFirmwareUpdatesCount,
   fetchHardwareSnapshot,
   fetchHardwareViewSummary,
@@ -11,7 +9,7 @@ import {
   type HardwareSnapshot,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
 // PCI class codes worth naming on this page — the GPU is the one that
 // decides which driver stack is in play, the audio and network functions
@@ -41,16 +39,14 @@ export function HardwareSection({ section }: { section: HubSection }) {
   const [modules, setModules] = useState<string[] | null>(null);
   const [pci, setPci] = useState<Array<[string, string[]]> | null>(null);
   const [firmware, setFirmware] = useState<number | null>(null);
-  const [firmwareCmd, setFirmwareCmd] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchHardwareSnapshot(), fetchFirmwareDevicesCommand().then(commandText)]).then(([s, cmd]) => {
+    fetchHardwareSnapshot().then((s) => {
       if (!cancelled) {
         setSnapshot(s);
-        setFirmwareCmd(cmd);
         setLoaded(true);
       }
     });
@@ -172,7 +168,6 @@ export function HardwareSection({ section }: { section: HubSection }) {
           <RecipeButton recipe="enroll-secureboot" label="Enroll Secure Boot key" busy={busy} run={run} />
           <RecipeButton recipe="device-info" label="Full device report" busy={busy} run={run} />
         </div>
-        <CommandLine label="List firmware devices" command={firmwareCmd} />
         <ActionStatus status={status} />
       </div>
     </LiveSectionCard>

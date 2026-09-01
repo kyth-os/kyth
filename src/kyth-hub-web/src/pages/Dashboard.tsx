@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
-import type { StatTile, GuardianEvent } from "../data/dashboardTypes";
-import { StatTileRow } from "../components/StatTileRow";
-import { HeroCard } from "../components/HeroCard";
-import { GaugeCard } from "../components/GaugeCard";
+import type { GuardianEvent } from "../data/dashboardTypes";
 import { PerformanceChart } from "../components/PerformanceChart";
 import { SessionsChart } from "../components/SessionsChart";
 import { GuardianHistoryCard } from "../components/GuardianHistoryCard";
+import { ActionButton } from "../components/SectionActions";
+import { useNavigate } from "react-router-dom";
 import {
   fetchBootRuntimeChecks,
   fetchGpuName,
@@ -25,9 +24,13 @@ import {
 // fixtures this page used to fall back to are gone (see dashboardTypes.ts):
 // a failed fetch left the mock tile in place, so "412 GB" and "RX 7900 XTX"
 // rendered as though they were this machine's facts.
-const PENDING = "—";
+function HomeCard({ icon, label, value, detail, good }: { icon: string; label: string; value: string; detail: string; good: boolean | null }) {
+  const tone = good === null ? "home-card-muted" : good ? "home-card-ok" : "home-card-warn";
+  return <article className={`home-card ${tone}`}><div className="home-card-top"><span className="home-card-icon" aria-hidden="true">{icon}</span><span className="home-card-label">{label}</span><span className="home-status-dot" /></div><strong className="home-card-value">{value}</strong><span className="home-card-detail">{detail}</span></article>;
+}
 
 export function Dashboard() {
+  const navigate = useNavigate();
   const [guardian, setGuardian] = useState<GuardianSnapshot | null>(null);
   const [updateChannel, setUpdateChannel] = useState<string | null>(null);
   const [gpuName, setGpuName] = useState<string | null>(null);
@@ -53,38 +56,10 @@ export function Dashboard() {
     };
   }, []);
 
-  const guardianTile = (): StatTile => {
-    if (!guardian) return { label: "Guardian", value: PENDING };
-    const n = guardian.pendingCount;
-    return {
-      label: "Guardian",
-      value: n === 0 ? "Healthy" : `${n} issue${n === 1 ? "" : "s"}`,
-      delta: n === 0 ? "0 issues" : `${n} pending`,
-      deltaTone: n === 0 ? "ok" : "warn",
-    };
-  };
-
-  const tiles: StatTile[] = [
-    guardianTile(),
-    { label: "Update Channel", value: updateChannel ?? PENDING },
-    { label: "Storage Free", value: storageFree ?? PENDING },
-    { label: "GPU", value: gpuName ?? PENDING },
-  ];
-
   // Boot runtime checks are a real pass/total, so the gauge shows that
   // ratio rather than a health "score" with no defined derivation.
   const passedChecks = bootChecks?.filter((check) => check.passed).length ?? 0;
   const totalChecks = bootChecks?.length ?? 0;
-  const healthValue = bootChecks && totalChecks > 0 ? (passedChecks / totalChecks) * 100 : null;
-
-  // Likewise a count of concrete safeguards that are actually in place,
-  // not an invented 0-10 stability figure. Only genuine safety properties
-  // count: recovery_status.rs sets `watcher_staged` to the same value as
-  // `has_staged`, so a staged update is not a missing safeguard and must
-  // not drag this figure down.
-  const safeguards = recovery ? [recovery.has_rollback, !recovery.quarantined_digest] : null;
-  const safeguardsReady = safeguards?.filter(Boolean).length ?? 0;
-
   const guardianEvents: GuardianEvent[] =
     guardian?.history.map((item) => ({
       title: item.title,
@@ -93,38 +68,32 @@ export function Dashboard() {
       when: relativeTime(item.timestamp),
     })) ?? [];
 
+  const hasReadings = guardian !== null || bootChecks !== null || recovery !== null || updateChannel !== null || gpuName !== null || storageFree !== null;
+  const healthGood = bootChecks === null ? null : totalChecks > 0 && passedChecks === totalChecks;
+  const guardianGood = guardian === null ? null : guardian.pendingCount === 0;
+  const recoveryGood = recovery === null ? null : !recovery.quarantined_digest;
+  const healthLabel = bootChecks === null ? "Checking…" : totalChecks === 0 ? "Not reported" : `${passedChecks}/${totalChecks} passing`;
+  const healthDetail = bootChecks === null ? "Boot runtime checks are being read." : healthGood ? "All boot checks are passing." : "Review the checks that need attention.";
+  const recoveryLabel = recovery === null ? "Checking…" : recovery.quarantined_digest ? "Review needed" : recovery.has_rollback ? "Rollback ready" : "Protected";
+  const recoveryDetail = recovery === null ? "Recovery safeguards are being read." : recovery.has_rollback ? "A previous deployment is available." : "No quarantined image is active.";
+  const guardianLabel = guardian === null ? "Checking…" : guardian.pendingCount === 0 ? "Healthy" : `${guardian.pendingCount} issue${guardian.pendingCount === 1 ? "" : "s"}`;
+  const guardianDetail = guardian === null ? "Guardian is checking the device." : guardian.pendingCount === 0 ? "No recommendations are waiting." : "Open Guardian to review recommendations.";
+
   return (
-    <div className="page-content" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <div className="dashboard-grid">
-        <HeroCard name={userName} pendingCount={guardian ? guardian.pendingCount : null} />
-        <GaugeCard
-          gaugeId="health"
-          title="Boot health"
-          subtitle="Boot runtime checks"
-          value={healthValue}
-          displayValue={`${passedChecks}/${totalChecks}`}
-          unitLabel={`${passedChecks} of ${totalChecks} checks passing`}
-          pendingNote={bootChecks ? "No boot checks reported" : "Boot checks not read yet"}
-        />
-        <GaugeCard
-          gaugeId="stability"
-          title="Recovery safeguards"
-          subtitle="Rollback + quarantine state"
-          value={safeguards ? safeguardsReady : null}
-          max={2}
-          displayValue={`${safeguardsReady}/2`}
-          unitLabel={`${safeguardsReady} of 2 safeguards ready`}
-          pendingNote="Recovery status not read yet"
-        />
-      </div>
-
-      <StatTileRow tiles={tiles} />
-
-      <div className="chart-grid">
-        <PerformanceChart />
-        <SessionsChart />
-      </div>
-
+    <div className="home-page">
+      <section className="home-overview" aria-label="Home overview">
+        <div className={`home-hero ${hasReadings ? "home-hero-live" : "home-hero-muted"}`}><div><span className="home-eyebrow">KythOS command center</span><h1>Welcome back{userName ? `, ${userName}` : ""}</h1><p>Health, updates, apps, and everyday controls in one place.</p></div><div className="home-ready-chip"><span />{guardianGood === false || healthGood === false ? "Needs attention" : hasReadings ? "System at a glance" : "Checking system"}</div></div>
+        <div className="home-card-grid">
+          <HomeCard icon="✓" label="Guardian" value={guardianLabel} detail={guardianDetail} good={guardianGood} />
+          <HomeCard icon="⌁" label="Boot health" value={healthLabel} detail={healthDetail} good={healthGood} />
+          <HomeCard icon="↶" label="Recovery" value={recoveryLabel} detail={recoveryDetail} good={recoveryGood} />
+          <HomeCard icon="◈" label="Update channel" value={updateChannel ?? "Checking…"} detail="The release stream this device follows." good={updateChannel === null ? null : true} />
+          <HomeCard icon="▣" label="Storage & graphics" value={storageFree ?? "Checking…"} detail={`${gpuName ?? "Graphics not identified"} · hardware summary`} good={storageFree === null && gpuName === null ? null : true} />
+        </div>
+        <div className="home-actions-card"><div><span className="home-eyebrow">Quick actions</span><h2>What do you want to do?</h2><p>Jump directly to the part of Kyth Hub you need.</p></div><div className="home-actions"><ActionButton label="Run health check" onClick={() => navigate("/this-pc?section=Guardian")} /><ActionButton label="Check updates" onClick={() => navigate("/updates")} /><ActionButton label="Find apps" onClick={() => navigate("/apps")} /><ActionButton label="Start playing" onClick={() => navigate("/play")} /></div></div>
+      </section>
+      <div className="home-content-heading"><span className="home-eyebrow">Activity</span><h2>Your recent system activity</h2><p>Performance and Guardian history stay visible without opening another workspace.</p></div>
+      <div className="chart-grid"><PerformanceChart /><SessionsChart /></div>
       <GuardianHistoryCard events={guardianEvents} live={guardian !== null} />
     </div>
   );

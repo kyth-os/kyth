@@ -226,6 +226,13 @@ where
 }
 
 pub fn boot_runtime_checks() -> Vec<RuntimeCheck> {
+    boot_runtime_checks_with_deadline(DEFAULT_DEADLINE, DEFAULT_INTERVAL)
+}
+
+/// Run the same native runtime assertions with a caller-selected budget.
+/// Interactive Hub health reporting uses this bounded variant so a missing
+/// boot-health record cannot turn a read-only page into a five-minute wait.
+pub fn boot_runtime_checks_with_deadline(deadline: Duration, interval: Duration) -> Vec<RuntimeCheck> {
     runtime_checks_with(
         systemd_booted,
         unit_active,
@@ -233,8 +240,8 @@ pub fn boot_runtime_checks() -> Vec<RuntimeCheck> {
         failed_units,
         drm_devices,
         software_compose_rescue,
-        DEFAULT_DEADLINE,
-        DEFAULT_INTERVAL,
+        deadline,
+        interval,
     )
 }
 

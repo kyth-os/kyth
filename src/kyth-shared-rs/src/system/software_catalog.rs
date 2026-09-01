@@ -79,6 +79,21 @@ pub struct AppStreamApp {
     pub id: String,
     pub name: String,
     pub summary: String,
+    /// Flathub's AppStream icon is deterministic from the validated app id.
+    /// Returning it from the native catalog keeps the webview from inventing
+    /// package metadata or shell commands.
+    pub icon_url: String,
+}
+
+fn flathub_icon_url(app_id: &str) -> String {
+    format!("https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/{app_id}.png")
+}
+
+fn valid_flatpak_id(app_id: &str) -> bool {
+    !app_id.is_empty()
+        && app_id.len() <= 200
+        && app_id.contains('.')
+        && app_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
 pub fn parse_appstream_results(raw: &str) -> Vec<AppStreamApp> {
@@ -87,8 +102,8 @@ pub fn parse_appstream_results(raw: &str) -> Vec<AppStreamApp> {
         let id = fields.next()?.trim();
         let name = fields.next()?.trim();
         let summary = fields.next().unwrap_or("").trim();
-        if id.is_empty() || !id.contains('.') { return None; }
-        Some(AppStreamApp { id: id.into(), name: name.into(), summary: summary.into() })
+        if !valid_flatpak_id(id) { return None; }
+        Some(AppStreamApp { id: id.into(), name: name.into(), summary: summary.into(), icon_url: flathub_icon_url(id) })
     }).take(30).collect()
 }
 
@@ -106,13 +121,7 @@ pub fn appstream_search(query: &str) -> Vec<AppStreamApp> {
 /// used by native surfaces. The caller still owns confirmation and execution;
 /// arbitrary shell text never crosses this boundary.
 pub fn flatpak_install_argv(app_id: &str) -> Option<Vec<String>> {
-    if app_id.is_empty()
-        || app_id.len() > 200
-        || !app_id.contains('.')
-        || !app_id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
-    {
-        return None;
-    }
+    if !valid_flatpak_id(app_id) { return None; }
     Some(
         ["flatpak", "install", "--user", "-y", "flathub", app_id]
             .into_iter()
@@ -136,20 +145,22 @@ pub struct InstalledFlatpak {
     pub branch: String,
     pub arch: String,
     pub scope: String,
+    pub icon_url: String,
 }
 
 pub fn parse_installed_flatpaks(raw: &str, scope: &str) -> Vec<InstalledFlatpak> {
     raw.lines().filter_map(|line| {
         let mut fields = line.split('\t').map(str::trim);
         let id = fields.next()?.to_string();
-        if id.is_empty() || !id.contains('.') { return None; }
+        if !valid_flatpak_id(&id) { return None; }
         Some(InstalledFlatpak {
-            id,
+            id: id.clone(),
             name: fields.next().unwrap_or("").into(),
             version: fields.next().unwrap_or("").into(),
             branch: fields.next().unwrap_or("").into(),
             arch: fields.next().unwrap_or("").into(),
             scope: scope.into(),
+            icon_url: flathub_icon_url(&id),
         })
     }).collect()
 }
@@ -248,9 +259,10 @@ mod tests {
 
     #[test]
     fn parses_appstream_rows_and_skips_non_ids() {
-        let apps = parse_appstream_results("Application\tName\tSummary\norg.example.App\tDemo\tA test app\ninvalid\tIgnored\tNo ID\n");
+        let apps = parse_appstream_results("Application\tName\tSummary\norg.example.App\tDemo\tA test app\ninvalid\tIgnored\tNo ID\norg.example.Bad/Path\tUnsafe\tNo icon path\n");
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].id, "org.example.App");
+        assert!(apps[0].icon_url.ends_with("/org.example.App.png"));
     }
 
     #[test]
@@ -259,6 +271,7 @@ mod tests {
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].scope, "user");
         assert_eq!(apps[0].version, "1.0");
+        assert!(apps[0].icon_url.ends_with("/org.example.App.png"));
     }
 
     #[test]

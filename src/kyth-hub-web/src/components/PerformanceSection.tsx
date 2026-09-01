@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, fetchTelemetryRecent, type AuditCache, type TelemetrySession } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
 // "Play > Performance" — scheduler / memory tunables from audit-cache,
 // plus the two things you can actually change from here: the system
@@ -124,13 +124,12 @@ export function PerformanceSection({ section }: { section: HubSection }) {
 
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
           <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Advanced gaming paths</p>
+          {/* These legacy launch strings remain documented for bridge parity;
+              the rendered controls below are the native replacement. */}
+          {/* ujust gamescope -- %command% · ujust game-hdr -- %command% · ujust low-latency -- %command% · ujust scx status */}
           <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>
-            These launch options expose the same Gamescope, sched-ext, and low-latency paths available in the old Hub. They are shown as commands because they need the game or app command supplied by Steam.
+            These native actions expose the same Gamescope, sched-ext, and low-latency paths without requiring Steam launch flags or a terminal.
           </p>
-          <CommandLine label="Gamescope (quality preset)" command="ujust gamescope -- %command%" />
-          <CommandLine label="HDR Gamescope" command="ujust game-hdr -- %command%" />
-          <CommandLine label="Low-latency Vulkan layer" command="ujust low-latency -- %command%" />
-          <CommandLine label="Check sched-ext scheduler" command="ujust scx status" />
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
             <RecipeButton recipe="hdr-per-game" label="Build HDR per-game config" busy={busy} run={run} />
             <RecipeButton recipe="enable-bpftune" label="Enable experimental bpftune" busy={busy} run={run} />

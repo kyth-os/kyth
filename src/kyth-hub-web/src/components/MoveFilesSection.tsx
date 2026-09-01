@@ -82,7 +82,7 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
 
       <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
         <p className="card-copy" style={{ fontSize: 12, margin: "0 0 12px" }}>
-          Migration helpers inspect the Windows volume first; copying stays in a visible terminal so paths and permissions are clear.
+          Migration helpers inspect the Windows volume first. The migration workspace gives you a preview before anything is copied or changed.
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <ActionButton label={busy === "open-migration" ? "Opening…" : "Open full migration"} disabled={busy !== null} onClick={() => run("open-migration", "Opening the Windows migration workflow…", openMoveFilesApp)} />
