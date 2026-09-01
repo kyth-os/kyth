@@ -57,7 +57,14 @@ fn just_output_detail(recipe: &str, output: &std::process::Output) -> String {
     }
 }
 
-fn start_just_job(recipe: &str, args: &[&str]) -> Result<String, String> {
+#[derive(Serialize)]
+pub(crate) struct JustActionLaunch {
+    pub(crate) job: String,
+    pub(crate) state: String,
+    pub(crate) detail: String,
+}
+
+fn start_just_job(recipe: &str, args: &[&str]) -> Result<JustActionLaunch, String> {
     let argv = kyth_shared::system::just::command_for(recipe, args)
         .ok_or_else(|| "recipe or argument is not allowlisted".to_string())?;
     kyth_shared::commands::normalize_command(&argv)
@@ -91,7 +98,7 @@ fn start_just_job(recipe: &str, args: &[&str]) -> Result<String, String> {
             store.insert(job_for_thread, (state, detail));
         }
     });
-    Ok(job)
+    Ok(JustActionLaunch { job, state: "running".into(), detail: format!("Running {recipe}…") })
 }
 
 /// Start an Updates-page operation as a native Rust-managed job. The command
@@ -152,7 +159,7 @@ fn start_update_job(operation: &str, argv: Vec<String>, timeout: Duration) -> Re
 }
 
 #[tauri::command]
-pub(crate) fn just_run(recipe: String) -> Result<String, String> {
+pub(crate) fn just_run(recipe: String) -> Result<JustActionLaunch, String> {
     start_just_job(&recipe, &[])
 }
 

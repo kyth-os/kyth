@@ -527,6 +527,7 @@ export async function fetchSecurebootState(): Promise<string | null> {
 // buttons for no-argument recipes until it has a safe, user-friendly form for
 // choosing those arguments.
 export interface JustRecipe { name: string; params: string; comment: string }
+export interface JustActionLaunch { job: string; state: "running"; detail: string; }
 export async function fetchJustList(): Promise<JustRecipe[] | null> {
   if (!inTauriShell()) return null;
   try {
@@ -545,6 +546,11 @@ async function waitJustJob(job: string): Promise<string> {
     if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
   }
   throw new Error("This action is still running; check the status here again in a moment.");
+}
+
+async function waitJustLaunch(launch: JustActionLaunch): Promise<string> {
+  if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Recipe did not start.");
+  return await waitJustJob(launch.job);
 }
 
 export interface UpdateActionLaunch { job: string; state: "running"; detail: string; }
@@ -567,8 +573,7 @@ async function waitUpdateLaunch(launch: UpdateActionLaunch): Promise<string> {
 
 async function runJustJob(recipe: string): Promise<string> {
   if (!inTauriShell()) throw new Error("This action is only available in the Hub app.");
-  const job = await invoke<string>("just_run", { recipe });
-  return await waitJustJob(job);
+  return await waitJustLaunch(await invoke<JustActionLaunch>("just_run", { recipe }));
 }
 
 export async function runJustRecipe(recipe: string): Promise<string> {
