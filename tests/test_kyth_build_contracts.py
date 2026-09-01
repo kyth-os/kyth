@@ -131,7 +131,7 @@ class BuildAssemblyContracts(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         builder = dockerfile[:dockerfile.index("# Base Image")]
         self.assertIn("COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json", builder)
-        self.assertIn("COPY src/kyth-welcome /build/kyth-hub-web/kyth-welcome", builder)
+        self.assertIn("COPY src/kyth-welcome /build/kyth-welcome", builder)
 
     def test_fedora_nvidia_devel_tracks_coordinated_latest_kernel(self):
         script = (BUILD_FILES / "scripts/lib/fedora-kernel.sh").read_text(encoding="utf-8")

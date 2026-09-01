@@ -45,10 +45,10 @@ COPY src/kyth-shared-rs /build/kyth-shared-rs
 COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
 # `main.rs` embeds the bundled compatibility catalog using a path relative to
 # `/build/kyth-hub-web/src-tauri/src`: ../../../kyth-welcome/... resolves to
-# `/build/kyth-hub-web/kyth-welcome/...`.  Keep that source-relative layout in
+# `/build/kyth-welcome/...`.  Keep that source-relative layout in
 # the builder stage so the release container compile sees the same catalog as
 # the repository build.
-COPY src/kyth-welcome /build/kyth-hub-web/kyth-welcome
+COPY src/kyth-welcome /build/kyth-welcome
 COPY src/kyth-hub-web /build/kyth-hub-web
 WORKDIR /build/kyth-hub-web
 RUN --mount=type=cache,id=kyth-hub-web-npm,target=/root/.npm \
