@@ -26,6 +26,7 @@ MAIN_RS = (TAURI_SRC / "main.rs").read_text(encoding="utf-8")
 # generate_handler! parsing against main.rs itself.
 MAIN_RS += "\n" + "\n".join(path.read_text(encoding="utf-8") for path in sorted((TAURI_SRC / "commands").glob("*.rs")))
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
+COMMAND_LEDGER = (ROOT / "src" / "kyth-hub-web" / "COMMAND_LEDGER.md").read_text(encoding="utf-8")
 
 HUB_SECTIONS = (HUB_WEB / "data" / "hubSections.ts").read_text(encoding="utf-8")
 
@@ -75,6 +76,15 @@ def _ui_sources() -> dict[str, str]:
 
 
 class HubWebActionTests(unittest.TestCase):
+    def test_release_ledger_records_the_mutating_bridge_surface(self):
+        """The release inventory is a contract, not advisory prose."""
+        for command in (
+            "guardian_execute_recipe", "privileged_action", "bootc_upgrade",
+            "install_flatpak", "smb_save_configured_share", "kali_create",
+            "gaming_tool_install", "scx_set_scheduler",
+        ):
+            self.assertIn(command, COMMAND_LEDGER)
+
     def test_every_mutating_wrapper_is_reachable_from_the_ui(self):
         sources = _ui_sources()
         for wrapper, expected_file in MUTATING_WRAPPERS.items():
