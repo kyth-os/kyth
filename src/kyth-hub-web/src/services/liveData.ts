@@ -1108,6 +1108,47 @@ export async function fetchSupportSnapshotCommand(): Promise<string | null> {
   try { return await invoke<string>("support_snapshot_command"); } catch { return null; }
 }
 export async function openGameFolder(key: "compatdata" | "shadercache"): Promise<string> { return await invoke<string>("open_game_folder", { key }); }
+
+// ---------------------------------------------------------------------
+// Overlays / sched-ext / per-game profile builder — page_gaming_tools_perf.py.
+// ---------------------------------------------------------------------
+
+export interface GamingPerfStatus { mangohud_installed: boolean; gamescope_installed: boolean; vkbasalt_installed: boolean }
+export async function fetchGamingPerfStatus(): Promise<GamingPerfStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<GamingPerfStatus>("gaming_perf_status"); } catch { return null; }
+}
+
+export interface ScxStatus { active: boolean; configured: string }
+export async function fetchScxStatus(): Promise<ScxStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<ScxStatus>("scx_status"); } catch { return null; }
+}
+export async function setScxScheduler(scheduler: "rusty" | "stop"): Promise<string> {
+  const job = await invoke<string>("scx_set_scheduler", { scheduler });
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1500));
+    const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
+    if (!state || state.state === "running") continue;
+    if (state.state === "complete") return state.detail;
+    throw new Error(state.detail);
+  }
+  throw new Error("Still running; check back in a moment.");
+}
+
+export async function fetchProfileLaunchOption(goal: string, fps: string, hdr: boolean): Promise<string | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string>("profile_launch_option", { goal, fps: fps || null, hdr }); } catch { return null; }
+}
+
+export interface GameProfile { profile: string; hdr: boolean }
+export async function fetchPerGameProfile(appid: string): Promise<GameProfile | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<GameProfile>("per_game_profile", { appid }); } catch { return null; }
+}
+export async function savePerGameProfile(appid: string, profile: string, hdr: boolean): Promise<string> {
+  return await invoke<string>("save_per_game_profile", { appid, profile, hdr });
+}
 export interface ProtonDbResult { app_id: string; tier: string; detail: string }
 export interface AntiCheatEntry { game: string; status: string; detail: string }
 export async function fetchProtonDbMany(appIds: string[]): Promise<ProtonDbResult[] | null> {

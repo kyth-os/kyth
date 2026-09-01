@@ -1183,7 +1183,13 @@ fn main() {
             commands::gaming::fix_obs_pipewire,
             commands::gaming::prefix_reset_hint,
             commands::gaming::support_snapshot_command,
-            commands::gaming::open_game_folder
+            commands::gaming::open_game_folder,
+            commands::gaming::gaming_perf_status,
+            commands::gaming::scx_status,
+            commands::gaming::scx_set_scheduler,
+            commands::gaming::profile_launch_option,
+            commands::gaming::per_game_profile,
+            commands::gaming::save_per_game_profile
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

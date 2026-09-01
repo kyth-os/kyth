@@ -1,13 +1,17 @@
 //! Gaming section bridge: the tool grid (install/launch/uninstall), the
-//! Discord/OBS one-shot capture fixes, and the two "open a well-known
-//! folder" actions from the first-failure playbook / Fix My Game card.
-//! Catalog and command builders live in `kyth_shared::system::gaming_tools`.
+//! Discord/OBS one-shot capture fixes, the "open a well-known folder"
+//! actions from the first-failure playbook / Fix My Game card, and the
+//! overlay/sched-ext/per-game profile builder from
+//! `page_gaming_tools_perf.py`. Catalog and command builders live in
+//! `kyth_shared::system::gaming_tools`, `gaming_perf`, and `gaming_per_game`.
 
 use std::process::Command;
 use std::time::Duration;
 
 use serde::Serialize;
 
+use kyth_shared::system::gaming_per_game;
+use kyth_shared::system::gaming_perf::{self, ProfileGoal};
 use kyth_shared::system::gaming_tools::{self, GAMING_TOOLS};
 
 use super::job::{failure_detail, spawn_argv_job, start_job};
@@ -135,4 +139,96 @@ pub(crate) fn open_game_folder(key: String) -> Result<String, String> {
         .spawn()
         .map_err(|err| format!("could not open {expanded}: {err}"))?;
     Ok(format!("Opened {expanded}"))
+}
+
+// ---------------------------------------------------------------------
+// Overlays / sched-ext / per-game profile builder — page_gaming_tools_perf.py.
+// ---------------------------------------------------------------------
+
+#[derive(Serialize)]
+pub(crate) struct GamingPerfStatusResponse {
+    mangohud_installed: bool,
+    gamescope_installed: bool,
+    vkbasalt_installed: bool,
+}
+
+#[tauri::command]
+pub(crate) fn gaming_perf_status() -> GamingPerfStatusResponse {
+    GamingPerfStatusResponse {
+        mangohud_installed: gaming_perf::mangohud_installed(),
+        gamescope_installed: gaming_perf::gamescope_installed(),
+        vkbasalt_installed: gaming_perf::vkbasalt_installed(),
+    }
+}
+
+#[derive(Serialize)]
+pub(crate) struct ScxStatusResponse {
+    active: bool,
+    configured: String,
+}
+
+#[tauri::command]
+pub(crate) fn scx_status() -> Option<ScxStatusResponse> {
+    gaming_perf::scx_status().map(|status| ScxStatusResponse { active: status.active, configured: status.configured })
+}
+
+/// Only the two schedulers the Hub's buttons actually offer ("Use
+/// scx_rusty", "Stop scx") — a fixed set, not an arbitrary scheduler name
+/// from the webview.
+#[tauri::command]
+pub(crate) fn scx_set_scheduler(scheduler: String) -> Result<String, String> {
+    if !matches!(scheduler.as_str(), "rusty" | "stop") {
+        return Err("unknown scheduler".to_string());
+    }
+    let argv = gaming_perf::scx_scheduler_command(&scheduler);
+    let job = start_job("scx", &format!("Setting scheduler: {scheduler}…"))?;
+    spawn_argv_job(job.clone(), argv, Duration::from_secs(30), |result| match result {
+        Ok(output) if output.status.success() => ("complete".to_string(), "sched-ext updated.".to_string()),
+        Ok(output) => ("failed".to_string(), failure_detail("sched-ext update", &output)),
+        Err(err) => ("failed".to_string(), format!("Could not start sched-ext update: {err}")),
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+pub(crate) fn profile_launch_option(goal: String, fps: Option<String>, hdr: bool) -> Result<String, String> {
+    let goal = ProfileGoal::parse(&goal).ok_or_else(|| "unknown goal".to_string())?;
+    if let Some(fps) = &fps {
+        if !fps.is_empty() && (fps.len() > 4 || !fps.chars().all(|c| c.is_ascii_digit())) {
+            return Err("fps must be a short numeric string".to_string());
+        }
+    }
+    Ok(gaming_perf::build_profile_launch_option(goal, fps.as_deref(), hdr))
+}
+
+fn valid_appid(appid: &str) -> bool {
+    !appid.is_empty() && appid.len() <= 64 && !appid.contains('"') && !appid.chars().any(char::is_control)
+}
+
+#[derive(Serialize)]
+pub(crate) struct GameProfileResponse {
+    profile: String,
+    hdr: bool,
+}
+
+#[tauri::command]
+pub(crate) fn per_game_profile(appid: String) -> Result<GameProfileResponse, String> {
+    if !valid_appid(&appid) {
+        return Err("invalid Steam app id".to_string());
+    }
+    let profile = gaming_per_game::get_profile_for_appid(&appid, gaming_per_game::per_game_config_path(None::<&str>));
+    Ok(GameProfileResponse { profile: profile.profile, hdr: profile.hdr })
+}
+
+#[tauri::command]
+pub(crate) fn save_per_game_profile(appid: String, profile: String, hdr: bool) -> Result<String, String> {
+    if !valid_appid(&appid) {
+        return Err("invalid Steam app id".to_string());
+    }
+    if ProfileGoal::parse(&profile).is_none() {
+        return Err("unknown profile".to_string());
+    }
+    gaming_per_game::set_profile_for_appid(&appid, &profile, hdr, gaming_per_game::per_game_config_path(None::<&str>))
+        .map_err(|err| format!("Could not save profile: {err}"))?;
+    Ok(format!("Saved {profile} (HDR: {hdr}) for {appid}."))
 }

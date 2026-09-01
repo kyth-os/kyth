@@ -90,3 +90,15 @@ its `key` against a fixed 2-entry set (`compatdata`, `shadercache`) rather
 than accepting a caller-supplied path. `security_job_status` and
 `gaming_job_status` both poll the same shared job store in
 `commands/job.rs`.
+
+The Gaming tab's overlay/sched-ext/profile-builder commands
+(`gaming_perf_status`, `scx_status`, `scx_set_scheduler`,
+`profile_launch_option`, `per_game_profile`, `save_per_game_profile`) back
+`page_gaming_tools_perf.py`'s remaining cards. `scx_set_scheduler` only
+accepts `"rusty"`/`"stop"` — the two schedulers the Hub's buttons offer,
+not an arbitrary scheduler name. `profile_launch_option` validates `goal`
+against the fixed five-goal set and `fps` as a short digit string.
+`save_per_game_profile` validates the Steam app id (non-empty, bounded
+length, no quote/control characters — it's interpolated into a TOML
+section header) and `profile` against the same fixed goal set before
+writing `~/.config/kyth/gaming-per-game.toml`.
