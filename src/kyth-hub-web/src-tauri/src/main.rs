@@ -405,18 +405,19 @@ fn smb_configured_shares() -> Vec<SmbConfiguredShare> {
 }
 
 #[tauri::command]
-fn smb_save_configured_share(share: SmbConfiguredShare) -> Result<(), String> {
+fn smb_save_configured_share(share: SmbConfiguredShare) -> Result<SmbActionResult, String> {
     if !valid_smb_configured_share(&share) {
         return Err("invalid SMB share configuration".to_string());
     }
     let mut shares = load_smb_configured_shares();
     shares.retain(|existing| existing.name != share.name);
     shares.push(share);
-    save_smb_configured_shares(&shares)
+    save_smb_configured_shares(&shares)?;
+    Ok(SmbActionResult { state: "complete".into(), detail: "Network share configuration saved.".into() })
 }
 
 #[tauri::command]
-fn smb_remove_configured_share(name: String) -> Result<(), String> {
+fn smb_remove_configured_share(name: String) -> Result<SmbActionResult, String> {
     if name.is_empty()
         || name.len() > 64
         || !name
@@ -427,8 +428,12 @@ fn smb_remove_configured_share(name: String) -> Result<(), String> {
     }
     let mut shares = load_smb_configured_shares();
     shares.retain(|existing| existing.name != name);
-    save_smb_configured_shares(&shares)
+    save_smb_configured_shares(&shares)?;
+    Ok(SmbActionResult { state: "complete".into(), detail: "Network share configuration removed.".into() })
 }
+
+#[derive(serde::Serialize)]
+struct SmbActionResult { state: String, detail: String }
 
 #[derive(serde::Serialize)]
 struct MemoryPressureResponse {

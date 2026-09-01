@@ -642,6 +642,7 @@ export interface NetworkShareInput extends ConfiguredNetworkShare {
   password: string;
   mount_now: boolean;
 }
+interface SmbActionResult { state: "complete"; detail: string; }
 export async function fetchConfiguredNetworkShares(): Promise<ConfiguredNetworkShare[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<ConfiguredNetworkShare[]>("smb_configured_shares"); } catch { return null; }
@@ -649,17 +650,19 @@ export async function fetchConfiguredNetworkShares(): Promise<ConfiguredNetworkS
 export async function addNetworkShare(share: NetworkShareInput): Promise<string> {
   const detail = await runPrivilegedAction("network_share_add", { ...share });
   if (detail === "Cancelled.") return detail;
-  await invoke<void>("smb_save_configured_share", { share: {
+  const saved = await invoke<SmbActionResult>("smb_save_configured_share", { share: {
     name: share.name, server: share.server, share_path: share.share_path,
     mount_point: share.mount_point, username: share.username, domain: share.domain,
     auto_mount: share.auto_mount,
   } });
+  if (saved.state !== "complete") throw new Error(saved.detail || "Network share configuration was not saved.");
   return detail;
 }
 export async function removeNetworkShare(share: Pick<ConfiguredNetworkShare, "name" | "mount_point">): Promise<string> {
   const detail = await runPrivilegedAction("network_share_remove", { ...share });
   if (detail === "Cancelled.") return detail;
-  await invoke<void>("smb_remove_configured_share", { name: share.name });
+  const removed = await invoke<SmbActionResult>("smb_remove_configured_share", { name: share.name });
+  if (removed.state !== "complete") throw new Error(removed.detail || "Network share configuration was not removed.");
   return detail;
 }
 
