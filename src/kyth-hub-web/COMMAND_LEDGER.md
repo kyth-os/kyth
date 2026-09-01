@@ -39,6 +39,7 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
 | `invokeBootcRollback` | `bootc_rollback` | none | `string` | mutate | covered |
 | `RecipeButton: apply-staged` | `just_run` | `{ recipe: "apply-staged" }` | `JustLaunch` | mutate | indirect |
 | `RecipeButton: update-health` | `just_run` | `{ recipe: "update-health" }` | `JustLaunch` | check | indirect |
+| `waitJustJob` | `just_run_status` | `{ job }` | `InstallStatus` | read | covered |
 
 ## Baseline gaps exposed by this ledger
 
@@ -52,23 +53,23 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
 4. The mutating wrappers return plain strings rather than a structured action
    result, so confirmation and failure semantics remain a follow-up item.
 
-## Native Rust/Slint additions
+## Native Rust/Tauri additions
 
-The native shell uses fixed callback identifiers rather than exposing Tauri's
-generic IPC surface. Updates, Guardian controls, curated recipes, AppImage
+The Tauri bridge uses dedicated commands rather than exposing a generic
+command or argv surface. Updates, Guardian controls, curated recipes, AppImage
 operations, user Flatpak removal, and feedback reports are now represented by
 dedicated native handlers. Kernel flavor and channel switches use fixed
 allowlisted values and the shared `just` argument validators. BitLocker,
 network share browse/mount, AppImage management, and feedback now have typed
-native inputs. BitLocker recovery keys are passed only to the existing
+typed inputs. BitLocker recovery keys are passed only to the existing
 validated privilege request and are never copied into action status. Cloud
 OAuth still presents a validated command for a terminal handoff, since its
 interactive browser flow is not safely hostable inside the shell.
 
-The native Gaming surface additionally covers the verified launcher/tool
+The Tauri Gaming surface additionally covers the verified launcher/tool
 recipes (`install-prismlauncher`, `install-itch`, `install-epic-launcher`,
 `install-battlenet`, `install-ea-app`, `install-ubisoft-connect`,
 `export-steam-games`, `install-gpu-screen-recorder`, `install-goverlay`,
 `install-mangojuice`, `install-lact`, `install-piper`, and `install-solaar`).
 They dispatch through the shared `just` allowlist; no free-form command text
-is accepted by the native action callback.
+is accepted by the bridge.

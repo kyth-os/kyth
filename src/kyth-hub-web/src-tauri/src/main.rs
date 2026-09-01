@@ -1103,6 +1103,7 @@ fn main() {
             take_pending_page,
             commands::updates::just_list,
             commands::updates::just_run,
+            commands::updates::just_run_status,
             commands::updates::bootc_upgrade,
             commands::updates::bootc_rollback,
             commands::updates::bootc_switch_branch,

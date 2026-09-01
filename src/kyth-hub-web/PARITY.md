@@ -1,16 +1,13 @@
 # Kyth Hub Parity — Python (Qt/PySide6) → Rust/Tauri/React
 
-The Tauri/React shell is the primary Hub UI. It provides the responsive
-navigation and complete feature-page surface, with direct Rust bridge commands
-under `src-tauri/`. The Slint implementation remains available as a controlled
-recovery path with `KYTH_USE_NATIVE_UI=1`; it is not the default launcher.
+The Tauri/React shell is the Hub UI. It provides the responsive navigation and
+complete feature-page surface, with direct native Rust bridge commands under
+`src-tauri/`.
 
-`kyth-welcome-launch` prefers `/usr/bin/kyth-hub-shell`, then falls back to
-`/usr/bin/kyth-hub-native` if the Tauri binary is unavailable. Setting
-`KYTH_USE_NATIVE_UI=1` explicitly selects the Slint binary when present, and
-the old Qt Hub remains the final fallback for older images. Both modern shells
+`kyth-welcome-launch` starts `/usr/bin/kyth-hub-shell` and falls back to the
+older Python Hub only on images that predate the Tauri shell. Both paths
 preserve the same `--page` contract. The React/Tauri build is covered by
-`check-hub-web-shell.sh`; the native binary remains built for recovery testing.
+`check-hub-web-shell.sh`.
 
 Native interactive coverage now includes the shared familiar-app chooser and
 the verified Gaming recipe set: Steam, Heroic, Lutris, Bottles, Prism Launcher,
@@ -50,9 +47,9 @@ Long-running Hub actions return a job and are polled by the frontend; they do no
 
 ## What is still not 100%
 
-### Native Rust/Slint interactive surface — expanded
+### Native Rust/Tauri interactive surface — expanded
 
-The native shell now exposes fixed interactive controls for the high-value
+The Tauri bridge exposes fixed interactive controls for the high-value
 workflows that can be safely represented without a generic command bridge:
 updates and rollback, Guardian safe repair, Flatpak search/install, gaming and
 balanced performance profiles, firmware update, Office fonts, Windows
@@ -60,12 +57,9 @@ verification, save-migration tooling, Tailscale setup, AppImage import/launch,
 user-scoped Flatpak removal, curated starter packs, ProtonDB lookup, feedback report generation,
 BitLocker unlock, SMB browse/mount, and the read-only
 desktop/network/deployment/kernel/channel refresh actions. System-changing
-native actions use a two-step confirmation gate and the core recipe runner now
-publishes structured running/complete/failed state with a native job id, while
-reporting bounded completion or failure inline. Remaining parity work is richer dynamic presentation and
-selection: cloud OAuth terminal handoff, installed-app/AppImage inventories,
-arbitrary recipe selection, and deeper per-section details. All secret-bearing
-inputs are validated and kept out of status text.
+actions use explicit confirmation in React, and the recipe runner publishes
+structured running/complete/failed state through the Tauri bridge. All
+secret-bearing inputs are validated and kept out of status text.
 
 ### 1. Charts — live telemetry wired
 `PerformanceChart.tsx`/`SessionsChart.tsx` read `kyth-telem` sessions through `liveData.ts:fetchTelemetryRecent` → `telemetry_recent` → `kyth-shared-rs::system::telemetry::recent_sessions` (read-only sqlite). They show `Live` when usable session data exists and an explicit no-data state otherwise; they never render the old `mockDashboard.ts` series.
@@ -82,8 +76,8 @@ Python `page_software.py` 7 mixins (Starter Packs, Flatpak Store, AppImages, Ins
 ### 5. kyth_shared → kyth-shared-rs coverage
 Python `src/kyth_shared/kyth_shared` `≈209` modules / `≈1494` defs vs Rust `src/kyth-shared-rs/src/system` `≈31` modules (≈15%). The Rust hardware-policy slice now evaluates read-only inventory and selectors, while `MIGRATION.md` reserves policy application and other collector/high-risk writer paths (installer partitioning, SELinux, VPN connect, `zypp`/`dnf`, and `collect_snapshot`). The Hub's explicit Guardian repair path is ported with the same eligibility, cooldown, verification, and fixed-command policy as Python; the live Guardian sweep and service state writer remain Python-owned. Parity for UI does not require 100% of `kyth_shared` — only the UI-facing reads plus the small set of explicitly exposed mutating actions.
 
-### 6. Launchers & single-instance — TAURI/REACT DEFAULT
-Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`, `krunner_desktop.py`, `kyth-welcome.desktop`. Rust/Tauri: the primary shell accepts `--page <key>`, forwards later launches through the single-instance plugin, and preserves the same destination contract. `src/kyth-welcome/kyth-welcome-launch` defaults to `/usr/bin/kyth-hub-shell`; `KYTH_USE_NATIVE_UI=1` explicitly selects the Slint recovery shell, and older images fall through to `/usr/bin/kyth-welcome`. `Dockerfile` ships both Rust binaries, and `23-kyth-helper-ctx-installs.sh` installs the unchanged desktop entries.
+### 6. Launchers & single-instance — TAURI/REACT
+Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`, `krunner_desktop.py`, `kyth-welcome.desktop`. Rust/Tauri: the primary shell accepts `--page <key>`, forwards later launches through the single-instance plugin, and preserves the same destination contract. `src/kyth-welcome/kyth-welcome-launch` starts `/usr/bin/kyth-hub-shell`; older images fall through to `/usr/bin/kyth-welcome`. `Dockerfile` ships the Tauri binary, and `23-kyth-helper-ctx-installs.sh` installs the unchanged desktop entries.
 
 ## Remaining work
 
@@ -92,8 +86,8 @@ shell: Gaming has a migration checklist, ProtonDB lookup, and anti-cheat
 guidance; App Store has Flatpak catalog search, AppImage discovery, and
 background Flatpak installation status; presets preview before confirmation;
 and Guardian repairs execute with verification/cooldowns/history. The native
-Rust migration now covers the common interactive paths plus read-only
+Rust/Tauri migration now covers the common interactive paths plus read-only
 snapshot/deployment timeline and staged-update truth used by Repair. Remaining
-product work is dedicated native controls for the listed high-risk workflows,
+product work is dedicated controls for the listed high-risk workflows,
 installed-image acceptance testing, deeper parity in still-Python collector
 paths, and eventual React/Qt removal.

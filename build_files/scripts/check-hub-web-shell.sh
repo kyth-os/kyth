@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build/typecheck gate for the Kyth Hub shells
+# Build/typecheck gate for the Kyth Hub Tauri shell
 # (src/kyth-hub-web). Mirrors validate.sh's role for the rest of the repo:
 # a single entry point `just check-hub-shell` and CI both call, so the two
 # never drift.
@@ -40,14 +40,6 @@ echo "== kyth-hub-web/src-tauri: cargo build =="
 # the profile, so it reproduces here at a fraction of the release build's
 # LTO cost.
 (cd "$hub_web/src-tauri" && cargo build --locked)
-(cd "$hub_web/src-tauri" && cargo build --locked --bin kyth-hub-native)
-
-native_bin="$hub_web/src-tauri/target/debug/kyth-hub-native"
-if [[ ! -x "$native_bin" ]]; then
-    echo "FAIL: native Slint Hub binary was not produced." >&2
-    exit 1
-fi
-echo "   native Slint Hub binary linked at $native_bin"
 
 echo "== kyth-hub-shell: assert the frontend is embedded =="
 # tauri-macros decides dev-vs-production from `dev: cfg!(not(feature =

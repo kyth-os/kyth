@@ -55,6 +55,7 @@ const rustCommands = [
   "bootc_upgrade",
   "bootc_rollback",
   "just_run",
+  "just_run_status",
 ];
 
 test("Dashboard wrappers are present and used by the page", () => {
@@ -76,6 +77,15 @@ test("ledger commands are registered in the Tauri handler", () => {
   assert.notEqual(handler, "", "Tauri handler registration not found");
   for (const command of rustCommands) {
     assert.match(handler, new RegExp(`\\b${command}\\b`), command);
+  }
+});
+
+test("every frontend invoke is registered in the Tauri handler", () => {
+  const handler = rust.match(/generate_handler!\[([\s\S]*?)\]/)?.[1] ?? "";
+  const invoked = new Set([...service.matchAll(/invoke(?:<[^>]+>)?\(\"([^\"]+)\"/g)].map((match) => match[1]));
+  assert.ok(invoked.size > 0, "no frontend invoke calls found");
+  for (const command of invoked) {
+    assert.match(handler, new RegExp(`\\b${command}\\b`), `${command} is invoked by the frontend but not registered`);
   }
 });
 

@@ -25,8 +25,6 @@ MAIN_RS = (TAURI_SRC / "main.rs").read_text(encoding="utf-8")
 # files in static checks that verify command definitions, while keeping the
 # generate_handler! parsing against main.rs itself.
 MAIN_RS += "\n" + "\n".join(path.read_text(encoding="utf-8") for path in sorted((TAURI_SRC / "commands").glob("*.rs")))
-NATIVE_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "native_main.rs").read_text(encoding="utf-8")
-NATIVE_SLINT = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "ui" / "hub.slint").read_text(encoding="utf-8")
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
 
 HUB_SECTIONS = (HUB_WEB / "data" / "hubSections.ts").read_text(encoding="utf-8")
@@ -77,59 +75,6 @@ def _ui_sources() -> dict[str, str]:
 
 
 class HubWebActionTests(unittest.TestCase):
-    def test_native_page_cards_consume_the_typed_hub_snapshot(self):
-        self.assertIn("hub_snapshot::collect", NATIVE_RS)
-        for field in (
-            "snapshot.gaming.installed_launchers",
-            "snapshot.software.installed_flatpaks",
-            "snapshot.doctor_score",
-            "snapshot.move_in.ntfs_drives",
-        ):
-            self.assertIn(field, NATIVE_RS)
-
-    def test_native_updates_surface_has_guarded_recipe_actions(self):
-        for recipe in ("upgrade", "rollback"):
-            self.assertIn(f'"{recipe}"', NATIVE_RS)
-        self.assertIn("command_for", NATIVE_RS)
-        self.assertIn("run_bounded_command", NATIVE_RS)
-        self.assertIn('selected-page == "Updates"', NATIVE_SLINT)
-        self.assertIn('page-action("upgrade")', NATIVE_SLINT)
-        self.assertIn('page-action("rollback")', NATIVE_SLINT)
-
-    def test_native_guardian_action_uses_the_guarded_rust_policy(self):
-        self.assertIn('page-action("guardian")', NATIVE_SLINT)
-        self.assertIn('action == "guardian"', NATIVE_RS)
-        self.assertIn("pending_recommendations", NATIVE_RS)
-        self.assertIn("execute_recipe", NATIVE_RS)
-
-    def test_native_hardware_section_surfaces_rust_capabilities(self):
-        self.assertIn("get_hardware_view_summary", NATIVE_RS)
-        self.assertIn("fn hardware_capabilities_text()", NATIVE_RS)
-        self.assertIn("set_hardware_capabilities", NATIVE_RS)
-        self.assertIn("hardware-capabilities", NATIVE_SLINT)
-        self.assertIn('selected-page == "This PC" && selected-section == "Hardware"', NATIVE_SLINT)
-
-    def test_native_gaming_section_surfaces_rust_launcher_inventory(self):
-        self.assertIn("gaming_library_scan", NATIVE_RS)
-        self.assertIn("fn gaming_launchers_text()", NATIVE_RS)
-        self.assertIn("set_gaming_launchers", NATIVE_RS)
-        self.assertIn("gaming-launchers", NATIVE_SLINT)
-        self.assertIn('selected-page == "Play" && selected-section == "Gaming"', NATIVE_SLINT)
-
-    def test_native_software_and_guardian_sections_surface_rust_reads(self):
-        self.assertIn("installed_flatpaks", NATIVE_RS)
-        self.assertIn("fn software_catalog_text()", NATIVE_RS)
-        self.assertIn("fn guardian_status_text()", NATIVE_RS)
-        self.assertIn("set_software_catalog", NATIVE_RS)
-        self.assertIn("set_guardian_status", NATIVE_RS)
-        self.assertIn('selected-page == "Apps" && selected-section == "App Store"', NATIVE_SLINT)
-        self.assertIn('selected-page == "This PC" && selected-section == "Guardian"', NATIVE_SLINT)
-
-    def test_native_apps_surface_has_bounded_appstream_search(self):
-        self.assertIn("appstream_search", NATIVE_RS)
-        self.assertIn("appstream-search(appstream-query)", NATIVE_SLINT)
-        self.assertIn("appstream-results", NATIVE_SLINT)
-
     def test_every_mutating_wrapper_is_reachable_from_the_ui(self):
         sources = _ui_sources()
         for wrapper, expected_file in MUTATING_WRAPPERS.items():

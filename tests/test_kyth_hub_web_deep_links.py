@@ -1,8 +1,7 @@
 """Hub deep links — every --page key that ships must resolve.
 
-kyth-welcome-launch forwards `--page KEY` unchanged to whichever Hub is
-installed. The native Slint shell and the compatibility Tauri shell both
-consume the same argument. Nothing in
+kyth-welcome-launch forwards `--page KEY` unchanged to the Tauri Hub, with the
+older Python Hub as a compatibility fallback. Nothing in
 that chain validates the key: an unknown one falls back to "/" and silently
 opens Home instead of the requested page. That is how `--page "App Store"`
 (shipped in 23-kyth-helper-ctx-installs.sh) and 19 krunner entries regressed
@@ -53,7 +52,6 @@ DESTINATIONS_TS = (HUB_WEB / "data" / "destinations.ts").read_text(encoding="utf
 SIDEBAR_TSX = (HUB_WEB / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
 HUB_PAGE_TSX = (HUB_WEB / "pages" / "HubPage.tsx").read_text(encoding="utf-8")
 LAUNCHER_SH = (ROOT / "src" / "kyth-welcome" / "kyth-welcome-launch").read_text(encoding="utf-8")
-NATIVE_RS = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "src" / "native_main.rs").read_text(encoding="utf-8")
 CTX_INSTALLS_SH = (
     ROOT / "build_files" / "scripts" / "branding" / "23-kyth-helper-ctx-installs.sh"
 ).read_text(encoding="utf-8")
@@ -99,10 +97,10 @@ def _resolvable_keys() -> set[str]:
 
 
 class HubWebDeepLinkTests(unittest.TestCase):
-    def test_tauri_hub_is_the_default_with_explicit_native_recovery(self):
+    def test_tauri_hub_is_the_default_without_a_slint_recovery_path(self):
         self.assertIn('target_bin="/usr/bin/kyth-hub-shell"', LAUNCHER_SH)
-        self.assertIn('KYTH_USE_NATIVE_UI:-0', LAUNCHER_SH)
-        self.assertIn('target_bin="/usr/bin/kyth-hub-native"', LAUNCHER_SH)
+        self.assertNotIn("KYTH_USE_NATIVE_UI", LAUNCHER_SH)
+        self.assertNotIn("kyth-hub-native", LAUNCHER_SH)
 
     def test_every_krunner_page_key_resolves(self):
         emitted = {
@@ -155,29 +153,6 @@ class HubWebDeepLinkTests(unittest.TestCase):
         # A mount-time effect syncing state->URL would clobber the incoming
         # deep link; the tab state must live only in the URL.
         self.assertNotIn("useState", HUB_PAGE_CODE)
-
-    def test_native_hub_selects_requested_section_deep_links(self):
-        # The native shell receives the same registry key through --page, but
-        # has no URL query string to carry the React shell's ?section value.
-        # It must select the matching native tab after resolving the landing
-        # destination, including the historical Just -> Recipes alias.
-        self.assertIn("fn initial_requested_page()", NATIVE_RS)
-        self.assertIn("fn initial_section(page: &str)", NATIVE_RS)
-        self.assertIn('Some("Just") if page == "This PC" => "Recipes"', NATIVE_RS)
-        self.assertIn('Some("Update") if page == "Updates" => "Updates"', NATIVE_RS)
-        self.assertIn('"Update" | "Updates" => "Updates"', NATIVE_RS)
-        self.assertIn("let section = initial_section(&page);", NATIVE_RS)
-        self.assertIn("window.set_selected_section(SharedString::from(section.as_str()));", NATIVE_RS)
-
-    def test_native_recovery_contract_keeps_migrated_surfaces(self):
-        slint = (ROOT / "src" / "kyth-hub-web" / "src-tauri" / "ui" / "hub.slint").read_text(encoding="utf-8")
-        self.assertIn('target_bin="/usr/bin/kyth-hub-native"', LAUNCHER_SH)
-        self.assertIn('KYTH_USE_NATIVE_UI:-0', LAUNCHER_SH)
-        for page, section in (("This PC", "Hardware"), ("Play", "Gaming"), ("Apps", "App Store"), ("This PC", "Guardian")):
-            self.assertIn(f'selected-page == "{page}" && selected-section == "{section}"', slint)
-        for action in ('page-action("upgrade")', 'page-action("rollback")'):
-            self.assertIn(action, slint)
-
 
 if __name__ == "__main__":
     unittest.main()

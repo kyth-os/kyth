@@ -51,9 +51,7 @@ WORKDIR /build/kyth-hub-web/src-tauri
 RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/registry \
     --mount=type=cache,id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target \
     cargo build --release --locked && \
-    cargo build --release --locked --bin kyth-hub-native && \
-    cp target/release/kyth-hub-shell /build/kyth-hub-shell && \
-    cp target/release/kyth-hub-native /build/kyth-hub-native
+    cp target/release/kyth-hub-shell /build/kyth-hub-shell
 
 # Base Image
 ARG BASE_IMAGE
@@ -242,9 +240,6 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/syscon
 # is what actually gates which channel launches it instead of the classic
 # kyth-welcome.
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-hub-shell /usr/bin/kyth-hub-shell
-# Native Slint Hub binary is shipped alongside the primary shell as a recovery
-# path; the launcher selects it only when explicitly requested or unavailable.
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-hub-native /usr/bin/kyth-hub-native
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \

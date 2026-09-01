@@ -1,4 +1,4 @@
-"""Static contract checks for the production Rust/Slint Hub surface."""
+"""Static contract checks for the production Rust/Tauri Hub surface."""
 
 from pathlib import Path
 import re
@@ -6,48 +6,33 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-NATIVE = ROOT / "src/kyth-hub-web/src-tauri/src/native_main.rs"
-SLINT = ROOT / "src/kyth-hub-web/src-tauri/ui/hub.slint"
+TAURI = ROOT / "src/kyth-hub-web/src-tauri"
+MAIN = (TAURI / "src/main.rs").read_text(encoding="utf-8")
+LIVE_DATA = (ROOT / "src/kyth-hub-web/src/services/liveData.ts").read_text(encoding="utf-8")
 
 
 class NativeHubContractTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.native = NATIVE.read_text(encoding="utf-8")
-        cls.slint = SLINT.read_text(encoding="utf-8")
+    def test_hub_has_one_tauri_binary_and_no_slint_sources(self):
+        cargo = (TAURI / "Cargo.toml").read_text(encoding="utf-8")
+        self.assertIn('name = "kyth-hub-shell"', cargo)
+        self.assertNotIn("slint", cargo.lower())
+        self.assertFalse((TAURI / "src/native_main.rs").exists())
+        self.assertFalse((TAURI / "ui/hub.slint").exists())
 
-    def test_every_slint_callback_has_a_rust_handler(self):
-        callbacks = re.findall(r"callback\s+([a-z-]+)\s*\(", self.slint)
-        for callback in callbacks:
-            rust_name = "on_" + callback.replace("-", "_")
-            self.assertRegex(self.native, rf"\.{rust_name}\s*\(", callback)
+    def test_every_frontend_invoke_is_registered(self):
+        handler = re.search(r"generate_handler!\[([\s\S]*?)\]", MAIN)
+        self.assertIsNotNone(handler)
+        commands = set(re.findall(r'invoke(?:<[^>]+>)?\("([^"]+)"', LIVE_DATA))
+        self.assertTrue(commands)
+        for command in commands:
+            self.assertRegex(handler.group(1), rf"\b{command}\b", command)
 
-    def test_every_page_action_is_in_the_native_source(self):
-        actions = sorted(set(re.findall(r'page-action\("([a-z0-9_-]+)"\)', self.slint)))
-        for action in actions:
-            self.assertIn(f'"{action}"', self.native, action)
-
-    def test_system_changing_actions_have_a_confirmation_boundary(self):
-        for action in (
-            "upgrade",
-            "rollback",
-            "apply-staged",
-            "firmware-update",
-            "install-ludusavi",
-            "setup-tailscale",
-            "switch-channel-stable",
-            "switch-kernel-cachy",
-        ):
-            self.assertIn(f'"{action}"', self.native)
-        self.assertIn("confirmation_granted", self.native)
-        self.assertIn("fixed_assignments", self.native)
-
-    def test_recipe_runner_publishes_structured_lifecycle_state(self):
-        for field in ("action-state", "action-id", "action-job-id"):
-            self.assertIn(field, self.slint)
-        for state in ("running", "complete", "failed"):
-            self.assertIn(f'"{state}"', self.native)
-        self.assertIn("NativeActionResult", self.native)
+    def test_recipe_lifecycle_is_registered_and_structured(self):
+        self.assertIn("commands::updates::just_run", MAIN)
+        self.assertIn("commands::updates::just_run_status", MAIN)
+        self.assertIn("struct InstallStatus", MAIN)
+        for state in ("running", "complete", "failed", "unknown"):
+            self.assertIn(f'"{state}"', MAIN)
 
 
 if __name__ == "__main__":
