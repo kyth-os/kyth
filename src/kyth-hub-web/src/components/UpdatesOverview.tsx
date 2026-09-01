@@ -6,9 +6,14 @@ import {
   fetchUpdateHealth,
   fetchUpdateStatus,
   fetchUpdaterAvailable,
+  fetchUpdateWatcherStatus,
+  setUpdateWatcherEnabled,
+  checkForUpdatesNow,
+  deferUpdateWatcher,
   invokeApplyStaged,
   invokeBootcRollback,
   invokeBootcUpgrade,
+  confirmUserAction,
   type BootcSnapshot,
   type UpdateHealthLive,
   type UpdateStatusLive,
@@ -21,19 +26,21 @@ type UpdateReadings = {
   pending: Record<string, string> | null;
   updater: boolean | null;
   health: UpdateHealthLive | null;
+  watcher: Awaited<ReturnType<typeof fetchUpdateWatcherStatus>>;
 };
 
-const emptyReadings: UpdateReadings = { snapshot: null, status: null, pending: null, updater: null, health: null };
+const emptyReadings: UpdateReadings = { snapshot: null, status: null, pending: null, updater: null, health: null, watcher: null };
 
 async function readUpdates(): Promise<UpdateReadings> {
-  const [snapshot, status, pending, updater, health] = await Promise.all([
+  const [snapshot, status, pending, updater, health, watcher] = await Promise.all([
     fetchBootcSnapshot(),
     fetchUpdateStatus(),
     fetchPendingUpdatesSummary(),
     fetchUpdaterAvailable(),
     fetchUpdateHealth(),
+    fetchUpdateWatcherStatus(),
   ]);
-  return { snapshot, status, pending, updater, health };
+  return { snapshot, status, pending, updater, health, watcher };
 }
 
 type CardTone = "ok" | "warn" | "muted";
@@ -82,11 +89,11 @@ export function UpdatesOverview() {
     return () => { cancelled = true; };
   }, []);
 
-  const { snapshot, status: updateStatus, pending, updater, health } = readings;
+  const { snapshot, status: updateStatus, pending, updater, health, watcher } = readings;
   const staged = updateStatus?.staged ?? false;
   const pendingCount = numericPending(pending);
   const updateReady = staged || updateStatus?.check_state === "available" || pendingCount > 0;
-  const blocked = Boolean(updateStatus?.blocked_reason) || health?.status === "unhealthy";
+  const blocked = updateStatus?.check_state === "error" || Boolean(updateStatus?.blocked_reason) || health?.status === "unhealthy";
   const healthNeedsAttention = health !== null && health.status !== "healthy";
   const hasReadings = snapshot !== null || updateStatus !== null || pending !== null || health !== null;
   const overallLabel = !loaded ? "Checking updates" : blocked || healthNeedsAttention ? "Needs attention" : staged ? "Restart to finish" : updateReady ? "Update ready" : hasReadings ? "System is current" : "Status unavailable";
@@ -102,7 +109,29 @@ export function UpdatesOverview() {
   async function check(): Promise<string> {
     const availability = await fetchCollectAvailability(null, false);
     if (!availability) return "Update checking is not available outside the Hub shell.";
-    await refresh();
+    const next = await readUpdates();
+    const status = next.status ?? {
+      booted: next.snapshot?.booted?.imageDigest ?? null,
+      staged: false,
+      rollback: Boolean(next.snapshot?.rollback),
+      remote_digest: null,
+      blocked_reason: null,
+      retry_cmd: null,
+      check_state: "idle",
+      detail: "",
+    };
+    setReadings({
+      ...next,
+      status: {
+        ...status,
+        staged: availability.staged,
+        check_state: availability.state,
+        blocked_reason: availability.blocked_reason || null,
+        detail: availability.detail,
+      },
+      pending: { ...(next.pending ?? {}), flatpak: String(availability.flatpak_count) },
+    });
+    setLoaded(true);
     return availability.detail;
   }
 
@@ -124,9 +153,27 @@ export function UpdatesOverview() {
     return detail;
   }
 
+  async function setWatcherEnabled(enabled: boolean): Promise<string> {
+    const detail = await setUpdateWatcherEnabled(enabled);
+    await refresh();
+    return detail;
+  }
+
+  async function checkWatcherNow(): Promise<string> {
+    const detail = await checkForUpdatesNow();
+    await refresh();
+    return detail;
+  }
+
+  async function deferWatcher(): Promise<string> {
+    const detail = await deferUpdateWatcher();
+    await refresh();
+    return detail;
+  }
+
   const channel = snapshot?.channel ?? "Not identified";
-  const version = snapshot?.booted?.version ?? "Not identified";
-  const availabilityValue = !loaded ? "Checking…" : staged ? "Staged" : updateReady ? "Ready" : updateStatus?.check_state || "Not checked";
+  const version = snapshot?.booted?.version ?? snapshot?.booted?.image ?? "Not identified";
+  const availabilityValue = !loaded ? "Checking…" : staged ? "Staged" : blocked ? "Check unavailable" : updateReady ? "Ready" : updateStatus?.check_state || "Not checked";
   const availabilityDetail = updateStatus?.blocked_reason || updateStatus?.detail || (pendingCount > 0 ? `${pendingCount} update item${pendingCount === 1 ? "" : "s"} reported.` : "Check now to query the update source.");
   const healthValue = health?.status ?? "Not checked";
   const healthDetail = health?.detail || "Boot health is checked after an image is deployed.";
@@ -166,6 +213,36 @@ export function UpdatesOverview() {
           <ActionButton label={busy === "refresh" ? "Refreshing…" : "Refresh status"} disabled={busy !== null} onClick={() => void run("refresh", "Refreshing update status…", refresh)} />
         </div>
       </div>
+      {watcher && (
+        <div className="updates-actions-card updates-watcher-card">
+          <div>
+            <span className="updates-eyebrow">Automatic updates</span>
+            <h2>{watcher.available ? watcher.enabled ? "Automatic updates are enabled" : "Automatic updates are paused" : "Automatic updates unavailable"}</h2>
+            <p>{watcher.available ? watcher.active ? "The update watcher timer is enabled and currently active." : "The watcher is installed but is not currently active." : "systemd could not be found on this system."}</p>
+          </div>
+          {watcher.available && (
+            <div className="updates-actions">
+              <ActionButton
+                label={busy === "watcher-check" ? "Checking…" : "Check now"}
+                disabled={busy !== null}
+                onClick={() => confirmUserAction("Run the update watcher now? It may stage a system update and ask for authentication.") && void run("watcher-check", "Running the update watcher…", checkWatcherNow)}
+              />
+              <ActionButton
+                label={busy === "watcher-toggle" ? "Updating…" : watcher.enabled ? "Disable automatic updates" : "Enable automatic updates"}
+                disabled={busy !== null}
+                onClick={() => confirmUserAction(`${watcher.enabled ? "Disable" : "Enable"} automatic updates?`) && void run("watcher-toggle", `${watcher.enabled ? "Disabling" : "Enabling"} automatic updates…`, () => setWatcherEnabled(!watcher.enabled))}
+              />
+              {watcher.enabled && (
+                <ActionButton
+                  label={busy === "watcher-defer" ? "Deferring…" : "Defer automatic updates"}
+                  disabled={busy !== null}
+                  onClick={() => confirmUserAction("Pause automatic updates until you enable them again?") && void run("watcher-defer", "Pausing automatic updates…", deferWatcher)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <ActionStatus status={status} />
     </section>
   );

@@ -566,6 +566,30 @@ pub fn is_pending_recipe(state: &Value, recipe_id: &str) -> bool {
     pending_recommendations(state).iter().any(|p| p.recipe_id == recipe_id)
 }
 
+/// Dismiss a current recommendation without running its repair. Record the
+/// dismissal as the newest per-recipe history item so the existing pending
+/// projection stops surfacing it across the Hub and notifications.
+pub fn dismiss_recommendation(recipe_id: &str) -> Result<String, String> {
+    let mut state = load_state();
+    if !is_pending_recipe(&state, recipe_id) {
+        return Err("recommendation is no longer pending".to_string());
+    }
+    let history = state
+        .get_mut("history")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| "Guardian history is unavailable".to_string())?;
+    history.push(serde_json::json!({
+        "timestamp": now_unix(),
+        "recipe_id": recipe_id,
+        "source": "hub",
+        "action": "dismissed",
+        "verified": null,
+        "detail": "Dismissed from the Home screen.",
+    }));
+    save_state(&state)?;
+    Ok(format!("Dismissed {}.", recipe_title(recipe_id)))
+}
+
 #[cfg(test)]
 mod pending_gate_tests {
     use super::{is_pending_recipe, now_unix};

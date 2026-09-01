@@ -8,6 +8,9 @@ import {
   fetchRecoveryStatus,
   fetchSnapshotCount,
   fetchSnapshotTimeline,
+  fetchInstallStatus,
+  installFlatpak,
+  openBackupApp,
   invokeBootcRollback,
   relativeTime,
   type BootcSnapshot,
@@ -44,6 +47,18 @@ export function RepairSection({ section }: { section: HubSection }) {
   const [memory, setMemory] = useState<{ status: string; detail: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
+
+  async function installBackup(): Promise<string> {
+    const job = await installFlatpak("org.gnome.World.PikaBackup");
+    for (let i = 0; i < 120; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      const state = await fetchInstallStatus(job);
+      if (!state || state.state === "running") continue;
+      if (state.state === "complete") return "Pika Backup installed.";
+      throw new Error(state.detail);
+    }
+    throw new Error("Pika Backup is still installing; check Apps for progress.");
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -178,6 +193,10 @@ export function RepairSection({ section }: { section: HubSection }) {
           />
           <RecipeButton recipe="update-health" label="Update health report" busy={busy} run={run} />
           <RecipeButton recipe="resume-check" label="Check suspend/resume" busy={busy} run={run} />
+          <RecipeButton recipe="device-info" label="Collect device info" busy={busy} run={run} />
+          <RecipeButton recipe="startup-apps" label="Review startup apps" busy={busy} run={run} />
+          <RecipeButton recipe="firmware-update" label="Check firmware updates" busy={busy} run={run} />
+          <RecipeButton recipe="windows-verify" label="Verify Windows migration" busy={busy} run={run} />
           <ActionButton
             label={busy === "recheck" ? "Re-reading…" : "Re-check"}
             disabled={busy !== null}
@@ -192,6 +211,23 @@ export function RepairSection({ section }: { section: HubSection }) {
               })
             }
           />
+        </div>
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
+          <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>File History backup</p>
+          <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Pika Backup keeps versioned copies of your home folder on a USB drive or network location. Kyth does not choose or delete backup data for you.</p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <ActionButton label={busy === "install-backup" ? "Installing…" : "Install Pika Backup"} disabled={busy !== null} onClick={() => run("install-backup", "Installing Pika Backup…", installBackup)} />
+            <ActionButton label={busy === "open-backup" ? "Opening…" : "Open Pika Backup"} disabled={busy !== null} onClick={() => run("open-backup", "Opening Pika Backup…", openBackupApp)} />
+          </div>
+        </div>
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
+          <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Quick fixes</p>
+          <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Run bounded, reversible maintenance actions without opening a terminal. Guardian remains the automatic path for symptom-based repair.</p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <RecipeButton recipe="health-check" label="Run system health check" busy={busy} run={run} />
+            <RecipeButton recipe="firmware-update" label="Refresh firmware metadata" busy={busy} run={run} />
+            <RecipeButton recipe="gaming-stack-status" label="Check gaming stack" busy={busy} run={run} />
+          </div>
         </div>
         <ActionStatus status={status} />
       </div>

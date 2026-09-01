@@ -7,12 +7,28 @@ pub(crate) struct ProbeResponse {
     pub(crate) error: Option<String>,
 }
 
-/// Read a disk-backed probe section. This remains read-only and does not
-/// trigger a fresh system probe.
+/// Read a disk-backed probe section. Boot status and branch have a bounded
+/// native fallback because the Updates page must remain useful when the
+/// optional probe service has not populated its cache yet.
 #[tauri::command]
-pub(crate) fn probe_backend(section: String) -> ProbeResponse {
-    let data = kyth_shared::system::probe::read_section(&section);
-    ProbeResponse { key: section, data, error: None }
+pub(crate) async fn probe_backend(section: String) -> ProbeResponse {
+    let key = section.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let data = match section.as_str() {
+            "bootc-status-data" => kyth_shared::system::probe::read_section(&section)
+                .or_else(kyth_shared::system::bootc_query::fetch_status_data),
+            "bootc-branch" => kyth_shared::system::probe::read_section(&section)
+                .or_else(|| kyth_shared::system::bootc::current_branch().map(serde_json::Value::String)),
+            _ => kyth_shared::system::probe::read_section(&section),
+        };
+        ProbeResponse { key: section, data, error: None }
+    })
+    .await
+    .unwrap_or_else(|_| ProbeResponse {
+        key,
+        data: None,
+        error: Some("Could not read probe data.".to_string()),
+    })
 }
 
 #[derive(Serialize)]

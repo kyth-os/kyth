@@ -6,6 +6,7 @@ import {
   fetchNetworkSummary,
   fetchNetworkSummaryLive,
   openCloudStorageApp,
+  runCloudSync,
   type CloudSyncRemote,
   type NetworkSummary,
 } from "../services/liveData";
@@ -70,11 +71,10 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
             <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
               <p className="card-copy" style={{ fontSize: 12, margin: 0 }}>Saved sync folders</p>
               {syncRemotes.map((remote) => (
-                <div key={remote.name} className="card-copy" style={{ fontSize: 12 }}>
-                  <strong>{remote.name}</strong> ({REMOTE_LABEL[remote.service] ?? remote.service}) → {remote.folder}
-                  {remote.last_sync !== null && (
-                    <> · {remote.last_ok === false ? "last sync failed" : "last sync completed"}</>
-                  )}
+                <div key={remote.name} className="card-copy" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12 }}>
+                  <span style={{ flex: 1, minWidth: 220 }}><strong>{remote.name}</strong> ({REMOTE_LABEL[remote.service] ?? remote.service}) → {remote.folder}
+                    {remote.last_sync !== null && (<> · {remote.last_ok === false ? "last sync failed" : "last sync completed"}</>)}</span>
+                  <ActionButton label={busy === `sync-${remote.name}` ? "Syncing…" : "Sync now"} disabled={busy !== null} onClick={() => run(`sync-${remote.name}`, `Syncing ${remote.name}…`, () => runCloudSync(remote.name))} />
                 </div>
               ))}
             </div>

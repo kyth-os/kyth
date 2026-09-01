@@ -1,12 +1,11 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, fetchTelemetryRecent, type AuditCache, type TelemetrySession } from "../services/liveData";
+import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, fetchGamingPerfStatus, fetchScxStatus, fetchTelemetryRecent, setScxScheduler, type AuditCache, type GamingPerfStatus, type ScxStatus, type TelemetrySession } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
 // "Play > Performance" — scheduler / memory tunables from audit-cache,
-// plus the two things you can actually change from here: the system
-// performance profile (via its ujust recipe) and the PipeWire quantum,
+// performance profiles, sched-ext/overlay state, and the PipeWire quantum,
 // which is the audio-latency knob that matters for gaming.
 export function PerformanceSection({ section }: { section: HubSection }) {
   const [audit, setAudit] = useState<AuditCache | null>(null);
@@ -14,14 +13,18 @@ export function PerformanceSection({ section }: { section: HubSection }) {
   const [sessions, setSessions] = useState<TelemetrySession[] | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pendingPreset, setPendingPreset] = useState<string | null>(null);
+  const [gamingTools, setGamingTools] = useState<GamingPerfStatus | null>(null);
+  const [scx, setScx] = useState<ScxStatus | null>(null);
   const { status, busy, run } = useSectionAction();
   useEffect(() => {
     let c = false;
-    Promise.all([fetchAuditCache(), fetchAudioPresets(), fetchTelemetryRecent(8)]).then(([a, p, recent]) => {
+    Promise.all([fetchAuditCache(), fetchAudioPresets(), fetchTelemetryRecent(8), fetchGamingPerfStatus(), fetchScxStatus()]).then(([a, p, recent, tools, scheduler]) => {
       if (!c) {
         setAudit(a);
         setAudioPresets(p);
         setSessions(recent);
+        setGamingTools(tools);
+        setScx(scheduler);
         setLoaded(true);
       }
     });
@@ -29,6 +32,11 @@ export function PerformanceSection({ section }: { section: HubSection }) {
       c = true;
     };
   }, []);
+  async function changeScheduler(scheduler: "rusty" | "stop"): Promise<string> {
+    const result = await setScxScheduler(scheduler);
+    setScx(await fetchScxStatus());
+    return result;
+  }
   return (
     <LiveSectionCard section={section} live={audit !== null || audioPresets !== null || sessions !== null}>
       {audit ? (
@@ -75,6 +83,28 @@ export function PerformanceSection({ section }: { section: HubSection }) {
           <RecipeButton recipe="gaming-mode" label="Performance (gaming profile)" busy={busy} run={run} />
           <RecipeButton recipe="balanced-mode" label="Balanced" busy={busy} run={run} />
           <RecipeButton recipe="system-audit" label="Run full audit" busy={busy} run={run} />
+        </div>
+
+        <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
+          <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Scheduler &amp; gaming stack</p>
+          <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>
+            Switch sched-ext for a gaming session, or stop it to return to the normal kernel scheduler. These controls mirror the old Performance page and show the current state before changing anything.
+          </p>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+            <span className={`pill ${scx?.active ? "pill-ok" : "pill-dim"}`}>sched-ext: {scx ? scx.active ? "active" : "inactive" : "unknown"}</span>
+            {scx && <span className="pill pill-dim">configured: {scx.configured}</span>}
+            {gamingTools && <>
+              <span className={`pill ${gamingTools.mangohud_installed ? "pill-ok" : "pill-dim"}`}>MangoHud {gamingTools.mangohud_installed ? "ready" : "missing"}</span>
+              <span className={`pill ${gamingTools.gamescope_installed ? "pill-ok" : "pill-dim"}`}>Gamescope {gamingTools.gamescope_installed ? "ready" : "missing"}</span>
+              <span className={`pill ${gamingTools.vkbasalt_installed ? "pill-ok" : "pill-dim"}`}>vkBasalt {gamingTools.vkbasalt_installed ? "ready" : "missing"}</span>
+            </>}
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+            <ActionButton label={busy === "scheduler-rusty" ? "Starting…" : "Use scx_rusty"} disabled={busy !== null} onClick={() => run("scheduler-rusty", "Starting scx_rusty…", () => changeScheduler("rusty"))} />
+            <ActionButton label={busy === "scheduler-stop" ? "Stopping…" : "Stop sched-ext"} disabled={busy !== null} onClick={() => run("scheduler-stop", "Stopping sched-ext…", () => changeScheduler("stop"))} />
+            <RecipeButton recipe="system-audit" label="Gaming audit" busy={busy} run={run} />
+            <RecipeButton recipe="gaming-stack-status" label="Stack status" busy={busy} run={run} />
+          </div>
         </div>
 
         {audioPresets && audioPresets.length > 0 && (

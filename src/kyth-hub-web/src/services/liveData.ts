@@ -23,6 +23,9 @@ export interface GuardianHistoryItem {
   title: string;
   detail: string;
   status: "ok" | "warn" | "error";
+  recipeId: string | null;
+  action: string;
+  verified: boolean | null;
 }
 
 export interface GuardianSnapshot {
@@ -34,6 +37,7 @@ export interface GuardianSnapshot {
 // Mirrors main.rs's GuardianSnapshotResponse shape exactly.
 interface GuardianBridgeHistoryItem {
   timestamp: number;
+  recipe_id: string | null;
   title: string;
   detail: string;
   action: string;
@@ -72,8 +76,11 @@ export async function fetchGuardianSnapshot(): Promise<GuardianSnapshot | null> 
       })),
       history: raw.history.map((item) => ({
         timestamp: item.timestamp,
+        recipeId: item.recipe_id,
         title: item.title,
         detail: item.detail,
+        action: item.action,
+        verified: item.verified,
         status: statusFor(item),
       })),
     };
@@ -256,8 +263,21 @@ export interface BootcSnapshot {
   rollback: BootcDeployment | null;
 }
 
+interface BootcStatusImage {
+  image?: string | { image?: string; reference?: string; imageDigest?: string; digest?: string };
+  reference?: string;
+  version?: string;
+  timestamp?: string;
+  imageDigest?: string;
+  digest?: string;
+}
+
 interface BootcStatusJsonEntry {
-  image?: { image?: { image?: string }; version?: string; timestamp?: string; imageDigest?: string };
+  image?: BootcStatusImage | string;
+  version?: string;
+  timestamp?: string;
+  imageDigest?: string;
+  digest?: string;
 }
 
 interface BootcStatusJson {
@@ -268,13 +288,25 @@ interface BootcStatusJson {
 }
 
 function deploymentFrom(entry: BootcStatusJsonEntry | undefined): BootcDeployment | null {
-  const img = entry?.image;
-  if (!img) return null;
+  const rawImage = entry?.image;
+  if (!rawImage) return null;
+  if (typeof rawImage === "string") {
+    return {
+      image: rawImage,
+      version: entry.version,
+      timestamp: entry.timestamp,
+      imageDigest: entry.imageDigest ?? entry.digest,
+    };
+  }
+  const nestedImage = typeof rawImage.image === "object" ? rawImage.image : null;
+  const imageRef = typeof rawImage.image === "string"
+    ? rawImage.image
+    : nestedImage?.image ?? nestedImage?.reference ?? rawImage.reference;
   return {
-    image: img.image?.image,
-    version: img.version,
-    timestamp: img.timestamp,
-    imageDigest: img.imageDigest,
+    image: imageRef,
+    version: entry.version ?? rawImage.version,
+    timestamp: entry.timestamp ?? rawImage.timestamp,
+    imageDigest: entry.imageDigest ?? rawImage.imageDigest ?? nestedImage?.imageDigest ?? rawImage.digest ?? nestedImage?.digest,
   };
 }
 
@@ -656,6 +688,25 @@ export async function fetchCloudSyncRemotes(): Promise<CloudSyncRemote[] | null>
   if (!inTauriShell()) return null;
   try { return await invoke<CloudSyncRemote[]>("cloud_sync_remotes"); } catch { return null; }
 }
+async function waitHubJob(job: string, limit = 7200): Promise<string> {
+  for (let i = 0; i < limit; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    const state = await invoke<InstallStatus>("job_status", { job }).catch(() => null);
+    if (!state || state.state === "running") continue;
+    if (state.state === "complete") return state.detail;
+    throw new Error(state.detail);
+  }
+  throw new Error("This action is still running; check back in a moment.");
+}
+export async function runCloudSync(remote: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Cloud sync is available from the installed Kyth Hub.");
+  if (!confirmUserAction(`Sync ${remote} to its saved local folder?`)) return "Cancelled.";
+  return await waitHubJob(await invoke<string>("cloud_sync_now", { remote }));
+}
+export async function openBackupApp(): Promise<string> {
+  if (!inTauriShell()) throw new Error("Backup is available from the installed Kyth Hub.");
+  return await invoke<string>("open_backup_app");
+}
 export async function openCloudStorageApp(): Promise<string> {
   if (!inTauriShell()) throw new Error("The full Cloud Storage workflow is available from the installed Kyth Hub.");
   return await invoke<string>("open_cloud_storage_app");
@@ -775,6 +826,27 @@ export interface UpdateHealthLive { status: string; pending_digest: string; last
 export async function fetchUpdateHealth(): Promise<UpdateHealthLive | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<UpdateHealthLive>("update_health"); } catch { return null; }
+}
+
+export interface UpdateWatcherStatus { available: boolean; enabled: boolean; active: boolean; }
+export async function fetchUpdateWatcherStatus(): Promise<UpdateWatcherStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<UpdateWatcherStatus>("update_watcher_status"); } catch { return null; }
+}
+export async function setUpdateWatcherEnabled(enabled: boolean): Promise<string> {
+  if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
+  const job = await invoke<string>("set_update_watcher_enabled", { enabled });
+  return await waitUpdateJob(job);
+}
+export async function checkForUpdatesNow(): Promise<string> {
+  if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
+  const job = await invoke<string>("check_for_updates_now");
+  return await waitUpdateJob(job);
+}
+export async function deferUpdateWatcher(): Promise<string> {
+  if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
+  const job = await invoke<string>("defer_update_watcher");
+  return await waitUpdateJob(job);
 }
 
 // Process helpers — live session + ansi + disk bytes
@@ -915,6 +987,10 @@ export async function invokeGuardianExecute(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction(`Run Guardian fix ${recipeId}? It may change system configuration.`)) return "Cancelled.";
   return await invoke<string>("guardian_execute_recipe", { recipeId });
+}
+export async function dismissGuardianRecommendation(recipeId: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("not in Tauri");
+  return await invoke<string>("guardian_dismiss", { recipeId });
 }
 
 // Plasma HDR/VRR presets — apply_plasma_preset is the mutating half of the
@@ -1137,4 +1213,33 @@ export async function fetchAntiCheatTable(): Promise<AntiCheatEntry[] | null> {
 export async function invokeOpenFeedbackIssue(title: string, body: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   return await invoke<string>("open_feedback_issue", { title, body });
+}
+
+// Work Setup parity: fixed Microsoft 365 web apps, PST discovery/import, and
+// a timed sleep-inhibited focus session. The catalog is intentionally fixed;
+// no arbitrary URL or command is accepted from the webview.
+export async function openM365App(name: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Microsoft 365 shortcuts are available from the installed Kyth Hub.");
+  return await invoke<string>("open_m365_app", { name });
+}
+export async function createM365Shortcuts(): Promise<string> {
+  if (!inTauriShell()) throw new Error("Microsoft 365 shortcuts are available from the installed Kyth Hub.");
+  return await invoke<string>("create_m365_shortcuts");
+}
+export async function fetchPstFiles(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("pst_files"); } catch { return null; }
+}
+export async function convertPst(path: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Outlook import is available from the installed Kyth Hub.");
+  const job = await invoke<string>("convert_pst", { path });
+  return await waitHubJob(job, 3600);
+}
+export async function startFocusSession(minutes: number): Promise<string> {
+  if (!inTauriShell()) throw new Error("Focus sessions are available from the installed Kyth Hub.");
+  return await invoke<string>("focus_start", { minutes });
+}
+export async function stopFocusSession(id: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Focus sessions are available from the installed Kyth Hub.");
+  return await invoke<string>("focus_stop", { id });
 }

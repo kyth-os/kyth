@@ -24,6 +24,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
 DASHBOARD = (HUB_WEB / "pages" / "Dashboard.tsx").read_text(encoding="utf-8")
+PLAY = (HUB_WEB / "pages" / "Play.tsx").read_text(encoding="utf-8")
 HERO_CARD = (HUB_WEB / "components" / "HeroCard.tsx").read_text(encoding="utf-8")
 GAUGE_CARD = (HUB_WEB / "components" / "GaugeCard.tsx").read_text(encoding="utf-8")
 PERF_CHART = (HUB_WEB / "components" / "PerformanceChart.tsx").read_text(encoding="utf-8")
@@ -137,6 +138,14 @@ class DashboardHonestyTests(unittest.TestCase):
             self.assertNotIn("Sample figures", code)
             self.assertNotIn("isn't wired", code)
 
+class PagePlacementTests(unittest.TestCase):
+    def test_gaming_activity_charts_live_under_play_not_home(self):
+        for chart in ("PerformanceChart", "SessionsChart"):
+            self.assertNotIn(chart, _code_only(DASHBOARD), f"{chart} must not be a Home card")
+            self.assertIn(chart, _code_only(PLAY), f"{chart} belongs in the Play section")
+        self.assertIn("Gaming activity", PLAY)
+        self.assertNotIn("Performance and Guardian history", DASHBOARD)
+
 
 class IdentityReadTests(unittest.TestCase):
     def test_identity_command_is_registered_in_the_shell(self):
@@ -171,7 +180,7 @@ class GuardianHistoryHonestyTests(unittest.TestCase):
         self.assertIn("events: GuardianEvent[]", GUARDIAN_CODE)
 
     def test_card_renders_an_empty_state(self):
-        self.assertIn("events.length === 0", GUARDIAN_CODE)
+        self.assertIn("visibleEvents.length === 0", GUARDIAN_CODE)
 
     def test_dashboard_passes_a_concrete_list(self):
         self.assertRegex(DASHBOARD_CODE, r"guardianEvents: GuardianEvent\[\]")

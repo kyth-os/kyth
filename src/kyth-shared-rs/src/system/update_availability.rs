@@ -15,6 +15,19 @@ pub struct AvailabilityStatus {
     pub blocked_reason: String,
 }
 
+fn error_status(detail: impl Into<String>) -> AvailabilityStatus {
+    let detail = detail.into();
+    AvailabilityStatus {
+        state: "error".to_string(),
+        blocked_reason: detail.clone(),
+        detail,
+        flatpak_count: 0,
+        flatpak_detail: String::new(),
+        staged: false,
+        manifest_raw: String::new(),
+    }
+}
+
 /// Project the availability state into the stable Updates-page view model.
 /// Collection remains separate so native callers can render a terminal state
 /// without taking ownership of network or package-manager orchestration.
@@ -51,28 +64,22 @@ pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> Availabil
     }
 
     if network_offline {
-        return AvailabilityStatus {
-            state: "error".to_string(),
-            detail: "Network is unavailable; cannot check for updates.".to_string(),
-            flatpak_count: 0,
-            flatpak_detail: String::new(),
-            staged: false,
-            manifest_raw: String::new(),
-            blocked_reason: "Network is unavailable; retry when connected.".to_string(),
-        };
+        return error_status("Network is unavailable; retry when connected.");
     }
 
     let b = branch.map(str::to_string).or_else(crate::system::bootc::current_branch).unwrap_or_else(|| "latest".to_string());
     let status_data = crate::system::probe::read_section("bootc-status-data")
         .or_else(|| crate::system::bootc_query::fetch_status_data());
     let Some(status_data) = status_data else {
-        return AvailabilityStatus { state: "error".to_string(), detail: "Could not read bootc status.".to_string(), flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::new(), blocked_reason: String::new() };
+        return error_status("Could not read bootc status.");
     };
 
     let remaining = deadline.saturating_duration_since(Instant::now());
     let registry = crate::system::registry::check_registry_update_with_timeout(&status_data, &b, crate::system::bootc_policy::REGISTRY, remaining);
     if registry.state == "error" {
-        return AvailabilityStatus { state: "error".to_string(), detail: registry.detail, flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() };
+        let mut status = error_status(registry.detail);
+        status.manifest_raw = String::from_utf8_lossy(&registry.manifest_raw).to_string();
+        return status;
     }
     let (flatpak_count, flatpak_detail) = flatpak_updates_count_until(use_cached, deadline);
     AvailabilityStatus { state: registry.state, detail: registry.detail, flatpak_count, flatpak_detail, staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() }
@@ -157,5 +164,12 @@ mod tests {
         assert!(view.update_btn_visible);
         assert!(!view.restart_btn_visible);
         assert!(view.body.contains("2 Flatpak updates"));
+    }
+
+    #[test]
+    fn every_availability_error_has_a_blocking_reason() {
+        let status = error_status("registry unavailable");
+        assert_eq!(status.state, "error");
+        assert_eq!(status.detail, status.blocked_reason);
     }
 }

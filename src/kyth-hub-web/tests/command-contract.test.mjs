@@ -8,7 +8,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 const service = await readFile(resolve(root, "src/services/liveData.ts"), "utf8");
 const dashboard = await readFile(resolve(root, "src/pages/Dashboard.tsx"), "utf8");
+const guardianHistory = await readFile(resolve(root, "src/components/GuardianHistoryCard.tsx"), "utf8");
 const updates = await readFile(resolve(root, "src/components/UpdatesSection.tsx"), "utf8");
+const updatesOverview = await readFile(resolve(root, "src/components/UpdatesOverview.tsx"), "utf8");
 const guardian = await readFile(resolve(root, "src/components/GuardianSection.tsx"), "utf8");
 const hardware = await readFile(resolve(root, "src/components/HardwareSection.tsx"), "utf8");
 const apps = await readFile(resolve(root, "src/components/AppStoreSection.tsx"), "utf8");
@@ -60,6 +62,10 @@ const rustCommands = [
   "apply_staged",
   "update_job_status",
   "update_health",
+  "update_watcher_status",
+  "set_update_watcher_enabled",
+  "check_for_updates_now",
+  "defer_update_watcher",
   "just_run",
   "just_run_status",
 ];
@@ -84,6 +90,22 @@ test("Updates actions use the native job bridge instead of just recipes", () => 
   }
   assert.match(updates, /invokeApplyStaged/);
   assert.doesNotMatch(updates, /RecipeButton recipe="(?:apply-staged|update-health)"/);
+});
+
+test("Updates overview reconciles a live check into the cards", () => {
+  assert.match(updatesOverview, /fetchCollectAvailability\(null, false\)/);
+  assert.match(updatesOverview, /check_state: availability\.state/);
+  assert.match(updatesOverview, /blocked_reason: availability\.blocked_reason \|\| null/);
+  assert.match(updatesOverview, /flatpak: String\(availability\.flatpak_count\)/);
+});
+
+test("Updates overview exposes the automatic watcher controls", () => {
+  for (const wrapper of ["fetchUpdateWatcherStatus", "setUpdateWatcherEnabled", "checkForUpdatesNow", "deferUpdateWatcher"]) {
+    assert.match(service, new RegExp(`export (?:async )?function ${wrapper}\\b`), wrapper);
+    assert.match(updatesOverview, new RegExp(`\\b${wrapper}\\b`), wrapper);
+  }
+  assert.match(updatesOverview, /Defer automatic updates/);
+  assert.match(updatesOverview, /Disable automatic updates|Enable automatic updates/);
 });
 
 test("ledger commands are registered in the Tauri handler", () => {
@@ -135,4 +157,12 @@ test("privileged and destructive frontend paths require confirmation", () => {
   assert.match(actions, /confirmUserAction\(`Run \$\{recipe\}\?/);
   assert.match(service, /recovery key will be sent only to the local privileged service/);
   assert.doesNotMatch(service, /confirmUserAction\([^\n]*key/);
+});
+
+test("Home Guardian activity exposes expandable current recommendations", () => {
+  assert.match(guardianHistory, /aria-expanded=\{isExpanded\}/);
+  assert.match(guardianHistory, /Confirm & run/);
+  assert.match(guardianHistory, /Dismiss/);
+  assert.match(dashboard, /dismissGuardianRecommendation/);
+  assert.match(dashboard, /invokeGuardianExecute/);
 });

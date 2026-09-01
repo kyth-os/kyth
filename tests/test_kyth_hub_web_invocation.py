@@ -340,6 +340,29 @@ class BridgeFieldTests(unittest.TestCase):
         self.assertIn("Saved sync folders", cloud)
         self.assertIn("Open full share controls", shares)
 
+    def test_parity_items_4_to_10_have_native_surface_and_bridge(self):
+        guardian = (HUB_WEB / "components" / "GuardianSection.tsx").read_text(encoding="utf-8")
+        performance = (HUB_WEB / "components" / "PerformanceSection.tsx").read_text(encoding="utf-8")
+        work = (HUB_WEB / "components" / "WorkSetupSection.tsx").read_text(encoding="utf-8")
+        repair = (HUB_WEB / "components" / "RepairSection.tsx").read_text(encoding="utf-8")
+        cloud = (HUB_WEB / "components" / "CloudStorageSection.tsx").read_text(encoding="utf-8")
+        dashboard = (HUB_WEB / "pages" / "Dashboard.tsx").read_text(encoding="utf-8")
+        history = (HUB_WEB / "components" / "GuardianHistoryCard.tsx").read_text(encoding="utf-8")
+        self.assertIn("Confirm & run", history)
+        self.assertIn("Dismiss", history)
+        self.assertIn("aria-expanded", history)
+        self.assertIn("dismissGuardianRecommendation", dashboard)
+        self.assertIn("aria-expanded", guardian)
+        self.assertIn("setScxScheduler", performance)
+        self.assertIn("gaming_perf_status", MAIN_RS)
+        for wrapper in ("openM365App", "createM365Shortcuts", "fetchPstFiles", "convertPst", "startFocusSession", "stopFocusSession"):
+            self.assertIn(wrapper, LIVE_DATA)
+        for command in ("open_m365_app", "create_m365_shortcuts", "pst_files", "convert_pst", "focus_start", "focus_stop"):
+            self.assertIn(command, MAIN_RS)
+        self.assertIn("Pika Backup", repair)
+        self.assertIn("runCloudSync", cloud)
+        self.assertIn("cloud_sync_now", MAIN_RS)
+
 
 class GuardianExecutionTests(unittest.TestCase):
     def test_guardian_execute_does_not_go_through_just(self):

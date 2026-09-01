@@ -361,6 +361,53 @@ a:focus-visible {
   background: linear-gradient(145deg, rgba(24, 35, 54, 0.98), rgba(14, 21, 34, 0.95));
 }
 
+.guardian-history-item {
+  border-bottom: 1px solid var(--hairline);
+}
+
+.guardian-history-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.guardian-history-row:hover {
+  background: rgba(255, 255, 255, .025);
+}
+
+.guardian-history-chevron {
+  width: 14px;
+  color: var(--text-faint);
+  font-size: 15px;
+  text-align: center;
+}
+
+.guardian-history-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 30px 12px 24px;
+}
+
+.guardian-history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.guardian-history-pending {
+  margin: 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
 .gauge-card,
 .chart-card {
   padding: 21px;
@@ -1367,11 +1414,11 @@ body {
 .play-card-value { overflow: hidden; color: var(--text); font-size: 15px; letter-spacing: -.2px; text-overflow: ellipsis; white-space: nowrap; }
 .play-card-detail { display: -webkit-box; overflow: hidden; color: var(--text-faint); font-size: 10px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .play-actions-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 17px; border: 1px solid var(--hairline); border-radius: 11px; background: rgba(255, 255, 255, .025); }
-.play-actions-card h2, .play-controls-heading h2 { margin: 3px 0 0; color: var(--text); font-size: 16px; letter-spacing: -.25px; }
-.play-actions-card p, .play-controls-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; }
+.play-actions-card h2, .play-controls-heading h2, .play-content-heading h2 { margin: 3px 0 0; color: var(--text); font-size: 16px; letter-spacing: -.25px; }
+.play-actions-card p, .play-controls-heading p, .play-content-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; }
 .play-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .play-actions .action-button { white-space: nowrap; }
-.play-controls-heading { padding: 3px 3px 0; }
+.play-controls-heading, .play-content-heading { padding: 3px 3px 0; }
 .play-guidance-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .play-guidance-grid > div, .play-profile-preview { display: flex; flex-direction: column; gap: 4px; padding: 11px 12px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-raised); }
 .play-guidance-grid strong, .play-profile-preview strong { color: var(--text); font-size: 12px; }
@@ -1543,4 +1590,41 @@ input {
   .stat-grid {
     grid-template-columns: 1fr;
   }
+}
+
+/* Guardian rows are interactive disclosure controls in both Home and This
+   PC. Keep the hit target full-width while allowing the action buttons in
+   the expanded panel to remain ordinary controls. */
+.guardian-section-row,
+.guardian-section-history-row {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+}
+.guardian-section-row {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 8px;
+  padding: 0;
+}
+.guardian-section-history-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  gap: 12px;
+  padding: 8px 4px;
+  cursor: pointer;
+}
+.guardian-section-row:hover,
+.guardian-section-history-row:hover {
+  color: var(--text);
+}
+.guardian-section-expanded {
+  flex-basis: 100%;
+  margin: 8px 0 0 20px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--hairline);
 }

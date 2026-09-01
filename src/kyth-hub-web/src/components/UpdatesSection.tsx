@@ -144,7 +144,7 @@ export function UpdatesSection({ section }: { section: HubSection }) {
           </div>
           <div>
             <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Booted version</p>
-            <p style={{ margin: "4px 0 0", fontSize: 15, fontWeight: 700 }}>{snapshot.booted.version ?? "Unknown"}</p>
+            <p style={{ margin: "4px 0 0", fontSize: 15, fontWeight: 700 }}>{snapshot.booted.version ?? snapshot.booted.image ?? "Unknown"}</p>
             <p className="card-copy" style={{ fontSize: 11.5, marginTop: 2 }}>
               {ago(snapshot.booted.timestamp) ?? "unknown age"} · {shortDigest(snapshot.booted.imageDigest) ?? "no digest"}
             </p>

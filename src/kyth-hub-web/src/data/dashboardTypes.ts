@@ -16,4 +16,7 @@ export interface GuardianEvent {
   detail: string;
   status: "ok" | "warn" | "error";
   when: string;
+  recipeId: string | null;
+  action: string;
+  verified: boolean | null;
 }

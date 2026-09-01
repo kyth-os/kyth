@@ -186,6 +186,63 @@ pub(crate) fn apply_staged() -> Result<String, String> {
     start_update_job("Apply staged update", vec!["sudo", "-A", "/usr/libexec/kyth-finalize-staged", "reboot"].into_iter().map(String::from).collect(), Duration::from_secs(300))
 }
 
+#[derive(Serialize)]
+pub(crate) struct UpdateWatcherStatusResponse {
+    pub(crate) available: bool,
+    pub(crate) enabled: bool,
+    pub(crate) active: bool,
+}
+
+fn systemd_unit_is(unit: &str, state: &str) -> bool {
+    let argv = vec!["systemctl".to_string(), state.to_string(), "--quiet".to_string(), unit.to_string()];
+    kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(5))
+        .map(|output| output.status.success())
+        .unwrap_or(false)
+}
+
+#[tauri::command]
+pub(crate) fn update_watcher_status() -> UpdateWatcherStatusResponse {
+    let available = std::path::Path::new("/usr/bin/systemctl").exists()
+        || std::path::Path::new("/bin/systemctl").exists();
+    UpdateWatcherStatusResponse {
+        available,
+        enabled: available && systemd_unit_is("kyth-update-watcher.timer", "is-enabled"),
+        active: available && systemd_unit_is("kyth-update-watcher.timer", "is-active"),
+    }
+}
+
+#[tauri::command]
+pub(crate) fn set_update_watcher_enabled(enabled: bool) -> Result<String, String> {
+    let action = if enabled { "enable" } else { "disable" };
+    let operation = if enabled { "Enable automatic updates" } else { "Disable automatic updates" };
+    start_update_job(
+        operation,
+        vec!["sudo", "-A", "systemctl", action, "--now", "kyth-update-watcher.timer"]
+            .into_iter().map(String::from).collect(),
+        Duration::from_secs(300),
+    )
+}
+
+#[tauri::command]
+pub(crate) fn check_for_updates_now() -> Result<String, String> {
+    start_update_job(
+        "Check for updates now",
+        vec!["sudo", "-A", "systemctl", "start", "kyth-update-watcher.service"]
+            .into_iter().map(String::from).collect(),
+        Duration::from_secs(300),
+    )
+}
+
+#[tauri::command]
+pub(crate) fn defer_update_watcher() -> Result<String, String> {
+    start_update_job(
+        "Defer automatic updates",
+        vec!["sudo", "-A", "systemctl", "stop", "kyth-update-watcher.timer"]
+            .into_iter().map(String::from).collect(),
+        Duration::from_secs(300),
+    )
+}
+
 #[tauri::command]
 pub(crate) fn update_job_status(job: String) -> crate::InstallStatus {
     let (state, detail) = update_jobs().lock().ok().and_then(|store| store.get(&job).cloned()).unwrap_or(("unknown".into(), "Update job not found.".into()));

@@ -18,7 +18,8 @@ use std::collections::HashMap;
 use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Child;
 use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,11 @@ fn app_installs() -> &'static Mutex<HashMap<String, (String, String)>> {
 static GUARDIAN_CHECKS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
 fn guardian_checks() -> &'static Mutex<HashMap<String, (String, String)>> {
     GUARDIAN_CHECKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+static FOCUS_SESSIONS: OnceLock<Mutex<HashMap<String, Child>>> = OnceLock::new();
+fn focus_sessions() -> &'static Mutex<HashMap<String, Child>> {
+    FOCUS_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn extract_page_arg<S: AsRef<str>>(argv: &[S]) -> Option<String> {
@@ -228,6 +234,11 @@ fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
         "{}: {detail}",
         kyth_shared::guardian::recipe_title(&recipe_id)
     ))
+}
+
+#[tauri::command]
+fn guardian_dismiss(recipe_id: String) -> Result<String, String> {
+    kyth_shared::guardian::dismiss_recommendation(&recipe_id)
 }
 
 #[derive(serde::Serialize)]
@@ -518,12 +529,160 @@ fn cloud_sync_remotes() -> Vec<CloudSyncRemote> {
 }
 
 #[tauri::command]
+fn cloud_sync_now(remote: String) -> Result<String, String> {
+    let config_path = cloud_sync_config_path()?;
+    let metadata = fs::symlink_metadata(&config_path).map_err(|_| "Cloud sync is not configured yet".to_string())?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > 128 * 1024 { return Err("Cloud sync configuration is unavailable".to_string()); }
+    let raw = fs::read_to_string(&config_path).map_err(|_| "Could not read cloud sync configuration".to_string())?;
+    let entries = serde_json::from_str::<HashMap<String, serde_json::Value>>(&raw).map_err(|_| "Cloud sync configuration is invalid".to_string())?;
+    let info = entries.get(&remote).ok_or_else(|| "That cloud remote is not configured".to_string())?;
+    let Some(configured) = valid_cloud_sync_remote(&remote, info) else { return Err("That cloud remote is invalid".to_string()); };
+    let job = commands::job::start_job("cloud-sync", &format!("Syncing {}…", configured.name))?;
+    let argv = vec!["rclone".to_string(), "sync".to_string(), format!("{}:", configured.name), configured.folder.clone(), "--progress".to_string(), "--stats-one-line".to_string(), "--stats=2s".to_string()];
+    commands::job::spawn_argv_job(job.clone(), argv, std::time::Duration::from_secs(3600), move |result| match result {
+        Ok(output) if output.status.success() => ("complete".to_string(), format!("{} synced to {}.", configured.name, configured.folder)),
+        Ok(output) => ("failed".to_string(), commands::job::failure_detail("Cloud sync", &output)),
+        Err(error) => ("failed".to_string(), format!("Could not start cloud sync: {error}")),
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+fn open_backup_app() -> Result<String, String> {
+    std::process::Command::new("flatpak")
+        .args(["run", "org.gnome.World.PikaBackup"])
+        .spawn()
+        .map_err(|error| format!("could not open Pika Backup: {error}"))?;
+    Ok("Opened Pika Backup.".to_string())
+}
+
+#[tauri::command]
 fn open_cloud_storage_app() -> Result<String, String> {
     std::process::Command::new("/usr/bin/kyth-welcome-launch")
         .args(["--page", "Cloud Storage"])
         .spawn()
         .map_err(|error| format!("could not open Cloud Storage: {error}"))?;
     Ok("Opened the full Cloud Storage workflow.".to_string())
+}
+
+fn m365_app(name: &str) -> Option<(&'static str, &'static str)> {
+    match name {
+        "Outlook" => Some(("https://outlook.office.com/mail/", "Email and calendar")),
+        "Word" => Some(("https://office.live.com/start/Word.aspx", "Documents")),
+        "Excel" => Some(("https://office.live.com/start/Excel.aspx", "Spreadsheets")),
+        "PowerPoint" => Some(("https://office.live.com/start/PowerPoint.aspx", "Presentations")),
+        "OneNote" => Some(("https://www.onenote.com/notebooks", "Notes")),
+        "Teams" => Some(("https://teams.microsoft.com/", "Chat and meetings")),
+        _ => None,
+    }
+}
+
+#[tauri::command]
+fn open_m365_app(name: String) -> Result<String, String> {
+    let (url, _) = m365_app(&name).ok_or_else(|| "unknown Microsoft 365 app".to_string())?;
+    std::process::Command::new("xdg-open")
+        .arg(url)
+        .spawn()
+        .map_err(|error| format!("could not open {name}: {error}"))?;
+    Ok(format!("Opened {name}."))
+}
+
+#[tauri::command]
+fn create_m365_shortcuts() -> Result<String, String> {
+    let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?;
+    let directory = PathBuf::from(home).join(".local/share/applications");
+    fs::create_dir_all(&directory).map_err(|error| format!("could not create application directory: {error}"))?;
+    let mut written = 0;
+    for name in ["Outlook", "Word", "Excel", "PowerPoint", "OneNote", "Teams"] {
+        let (url, comment) = m365_app(name).expect("fixed M365 catalog");
+        let path = directory.join(format!("kyth-m365-{}.desktop", name.to_lowercase()));
+        if let Ok(metadata) = fs::symlink_metadata(&path) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                continue;
+            }
+        }
+        let entry = format!("[Desktop Entry]\nType=Application\nName={name} (Microsoft 365)\nComment={comment}\nExec=/usr/bin/xdg-open {url}\nIcon=internet-web-browser\nCategories=Office;\n");
+        fs::write(&path, entry).map_err(|error| format!("could not write {name} shortcut: {error}"))?;
+        written += 1;
+    }
+    Ok(format!("Added {written} Microsoft 365 shortcut(s) to the application menu."))
+}
+
+fn add_pst_paths(root: &Path, depth: usize, paths: &mut Vec<String>) {
+    if depth > 5 || paths.len() >= 50 { return; }
+    let Ok(entries) = fs::read_dir(root) else { return; };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Ok(metadata) = fs::symlink_metadata(&path) else { continue; };
+        if metadata.file_type().is_symlink() { continue; }
+        if metadata.is_file() && path.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "pst" | "ost")) {
+            paths.push(path.to_string_lossy().into_owned());
+        } else if metadata.is_dir() { add_pst_paths(&path, depth + 1, paths); }
+    }
+}
+
+#[tauri::command]
+fn pst_files() -> Vec<String> {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else { return Vec::new(); };
+    let mut paths = Vec::new();
+    let mut roots = vec![home.join("Documents"), home.join("Downloads"), home.join(".local/share")];
+    if let Some(user) = std::env::var_os("USER") { roots.push(PathBuf::from("/run/media").join(user)); }
+    for root in roots
+        .into_iter().filter(|path| path.is_dir()) { add_pst_paths(&root, 0, &mut paths); }
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+fn allowed_pst_path(path: &str) -> Result<PathBuf, String> {
+    let candidate = PathBuf::from(path);
+    let canonical = candidate.canonicalize().map_err(|_| "Outlook archive was not found".to_string())?;
+    if !canonical.is_file() || !canonical.extension().and_then(|ext| ext.to_str()).is_some_and(|ext| matches!(ext.to_ascii_lowercase().as_str(), "pst" | "ost")) {
+        return Err("Only an existing .pst or .ost archive can be imported".to_string());
+    }
+    let home = PathBuf::from(std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?);
+    let mut allowed = vec![home.join("Documents"), home.join("Downloads"), home.join(".local/share")];
+    if let Some(user) = std::env::var_os("USER") { allowed.push(PathBuf::from("/run/media").join(user)); }
+    if allowed.iter().any(|root| canonical.starts_with(root)) { Ok(canonical) } else { Err("Archive must be in a user-owned migration folder".to_string()) }
+}
+
+#[tauri::command]
+fn convert_pst(path: String) -> Result<String, String> {
+    let source = allowed_pst_path(&path)?;
+    if !Path::new("/usr/bin/readpst").exists() && !Path::new("/bin/readpst").exists() {
+        return Err("readpst is not installed — install it before importing Outlook archives.".to_string());
+    }
+    let home = PathBuf::from(std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?);
+    let destination = home.join("Documents/Outlook Import");
+    fs::create_dir_all(&destination).map_err(|error| format!("could not create import folder: {error}"))?;
+    let job = commands::job::start_job("pst", "Converting Outlook archive…")?;
+    let argv = vec!["readpst".to_string(), "-r".to_string(), "-o".to_string(), destination.to_string_lossy().into_owned(), source.to_string_lossy().into_owned()];
+    commands::job::spawn_argv_job(job.clone(), argv, std::time::Duration::from_secs(1800), |result| match result {
+        Ok(output) if output.status.success() => ("complete".to_string(), "Outlook archive converted to Documents/Outlook Import.".to_string()),
+        Ok(output) => ("failed".to_string(), commands::job::failure_detail("Outlook import", &output)),
+        Err(error) => ("failed".to_string(), format!("Could not start Outlook import: {error}")),
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+fn focus_start(minutes: u32) -> Result<String, String> {
+    if !(1..=240).contains(&minutes) { return Err("Focus session must be between 1 and 240 minutes".to_string()); }
+    let child = std::process::Command::new("systemd-inhibit")
+        .args(["--what=idle:sleep", "--why=KythOS Focus Session", "--mode=block", "sleep", &(minutes * 60 + 60).to_string()])
+        .spawn().map_err(|error| format!("could not keep the PC awake: {error}"))?;
+    let id = format!("focus-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    focus_sessions().lock().map_err(|_| "focus session store is unavailable".to_string())?.insert(id.clone(), child);
+    Ok(id)
+}
+
+#[tauri::command]
+fn focus_stop(id: String) -> Result<String, String> {
+    let mut sessions = focus_sessions().lock().map_err(|_| "focus session store is unavailable".to_string())?;
+    let Some(mut child) = sessions.remove(&id) else { return Ok("Focus session already ended.".to_string()); };
+    let _ = child.kill();
+    let _ = child.wait();
+    Ok("Focus session ended; normal power behavior is restored.".to_string())
 }
 
 #[tauri::command]
@@ -1097,6 +1256,7 @@ fn main() {
             commands::updates::bootc_rollback,
             commands::updates::bootc_switch_branch,
             guardian_execute_recipe,
+            guardian_dismiss,
             commands::updates::branch_display_name,
             commands::updates::update_availability_view,
             mok_status,
@@ -1114,7 +1274,9 @@ fn main() {
             is_gaming_slice_available,
             cloud_oauth_status,
             cloud_sync_remotes,
+            cloud_sync_now,
             open_cloud_storage_app,
+            open_backup_app,
             open_move_files_app,
             open_network_shares_app,
             ipp_discover,
@@ -1174,6 +1336,17 @@ fn main() {
             commands::updates::apply_staged,
             commands::updates::update_job_status,
             commands::updates::update_health,
+            commands::updates::update_watcher_status,
+            commands::updates::set_update_watcher_enabled,
+            commands::updates::check_for_updates_now,
+            commands::updates::defer_update_watcher,
+            commands::job::job_status,
+            open_m365_app,
+            create_m365_shortcuts,
+            pst_files,
+            convert_pst,
+            focus_start,
+            focus_stop,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

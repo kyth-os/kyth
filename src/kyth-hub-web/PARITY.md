@@ -79,6 +79,38 @@ Python `src/kyth_shared/kyth_shared` `251` files / `≈1567` defs vs Rust `src/k
 ### 6. Launchers & single-instance — TAURI/REACT
 Python: `app.py:QLocalSocket/QLocalServer` + `--page <key>` + `instance_ipc.py`, `krunner_desktop.py`, `kyth-welcome.desktop`. Rust/Tauri: the primary shell accepts `--page <key>`, forwards later launches through the single-instance plugin, and preserves the same destination contract. `src/kyth-welcome/kyth-welcome-launch` starts `/usr/bin/kyth-hub-shell`; older images fall through to `/usr/bin/kyth-welcome`. `Dockerfile` ships the Tauri binary, and `23-kyth-helper-ctx-installs.sh` installs the unchanged desktop entries.
 
+### 7. Work Setup actions — LIVE
+`WorkSetupSection.tsx` now covers the old page's day-one workflow: LibreOffice
+and Betterbird installs use the existing user-scoped Flatpak job bridge;
+Microsoft 365's six fixed web apps can be opened or added to the application
+menu; PST/OST files are discovered only in user migration folders and are
+converted through a bounded `readpst` job; and Focus Sessions hold off sleep
+for the selected timer with an explicit end action. No arbitrary URL, file,
+or command is accepted from the webview.
+
+### 8. Repair actions — LIVE
+Repair now includes the old quick-fix and File History entry points alongside
+the deployment/snapshot view: device and startup diagnostics, firmware and
+Windows migration checks, recovery checks, and Pika Backup installation/open.
+The Hub reports captured job results inline; it does not silently claim that a
+repair succeeded when the helper failed.
+
+### 9. Cloud Storage sync — LIVE
+Configured rclone remotes retain their provider/folder/last-result summary and
+now expose `Sync now` per saved folder. The command validates the remote
+against the user-owned Kyth configuration, runs the same remote-to-local
+`rclone sync` direction as the Python workflow, and returns captured output to
+the Hub. OAuth setup and schedules remain in the existing full workflow.
+
+### 10. Freshness and acceptance coverage — IN PROGRESS
+Home Guardian activity is limited to the last 24 hours, refreshes on a short
+heartbeat, and always includes pending recommendations so an old alert cannot
+remain an unexplained "confirmation required" row. Both Home and This PC use
+expandable activity rows with confirm/run and dismiss paths. Contract/build/
+smoke tests cover the native bridge; final installed-image acceptance still
+needs a real KythOS image with WebKitGTK, services, and representative
+network/update state.
+
 ## Remaining work
 
 The four React feature-completeness items remain implemented in the compatibility

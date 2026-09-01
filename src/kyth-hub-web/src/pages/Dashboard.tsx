@@ -1,7 +1,5 @@
 import { useEffect, useState } from "react";
 import type { GuardianEvent } from "../data/dashboardTypes";
-import { PerformanceChart } from "../components/PerformanceChart";
-import { SessionsChart } from "../components/SessionsChart";
 import { GuardianHistoryCard } from "../components/GuardianHistoryCard";
 import { ActionButton } from "../components/SectionActions";
 import { useNavigate } from "react-router-dom";
@@ -9,6 +7,8 @@ import {
   fetchBootRuntimeChecks,
   fetchGpuName,
   fetchGuardianSnapshot,
+  dismissGuardianRecommendation,
+  invokeGuardianExecute,
   fetchRecoveryStatus,
   fetchStorageFree,
   fetchUpdateChannel,
@@ -38,6 +38,7 @@ export function Dashboard() {
   const [userName, setUserName] = useState<string | null>(null);
   const [bootChecks, setBootChecks] = useState<BootRuntimeCheck[] | null>(null);
   const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
+  const [, setClock] = useState(() => Date.now());
 
   useEffect(() => {
     let cancelled = false;
@@ -51,8 +52,15 @@ export function Dashboard() {
     fetchUserName().then(set(setUserName));
     fetchBootRuntimeChecks().then(set(setBootChecks));
     fetchRecoveryStatus().then(set(setRecovery));
+    const refresh = window.setInterval(() => {
+      fetchGuardianSnapshot().then(set(setGuardian));
+      setClock(Date.now());
+    }, 60_000);
+    const clock = window.setInterval(() => setClock(Date.now()), 30_000);
     return () => {
       cancelled = true;
+      window.clearInterval(refresh);
+      window.clearInterval(clock);
     };
   }, []);
 
@@ -60,13 +68,30 @@ export function Dashboard() {
   // ratio rather than a health "score" with no defined derivation.
   const passedChecks = bootChecks?.filter((check) => check.passed).length ?? 0;
   const totalChecks = bootChecks?.length ?? 0;
+  const recentGuardianHistory = guardian?.history.filter((item) => Date.now() / 1000 - item.timestamp <= 24 * 60 * 60) ?? [];
+  const historyRecipeIds = new Set(recentGuardianHistory.map((item) => item.recipeId).filter(Boolean));
   const guardianEvents: GuardianEvent[] =
-    guardian?.history.map((item) => ({
+    recentGuardianHistory.map((item) => ({
       title: item.title,
       detail: item.detail || "No further detail recorded.",
       status: item.status,
       when: relativeTime(item.timestamp),
-    })) ?? [];
+      recipeId: item.recipeId,
+      action: item.action,
+      verified: item.verified,
+    })).concat(
+      (guardian?.pending ?? [])
+        .filter((item) => !historyRecipeIds.has(item.recipeId))
+        .map((item) => ({
+          title: item.title,
+          detail: item.detail || "Guardian has a recommendation ready for review.",
+          status: "warn" as const,
+          when: "Needs attention",
+          recipeId: item.recipeId,
+          action: "recommended",
+          verified: null,
+        })),
+    );
 
   const hasReadings = guardian !== null || bootChecks !== null || recovery !== null || updateChannel !== null || gpuName !== null || storageFree !== null;
   const healthGood = bootChecks === null ? null : totalChecks > 0 && passedChecks === totalChecks;
@@ -83,7 +108,7 @@ export function Dashboard() {
   return (
     <div className="home-page">
       <section className="home-overview" aria-label="Home overview">
-        <div className={`home-hero ${hasReadings ? "home-hero-live" : "home-hero-muted"}`}><div><span className="home-eyebrow">KythOS command center</span><h1>Welcome back{userName ? `, ${userName}` : ""}</h1><p>Health, updates, apps, and everyday controls in one place.</p></div><div className="home-ready-chip"><span />{guardianGood === false || healthGood === false ? "Needs attention" : hasReadings ? "System at a glance" : "Checking system"}</div></div>
+        <div className={`home-hero ${hasReadings ? "home-hero-live" : "home-hero-muted"}`}><div><span className="home-eyebrow">KythOS command center</span><h1>Welcome back{userName ? `, ${userName}` : ""}</h1><p>Health, recovery, updates, and device status in one place.</p></div><div className="home-ready-chip"><span />{guardianGood === false || healthGood === false ? "Needs attention" : hasReadings ? "System at a glance" : "Checking system"}</div></div>
         <div className="home-card-grid">
           <HomeCard icon="✓" label="Guardian" value={guardianLabel} detail={guardianDetail} good={guardianGood} pendingLabel="PENDING" />
           <HomeCard icon="⌁" label="Boot health" value={healthLabel} detail={healthDetail} good={healthGood} pendingLabel="PENDING" pendingNote={bootChecks ? "Boot checks were reported." : "Boot checks are still pending."} />
@@ -91,11 +116,26 @@ export function Dashboard() {
           <HomeCard icon="◈" label="Update channel" value={updateChannel ?? "Checking…"} detail="The release stream this device follows." good={updateChannel === null ? null : true} pendingLabel="PENDING" />
           <HomeCard icon="▣" label="Storage & graphics" value={storageFree ?? "Checking…"} detail={`${gpuName ?? "Graphics not identified"} · hardware summary`} good={storageFree === null && gpuName === null ? null : true} />
         </div>
-        <div className="home-actions-card"><div><span className="home-eyebrow">Quick actions</span><h2>What do you want to do?</h2><p>Jump directly to the part of Kyth Hub you need.</p></div><div className="home-actions"><ActionButton label="Run health check" onClick={() => navigate("/this-pc?section=Guardian")} /><ActionButton label="Check updates" onClick={() => navigate("/updates")} /><ActionButton label="Find apps" onClick={() => navigate("/apps")} /><ActionButton label="Start playing" onClick={() => navigate("/play")} /></div></div>
+        <div className="home-actions-card"><div><span className="home-eyebrow">System actions</span><h2>Keep this device healthy</h2><p>Open the system tools you need without leaving the Home overview.</p></div><div className="home-actions"><ActionButton label="Run health check" onClick={() => navigate("/this-pc?section=Guardian")} /><ActionButton label="Check updates" onClick={() => navigate("/updates")} /><ActionButton label="Open Repair" onClick={() => navigate("/this-pc?section=Repair")} /><ActionButton label="Open Hardware" onClick={() => navigate("/this-pc?section=Hardware")} /></div></div>
       </section>
-      <div className="home-content-heading"><span className="home-eyebrow">Activity</span><h2>Your recent system activity</h2><p>Performance and Guardian history stay visible without opening another workspace.</p></div>
-      <div className="chart-grid"><PerformanceChart /><SessionsChart /></div>
-      <GuardianHistoryCard events={guardianEvents} live={guardian !== null} />
+      <div className="home-content-heading"><span className="home-eyebrow">Activity</span><h2>Your recent system activity</h2><p>Guardian history stays visible without opening another workspace.</p></div>
+      <GuardianHistoryCard
+        events={guardianEvents}
+        pending={guardian?.pending}
+        live={guardian !== null}
+        onConfirm={async (recipeId) => {
+          const result = await invokeGuardianExecute(recipeId);
+          const next = await fetchGuardianSnapshot();
+          if (next) setGuardian(next);
+          return result;
+        }}
+        onDismiss={async (recipeId) => {
+          const result = await dismissGuardianRecommendation(recipeId);
+          const next = await fetchGuardianSnapshot();
+          if (next) setGuardian(next);
+          return result;
+        }}
+      />
     </div>
   );
 }

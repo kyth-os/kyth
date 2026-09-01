@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
   fetchGuardianSnapshot,
+  dismissGuardianRecommendation,
   invokeGuardianExecute,
   runGuardianCheck,
   waitGuardianCheck,
@@ -37,6 +38,7 @@ const statusDot: Record<string, string> = {
 export function GuardianSection({ section }: { section: HubSection }) {
   const [snapshot, setSnapshot] = useState<GuardianSnapshot | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
   const { status, busy, run } = useSectionAction();
 
   useEffect(() => {
@@ -67,6 +69,13 @@ export function GuardianSection({ section }: { section: HubSection }) {
     return result;
   }
 
+  async function dismiss(recipeId: string): Promise<string> {
+    const result = await dismissGuardianRecommendation(recipeId);
+    const next = await fetchGuardianSnapshot();
+    if (next) setSnapshot(next);
+    return result;
+  }
+
   return (
     <LiveSectionCard section={section} live={snapshot !== null}>
       {snapshot ? (
@@ -86,28 +95,30 @@ export function GuardianSection({ section }: { section: HubSection }) {
                       display: "flex",
                       alignItems: "center",
                       gap: 12,
+                      flexWrap: "wrap",
                       padding: "10px 4px",
                       borderBottom: "1px solid var(--hairline)",
                     }}
                   >
-                    <div style={{ flex: 1 }}>
-                      <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>{item.title}</p>
-                      {item.detail && (
-                        <p className="card-copy" style={{ margin: "2px 0 0", fontSize: 11.5 }}>{item.detail}</p>
-                      )}
-                    </div>
+                    <button type="button" className="guardian-section-row" aria-expanded={expanded === item.recipeId} onClick={() => setExpanded(expanded === item.recipeId ? null : item.recipeId)}>
+                      <span style={{ flex: 1, textAlign: "left" }}>
+                        <span style={{ display: "block", fontSize: 13, fontWeight: 600 }}>{item.title}</span>
+                        {expanded !== item.recipeId && item.detail && <span className="card-copy" style={{ display: "block", marginTop: 2, fontSize: 11.5 }}>{item.detail}</span>}
+                      </span>
+                      <span className="guardian-history-chevron" aria-hidden="true">{expanded === item.recipeId ? "⌃" : "⌄"}</span>
+                    </button>
                     <span className={`pill ${riskTone[item.risk] ?? "pill-dim"}`} style={{ flexShrink: 0 }}>
                       {item.risk}
                     </span>
-                    {RUNNABLE_RISK.has(item.risk) && (
-                      <ActionButton
-                        label={busy === item.recipeId ? "Running…" : "Run fix"}
-                        disabled={busy !== null}
-                        onClick={() =>
-                          run(item.recipeId, `Running ${item.title}…`, () => invokeGuardianExecute(item.recipeId))
-                        }
-                      />
-                    )}
+                    {expanded === item.recipeId && <div className="guardian-section-expanded">
+                      <p className="card-copy" style={{ margin: 0, fontSize: 11.5 }}>{item.detail || "Guardian has no additional detail."}</p>
+                      <div className="guardian-history-actions">
+                        {RUNNABLE_RISK.has(item.risk) && (
+                          <ActionButton label={busy === item.recipeId ? "Running…" : "Confirm & run"} disabled={busy !== null} onClick={() => run(item.recipeId, `Running ${item.title}…`, () => invokeGuardianExecute(item.recipeId))} />
+                        )}
+                        <ActionButton label={busy === `dismiss-${item.recipeId}` ? "Dismissing…" : "Dismiss"} disabled={busy !== null} onClick={() => run(`dismiss-${item.recipeId}`, `Dismissing ${item.title}…`, () => dismiss(item.recipeId))} />
+                      </div>
+                    </div>}
                   </div>
                 ))}
               </div>
@@ -122,12 +133,17 @@ export function GuardianSection({ section }: { section: HubSection }) {
               </p>
               <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 2 }}>
                 {snapshot.history.slice(0, 5).map((event, i) => (
-                  <div
+                  <button
+                    type="button"
                     key={`${event.title}-${i}`}
+                    className="guardian-section-history-row"
+                    aria-expanded={expanded === `history-${i}`}
+                    onClick={() => setExpanded(expanded === `history-${i}` ? null : `history-${i}`)}
                     style={{
                       display: "flex",
                       alignItems: "center",
                       gap: 12,
+                      flexWrap: "wrap",
                       padding: "8px 4px",
                       borderBottom: "1px solid var(--hairline)",
                     }}
@@ -141,11 +157,13 @@ export function GuardianSection({ section }: { section: HubSection }) {
                         flexShrink: 0,
                       }}
                     />
-                    <p style={{ margin: 0, fontSize: 12.5, flex: 1 }}>{event.title}</p>
+                    <span style={{ margin: 0, fontSize: 12.5, flex: 1, textAlign: "left" }}>{event.title}</span>
+                    {expanded === `history-${i}` && <span className="card-copy" style={{ flexBasis: "100%", fontSize: 11.5, textAlign: "left", marginLeft: 19 }}>{event.detail || "No further detail recorded."}</span>}
                     <span className="card-copy" style={{ fontSize: 11, flexShrink: 0 }}>
                       {relativeTime(event.timestamp)}
                     </span>
-                  </div>
+                    <span className="guardian-history-chevron" aria-hidden="true">{expanded === `history-${i}` ? "⌃" : "⌄"}</span>
+                  </button>
                 ))}
               </div>
             </div>

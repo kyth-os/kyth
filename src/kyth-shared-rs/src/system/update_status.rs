@@ -108,9 +108,11 @@ fn project_cached_status(data: Option<&serde_json::Value>, watcher: Option<&Upda
 }
 
 pub fn check_update_status() -> UpdateStatus {
-    // This command is used by the page on mount and refresh. Keep it a
-    // cache-only read; the explicit check action owns the live registry call.
-    let data = crate::system::probe::read_section("bootc-status-data");
+    // The probe cache is an optimization, not the source of truth. The Hub
+    // can be opened before kyth-probe has produced its first snapshot, so use
+    // the same bounded bootc query fallback as availability and health.
+    let data = crate::system::probe::read_section("bootc-status-data")
+        .or_else(crate::system::bootc_query::fetch_status_data);
     let watcher = read_update_snapshot(600);
     project_cached_status(data.as_ref(), watcher.as_ref())
 }

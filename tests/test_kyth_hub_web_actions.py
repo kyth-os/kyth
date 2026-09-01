@@ -121,6 +121,14 @@ class HubWebActionTests(unittest.TestCase):
         self.assertIn("recipeId: string;", LIVE_DATA)
         self.assertIn("recipeId: item.recipe_id", LIVE_DATA)
 
+    def test_home_guardian_history_has_confirm_and_dismiss_paths(self):
+        history = (HUB_WEB / "components" / "GuardianHistoryCard.tsx").read_text(encoding="utf-8")
+        dashboard = (HUB_WEB / "pages" / "Dashboard.tsx").read_text(encoding="utf-8")
+        self.assertIn("aria-expanded={isExpanded}", history)
+        self.assertIn("Confirm & run", history)
+        self.assertIn("Dismiss", history)
+        self.assertIn("dismissGuardianRecommendation", dashboard)
+
 
 class HubWebCoverageTests(unittest.TestCase):
     """Every backend read has to reach a section, and every section a page.
