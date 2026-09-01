@@ -9,11 +9,15 @@
 # kyth-shared crate's real unit tests (it's a plain library — no
 # GPU/display needed to test it, unlike the shell binary), then links the
 # Tauri shell and inspects the binary it produced. CI has no GPU/display to
-# actually launch the app against (see web_shell.py's prior art doc comments
-# for how the GUI side gets exercised instead, via the offscreen PySide6
-# smoke test — this shell doesn't have an offscreen equivalent yet), but the
-# one launch-blocking property that *is* checkable without a display is
-# whether the frontend got embedded at all — see the assertion at the bottom.
+# actually launch the real `kyth-hub-shell` binary against (that would need
+# Xvfb plus a full WebKitGTK runtime — a separate, larger follow-up, not
+# attempted here); what *is* checkable without a display is (1) whether the
+# frontend got embedded at all — see the assertion at the bottom — and (2)
+# whether every Hub section component constructs without throwing, which
+# `npm run test:smoke` below now covers by server-rendering each one
+# (`tests/hub-shell-smoke.test.mjs`, via `react-dom/server`) — the React
+# analog of `.githooks/pre-push`'s offscreen PySide6 `MainWindow` smoke test
+# for the old Qt Hub.
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -28,6 +32,9 @@ echo "== kyth-hub-web: frontend build =="
 
 echo "== kyth-hub-web: frontend/Rust contract tests =="
 (cd "$hub_web" && npm run test:contracts)
+
+echo "== kyth-hub-web: headless section construction smoke =="
+(cd "$hub_web" && npm run test:smoke)
 
 echo "== kyth-shared-rs: cargo test =="
 (cd "$kyth_shared_rs" && cargo test --locked)

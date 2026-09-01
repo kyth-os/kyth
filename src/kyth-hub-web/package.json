@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "test:contracts": "node --test tests/command-contract.test.mjs",
+    "test:smoke": "node --test tests/hub-shell-smoke.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 tauri dev",

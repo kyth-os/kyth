@@ -64,4 +64,7 @@ build_files/scripts/check-hub-web-shell.sh
 ```
 
 It runs the clean frontend install, production build, frontend/Rust contract
-tests, shared Rust tests, Tauri build, and embedded-asset assertion.
+tests, a headless SSR construction smoke test of every Hub section component
+(`tests/hub-shell-smoke.test.mjs` — the React analog of the old Qt Hub's
+offscreen PySide6 `MainWindow` smoke test), shared Rust tests, Tauri build,
+and embedded-asset assertion.
