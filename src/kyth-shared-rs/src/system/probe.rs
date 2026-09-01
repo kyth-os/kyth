@@ -72,6 +72,22 @@ fn load_cache_file(path: &Path) -> Option<Value> {
     Some(data)
 }
 
+/// Atomically persist a validated probe-cache document.  This is the native
+/// writer counterpart to Python's `write_cache_file`: callers still own
+/// collection and locking policy, while a partial write can never replace a
+/// usable cache.
+pub fn write_cache_file(path: &Path, document: &Value) -> Result<(), String> {
+    if !document.is_object() || document.get("sections").and_then(Value::as_object).is_none() {
+        return Err("probe cache document must contain an object sections field".into());
+    }
+    let parent = path.parent().ok_or_else(|| "probe cache path has no parent".to_string())?;
+    std::fs::create_dir_all(parent).map_err(|e| format!("could not create probe cache directory: {e}"))?;
+    let encoded = serde_json::to_vec(document).map_err(|e| format!("could not encode probe cache: {e}"))?;
+    let temporary = parent.join(format!(".probe-cache-{}", std::process::id()));
+    std::fs::write(&temporary, encoded).map_err(|e| format!("could not write probe cache: {e}"))?;
+    std::fs::rename(&temporary, path).map_err(|e| { let _ = std::fs::remove_file(&temporary); format!("could not replace probe cache: {e}") })
+}
+
 fn now_unix() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
@@ -228,5 +244,14 @@ mod tests {
         assert!(updated["sections"].get("audit-cache").is_none());
         assert!(updated["sections"].get("custom").is_some());
         assert_eq!(updated["metadata"], "keep");
+    }
+
+    #[test]
+    fn writes_a_cache_document_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe-cache.json");
+        let document = json!({"sections":{"bootc-branch":{"ts":1,"data":"testing"}}});
+        write_cache_file(&path, &document).unwrap();
+        assert_eq!(load_cache_file(&path), Some(document));
     }
 }
