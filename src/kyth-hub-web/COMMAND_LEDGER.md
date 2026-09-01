@@ -54,6 +54,32 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
 4. The mutating wrappers return plain strings rather than a structured action
    result, so confirmation and failure semantics remain a follow-up item.
 
+## Full interactive surface
+
+The table below is the release inventory for every remaining non-navigation
+Tauri handler.  It is deliberately grouped by policy rather than duplicating
+implementation details: additions must be recorded here and in the
+frontend/Rust invocation tests.
+
+| Area | Commands | Class | Boundary / release expectation |
+| --- | --- | --- | --- |
+| Guardian | `guardian_check`, `guardian_control`, `guardian_execute_recipe`, status/history reads | check / mutate | Fixed recipe policy, eligibility and cooldowns; completion must be polled before success is shown. |
+| Privilege broker | `privileged_action`, `privileged_action_status` | mutate / read | Fixed operation allowlist only; local peer authorization; secrets never enter argv, status, or audit detail. |
+| Updates and channels | `bootc_upgrade`, `bootc_rollback`, `bootc_switch_branch`, `collect_availability`, `just_run`, job status | check / mutate | Explicit confirmation for state changes; named recipes and channel values are allowlisted. |
+| Applications | `install_flatpak`, `uninstall_flatpak`, AppImage import/chmod/launch, install status | mutate / read | User Flatpak removal stays user-scoped; system changes use their dedicated policy path. |
+| Network and migration | SMB save/remove, cloud/app launch handoffs, VPN launch, printer discovery/setup text | read / check / mutate | Credentials remain outside config; command-returning helpers are copyable text, never generic execution. |
+| Hardware and desktop | firmware, PipeWire, Plasma preset, controllers, display/hardware reads | read / check / mutate | Expensive scans stay on demand; mutating presets require confirmation and bounded argv. |
+| Security | Kali lifecycle and host-tool install/uninstall/launch plus job status | read / mutate | Fixed Kali templates and two-tool catalog; no caller-supplied container or Flatpak identifiers. |
+| Gaming | tool catalog actions, Discord/OBS fixes, folder open, SCX controls, per-game profile save | read / mutate | Fixed 14-tool catalog and fixed folder/scheduler/profile value sets; no arbitrary path or command bridge. |
+
+### Ledger maintenance rule
+
+Any new `generate_handler!` entry that is not navigation-only must add a row
+to this inventory (or the Dashboard/Updates tables above), state its trust
+class, and be covered by `test_kyth_hub_web_actions.py` and
+`test_kyth_hub_web_invocation.py`.  A handler without that evidence is not
+release-ready.
+
 ## Native Rust/Tauri additions
 
 The Tauri bridge uses dedicated commands rather than exposing a generic
