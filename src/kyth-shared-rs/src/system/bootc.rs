@@ -38,15 +38,22 @@ fn run_with_timeout(cmd: &[String], timeout: std::time::Duration) -> Option<(i32
 pub fn has_staged_update() -> bool {
     crate::system::probe::read_section("bootc-status-data")
         .or_else(crate::system::bootc_query::fetch_status_data)
-        .and_then(|v| v.get("status").and_then(|s| s.get("staged")).cloned())
-        .is_some()
+        .is_some_and(|v| deployment_present(&v, "staged"))
 }
 
 pub fn has_rollback_deployment() -> bool {
     crate::system::probe::read_section("bootc-status-data")
         .or_else(crate::system::bootc_query::fetch_status_data)
-        .and_then(|v| v.get("status").and_then(|s| s.get("rollback")).cloned())
-        .is_some()
+        .is_some_and(|v| deployment_present(&v, "rollback"))
+}
+
+/// bootc emits the deployment keys with `null` when no deployment exists.
+/// Testing only for key presence turns an ordinary up-to-date system into a
+/// permanently staged/rollback-ready one.
+pub fn deployment_present(data: &serde_json::Value, section: &str) -> bool {
+    data.get("status")
+        .and_then(|status| status.get(section))
+        .is_some_and(|deployment| !deployment.is_null())
 }
 
 #[cfg(test)]
@@ -59,5 +66,14 @@ mod tests {
     #[test]
     fn staged_bool() {
         let _ = has_staged_update();
+    }
+
+    #[test]
+    fn null_deployments_are_not_reported_as_available() {
+        let status = serde_json::json!({"status": {"staged": null, "rollback": null}});
+        assert!(!deployment_present(&status, "staged"));
+        assert!(!deployment_present(&status, "rollback"));
+        let deployment = serde_json::json!({"status": {"staged": {"image": {}}}});
+        assert!(deployment_present(&deployment, "staged"));
     }
 }

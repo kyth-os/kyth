@@ -6,9 +6,14 @@ use std::time::Duration;
 use serde::Serialize;
 
 static JUST_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+static UPDATE_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
 
 fn just_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
     JUST_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn update_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
+    UPDATE_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 #[derive(Serialize)]
@@ -89,6 +94,56 @@ fn start_just_job(recipe: &str, args: &[&str]) -> Result<String, String> {
     Ok(job)
 }
 
+/// Start an Updates-page operation as a native Rust-managed job. The command
+/// is always a fixed argv; `just` is intentionally not involved here. The
+/// privileged safety helper remains the root boundary for upgrade policy and
+/// boot-health recording, while Rust owns lifecycle, timeout, and UI output.
+fn start_update_job(operation: &str, argv: Vec<String>, timeout: Duration) -> Result<String, String> {
+    kyth_shared::commands::normalize_command(&argv)
+        .map_err(|_| "update produced an invalid command".to_string())?;
+    let job = format!("update-{}-{}", operation, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    update_jobs().lock().map_err(|_| "update job store is unavailable".to_string())?.insert(job.clone(), ("running".into(), format!("{operation} is running…")));
+    let job_for_thread = job.clone();
+    let operation_for_thread = operation.to_string();
+    std::thread::spawn(move || {
+        let mut command = Command::new(&argv[0]);
+        command.args(&argv[1..]);
+        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+        let desktop = kyth_shared::commands::environment_for(
+            kyth_shared::commands::EnvironmentPolicy::Desktop,
+            &inherited,
+        );
+        command.env_clear().envs(desktop);
+        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+            command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+        }
+        let result = kyth_shared::system::process::run_bounded_command(command, timeout);
+        let (state, detail) = match result {
+            Ok(output) => {
+                let mut detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                if !stderr.is_empty() {
+                    if !detail.is_empty() { detail.push('\n'); }
+                    detail.push_str(&stderr);
+                }
+                let detail: String = kyth_shared::system::process::strip_ansi(&detail)
+                    .chars().rev().take(1200).collect::<String>().chars().rev().collect();
+                let state = if output.status.success() { "complete" } else { "failed" };
+                let detail = if detail.is_empty() {
+                    if output.status.success() { format!("{operation_for_thread} complete.") }
+                    else { format!("{operation_for_thread} failed (exit code {}).", output.status.code().unwrap_or(-1)) }
+                } else { detail };
+                (state.to_string(), detail)
+            }
+            Err(error) => ("failed".to_string(), format!("{operation_for_thread} could not complete: {error}")),
+        };
+        if let Ok(mut store) = update_jobs().lock() {
+            store.insert(job_for_thread, (state, detail));
+        }
+    });
+    Ok(job)
+}
+
 #[tauri::command]
 pub(crate) fn just_run(recipe: String) -> Result<String, String> {
     start_just_job(&recipe, &[])
@@ -102,19 +157,39 @@ pub(crate) fn just_run_status(job: String) -> crate::InstallStatus {
 
 #[tauri::command]
 pub(crate) fn bootc_upgrade() -> Result<String, String> {
-    if std::path::Path::new("/usr/bin/bootc").exists() || std::path::Path::new("/usr/bin/rpm-ostree").exists() { start_just_job("upgrade", &[]) } else { Err("bootc not installed".to_string()) }
+    if !std::path::Path::new("/usr/bin/bootc").exists() && !std::path::Path::new("/usr/bin/rpm-ostree").exists() {
+        return Err("bootc is not installed on this system.".to_string());
+    }
+    start_update_job("Download and stage", vec!["sudo", "-A", "kyth-safe-upgrade"].into_iter().map(String::from).collect(), Duration::from_secs(3600))
 }
 
 #[tauri::command]
 pub(crate) fn bootc_rollback() -> Result<String, String> {
-    start_just_job("rollback", &[])
+    start_update_job("Rollback", vec!["sudo", "-A", "/usr/bin/bootc", "rollback"].into_iter().map(String::from).collect(), Duration::from_secs(300))
 }
 
 #[tauri::command]
 pub(crate) fn bootc_switch_branch(branch: String) -> Result<String, String> {
     let channel = kyth_shared::system::bootc_policy::switch_channel_arg(&branch)
         .ok_or_else(|| "unknown channel".to_string())?;
-    start_just_job("switch-channel", &[channel])
+    let operation = format!("switch-{channel}");
+    let mut argv = vec!["sudo", "-A", "/usr/bin/kyth-bootc-guard"].into_iter().map(String::from).collect::<Vec<_>>();
+    argv.push(operation);
+    start_update_job("Switch channel", argv, Duration::from_secs(300))
+}
+
+#[tauri::command]
+pub(crate) fn apply_staged() -> Result<String, String> {
+    if !std::path::Path::new("/usr/libexec/kyth-finalize-staged").exists() {
+        return Err("The staged-update finalizer is not installed on this system.".to_string());
+    }
+    start_update_job("Apply staged update", vec!["sudo", "-A", "/usr/libexec/kyth-finalize-staged", "reboot"].into_iter().map(String::from).collect(), Duration::from_secs(300))
+}
+
+#[tauri::command]
+pub(crate) fn update_job_status(job: String) -> crate::InstallStatus {
+    let (state, detail) = update_jobs().lock().ok().and_then(|store| store.get(&job).cloned()).unwrap_or(("unknown".into(), "Update job not found.".into()));
+    crate::InstallStatus { id: job, state, detail }
 }
 
 #[tauri::command]
@@ -256,4 +331,33 @@ pub(crate) async fn current_update_channel() -> Option<String> {
 #[tauri::command]
 pub(crate) fn updater_available() -> bool {
     kyth_shared::system::updater::updater_available()
+}
+
+#[derive(Serialize)]
+pub(crate) struct UpdateHealthResponse {
+    pub(crate) status: String,
+    pub(crate) pending_digest: String,
+    pub(crate) last_healthy_digest: String,
+    pub(crate) failures: i64,
+    pub(crate) quarantined: usize,
+    pub(crate) detail: String,
+}
+
+#[tauri::command]
+pub(crate) fn update_health() -> UpdateHealthResponse {
+    let state = kyth_shared::system::boot_health::read_default_state();
+    let invariants = state.invariants();
+    let detail = if invariants.is_empty() {
+        format!("Boot health is {} · {} quarantined digest(s).", state.status, state.quarantined.len())
+    } else {
+        format!("Boot health state needs attention: {}", invariants.join(", "))
+    };
+    UpdateHealthResponse {
+        status: state.status,
+        pending_digest: state.pending_digest,
+        last_healthy_digest: state.last_healthy_digest,
+        failures: state.failures,
+        quarantined: state.quarantined.len(),
+        detail,
+    }
 }

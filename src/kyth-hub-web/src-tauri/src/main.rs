@@ -1189,7 +1189,10 @@ fn main() {
             commands::gaming::scx_set_scheduler,
             commands::gaming::profile_launch_option,
             commands::gaming::per_game_profile,
-            commands::gaming::save_per_game_profile
+            commands::gaming::save_per_game_profile,
+            commands::updates::apply_staged,
+            commands::updates::update_job_status,
+            commands::updates::update_health,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

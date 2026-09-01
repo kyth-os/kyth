@@ -515,6 +515,17 @@ async function waitJustJob(job: string): Promise<string> {
   throw new Error("This action is still running; check the status here again in a moment.");
 }
 
+async function waitUpdateJob(job: string): Promise<string> {
+  // Upgrade downloads can legitimately take an hour on a slow connection.
+  for (let i = 0; i < 7200; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    const state = await invoke<InstallStatus>("update_job_status", { job });
+    if (state.state === "complete") return state.detail;
+    if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
+  }
+  throw new Error("The update is still running; refresh the Updates page in a moment.");
+}
+
 async function runJustJob(recipe: string): Promise<string> {
   if (!inTauriShell()) throw new Error("This action is only available in the Hub app.");
   const job = await invoke<string>("just_run", { recipe });
@@ -765,6 +776,12 @@ export async function fetchUpdateStatus(): Promise<UpdateStatusLive | null> {
   try { return await invoke<UpdateStatusLive>("update_status"); } catch { return null; }
 }
 
+export interface UpdateHealthLive { status: string; pending_digest: string; last_healthy_digest: string; failures: number; quarantined: number; detail: string; }
+export async function fetchUpdateHealth(): Promise<UpdateHealthLive | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<UpdateHealthLive>("update_health"); } catch { return null; }
+}
+
 // Process helpers — live session + ansi + disk bytes
 export async function fetchIsLiveSession(): Promise<boolean | null> {
   if (!inTauriShell()) return null;
@@ -879,19 +896,25 @@ export async function invokeBootcUpgrade(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction("Download and stage the next system update? It will require a reboot to apply.")) return "Cancelled.";
   const job = await invoke<string>("bootc_upgrade");
-  return await waitJustJob(job);
+  return await waitUpdateJob(job);
 }
 export async function invokeBootcRollback(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction("Roll back to the previous system deployment? This changes the next boot target.")) return "Cancelled.";
   const job = await invoke<string>("bootc_rollback");
-  return await waitJustJob(job);
+  return await waitUpdateJob(job);
+}
+export async function invokeApplyStaged(): Promise<string> {
+  if (!inTauriShell()) throw new Error("not in Tauri");
+  if (!confirmUserAction("Restart now to apply the staged system update?")) return "Cancelled.";
+  const job = await invoke<string>("apply_staged");
+  return await waitUpdateJob(job);
 }
 export async function invokeBootcSwitchBranch(branch: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction(`Switch the system update channel to ${branch}? This stages a new deployment.`)) return "Cancelled.";
   const job = await invoke<string>("bootc_switch_branch", { branch });
-  return await waitJustJob(job);
+  return await waitUpdateJob(job);
 }
 export async function invokeGuardianExecute(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");

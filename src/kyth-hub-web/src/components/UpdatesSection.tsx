@@ -4,18 +4,20 @@ import {
   fetchBootcSnapshot,
   fetchCollectAvailability,
   fetchPendingUpdatesSummary,
+  fetchUpdateHealth,
   fetchUpdateAvailabilityView,
   fetchUpdateStatus,
   fetchUpdaterAvailable,
   invokeBootcRollback,
   invokeBootcUpgrade,
+  invokeApplyStaged,
   relativeTime,
   type BootcSnapshot,
   type UpdateAvailabilityView,
   type UpdateStatusLive,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
 function shortDigest(digest: string | undefined): string | null {
   if (!digest) return null;
@@ -43,6 +45,7 @@ export function UpdatesSection({ section }: { section: HubSection }) {
   const [updateStatus, setUpdateStatus] = useState<UpdateStatusLive | null>(null);
   const [pending, setPending] = useState<Record<string, unknown> | null>(null);
   const [updaterAvailable, setUpdaterAvailable] = useState<boolean | null>(null);
+  const [health, setHealth] = useState<Awaited<ReturnType<typeof fetchUpdateHealth>>>(null);
   const [view, setView] = useState<UpdateAvailabilityView | null>(null);
   const [loaded, setLoaded] = useState(false);
   const { status, busy, run } = useSectionAction();
@@ -53,17 +56,19 @@ export function UpdatesSection({ section }: { section: HubSection }) {
       fetchUpdateStatus(),
       fetchPendingUpdatesSummary(),
       fetchUpdaterAvailable(),
+      fetchUpdateHealth(),
     ]);
   }
 
   useEffect(() => {
     let cancelled = false;
-    readUpdateState().then(([snap, live, summary, updater]) => {
+    readUpdateState().then(([snap, live, summary, updater, healthState]) => {
       if (!cancelled) {
         setSnapshot(snap);
         setUpdateStatus(live);
         setPending(summary);
         setUpdaterAvailable(updater);
+        setHealth(healthState);
         setLoaded(true);
       }
     });
@@ -73,11 +78,12 @@ export function UpdatesSection({ section }: { section: HubSection }) {
   }, []);
 
   async function refreshUpdateState(): Promise<string> {
-    const [snap, live, summary, updater] = await readUpdateState();
+    const [snap, live, summary, updater, healthState] = await readUpdateState();
     setSnapshot(snap);
     setUpdateStatus(live);
     setPending(summary);
     setUpdaterAvailable(updater);
+    setHealth(healthState);
     return "Update status refreshed.";
   }
 
@@ -92,7 +98,39 @@ export function UpdatesSection({ section }: { section: HubSection }) {
       check_ts_details: availability.detail,
     });
     if (card) setView(card);
+    setUpdateStatus((current) => current ? {
+      ...current,
+      staged: availability.staged,
+      check_state: availability.state,
+      blocked_reason: availability.blocked_reason || null,
+      detail: availability.detail,
+    } : current);
+    setPending((current) => ({ ...(current ?? {}), flatpak: availability.flatpak_count }));
     return availability.blocked_reason || card?.title || availability.detail;
+  }
+
+  async function downloadAndStage(): Promise<string> {
+    const detail = await invokeBootcUpgrade();
+    await refreshUpdateState();
+    return detail;
+  }
+
+  async function rollback(): Promise<string> {
+    const detail = await invokeBootcRollback();
+    await refreshUpdateState();
+    return detail;
+  }
+
+  async function applyStaged(): Promise<string> {
+    const detail = await invokeApplyStaged();
+    await refreshUpdateState();
+    return detail;
+  }
+
+  async function healthReport(): Promise<string> {
+    const next = await fetchUpdateHealth();
+    setHealth(next);
+    return next?.detail ?? "Update health is unavailable.";
   }
 
   const live = snapshot !== null || updateStatus !== null;
@@ -154,6 +192,14 @@ export function UpdatesSection({ section }: { section: HubSection }) {
         <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Blocked: {updateStatus.blocked_reason}</p>
       )}
 
+      {health && (
+        <div style={{ marginTop: 12, display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <span className={`pill ${health.status === "healthy" ? "pill-dim" : "pill-warn"}`}>health: {health.status}</span>
+          <span className="pill pill-dim">quarantined: {health.quarantined}</span>
+          {health.failures > 0 && <span className="pill pill-warn">failures: {health.failures}</span>}
+        </div>
+      )}
+
       {view && (
         <div style={{ marginTop: 16, padding: "12px 14px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
           <p style={{ margin: 0, fontWeight: 700, fontSize: 14 }}>
@@ -178,15 +224,15 @@ export function UpdatesSection({ section }: { section: HubSection }) {
           <ActionButton
             label={busy === "upgrade" ? "Downloading…" : "Download and stage"}
             disabled={busy !== null}
-            onClick={() => run("upgrade", "Starting upgrade…", invokeBootcUpgrade)}
+            onClick={() => run("upgrade", "Downloading and staging…", downloadAndStage)}
           />
-          {updateStatus?.staged && <RecipeButton recipe="apply-staged" label="Restart to apply" busy={busy} run={run} />}
-          <RecipeButton recipe="update-health" label="Update health report" busy={busy} run={run} />
+          {updateStatus?.staged && <ActionButton label={busy === "apply-staged" ? "Restarting…" : "Restart to apply"} disabled={busy !== null} onClick={() => run("apply-staged", "Applying staged update…", applyStaged)} />}
+          <ActionButton label={busy === "health" ? "Checking health…" : "Update health report"} disabled={busy !== null} onClick={() => run("health", "Reading boot health…", healthReport)} />
           <ActionButton
             label={busy === "rollback" ? "Rolling back…" : "Roll back"}
             // Nothing to roll back to until a previous deployment exists.
             disabled={busy !== null || !(snapshot?.rollback || updateStatus?.rollback)}
-            onClick={() => run("rollback", "Rolling back…", invokeBootcRollback)}
+            onClick={() => run("rollback", "Rolling back…", rollback)}
           />
         </div>
         <ActionStatus status={status} />

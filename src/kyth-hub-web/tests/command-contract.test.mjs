@@ -15,6 +15,7 @@ const apps = await readFile(resolve(root, "src/components/AppStoreSection.tsx"),
 const gaming = await readFile(resolve(root, "src/components/GamingSection.tsx"), "utf8");
 const actions = await readFile(resolve(root, "src/components/SectionActions.tsx"), "utf8");
 const rust = await readFile(resolve(root, "src-tauri/src/main.rs"), "utf8");
+const updatesRust = await readFile(resolve(root, "src-tauri/src/commands/updates.rs"), "utf8");
 const parity = await readFile(resolve(root, "PARITY.md"), "utf8");
 
 const dashboardWrappers = [
@@ -32,10 +33,12 @@ const updateWrappers = [
   "fetchUpdateStatus",
   "fetchPendingUpdatesSummary",
   "fetchUpdaterAvailable",
+  "fetchUpdateHealth",
   "fetchCollectAvailability",
   "fetchUpdateAvailabilityView",
   "invokeBootcUpgrade",
   "invokeBootcRollback",
+  "invokeApplyStaged",
 ];
 
 const rustCommands = [
@@ -54,6 +57,9 @@ const rustCommands = [
   "current_update_channel",
   "bootc_upgrade",
   "bootc_rollback",
+  "apply_staged",
+  "update_job_status",
+  "update_health",
   "just_run",
   "just_run_status",
 ];
@@ -70,6 +76,14 @@ test("Updates wrappers are present and used by the section", () => {
     assert.match(service, new RegExp(`export async function ${wrapper}\\b`), wrapper);
     assert.match(updates, new RegExp(`\\b${wrapper}\\b`), wrapper);
   }
+});
+
+test("Updates actions use the native job bridge instead of just recipes", () => {
+  for (const command of ["bootc_upgrade", "bootc_rollback", "apply_staged"]) {
+    assert.match(updatesRust, new RegExp(`fn ${command}\\b[\\s\\S]*?start_update_job`), command);
+  }
+  assert.match(updates, /invokeApplyStaged/);
+  assert.doesNotMatch(updates, /RecipeButton recipe="(?:apply-staged|update-health)"/);
 });
 
 test("ledger commands are registered in the Tauri handler", () => {

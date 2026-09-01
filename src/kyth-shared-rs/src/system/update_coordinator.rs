@@ -49,7 +49,10 @@ impl UpdateCoordinator {
         let payload = serde_json::to_string_pretty(&updated)
             .map(|value| format!("{value}\n"))
             .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-        let result = crate::atomic_io::atomic_write_text(&self.path, &payload, Some(0o600));
+        // Boot-health state contains digests and health metadata, not secrets;
+        // the desktop Hub and notifier must be able to read it after a root
+        // update worker writes it.
+        let result = crate::atomic_io::atomic_write_text(&self.path, &payload, Some(0o644));
         let _ = flock(&lock, FlockOperation::Unlock);
         result.map(|()| updated)
     }

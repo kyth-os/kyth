@@ -35,10 +35,8 @@ pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> Availabil
     // staged takes precedence — no registry call needed
     let staged = crate::system::bootc::has_staged_update();
     if staged {
-        let flatpak = if use_cached {
-            crate::system::probe::read_section("flatpak-updates").and_then(|v| v.as_i64()).map(|n| n as i32).unwrap_or(0)
-        } else { 0 };
-        return AvailabilityStatus { state: "staged".to_string(), detail: "A staged image is ready to boot.".to_string(), flatpak_count: flatpak.max(0), flatpak_detail: String::new(), staged: true, manifest_raw: String::new(), blocked_reason: String::new() };
+        let (flatpak_count, flatpak_detail) = flatpak_updates_count(use_cached);
+        return AvailabilityStatus { state: "staged".to_string(), detail: "A staged image is ready to boot.".to_string(), flatpak_count, flatpak_detail, staged: true, manifest_raw: String::new(), blocked_reason: String::new() };
     }
     let b = branch.map(str::to_string).or_else(crate::system::bootc::current_branch).unwrap_or_else(|| "latest".to_string());
     let status_data = crate::system::probe::read_section("bootc-status-data")
@@ -55,12 +53,51 @@ pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> Availabil
     if matches!(nm.as_deref(), Some("disconnected") | Some("asleep") | Some("unknown")) {
         return AvailabilityStatus { state: registry.state, detail: registry.detail, flatpak_count: 0, flatpak_detail: String::new(), staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() };
     }
-    let flatpak_count = crate::system::probe::read_section("flatpak-updates")
-        .and_then(|v| v.as_i64())
-        .map(|n| n as i32)
-        .unwrap_or(0)
-        .max(0);
-    AvailabilityStatus { state: registry.state, detail: registry.detail, flatpak_count, flatpak_detail: String::new(), staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() }
+    let (flatpak_count, flatpak_detail) = flatpak_updates_count(use_cached);
+    AvailabilityStatus { state: registry.state, detail: registry.detail, flatpak_count, flatpak_detail, staged: false, manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(), blocked_reason: String::new() }
+}
+
+/// Return the pending Flatpak count. An explicit Updates-page check bypasses
+/// the shared probe cache so a fresh registry result is not paired with stale
+/// package-manager data.
+pub fn flatpak_updates_count(use_cached: bool) -> (i32, String) {
+    if use_cached {
+        return (
+            crate::system::probe::read_section("flatpak-updates")
+                .and_then(|value| value.as_i64())
+                .unwrap_or(0)
+                .max(0) as i32,
+            String::new(),
+        );
+    }
+    let mut total = 0;
+    let mut successful_scope = false;
+    let mut errors = Vec::new();
+    for scope in ["--system", "--user"] {
+        let argv = vec![
+            "flatpak".to_string(),
+            "remote-ls".to_string(),
+            "--updates".to_string(),
+            scope.to_string(),
+            "--columns=application".to_string(),
+        ];
+        match super::process::run_bounded(&argv, Duration::from_secs(15)) {
+            Ok(output) if output.status.success() => {
+                successful_scope = true;
+                total += String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .count() as i32;
+            }
+            Ok(output) => {
+                let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                if !detail.is_empty() { errors.push(detail); }
+            }
+            Err(error) => errors.push(error.to_string()),
+        }
+    }
+    if successful_scope { (total.max(0), String::new()) }
+    else { (0, errors.into_iter().next().unwrap_or_else(|| "Flatpak update check unavailable.".to_string())) }
 }
 
 fn run_nmcli_state() -> Option<String> {

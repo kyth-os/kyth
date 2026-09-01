@@ -83,8 +83,8 @@ pub fn check_update_status() -> UpdateStatus {
         .or_else(|| crate::system::bootc_query::fetch_status_data());
     let watcher = read_update_snapshot(600);
     let watcher_staged = watcher.as_ref().is_some_and(|snapshot| !snapshot.staged_digest.is_empty());
-    let staged = data.as_ref().and_then(|v| v.get("status").and_then(|s| s.get("staged"))).is_some_and(|value| !value.is_null()) || watcher_staged;
-    let rollback = data.as_ref().and_then(|v| v.get("status").and_then(|s| s.get("rollback"))).is_some_and(|value| !value.is_null());
+    let staged = data.as_ref().is_some_and(|value| crate::system::bootc::deployment_present(value, "staged")) || watcher_staged;
+    let rollback = data.as_ref().is_some_and(|value| crate::system::bootc::deployment_present(value, "rollback"));
     let booted = data.as_ref().and_then(crate::system::registry::booted_image_digest);
     let branch = crate::system::bootc::current_branch().unwrap_or_else(|| "latest".to_string());
     let Some(data) = data else {

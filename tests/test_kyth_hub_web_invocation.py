@@ -97,14 +97,15 @@ class JustInvocationTests(unittest.TestCase):
         self.assertNotIn("in_terminal", LIVE_DATA)
         self.assertNotIn("terminal window", SECTION_ACTIONS)
 
-    def test_bootc_commands_do_not_claim_a_finished_change(self):
-        # These commands return a job and the frontend waits for the captured
-        # result, rather than claiming a change when a terminal merely opens.
+    def test_bootc_commands_use_native_update_jobs(self):
+        # These commands return a native Rust-managed job and the frontend
+        # waits for the captured result, rather than routing updates through
+        # a generic just recipe.
         for command in ("bootc_upgrade", "bootc_rollback", "bootc_switch_branch"):
             body = re.search(rf"fn {command}\([^)]*\)[^{{]*{{(.*?)\n}}", MAIN_RS, re.S)
             self.assertIsNotNone(body, command)
             code = re.sub(r"//.*", "", body.group(1))
-            self.assertIn("start_just_job", code, command)
+            self.assertIn("start_update_job", code, command)
             for claim in ("rolled back", "staged", "completed", "applied"):
                 self.assertNotIn(claim, code, f"{command} claims {claim!r} for a spawned window")
 

@@ -91,11 +91,11 @@ class HubWebActionTests(unittest.TestCase):
         )
         self.assertIsNotNone(body, "bootc_switch_branch not found")
         text = body.group(0)
-        # It must delegate, not just format a reassuring string. It goes
-        # through the captured just job runner rather than a raw Command so
-        # it inherits the justfile resolution a bare `just` does not have.
-        self.assertIn("switch-channel", text)
-        self.assertIn("start_just_job", text)
+        # It must delegate, not just format a reassuring string. The guarded
+        # native command keeps the channel mapping fixed and auditable.
+        self.assertIn("kyth-bootc-guard", text)
+        self.assertIn("switch-{channel}", text)
+        self.assertNotIn("start_just_job", text)
         self.assertNotIn('Command::new("just")', text)
         self.assertIn("switch_channel_arg", text)
         self.assertNotIn("queued — run bootc switch via polkit terminal", text)

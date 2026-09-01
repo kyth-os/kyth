@@ -37,9 +37,10 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
 | `checkForUpdates` | `update_availability_view` | availability view model | `UpdateAvailabilityView` | read | covered |
 | `invokeBootcUpgrade` | `bootc_upgrade` | none | `string` | mutate | covered |
 | `invokeBootcRollback` | `bootc_rollback` | none | `string` | mutate | covered |
-| `RecipeButton: apply-staged` | `just_run` | `{ recipe: "apply-staged" }` | `JustLaunch` | mutate | indirect |
-| `RecipeButton: update-health` | `just_run` | `{ recipe: "update-health" }` | `JustLaunch` | check | indirect |
-| `waitJustJob` | `just_run_status` | `{ job }` | `InstallStatus` | read | covered |
+| `invokeApplyStaged` | `apply_staged` | none | `string` | mutate | covered |
+| update job polling | `update_job_status` | `{ job }` | `InstallStatus` | read | covered |
+| `fetchUpdateHealth` | `update_health` | none | `UpdateHealthLive` | read | covered |
+| `healthReport` | `update_health` | none | `UpdateHealthLive` | check | covered |
 
 ## Baseline gaps exposed by this ledger
 
