@@ -1163,7 +1163,17 @@ fn main() {
             commands::updates::updater_available,
             commands::dashboard::current_user_name,
             commands::updates::current_update_channel,
-            open_feedback_issue
+            open_feedback_issue,
+            commands::security::kali_status,
+            commands::security::kali_create,
+            commands::security::kali_export,
+            commands::security::kali_remove,
+            commands::security::kali_enter_terminal,
+            commands::security::security_job_status,
+            commands::security::sec_host_tools,
+            commands::security::sec_host_tool_install,
+            commands::security::sec_host_tool_uninstall,
+            commands::security::sec_host_tool_launch
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

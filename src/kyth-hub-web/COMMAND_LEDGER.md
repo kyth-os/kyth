@@ -73,3 +73,10 @@ recipes (`install-prismlauncher`, `install-itch`, `install-epic-launcher`,
 `install-mangojuice`, `install-lact`, `install-piper`, and `install-solaar`).
 They dispatch through the shared `just` allowlist; no free-form command text
 is accepted by the bridge.
+
+The Security tab's Kali distrobox lifecycle (`kali_status`, `kali_create`,
+`kali_export`, `kali_remove`, `kali_enter_terminal`) and host-tools grid
+(`sec_host_tools`, `sec_host_tool_install`/`_uninstall`/`_launch`) are typed
+commands backed by `kyth-shared-rs::system::security_container`'s fixed
+command templates and 2-tool catalog — never a caller-supplied Flatpak id or
+container name.

@@ -1003,6 +1003,64 @@ export async function fetchInstallStatus(id: string): Promise<InstallStatus | nu
   if (!inTauriShell()) return null;
   try { return await invoke<InstallStatus>("install_status", { job: id }); } catch { return null; }
 }
+
+// ---------------------------------------------------------------------
+// Security tab: Kali distrobox lifecycle + host-side (Flatpak) tools grid.
+// Kali create/export/remove run as background jobs (security_job_status),
+// same running/complete/failed shape as installFlatpak/uninstallFlatpak
+// above — polled longer since a "kali-linux-everything" pull can run many
+// minutes. Reported status text, not a live percentage; see
+// kyth-shared-rs's security_container module doc for why.
+// ---------------------------------------------------------------------
+
+export async function fetchKaliStatus(): Promise<boolean | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<boolean>("kali_status"); } catch { return null; }
+}
+
+export interface SecHostTool { flatpak: string; name: string; desc: string; installed: boolean }
+export async function fetchSecHostTools(): Promise<SecHostTool[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<SecHostTool[]>("sec_host_tools"); } catch { return null; }
+}
+
+async function pollSecurityJob(job: string, maxIterations: number): Promise<string> {
+  for (let i = 0; i < maxIterations; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 3000));
+    const state = await invoke<InstallStatus>("security_job_status", { job }).catch(() => null);
+    if (!state || state.state === "running") continue;
+    if (state.state === "complete") return state.detail;
+    throw new Error(state.detail);
+  }
+  throw new Error("Still running; check back in a moment.");
+}
+
+export async function createKaliBox(tier: "headless" | "default" | "everything"): Promise<string> {
+  if (!confirmUserAction(`Create the Kali box (${tier} tools)? This pulls a container image and installs packages — it may take several minutes, longer for "everything".`)) return "Cancelled.";
+  const job = await invoke<string>("kali_create", { tier });
+  return await pollSecurityJob(job, 600); // up to 30 minutes
+}
+export async function exportKaliApps(): Promise<string> {
+  const job = await invoke<string>("kali_export", {});
+  return await pollSecurityJob(job, 100); // up to 5 minutes
+}
+export async function removeKaliBox(): Promise<string> {
+  if (!confirmUserAction("Remove the Kali distrobox container? Files in your home directory are not affected.")) return "Cancelled.";
+  const job = await invoke<string>("kali_remove", {});
+  return await pollSecurityJob(job, 60); // up to 3 minutes
+}
+export async function enterKaliTerminal(): Promise<string> { return await invoke<string>("kali_enter_terminal"); }
+
+export async function installSecHostTool(flatpakId: string): Promise<string> {
+  const job = await invoke<string>("sec_host_tool_install", { flatpakId });
+  return await pollSecurityJob(job, 240); // up to 12 minutes
+}
+export async function uninstallSecHostTool(flatpakId: string): Promise<string> {
+  if (!confirmUserAction("Remove this tool?")) return "Cancelled.";
+  const job = await invoke<string>("sec_host_tool_uninstall", { flatpakId });
+  return await pollSecurityJob(job, 60);
+}
+export async function launchSecHostTool(flatpakId: string): Promise<string> { return await invoke<string>("sec_host_tool_launch", { flatpakId }); }
 export interface ProtonDbResult { app_id: string; tier: string; detail: string }
 export interface AntiCheatEntry { game: string; status: string; detail: string }
 export async function fetchProtonDbMany(appIds: string[]): Promise<ProtonDbResult[] | null> {

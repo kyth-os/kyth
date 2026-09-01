@@ -1,0 +1,250 @@
+//! Security tab bridge: the Kali distrobox lifecycle (create/enter/export/
+//! remove) and the host-side (Flatpak) security-tools grid. Command argv
+//! comes entirely from `kyth_shared::system::security_container`'s fixed
+//! templates/catalog — nothing here accepts a free-form command or Flatpak
+//! id from the webview.
+//!
+//! Jobs report running/complete/failed like `just_run` and the App Store's
+//! Flatpak install job, not a live percentage — see
+//! `security_container`'s module doc for why the Python progress-bar
+//! parser wasn't ported.
+
+use std::collections::HashMap;
+use std::process::{Command, Output};
+use std::sync::{Mutex, OnceLock};
+use std::time::Duration;
+
+use serde::Serialize;
+
+use kyth_shared::system::security_container::{
+    self, KaliTier, DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE,
+};
+
+static SECURITY_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+
+fn security_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
+    SECURITY_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn new_job_id(prefix: &str) -> String {
+    format!(
+        "{prefix}-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    )
+}
+
+fn start_job(prefix: &str, pending: &str) -> Result<String, String> {
+    let job = new_job_id(prefix);
+    security_jobs()
+        .lock()
+        .map_err(|_| "security job store is unavailable".to_string())?
+        .insert(job.clone(), ("running".into(), pending.to_string()));
+    Ok(job)
+}
+
+fn finish_job(job: String, state: &str, detail: String) {
+    if let Ok(mut store) = security_jobs().lock() {
+        store.insert(job, (state.to_string(), detail));
+    }
+}
+
+/// Same truncation/direction convention as `commands::updates::just_output_detail`:
+/// keep the tail of combined stdout+stderr, since that's where the actual
+/// error usually is in apt/distrobox output.
+fn failure_detail(action: &str, output: &Output) -> String {
+    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    if !stderr.trim().is_empty() {
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str(&stderr);
+    }
+    let text = kyth_shared::system::process::strip_ansi(text.trim());
+    let tail: String = text.chars().rev().take(500).collect::<String>().chars().rev().collect();
+    if tail.trim().is_empty() {
+        match output.status.code() {
+            Some(code) => format!("{action} failed (exit {code})."),
+            None => format!("{action} stopped before it could complete."),
+        }
+    } else {
+        format!("{action} failed — {}", tail.trim())
+    }
+}
+
+fn askpass_env(command: &mut Command) {
+    if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+        command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+    }
+}
+
+fn spawn_argv_job(job: String, argv: Vec<String>, timeout: Duration, on_done: impl FnOnce(Result<Output, std::io::Error>) -> (String, String) + Send + 'static) {
+    std::thread::spawn(move || {
+        let mut command = Command::new(&argv[0]);
+        command.args(&argv[1..]);
+        askpass_env(&mut command);
+        let result = kyth_shared::system::process::run_bounded_command(command, timeout);
+        let (state, detail) = on_done(result);
+        finish_job(job, &state, detail);
+    });
+}
+
+#[tauri::command]
+pub(crate) fn kali_status() -> bool {
+    security_container::is_socket_capable_kali_box(DEFAULT_KALI_BOX)
+}
+
+#[tauri::command]
+pub(crate) fn kali_create(tier: String) -> Result<String, String> {
+    let parsed = KaliTier::parse(&tier).ok_or_else(|| "unknown Kali tier".to_string())?;
+    let argv = security_container::build_kali_create_command(DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE, parsed);
+    let job = start_job("kali-create", "Pulling Kali container image…")?;
+    // kali-linux-everything can pull 15-20GB; give it real headroom.
+    spawn_argv_job(job.clone(), argv, Duration::from_secs(1800), move |result| match result {
+        Ok(output) if output.status.success() => (
+            "complete".to_string(),
+            if parsed.has_gui() {
+                "Kali box created. GUI apps exported — check your application menu.".to_string()
+            } else {
+                "Kali box created. Launch a terminal to start hacking.".to_string()
+            },
+        ),
+        Ok(output) => ("failed".to_string(), failure_detail("Kali setup", &output)),
+        Err(err) => ("failed".to_string(), format!("Could not start Kali setup: {err}")),
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+pub(crate) fn kali_export() -> Result<String, String> {
+    let argv = security_container::build_kali_export_command(DEFAULT_KALI_BOX);
+    let job = start_job("kali-export", "Scanning Kali container for GUI apps…")?;
+    spawn_argv_job(job.clone(), argv, Duration::from_secs(300), |result| match result {
+        Ok(output) if output.status.code() == Some(2) => (
+            "complete".to_string(),
+            "No GUI apps found. kali-linux-headless only includes CLI tools. Re-create the box \
+             with 'Default' or 'Everything' to get exportable GUI apps."
+                .to_string(),
+        ),
+        Ok(output) if output.status.success() => {
+            let count = security_container::parse_kali_export_count(&String::from_utf8_lossy(&output.stdout)).unwrap_or(0);
+            let detail = if count == 0 {
+                "No GUI apps exported. kali-linux-headless contains CLI tools only — remove this \
+                 box and re-create it with 'Default' or 'Everything' to get exportable GUI apps."
+                    .to_string()
+            } else {
+                format!("Exported {count} app(s) — they should appear in your application menu shortly.")
+            };
+            ("complete".to_string(), detail)
+        }
+        Ok(output) => ("failed".to_string(), failure_detail("Export", &output)),
+        Err(err) => ("failed".to_string(), format!("Could not start export: {err}")),
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+pub(crate) fn kali_remove() -> Result<String, String> {
+    let argv = security_container::build_kali_remove_command(DEFAULT_KALI_BOX);
+    let job = start_job("kali-remove", "Stopping and removing Kali box…")?;
+    spawn_argv_job(job.clone(), argv, Duration::from_secs(120), |result| match result {
+        Ok(output) if output.status.success() => ("complete".to_string(), "Kali box removed.".to_string()),
+        Ok(output) => ("failed".to_string(), failure_detail("Removal", &output)),
+        Err(err) => ("failed".to_string(), format!("Could not start removal: {err}")),
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+pub(crate) fn kali_enter_terminal() -> Result<String, String> {
+    let terminal = security_container::detect_terminal()
+        .ok_or_else(|| "Could not find a terminal emulator to open.".to_string())?;
+    let argv = security_container::kali_enter_argv(terminal, DEFAULT_KALI_BOX);
+    Command::new(&argv[0])
+        .args(&argv[1..])
+        .spawn()
+        .map_err(|err| format!("could not open a terminal: {err}"))?;
+    Ok("Opened a Kali terminal.".to_string())
+}
+
+#[tauri::command]
+pub(crate) fn security_job_status(job: String) -> crate::InstallStatus {
+    let (state, detail) = security_jobs()
+        .lock()
+        .ok()
+        .and_then(|store| store.get(&job).cloned())
+        .unwrap_or(("unknown".into(), "Job not found.".into()));
+    crate::InstallStatus { id: job, state, detail }
+}
+
+#[derive(Serialize)]
+pub(crate) struct SecHostToolResponse {
+    flatpak: String,
+    name: String,
+    desc: String,
+    installed: bool,
+}
+
+#[tauri::command]
+pub(crate) fn sec_host_tools() -> Vec<SecHostToolResponse> {
+    security_container::SEC_HOST_TOOLS
+        .iter()
+        .map(|tool| SecHostToolResponse {
+            flatpak: tool.flatpak.to_string(),
+            name: tool.name.to_string(),
+            desc: tool.desc.to_string(),
+            installed: kyth_shared::system::software_catalog::is_flatpak_installed(tool.flatpak),
+        })
+        .collect()
+}
+
+fn validated_sec_tool(flatpak_id: &str) -> Result<&'static security_container::SecHostTool, String> {
+    security_container::find_sec_host_tool(flatpak_id).ok_or_else(|| "unknown security tool".to_string())
+}
+
+#[tauri::command]
+pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<String, String> {
+    let tool = validated_sec_tool(&flatpak_id)?;
+    let name = tool.name.to_string();
+    let argv = vec![
+        "bash".to_string(),
+        "-c".to_string(),
+        format!(
+            "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak install -y flathub {flatpak_id}"
+        ),
+    ];
+    let job = start_job("sec-install", &format!("Installing {name}…"))?;
+    spawn_argv_job(job.clone(), argv, Duration::from_secs(600), move |result| match result {
+        Ok(output) if output.status.success() => ("complete".to_string(), format!("{name} installed.")),
+        Ok(output) => ("failed".to_string(), failure_detail("Installation", &output)),
+        Err(err) => ("failed".to_string(), format!("Could not start installation: {err}")),
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<String, String> {
+    let tool = validated_sec_tool(&flatpak_id)?;
+    let name = tool.name.to_string();
+    let argv = vec!["flatpak".to_string(), "uninstall".to_string(), "-y".to_string(), flatpak_id];
+    let job = start_job("sec-uninstall", &format!("Uninstalling {name}…"))?;
+    spawn_argv_job(job.clone(), argv, Duration::from_secs(120), move |result| match result {
+        Ok(output) if output.status.success() => ("complete".to_string(), format!("{name} uninstalled.")),
+        Ok(output) => ("failed".to_string(), failure_detail("Uninstall", &output)),
+        Err(err) => ("failed".to_string(), format!("Could not start uninstall: {err}")),
+    });
+    Ok(job)
+}
+
+#[tauri::command]
+pub(crate) fn sec_host_tool_launch(flatpak_id: String) -> Result<String, String> {
+    let tool = validated_sec_tool(&flatpak_id)?;
+    Command::new("flatpak")
+        .args(["run", tool.flatpak])
+        .spawn()
+        .map_err(|err| format!("could not launch {}: {err}", tool.name))?;
+    Ok(format!("{} launched.", tool.name))
+}

@@ -168,6 +168,14 @@ pub fn installed_flatpaks() -> Vec<InstalledFlatpak> {
     apps
 }
 
+/// Port of `services.flatpak.is_installed`'s no-cache fallback path: check
+/// live installed state rather than trusting a cache this crate doesn't
+/// maintain. Used by the App Store's own installed list and the Security
+/// tab's host-tools grid to decide Install vs. Launch/Uninstall.
+pub fn is_flatpak_installed(app_id: &str) -> bool {
+    installed_flatpaks().iter().any(|app| app.id == app_id)
+}
+
 /// Make a discovered AppImage runnable.  Restrict the path to the three
 /// directories that appimages() scans so the webview cannot chmod an
 /// arbitrary user file.

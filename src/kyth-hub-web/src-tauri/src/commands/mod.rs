@@ -7,4 +7,5 @@
 pub(crate) mod dashboard;
 pub(crate) mod privilege;
 pub(crate) mod process;
+pub(crate) mod security;
 pub(crate) mod updates;

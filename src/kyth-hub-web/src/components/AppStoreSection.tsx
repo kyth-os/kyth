@@ -13,12 +13,22 @@ import {
   makeAppImageExecutable,
   importAppImage,
   fetchStarterPacks,
+  fetchKaliStatus,
+  fetchSecHostTools,
+  createKaliBox,
+  exportKaliApps,
+  removeKaliBox,
+  enterKaliTerminal,
+  installSecHostTool,
+  uninstallSecHostTool,
+  launchSecHostTool,
   type AppStoreSnapshot,
   type FamiliarApp,
   type AppImageEntry,
   type AppStreamApp,
   type StarterPack,
   type InstalledFlatpak,
+  type SecHostTool,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
@@ -30,6 +40,130 @@ import { ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./Sec
 function installCommand(ids: string[]): string | null {
   if (ids.length === 0) return null;
   return `flatpak install -y flathub ${ids.join(" ")}`;
+}
+
+type SectionRun = (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
+const secBtnStyle = { padding: "6px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 } as const;
+
+// The Kali distrobox lifecycle: create (tiered), enter a terminal, export
+// GUI apps to the host menu, remove. Mirrors page_software_security_kali.py
+// — see security_container.rs for why create/export/remove run as bash
+// scripts rather than plain argv.
+function KaliCard({ busy, run }: { busy: string | null; run: SectionRun }) {
+  const [installed, setInstalled] = useState<boolean | null>(null);
+  const [tier, setTier] = useState<"headless" | "default" | "everything">("headless");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchKaliStatus().then((value) => { if (!cancelled) setInstalled(value); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function refresh(): Promise<void> {
+    setInstalled(await fetchKaliStatus());
+  }
+
+  return (
+    <div style={{ marginTop: 18, padding: "12px 14px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <p style={{ fontWeight: 700, fontSize: 13, margin: 0, flex: 1 }}>Kali Linux Toolbox</p>
+        {installed != null && <span className={`pill ${installed ? "pill-ok" : "pill-dim"}`}>{installed ? "Installed" : "Not installed"}</span>}
+      </div>
+      <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>
+        Creates a Kali Linux container via distrobox that shares your home directory. Choose a toolset below — the container image is shared regardless of tier.
+      </p>
+      {installed === false && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+            {([
+              ["headless", "Headless — kali-linux-headless (~150 CLI tools: nmap, metasploit, hashcat, john, hydra, …)"],
+              ["default", "Default — kali-linux-default (headless + GUI tools: Zenmap, Autopsy, Faraday, legion, …)"],
+              ["everything", "Everything — kali-linux-everything (every available Kali tool)"],
+            ] as const).map(([value, label]) => (
+              <label key={value} style={{ fontSize: 12, display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
+                <input type="radio" name="kali-tier" checked={tier === value} onChange={() => setTier(value)} />
+                {label}
+              </label>
+            ))}
+          </div>
+          {tier === "everything" && (
+            <p className="card-copy" style={{ fontSize: 11, marginTop: 6 }}>
+              ⚠ kali-linux-everything is extremely large — expect 15–20 GB or more of downloads and a very long install time.
+            </p>
+          )}
+          <button
+            disabled={busy !== null}
+            onClick={() => run("kali-create", "Creating Kali box…", async () => { const result = await createKaliBox(tier); await refresh(); return result; })}
+            style={{ ...secBtnStyle, marginTop: 10 }}
+          >
+            {busy === "kali-create" ? "Creating…" : "Create Kali Box"}
+          </button>
+        </div>
+      )}
+      {installed === true && (
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+          <button disabled={busy !== null} onClick={() => run("kali-enter", "Opening terminal…", enterKaliTerminal)} style={secBtnStyle}>
+            {busy === "kali-enter" ? "Opening…" : "Launch Kali Terminal"}
+          </button>
+          <button disabled={busy !== null} onClick={() => run("kali-export", "Exporting GUI apps…", exportKaliApps)} style={secBtnStyle}>
+            {busy === "kali-export" ? "Exporting…" : "Export Apps to Menu"}
+          </button>
+          <button
+            disabled={busy !== null}
+            onClick={() => run("kali-remove", "Stopping and removing Kali box…", async () => { const result = await removeKaliBox(); await refresh(); return result; })}
+            style={{ ...secBtnStyle, borderColor: "var(--danger, #c0392b)", color: "var(--danger, #c0392b)" }}
+          >
+            {busy === "kali-remove" ? "Removing…" : "Remove Box"}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Native (Flatpak) host-side security tools: install, launch, uninstall.
+// Mirrors page_software_security_hosttools.py's grid.
+function HostToolsGrid({ busy, run }: { busy: string | null; run: SectionRun }) {
+  const [tools, setTools] = useState<SecHostTool[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchSecHostTools().then((value) => { if (!cancelled) setTools(value); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function refresh(): Promise<void> {
+    const fresh = await fetchSecHostTools();
+    if (fresh) setTools(fresh);
+  }
+
+  if (!tools || tools.length === 0) return null;
+  return (
+    <div style={{ marginTop: 18 }}>
+      <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Host-side Security Tools</p>
+      <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>
+        These run natively on KythOS as Flatpaks — better Wayland integration and no container overhead for GUI-heavy workflows.
+      </p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+        {tools.map((tool) => (
+          <div key={tool.flatpak} style={{ padding: "10px 12px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <p style={{ fontWeight: 700, fontSize: 13, margin: 0, flex: 1 }}>{tool.name}</p>
+              {tool.installed ? (
+                <>
+                  <button disabled={busy !== null} onClick={() => run(`sec-launch-${tool.flatpak}`, `Launching ${tool.name}…`, () => launchSecHostTool(tool.flatpak))} style={secBtnStyle}>Launch</button>
+                  <button disabled={busy !== null} onClick={() => run(`sec-uninstall-${tool.flatpak}`, `Uninstalling ${tool.name}…`, async () => { const result = await uninstallSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Uninstall</button>
+                </>
+              ) : (
+                <button disabled={busy !== null} onClick={() => run(`sec-install-${tool.flatpak}`, `Installing ${tool.name}…`, async () => { const result = await installSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Install</button>
+              )}
+            </div>
+            <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>{tool.desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // "Apps > App Store" — flatpak counts, the starter-pack catalog, and the
@@ -245,6 +379,12 @@ export function AppStoreSection({ section }: { section: HubSection }) {
           </div>}
 
           <div style={{ marginTop: 22 }}>
+            <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Security</p>
+            <KaliCard busy={busy} run={run} />
+            <HostToolsGrid busy={busy} run={run} />
+          </div>
+
+          <div style={{ marginTop: 22 }}>
             <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Developer, creator, and specialized environments</p>
             <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>
               The old Hub grouped these tools separately from the general store. They remain opt-in recipes so the action and its system impact are visible before anything changes.
@@ -253,11 +393,9 @@ export function AppStoreSection({ section }: { section: HubSection }) {
               <RecipeButton recipe="setup-kyth-dev-box" label="Set up Kyth developer box" busy={busy} run={run} />
               <RecipeButton recipe="ai-dev-status" label="AI development status" busy={busy} run={run} />
               <RecipeButton recipe="ai-dev-setup" label="Set up AI development" busy={busy} run={run} />
-              <RecipeButton recipe="export-kali-apps" label="Export Kali apps" busy={busy} run={run} />
               <RecipeButton recipe="setup-waydroid" label="Set up Waydroid" busy={busy} run={run} />
               <RecipeButton recipe="remove-waydroid" label="Remove Waydroid" busy={busy} run={run} />
             </div>
-            <CommandLine label="Kali environment (choose tools explicitly)" command="ujust setup-kali-box tools=headless" />
           </div>
         </div>
       ) : (
