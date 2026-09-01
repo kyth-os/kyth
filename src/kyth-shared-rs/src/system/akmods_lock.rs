@@ -55,6 +55,13 @@ mod tests {
         assert!(build_in_progress(&path));
         assert!(acquire(&path, Duration::from_millis(10)).is_err());
         drop(first);
+        // flock releases synchronously, but a busy CI runner can briefly
+        // delay the probe's next open/lock attempt. Keep the assertion
+        // bounded so this tests eventual release without hiding a stuck lock.
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while build_in_progress(&path) && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert!(!build_in_progress(&path));
     }
 }

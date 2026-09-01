@@ -51,6 +51,7 @@ const rustCommands = [
   "updater_available",
   "collect_availability",
   "update_availability_view",
+  "current_update_channel",
   "bootc_upgrade",
   "bootc_rollback",
   "just_run",

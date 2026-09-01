@@ -157,12 +157,29 @@ pub(crate) fn update_availability_view(
 }
 
 #[tauri::command]
-pub(crate) fn pending_updates_summary() -> std::collections::HashMap<String, String> {
-    kyth_shared::system::updates_unified::pending_updates_summary()
+pub(crate) async fn pending_updates_summary() -> std::collections::HashMap<String, String> {
+    tauri::async_runtime::spawn_blocking(kyth_shared::system::updates_unified::pending_updates_summary)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
-pub(crate) fn update_status() -> UpdateStatusResponse {
+pub(crate) async fn update_status() -> UpdateStatusResponse {
+    tauri::async_runtime::spawn_blocking(update_status_response)
+        .await
+        .unwrap_or_else(|_| UpdateStatusResponse {
+            booted: None,
+            staged: false,
+            rollback: false,
+            remote_digest: None,
+            blocked_reason: Some("Could not read update status.".to_string()),
+            retry_cmd: Some("bootc upgrade --check".to_string()),
+            check_state: "error".to_string(),
+            detail: "Could not read update status.".to_string(),
+        })
+}
+
+fn update_status_response() -> UpdateStatusResponse {
     let status = kyth_shared::system::update_status::check_update_status();
     UpdateStatusResponse {
         booted: status.booted,
@@ -200,8 +217,20 @@ pub(crate) struct AvailabilityStatusResponse {
 }
 
 #[tauri::command]
-pub(crate) fn collect_availability(branch: Option<String>, use_cached: Option<bool>) -> AvailabilityStatusResponse {
-    let status = kyth_shared::system::update_availability::collect_availability(branch.as_deref(), use_cached.unwrap_or(true));
+pub(crate) async fn collect_availability(branch: Option<String>, use_cached: Option<bool>) -> AvailabilityStatusResponse {
+    let status = tauri::async_runtime::spawn_blocking(move || {
+        kyth_shared::system::update_availability::collect_availability(branch.as_deref(), use_cached.unwrap_or(true))
+    })
+    .await
+    .unwrap_or_else(|_| kyth_shared::system::update_availability::AvailabilityStatus {
+        state: "error".to_string(),
+        detail: "Could not check update availability.".to_string(),
+        flatpak_count: 0,
+        flatpak_detail: String::new(),
+        staged: false,
+        manifest_raw: String::new(),
+        blocked_reason: "Could not check update availability.".to_string(),
+    });
     AvailabilityStatusResponse {
         state: status.state,
         detail: status.detail,
@@ -211,6 +240,17 @@ pub(crate) fn collect_availability(branch: Option<String>, use_cached: Option<bo
         manifest_raw: status.manifest_raw,
         blocked_reason: status.blocked_reason,
     }
+}
+
+/// Resolve the active channel without making the short-lived probe cache a
+/// hard dependency. The fallback can query bootc, so keep it off the Tauri
+/// command/UI thread just like the update probes above.
+#[tauri::command]
+pub(crate) async fn current_update_channel() -> Option<String> {
+    tauri::async_runtime::spawn_blocking(kyth_shared::system::bootc::current_branch)
+        .await
+        .ok()
+        .flatten()
 }
 
 #[tauri::command]

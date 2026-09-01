@@ -35,7 +35,7 @@ export function StatTileRow({ tiles }: { tiles: StatTile[] }) {
                 {tile.label}
               </p>
               <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: 6 }}>
-                <span className="stat-value" style={{ marginTop: 0 }}>{tile.value}</span>
+                <span className="stat-value" title={tile.value} style={{ marginTop: 0 }}>{tile.value}</span>
               </div>
               {tile.delta && (
                 <span className={`pill ${toneClass[tile.deltaTone ?? "ok"]}`} style={{ display: "inline-block", marginTop: 8 }}>

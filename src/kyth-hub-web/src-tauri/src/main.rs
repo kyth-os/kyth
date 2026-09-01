@@ -1161,6 +1161,7 @@ fn main() {
             desktop_stack_checks,
             commands::updates::updater_available,
             commands::dashboard::current_user_name,
+            commands::updates::current_update_channel,
             open_feedback_issue
         ])
         .run(tauri::generate_context!())

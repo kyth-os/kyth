@@ -11,9 +11,9 @@ import { inTauriShell } from "./tauriEnv";
 // left to fall back to.
 //
 // Two conventions the sections rely on:
-//   - Cheap, disk-backed reads run on mount. Anything that waits on the
-//     network, on fwupd, or on mokutil sits behind an explicit button, so
-//     switching tabs never blocks on it.
+//   - Reads may run on mount, but the Tauri commands for update status,
+//     update summaries, and channel fallback offload blocking probes before
+//     they reach this webview. Switching tabs therefore never blocks the UI.
 //   - The mutating wrappers at the bottom throw instead of returning null,
 //     so useSectionAction can report the failure rather than leaving a
 //     button that appears to have done something.
@@ -177,9 +177,9 @@ async function fetchProbeSection<T>(key: string): Promise<T | null> {
 export async function fetchUpdateChannel(): Promise<string | null> {
   if (!inTauriShell()) return null;
   try {
-    const raw = await invoke<ProbeBridgeResponse<string>>("probe_backend", { section: "bootc-branch" });
-    if (!raw.data) return null;
-    return CHANNEL_DISPLAY[raw.data] ?? raw.data;
+    const raw = await invoke<string | null>("current_update_channel");
+    if (!raw) return null;
+    return CHANNEL_DISPLAY[raw] ?? raw;
   } catch {
     return null;
   }
@@ -441,7 +441,8 @@ export function relativeTime(unixSeconds: number): string {
 // different framing: ChannelSection shows the switcher state vs. Update's
 // deployment view.
 export async function fetchChannelRaw(): Promise<string | null> {
-  return fetchProbeSection<string>("bootc-branch");
+  if (!inTauriShell()) return null;
+  try { return await invoke<string | null>("current_update_channel"); } catch { return null; }
 }
 
 // display-detect (capabilities/profiles) was collected but never readable
@@ -527,9 +528,8 @@ export async function runJustRecipe(recipe: string): Promise<string> {
 // Update card view-model — the Rust port of the Qt Update page's
 // "what should this card say" logic. UpdatesSection feeds it the live
 // update_status + collect_availability reads rather than recomputing the
-// copy in TS. (The sibling branch_display_name command stays unwrapped on
-// purpose: CHANNEL_DISPLAY above is the one authority for channel labels,
-// and it's synchronous, which the two fetchers that use it need.)
+// copy in TS. The sibling branch_display_name command stays unwrapped on
+// purpose: CHANNEL_DISPLAY above is the one authority for channel labels.
 export interface UpdateAvailabilityView { card_style: string; icon_text: string; icon_style: string; title: string; body: string; update_btn_visible: boolean; restart_btn_visible: boolean; }
 export async function fetchUpdateAvailabilityView(args: { staged: boolean; check_state: string; flatpak_count: number; check_ts: string; check_ts_details: string; staged_ts?: string | null }): Promise<UpdateAvailabilityView | null> {
   if (!inTauriShell()) return null;

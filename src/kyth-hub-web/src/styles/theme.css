@@ -349,12 +349,12 @@ a:focus-visible {
 .stat-value {
   display: block;
   margin-top: 7px;
-  overflow: hidden;
   font-size: 19px;
   font-weight: 800;
   letter-spacing: -0.4px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .dashboard-card {

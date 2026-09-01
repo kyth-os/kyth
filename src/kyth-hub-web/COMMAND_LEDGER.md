@@ -17,7 +17,7 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
 | Wrapper | Rust command | Payload / selector | Response | Class | Status |
 | --- | --- | --- | --- | --- | --- |
 | `fetchGuardianSnapshot` | `guardian_snapshot` | none | `GuardianBridgeResponse` | read | covered |
-| `fetchUpdateChannel` | `probe_backend` | `section: "bootc-branch"` | `ProbeBridgeResponse<string>` | read | covered |
+| `fetchUpdateChannel` | `current_update_channel` | none; cache with bootc fallback | `string \| null` | read | covered |
 | `fetchGpuName` | `hardware_snapshot` | none | `HardwareBridgeResponse` | read | covered |
 | `fetchStorageFree` | `storage_snapshot` | none | `StorageBridgeResponse` | read | covered |
 | `fetchUserName` | `current_user_name` | none | `string` | read | covered |

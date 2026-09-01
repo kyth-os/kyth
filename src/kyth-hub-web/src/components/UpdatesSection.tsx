@@ -33,12 +33,11 @@ function ago(timestamp: string | undefined): string | null {
 // bootc-branch probe sections the retired Qt Hub's Update page read,
 // through the Tauri probe_backend bridge (see services/liveData.ts).
 //
-// Mount stays on the disk-backed reads plus update_status, which is
-// TTL-bounded. "Check for updates" is the only thing that talks to the
-// registry: collect_availability has a 15s deadline of its own, and its
-// result is handed to update_availability_view — the Rust port of the Qt
-// page's "what should this card say" logic — rather than being re-derived
-// into card copy here.
+// Mount reads the persisted status plus bounded update summaries. The native
+// bridge runs their blocking probes off the webview thread; "Check for
+// updates" is still the explicit registry refresh and its result is handed
+// to update_availability_view — the Rust port of the Qt page's "what should
+// this card say" logic — rather than being re-derived into card copy here.
 export function UpdatesSection({ section }: { section: HubSection }) {
   const [snapshot, setSnapshot] = useState<BootcSnapshot | null>(null);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatusLive | null>(null);
