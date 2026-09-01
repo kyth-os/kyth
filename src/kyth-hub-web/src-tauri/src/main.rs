@@ -123,8 +123,11 @@ fn guardian_snapshot() -> GuardianSnapshotResponse {
 /// Ask the existing Python Guardian service for a fresh check, then let the
 /// frontend re-read the disk-backed snapshot.  The Rust shell does not port
 /// the live probe sweep; Python remains the authority for that behavior.
+#[derive(serde::Serialize)]
+struct GuardianActionLaunch { job: String, state: String, detail: String }
+
 #[tauri::command]
-fn guardian_check(investigate: bool) -> Result<String, String> {
+fn guardian_check(investigate: bool) -> Result<GuardianActionLaunch, String> {
     if !std::path::Path::new("/usr/bin/kyth-guardian").exists() {
         return Err("Guardian service is not installed".to_string());
     }
@@ -155,7 +158,7 @@ fn guardian_check(investigate: bool) -> Result<String, String> {
             .unwrap()
             .insert(job_for_thread, (state.into(), detail));
     });
-    Ok(job)
+    Ok(GuardianActionLaunch { job, state: "running".into(), detail: "Guardian check is running…".into() })
 }
 
 #[tauri::command]
@@ -174,7 +177,7 @@ fn guardian_check_status(job: String) -> InstallStatus {
 }
 
 #[tauri::command]
-fn guardian_control(action: String) -> Result<String, String> {
+fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
     let args: &[&str] = match action.as_str() {
         "enable" => &["enable"],
         "disable" => &["disable"],
@@ -215,7 +218,7 @@ fn guardian_control(action: String) -> Result<String, String> {
             ),
         );
     });
-    Ok(job)
+    Ok(GuardianActionLaunch { job, state: "running".into(), detail: format!("Running Guardian {action}…") })
 }
 
 /// Phase 2: guardian execute_recipe (Repair/Diagnostics mutating)

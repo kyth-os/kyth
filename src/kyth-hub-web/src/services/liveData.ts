@@ -88,8 +88,10 @@ export async function fetchGuardianSnapshot(): Promise<GuardianSnapshot | null> 
     return null;
   }
 }
+interface GuardianActionLaunch { job: string; state: "running"; detail: string; }
+function guardianJob(launch: GuardianActionLaunch): string { if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Guardian action did not start."); return launch.job; }
 export async function runGuardianCheck(investigate = false): Promise<string> {
-  return await invoke<string>("guardian_check", { investigate });
+  return guardianJob(await invoke<GuardianActionLaunch>("guardian_check", { investigate }));
 }
 export async function waitGuardianCheck(job: string): Promise<string> {
   for (let i = 0; i < 180; i += 1) {
@@ -102,7 +104,7 @@ export async function waitGuardianCheck(job: string): Promise<string> {
 }
 export async function runGuardianControl(action: string): Promise<string> {
   if (!confirmUserAction(`Change Guardian setting: ${action}?`)) return "Cancelled.";
-  const job = await invoke<string>("guardian_control", { action });
+  const job = guardianJob(await invoke<GuardianActionLaunch>("guardian_control", { action }));
   return await waitGuardianCheck(job);
 }
 
