@@ -7,6 +7,7 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
+use std::io::Write;
 
 use serde_json::Value;
 
@@ -83,9 +84,22 @@ pub fn write_cache_file(path: &Path, document: &Value) -> Result<(), String> {
     let parent = path.parent().ok_or_else(|| "probe cache path has no parent".to_string())?;
     std::fs::create_dir_all(parent).map_err(|e| format!("could not create probe cache directory: {e}"))?;
     let encoded = serde_json::to_vec(document).map_err(|e| format!("could not encode probe cache: {e}"))?;
+    let lock = path.with_extension(format!("{}.lock", path.extension().and_then(|e| e.to_str()).unwrap_or("cache")));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let _guard = loop {
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
+            Ok(file) => break file,
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(error) => return Err(format!("could not acquire probe cache lock: {error}")),
+        }
+    };
     let temporary = parent.join(format!(".probe-cache-{}", std::process::id()));
-    std::fs::write(&temporary, encoded).map_err(|e| format!("could not write probe cache: {e}"))?;
-    std::fs::rename(&temporary, path).map_err(|e| { let _ = std::fs::remove_file(&temporary); format!("could not replace probe cache: {e}") })
+    let mut file = std::fs::File::create(&temporary).map_err(|e| format!("could not write probe cache: {e}"))?;
+    file.write_all(&encoded).and_then(|_| file.sync_all()).map_err(|e| format!("could not flush probe cache: {e}"))?;
+    drop(file);
+    let result = std::fs::rename(&temporary, path).map_err(|e| { let _ = std::fs::remove_file(&temporary); format!("could not replace probe cache: {e}") });
+    let _ = std::fs::remove_file(&lock);
+    result
 }
 
 fn now_unix() -> f64 {
