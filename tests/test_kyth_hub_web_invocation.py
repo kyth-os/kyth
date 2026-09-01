@@ -131,24 +131,154 @@ class JustInvocationTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^\s*sudo\b")
 
 
+SHARED_RS_SOURCE = "\n".join(
+    path.read_text(encoding="utf-8") for path in sorted(SHARED_RS.rglob("*.rs"))
+)
+ALL_RUST_SOURCE = MAIN_RS + "\n" + SHARED_RS_SOURCE
+
+TS_PRIMITIVES = {"string", "boolean", "number", "void", "null", "undefined", "any"}
+
+# Commands whose Rust return type has no struct to check fields against —
+# each needs a one-line reason, and test_bridge_exemptions_are_still_real
+# below checks the command itself hasn't been renamed out from under it.
+UNTYPED_BRIDGE_RETURNS = {
+    "ntfs_devices": "returns Vec<serde_json::Value> — an intentionally untyped JSON passthrough",
+}
+
+
+def _balanced_body(text: str, open_brace_index: int) -> str:
+    """`text[open_brace_index]` must be '{'. Returns the substring strictly
+    between it and its matching close brace, honoring nesting — a plain
+    non-greedy `\\{(.*?)\\}` regex breaks on the first nested `{...}` (e.g.
+    StarterPack's `apps: { id: string; ... }[]` field)."""
+    assert text[open_brace_index] == "{"
+    depth = 0
+    for index in range(open_brace_index, len(text)):
+        if text[index] == "{":
+            depth += 1
+        elif text[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[open_brace_index + 1 : index]
+    raise ValueError("unbalanced braces")
+
+
+def _find_balanced_body(text: str, header_pattern: str) -> str | None:
+    """`header_pattern` must match up to (not including) the opening '{'."""
+    match = re.search(header_pattern, text)
+    if match is None:
+        return None
+    return _balanced_body(text, match.end())
+
+
+def _ts_candidate_type(raw: str) -> str | None:
+    """A bare interface/type name this check can look up, or None for a
+    primitive, union, or inline object literal type — those have no single
+    named interface to check field coverage against, so they're out of
+    scope here rather than silently mis-flagged."""
+    raw = re.sub(r"\s*\|\s*null$", "", raw.strip())
+    raw = re.sub(r"\[\]$", "", raw)
+    if re.fullmatch(r"[A-Za-z_]\w*", raw) and raw not in TS_PRIMITIVES:
+        return raw
+    return None
+
+
+def _rust_struct_short_name(return_type: str) -> str:
+    """Strips Result<_, String>/Vec<_>/Option<_>/crate:: wrappers down to a
+    bare struct name, then the last `::` segment of any qualified path
+    (kyth_shared::system::foo::Bar -> Bar)."""
+    return_type = return_type.strip().rstrip(";").strip()
+    changed = True
+    while changed:
+        changed = False
+        for pattern in (r"Result<\s*(.+?)\s*,\s*String\s*>", r"Vec<\s*(.+?)\s*>", r"Option<\s*(.+?)\s*>", r"crate::(.+)"):
+            match = re.fullmatch(pattern, return_type)
+            if match:
+                return_type = match.group(1)
+                changed = True
+                break
+    return return_type.split("::")[-1]
+
+
+def _ts_top_level_field_names(body: str) -> set[str]:
+    # Strip nested `{...}` groups first so a nested object type's own field
+    # names (StarterPack.apps[].id) aren't mistaken for the outer
+    # interface's fields.
+    previous = None
+    while previous != body:
+        previous = body
+        body = re.sub(r"\{[^{}]*\}", "", body)
+    return set(re.findall(r"(\w+)\s*\??\s*:", body))
+
+
+def _rust_field_names(body: str) -> set[str]:
+    # `#[serde(rename = "...")]` changes the wire name a field actually
+    # serializes as (system::snapshot::SnapshotRow's `row_type` field is
+    # `#[serde(rename = "type")]`, matching the TS `type` field) — checked
+    # against the Rust identifier alone, that one reads as a false gap.
+    names = set()
+    for match in re.finditer(
+        r'(?:#\[serde\([^\]]*rename\s*=\s*"(\w+)"[^\]]*\)\]\s*)?(?:^|[,\n])\s*(?:pub(?:\(crate\))?\s+)?(\w+)\s*:',
+        body,
+    ):
+        names.add(match.group(1) or match.group(2))
+    return names
+
+
 class BridgeFieldTests(unittest.TestCase):
-    # Frontend interface -> the Rust struct that has to serialize it.
-    BRIDGE_TYPES = {"JustRecipe": "JustRecipeResponse", "InstallStatus": "InstallStatus"}
+    """Every `invoke<TsType>("command")` call site in liveData.ts, matched
+    by command name (not by guessing a naming convention between the TS and
+    Rust names — they often don't share one, e.g. `HardwareBridgeResponse`
+    TS vs. `HardwareResponse` Rust) to that command's actual Rust return
+    type, and checked field-for-field. Supersedes a two-pair hardcoded
+    version of this test that only ever covered JustRecipe/InstallStatus —
+    the bug that motivated writing it (JustRecipeResponse silently missing
+    a `params` field liveData.ts declared) could just as easily land in any
+    of the ~40 other bridge types this now covers automatically; a new one
+    needs no enrollment step to be checked, only a documented exemption if
+    it genuinely can't be (UNTYPED_BRIDGE_RETURNS)."""
+
+    def _command_ts_types(self) -> dict[str, str]:
+        found: dict[str, str] = {}
+        for match in re.finditer(r'invoke<([^>]+)>\("([a-zA-Z_]+)"', LIVE_DATA):
+            found.setdefault(match.group(2), match.group(1))
+        return found
 
     def test_bridge_structs_carry_every_field_the_frontend_reads(self):
-        for ts_name, rust_name in self.BRIDGE_TYPES.items():
-            with self.subTest(interface=ts_name):
-                declared = re.search(rf"export interface {ts_name} \{{(.*?)\}}", LIVE_DATA, re.S)
-                self.assertIsNotNone(declared, f"{ts_name} not found in liveData.ts")
-                fields = set(re.findall(r"(\w+)\s*:", declared.group(1)))
-                self.assertTrue(fields)
-                struct = re.search(rf"struct {rust_name} \{{(.*?)\}}", MAIN_RS, re.S)
-                self.assertIsNotNone(struct, f"{rust_name} not found in main.rs")
-                served = set(re.findall(
-                    r"(?:^|[,\n])\s*(?:pub(?:\(crate\))?\s+)?(\w+)\s*:",
-                    struct.group(1),
-                ))
-                self.assertEqual(fields - served, set(), f"{rust_name} never sends these")
+        command_ts_types = self._command_ts_types()
+        self.assertGreater(len(command_ts_types), 80, "invoke<...> extraction broke")
+        checked = 0
+        for command, ts_raw in sorted(command_ts_types.items()):
+            if command in UNTYPED_BRIDGE_RETURNS:
+                continue
+            ts_name = _ts_candidate_type(ts_raw)
+            if ts_name is None:
+                continue  # primitive / union / inline object literal — out of scope
+            with self.subTest(command=command):
+                fn_match = re.search(rf"fn {command}\([^)]*\)\s*(?:->\s*([^{{]+))?{{", MAIN_RS)
+                self.assertIsNotNone(fn_match, f"no Rust fn {command} found")
+                rust_return = (fn_match.group(1) or "()").strip()
+                short_name = _rust_struct_short_name(rust_return)
+                struct_body = _find_balanced_body(ALL_RUST_SOURCE, rf"struct {re.escape(short_name)}\s*")
+                self.assertIsNotNone(
+                    struct_body,
+                    f"{command} returns {rust_return!r} (-> struct {short_name}) but no such struct exists; "
+                    f"add it to UNTYPED_BRIDGE_RETURNS with a reason if this is intentionally untyped",
+                )
+                iface_body = _find_balanced_body(LIVE_DATA, rf"(?:export\s+)?interface\s+{re.escape(ts_name)}(?:<[^>]*>)?\s*")
+                self.assertIsNotNone(iface_body, f"TS interface {ts_name} not found in liveData.ts")
+                ts_fields = _ts_top_level_field_names(iface_body)
+                self.assertTrue(ts_fields, f"{ts_name} has no fields — extraction broke")
+                rust_fields = _rust_field_names(struct_body)
+                missing = ts_fields - rust_fields
+                self.assertEqual(missing, set(), f"struct {short_name} never sends these fields TS {ts_name} reads")
+                checked += 1
+        self.assertGreater(checked, 30, "far fewer bridge types were checkable than expected — did extraction break?")
+
+    def test_bridge_exemptions_are_still_real_commands(self):
+        command_ts_types = self._command_ts_types()
+        for command in UNTYPED_BRIDGE_RETURNS:
+            self.assertIn(command, command_ts_types, f"{command} is exempted but is no longer invoked from liveData.ts")
 
     def test_compatibility_matrix_bridge_is_registered_and_consumed(self):
         # The old Hub's title matrix is image-owned JSON. A typed Tauri
@@ -173,7 +303,11 @@ class BridgeFieldTests(unittest.TestCase):
         app_store = (HUB_WEB / "components" / "AppStoreSection.tsx").read_text(encoding="utf-8")
         for command in ("ujust gamescope -- %command%", "ujust game-hdr -- %command%", "ujust low-latency -- %command%", "ujust scx status"):
             self.assertIn(command, performance)
-        for recipe in ("hdr-per-game", "enable-bpftune", "disable-bpftune", "setup-kyth-dev-box", "ai-dev-status", "ai-dev-setup", "export-kali-apps", "setup-waydroid", "remove-waydroid"):
+        # export-kali-apps used to be a RecipeButton here; the Security tab's
+        # KaliCard now runs the same export through the live kali_export
+        # bridge command instead (see BridgeFieldTests / commands/security.rs),
+        # so it's no longer a static recipe button to check for.
+        for recipe in ("hdr-per-game", "enable-bpftune", "disable-bpftune", "setup-kyth-dev-box", "ai-dev-status", "ai-dev-setup", "setup-waydroid", "remove-waydroid"):
             self.assertIn(f'recipe="{recipe}"', performance + app_store)
 
     def test_network_share_and_vpn_parity_bridges_are_registered(self):
