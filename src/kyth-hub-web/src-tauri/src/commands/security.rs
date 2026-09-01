@@ -20,13 +20,16 @@ use kyth_shared::system::security_container::{
 
 use super::job::{failure_detail, spawn_argv_job, start_job};
 
+#[derive(Serialize)]
+pub(crate) struct SecurityActionLaunch { pub(crate) job: String, pub(crate) state: String, pub(crate) detail: String }
+
 #[tauri::command]
 pub(crate) fn kali_status() -> bool {
     security_container::is_socket_capable_kali_box(DEFAULT_KALI_BOX)
 }
 
 #[tauri::command]
-pub(crate) fn kali_create(tier: String) -> Result<String, String> {
+pub(crate) fn kali_create(tier: String) -> Result<SecurityActionLaunch, String> {
     let parsed = KaliTier::parse(&tier).ok_or_else(|| "unknown Kali tier".to_string())?;
     let argv = security_container::build_kali_create_command(DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE, parsed);
     let job = start_job("kali-create", "Pulling Kali container image…")?;
@@ -43,11 +46,11 @@ pub(crate) fn kali_create(tier: String) -> Result<String, String> {
         Ok(output) => ("failed".to_string(), failure_detail("Kali setup", &output)),
         Err(err) => ("failed".to_string(), format!("Could not start Kali setup: {err}")),
     });
-    Ok(job)
+    Ok(SecurityActionLaunch { job, state: "running".into(), detail: "Pulling Kali container image…".into() })
 }
 
 #[tauri::command]
-pub(crate) fn kali_export() -> Result<String, String> {
+pub(crate) fn kali_export() -> Result<SecurityActionLaunch, String> {
     let argv = security_container::build_kali_export_command(DEFAULT_KALI_BOX);
     let job = start_job("kali-export", "Scanning Kali container for GUI apps…")?;
     spawn_argv_job(job.clone(), argv, Duration::from_secs(300), |result| match result {
@@ -71,11 +74,11 @@ pub(crate) fn kali_export() -> Result<String, String> {
         Ok(output) => ("failed".to_string(), failure_detail("Export", &output)),
         Err(err) => ("failed".to_string(), format!("Could not start export: {err}")),
     });
-    Ok(job)
+    Ok(SecurityActionLaunch { job, state: "running".into(), detail: "Scanning Kali container for GUI apps…".into() })
 }
 
 #[tauri::command]
-pub(crate) fn kali_remove() -> Result<String, String> {
+pub(crate) fn kali_remove() -> Result<SecurityActionLaunch, String> {
     let argv = security_container::build_kali_remove_command(DEFAULT_KALI_BOX);
     let job = start_job("kali-remove", "Stopping and removing Kali box…")?;
     spawn_argv_job(job.clone(), argv, Duration::from_secs(120), |result| match result {
@@ -83,7 +86,7 @@ pub(crate) fn kali_remove() -> Result<String, String> {
         Ok(output) => ("failed".to_string(), failure_detail("Removal", &output)),
         Err(err) => ("failed".to_string(), format!("Could not start removal: {err}")),
     });
-    Ok(job)
+    Ok(SecurityActionLaunch { job, state: "running".into(), detail: "Stopping and removing Kali box…".into() })
 }
 
 #[tauri::command]
@@ -129,9 +132,10 @@ fn validated_sec_tool(flatpak_id: &str) -> Result<&'static security_container::S
 }
 
 #[tauri::command]
-pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<String, String> {
+pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityActionLaunch, String> {
     let tool = validated_sec_tool(&flatpak_id)?;
     let name = tool.name.to_string();
+    let launch_detail = format!("Installing {name}…");
     let argv = vec![
         "bash".to_string(),
         "-c".to_string(),
@@ -145,13 +149,14 @@ pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<String, String
         Ok(output) => ("failed".to_string(), failure_detail("Installation", &output)),
         Err(err) => ("failed".to_string(), format!("Could not start installation: {err}")),
     });
-    Ok(job)
+    Ok(SecurityActionLaunch { job, state: "running".into(), detail: launch_detail })
 }
 
 #[tauri::command]
-pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<String, String> {
+pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActionLaunch, String> {
     let tool = validated_sec_tool(&flatpak_id)?;
     let name = tool.name.to_string();
+    let launch_detail = format!("Uninstalling {name}…");
     let argv = vec!["flatpak".to_string(), "uninstall".to_string(), "-y".to_string(), flatpak_id];
     let job = start_job("sec-uninstall", &format!("Uninstalling {name}…"))?;
     spawn_argv_job(job.clone(), argv, Duration::from_secs(120), move |result| match result {
@@ -159,7 +164,7 @@ pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<String, Stri
         Ok(output) => ("failed".to_string(), failure_detail("Uninstall", &output)),
         Err(err) => ("failed".to_string(), format!("Could not start uninstall: {err}")),
     });
-    Ok(job)
+    Ok(SecurityActionLaunch { job, state: "running".into(), detail: launch_detail })
 }
 
 #[tauri::command]
