@@ -115,6 +115,7 @@ export function confirmUserAction(message: string): boolean {
 }
 
 type PrivilegedPayload = Record<string, string | boolean | number>;
+interface PrivilegedActionLaunch { job: string; state: "running"; detail: string; }
 
 function privilegedActionPrompt(operation: string, payload: PrivilegedPayload): string {
   switch (operation) {
@@ -141,7 +142,9 @@ function privilegedActionPrompt(operation: string, payload: PrivilegedPayload): 
 
 export async function runPrivilegedAction(operation: string, payload: PrivilegedPayload = {}): Promise<string> {
   if (!confirmUserAction(privilegedActionPrompt(operation, payload))) return "Cancelled.";
-  const job = await invoke<string>("privileged_action", { operation, payload });
+  const launch = await invoke<PrivilegedActionLaunch>("privileged_action", { operation, payload });
+  if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Privileged operation did not start.");
+  const job = launch.job;
   for (let i = 0; i < 1800; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await invoke<InstallStatus>("privileged_action_status", { job });

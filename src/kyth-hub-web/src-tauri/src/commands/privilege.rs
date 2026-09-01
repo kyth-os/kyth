@@ -3,6 +3,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::{Mutex, OnceLock};
 
+use serde::Serialize;
 use serde_json::{json, Value};
 
 static JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
@@ -192,7 +193,7 @@ fn valid_block_device(value: &str) -> bool {
 }
 
 #[tauri::command]
-pub(crate) fn privileged_action(operation: String, payload: Value) -> Result<String, String> {
+pub(crate) fn privileged_action(operation: String, payload: Value) -> Result<PrivilegedActionLaunch, String> {
     let request = validated_request(&operation, &payload)?;
     let job = format!(
         "privileged-{}",
@@ -219,8 +220,11 @@ pub(crate) fn privileged_action(operation: String, payload: Value) -> Result<Str
             store.insert(job_for_thread, (state.into(), detail));
         }
     });
-    Ok(job)
+    Ok(PrivilegedActionLaunch { job, state: "running".into(), detail: format!("Running {operation}…") })
 }
+
+#[derive(Serialize)]
+pub(crate) struct PrivilegedActionLaunch { pub(crate) job: String, pub(crate) state: String, pub(crate) detail: String }
 
 pub(crate) fn send_request(request: Value) -> Result<String, String> {
     let mut stream = UnixStream::connect("/run/kyth/privileged.sock")
