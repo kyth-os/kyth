@@ -283,11 +283,6 @@ fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
     SmbBrowseResponse { ok, detail }
 }
 #[tauri::command]
-fn smb_mount_command(share: String) -> Vec<String> {
-    kyth_shared::system::smb::smb_mount_command(&share)
-}
-
-#[tauri::command]
 fn smb_mount(share: String) -> Result<String, String> {
     let share = share.trim();
     if share.len() > 2048
@@ -442,10 +437,6 @@ fn snapshot_timeline(limit: Option<usize>) -> Vec<kyth_shared::system::snapshot:
 }
 
 #[tauri::command]
-fn gaming_slice_command(argv: Vec<String>, use_user: Option<bool>) -> Vec<String> {
-    kyth_shared::system::gaming_slice::gaming_slice_command(&argv, use_user)
-}
-#[tauri::command]
 fn is_gaming_slice_available() -> bool {
     kyth_shared::system::gaming_slice::is_gaming_slice_available()
 }
@@ -460,11 +451,6 @@ fn cloud_oauth_status() -> CloudOauthResponse {
     let (ok, detail) = kyth_shared::system::cloud_oauth::cloud_oauth_status();
     CloudOauthResponse { ok, detail }
 }
-#[tauri::command]
-fn rclone_oauth_command(remote: String) -> Vec<String> {
-    kyth_shared::system::cloud_oauth::rclone_oauth_command(&remote)
-}
-
 /// The legacy Cloud Storage page owns OAuth tokens and rclone execution.
 /// The Hub may safely surface this *non-secret* sync metadata so users can
 /// see which local folders are connected without opening the legacy page.
@@ -561,11 +547,6 @@ fn open_network_shares_app() -> Result<String, String> {
 fn ipp_discover() -> Vec<String> {
     kyth_shared::system::printing::ipp_discover()
 }
-#[tauri::command]
-fn printer_setup_command() -> Vec<String> {
-    kyth_shared::system::printing::printer_setup_command()
-}
-
 #[derive(serde::Serialize)]
 struct BtrfsHealthResponse {
     status: String,
@@ -646,11 +627,6 @@ struct NetworkIdentityResponse {
     smb_mounts: i32,
     cloud_providers: Vec<String>,
     detail: String,
-}
-
-#[tauri::command]
-fn rollback_command() -> Vec<String> {
-    kyth_shared::system::updates_unified::rollback_command()
 }
 
 #[tauri::command]
@@ -940,11 +916,6 @@ fn firmware_updates_count() -> i32 {
     kyth_shared::system::firmware::check_firmware_updates(20)
 }
 #[tauri::command]
-fn firmware_devices_command() -> Vec<String> {
-    kyth_shared::system::firmware::firmware_devices_command()
-}
-
-#[tauri::command]
 fn plasma_presets() -> Vec<String> {
     kyth_shared::system::plasma_hdr::available_presets()
 }
@@ -1133,7 +1104,6 @@ fn main() {
             mesa_version,
             mesa_overlay_dry_run,
             smb_browse,
-            smb_mount_command,
             smb_mount,
             smb_configured_shares,
             smb_save_configured_share,
@@ -1141,16 +1111,13 @@ fn main() {
             memory_pressure,
             snapshot_count,
             snapshot_timeline,
-            gaming_slice_command,
             is_gaming_slice_available,
             cloud_oauth_status,
-            rclone_oauth_command,
             cloud_sync_remotes,
             open_cloud_storage_app,
             open_move_files_app,
             open_network_shares_app,
             ipp_discover,
-            printer_setup_command,
             btrfs_health,
             loaded_kernel_modules,
             pci_devices_by_class,
@@ -1158,7 +1125,6 @@ fn main() {
             hardware_view_summary,
             network_identity,
             commands::updates::pending_updates_summary,
-            rollback_command,
             available_audio_presets,
             apply_pipewire_quantum,
             deployment_history,
@@ -1168,7 +1134,6 @@ fn main() {
             strip_ansi,
             disk_write_bytes,
             firmware_updates_count,
-            firmware_devices_command,
             plasma_presets,
             apply_plasma_preset,
             amd64_manifest_entry,
@@ -1200,13 +1165,10 @@ fn main() {
             commands::gaming::gaming_job_status,
             commands::gaming::fix_discord_screenshare,
             commands::gaming::fix_obs_pipewire,
-            commands::gaming::prefix_reset_hint,
-            commands::gaming::support_snapshot_command,
             commands::gaming::open_game_folder,
             commands::gaming::gaming_perf_status,
             commands::gaming::scx_status,
             commands::gaming::scx_set_scheduler,
-            commands::gaming::profile_launch_option,
             commands::gaming::per_game_profile,
             commands::gaming::save_per_game_profile,
             commands::updates::apply_staged,

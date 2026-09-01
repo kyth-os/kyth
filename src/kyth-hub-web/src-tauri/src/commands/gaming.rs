@@ -113,16 +113,6 @@ pub(crate) fn fix_obs_pipewire() -> Result<String, String> {
     run_capture_fix("OBS capture repair", gaming_tools::obs_pipewire_fix_command())
 }
 
-#[tauri::command]
-pub(crate) fn prefix_reset_hint() -> String {
-    gaming_tools::prefix_reset_hint().to_string()
-}
-
-#[tauri::command]
-pub(crate) fn support_snapshot_command() -> String {
-    gaming_tools::support_snapshot_command().to_string()
-}
-
 /// Opens one of the two well-known game-data folders in the desktop file
 /// manager. `key` is validated against `game_folder_path`'s fixed set —
 /// never an arbitrary caller-supplied path.
@@ -188,17 +178,6 @@ pub(crate) fn scx_set_scheduler(scheduler: String) -> Result<String, String> {
         Err(err) => ("failed".to_string(), format!("Could not start sched-ext update: {err}")),
     });
     Ok(job)
-}
-
-#[tauri::command]
-pub(crate) fn profile_launch_option(goal: String, fps: Option<String>, hdr: bool) -> Result<String, String> {
-    let goal = ProfileGoal::parse(&goal).ok_or_else(|| "unknown goal".to_string())?;
-    if let Some(fps) = &fps {
-        if !fps.is_empty() && (fps.len() > 4 || !fps.chars().all(|c| c.is_ascii_digit())) {
-            return Err("fps must be a short numeric string".to_string());
-        }
-    }
-    Ok(gaming_perf::build_profile_launch_option(goal, fps.as_deref(), hdr))
 }
 
 fn valid_appid(appid: &str) -> bool {

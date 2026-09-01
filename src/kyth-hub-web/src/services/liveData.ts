@@ -635,11 +635,6 @@ export async function fetchSnapshotTimeline(limit = 20): Promise<SnapshotRow[] |
   try { return await invoke<SnapshotRow[]>("snapshot_timeline", { limit }); } catch { return null; }
 }
 
-// Gaming slice — per-game cgroup wrapper
-export async function fetchGamingSliceCommand(argv: string[], useUser?: boolean | null): Promise<string[] | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string[]>("gaming_slice_command", { argv, useUser: useUser ?? null }); } catch { return null; }
-}
 export async function fetchGamingSliceAvailable(): Promise<boolean | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<boolean>("is_gaming_slice_available"); } catch { return null; }
@@ -922,40 +917,6 @@ export async function invokeGuardianExecute(recipeId: string): Promise<string> {
   return await invoke<string>("guardian_execute_recipe", { recipeId });
 }
 
-// ---------------------------------------------------------------------
-// Command-text reads. Several kyth-shared helpers return argv rather than
-// running anything (smb_mount_command, rclone_oauth_command, ...). The Hub
-// shows those as copyable one-liners instead of spawning them: a generic
-// "run this argv" bridge command would be a new privilege surface, and the
-// argv these produce need a terminal the user can see anyway. Where a
-// `just` recipe covers the same ground, the section pairs the text with a
-// runJustRecipe button — that path already exists and prompts for its own
-// privilege.
-// ---------------------------------------------------------------------
-
-/** Joins an argv into something safe to paste into a shell. */
-export function commandText(argv: string[] | null): string | null {
-  if (!argv || argv.length === 0) return null;
-  return argv.map((part) => (/^[\w.:/=@-]+$/.test(part) ? part : JSON.stringify(part))).join(" ");
-}
-
-export async function fetchRcloneOauthCommand(remote: string): Promise<string[] | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string[]>("rclone_oauth_command", { remote }); } catch { return null; }
-}
-export async function fetchPrinterSetupCommand(): Promise<string[] | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string[]>("printer_setup_command"); } catch { return null; }
-}
-export async function fetchRollbackCommand(): Promise<string[] | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string[]>("rollback_command"); } catch { return null; }
-}
-export async function fetchFirmwareDevicesCommand(): Promise<string[] | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string[]>("firmware_devices_command"); } catch { return null; }
-}
-
 // Plasma HDR/VRR presets — apply_plasma_preset is the mutating half of the
 // pair fetchPlasmaPresets lists (same shape as the PipeWire pair above).
 export async function applyPlasmaPreset(preset: string, dryRun = false): Promise<{ ok: boolean; detail: string } | null> {
@@ -1122,14 +1083,6 @@ export async function launchGamingTool(flatpakId: string): Promise<string> { ret
 
 export async function fixDiscordScreenshare(): Promise<string> { return await invoke<string>("fix_discord_screenshare"); }
 export async function fixObsPipewire(): Promise<string> { return await invoke<string>("fix_obs_pipewire"); }
-export async function fetchPrefixResetHint(): Promise<string | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string>("prefix_reset_hint"); } catch { return null; }
-}
-export async function fetchSupportSnapshotCommand(): Promise<string | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string>("support_snapshot_command"); } catch { return null; }
-}
 export async function openGameFolder(key: "compatdata" | "shadercache"): Promise<string> { return await invoke<string>("open_game_folder", { key }); }
 
 // ---------------------------------------------------------------------
@@ -1157,11 +1110,6 @@ export async function setScxScheduler(scheduler: "rusty" | "stop"): Promise<stri
     throw new Error(state.detail);
   }
   throw new Error("Still running; check back in a moment.");
-}
-
-export async function fetchProfileLaunchOption(goal: string, fps: string, hdr: boolean): Promise<string | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<string>("profile_launch_option", { goal, fps: fps || null, hdr }); } catch { return null; }
 }
 
 export interface GameProfile { profile: string; hdr: boolean }
