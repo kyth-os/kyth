@@ -80,3 +80,13 @@ The Security tab's Kali distrobox lifecycle (`kali_status`, `kali_create`,
 commands backed by `kyth-shared-rs::system::security_container`'s fixed
 command templates and 2-tool catalog — never a caller-supplied Flatpak id or
 container name.
+
+The Gaming tab's tool grid (`gaming_tools`, `gaming_tool_install`/
+`_uninstall`/`_launch`) follows the same fixed-catalog pattern against
+`kyth-shared-rs::system::gaming_tools`'s 14-tool list. `fix_discord_screenshare`
+and `fix_obs_pipewire` run bounded, `--user`-scoped `flatpak override`
+argv synchronously (no sudo, no job needed). `open_game_folder` validates
+its `key` against a fixed 2-entry set (`compatdata`, `shadercache`) rather
+than accepting a caller-supplied path. `security_job_status` and
+`gaming_job_status` both poll the same shared job store in
+`commands/job.rs`.

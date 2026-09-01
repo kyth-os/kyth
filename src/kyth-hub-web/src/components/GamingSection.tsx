@@ -8,13 +8,123 @@ import {
   fetchGamingSliceCommand,
   fetchProtonDbMany,
   fetchAntiCheatTable,
+  fetchGamingTools,
+  installGamingTool,
+  uninstallGamingTool,
+  launchGamingTool,
+  fixDiscordScreenshare,
+  fixObsPipewire,
+  fetchPrefixResetHint,
+  fetchSupportSnapshotCommand,
+  openGameFolder,
   type AntiCheatEntry,
   type ProtonDbResult,
   type AuditCache,
   type LauncherEntry,
+  type GamingTool,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionStatus, CommandLine, RecipeButton, useSectionAction } from "./SectionActions";
+
+type SectionRun = (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
+const gamingBtnStyle = { padding: "6px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 } as const;
+
+// Install/launch/uninstall grid for the curated Flatpak gaming tools.
+// Mirrors page_gaming_tools_grid.py's GAMING_TOOLS tiles.
+function GamingToolGrid({ busy, run }: { busy: string | null; run: SectionRun }) {
+  const [tools, setTools] = useState<GamingTool[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchGamingTools().then((value) => { if (!cancelled) setTools(value); });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function refresh(): Promise<void> {
+    const fresh = await fetchGamingTools();
+    if (fresh) setTools(fresh);
+  }
+
+  if (!tools || tools.length === 0) return null;
+  return (
+    <div style={{ marginTop: 22 }}>
+      <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Gaming tools</p>
+      <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>Install, launch, or remove launchers and capture tools — status stays live as you go.</p>
+      <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
+        {tools.map((tool) => (
+          <div key={tool.flatpak} style={{ padding: "10px 12px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <p style={{ fontWeight: 700, fontSize: 13, margin: 0, flex: 1 }}>{tool.name}</p>
+              {tool.installed ? (
+                <>
+                  <button disabled={busy !== null} onClick={() => run(`gt-launch-${tool.flatpak}`, `Launching ${tool.name}…`, () => launchGamingTool(tool.flatpak))} style={gamingBtnStyle}>Launch</button>
+                  <button disabled={busy !== null} onClick={() => run(`gt-uninstall-${tool.flatpak}`, `Uninstalling ${tool.name}…`, async () => { const result = await uninstallGamingTool(tool.flatpak); await refresh(); return result; })} style={gamingBtnStyle}>Uninstall</button>
+                </>
+              ) : (
+                <button disabled={busy !== null} onClick={() => run(`gt-install-${tool.flatpak}`, `Installing ${tool.name}…`, async () => { const result = await installGamingTool(tool.flatpak); await refresh(); return result; })} style={gamingBtnStyle}>Install</button>
+              )}
+            </div>
+            <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>{tool.desc}</p>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Copyable safe launch-option tests, plus one-shot Discord/OBS capture
+// permission fixes. Mirrors page_gaming_fixes.py's first-failure playbook.
+function FirstFailurePlaybook({ busy, run }: { busy: string | null; run: SectionRun }) {
+  const launchOptions: [string, string][] = [
+    ["Capture Proton log", "PROTON_LOG=1 %command%"],
+    ["Disable NTSYNC", "PROTON_NO_NTSYNC=1 %command%"],
+    ["Disable esync", "PROTON_NO_ESYNC=1 %command%"],
+    ["Disable fsync", "PROTON_NO_FSYNC=1 %command%"],
+    ["Force Vulkan HUD", "MANGOHUD=1 %command%"],
+    ["Launcher retry", "PROTON_LOG=1 PROTON_NO_NTSYNC=1 %command%"],
+  ];
+  return (
+    <div style={{ marginTop: 22 }}>
+      <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Game will not launch</p>
+      <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>
+        Start simple: try a clean Proton runner, collect a log, then disable one sync path at a time. These launch options are safe per-game tests.
+      </p>
+      {launchOptions.map(([label, opt]) => <CommandLine key={label} label={label} command={opt} />)}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
+        <a className="action-button" href="https://www.protondb.com" target="_blank" rel="noreferrer">Open ProtonDB</a>
+        <a className="action-button" href="https://areweanticheatyet.com" target="_blank" rel="noreferrer">Open Anti-Cheat Status</a>
+        <button disabled={busy !== null} onClick={() => run("fix-discord", "Applying Discord screen share repair…", fixDiscordScreenshare)} style={gamingBtnStyle}>Fix Discord screen share</button>
+        <button disabled={busy !== null} onClick={() => run("fix-obs", "Applying OBS capture repair…", fixObsPipewire)} style={gamingBtnStyle}>Fix OBS capture</button>
+      </div>
+    </div>
+  );
+}
+
+// Fast non-destructive support actions. Mirrors page_gaming_fixes.py's
+// "Fix My Game" card.
+function FixMyGame({ busy, run }: { busy: string | null; run: SectionRun }) {
+  const [resetHint, setResetHint] = useState<string | null>(null);
+  const [snapshotCmd, setSnapshotCmd] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([fetchPrefixResetHint(), fetchSupportSnapshotCommand()]).then(([hint, snap]) => {
+      if (!cancelled) { setResetHint(hint); setSnapshotCmd(snap); }
+    });
+    return () => { cancelled = true; };
+  }, []);
+  return (
+    <div style={{ marginTop: 22 }}>
+      <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Fix my game</p>
+      <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Fast non-destructive support actions: open the folders players need, copy safe launch tests, and generate diagnostics.</p>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+        <button disabled={busy !== null} onClick={() => run("open-compatdata", "Opening compatdata…", () => openGameFolder("compatdata"))} style={gamingBtnStyle}>Open Steam compatdata</button>
+        <button disabled={busy !== null} onClick={() => run("open-shadercache", "Opening shadercache…", () => openGameFolder("shadercache"))} style={gamingBtnStyle}>Open shadercache</button>
+      </div>
+      <CommandLine label="Reset a Proton prefix (safe — backs up, doesn't delete)" command={resetHint} />
+      <CommandLine label="Support snapshot" command={snapshotCmd} />
+    </div>
+  );
+}
 
 // "Play > Gaming" — audit master profile + live launcher library scan.
 // Previously only audit pills; now also shows which launchers are installed
@@ -143,6 +253,9 @@ export function GamingSection({ section }: { section: HubSection }) {
             {[...fixRecipes, ...toolRecipes].map(([recipe, label]) => <RecipeButton key={recipe} recipe={recipe} label={label} busy={busy} run={run} />)}
           </div>
         </div>
+        <GamingToolGrid busy={busy} run={run} />
+        <FirstFailurePlaybook busy={busy} run={run} />
+        <FixMyGame busy={busy} run={run} />
         <ActionStatus status={status} />
       </div>
     </LiveSectionCard>

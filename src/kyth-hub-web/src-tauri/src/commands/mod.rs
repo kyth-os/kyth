@@ -5,6 +5,8 @@
 //! command between modules must not change its Tauri command name.
 
 pub(crate) mod dashboard;
+pub(crate) mod gaming;
+pub(crate) mod job;
 pub(crate) mod privilege;
 pub(crate) mod process;
 pub(crate) mod security;

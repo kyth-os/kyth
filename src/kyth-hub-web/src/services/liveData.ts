@@ -1061,6 +1061,53 @@ export async function uninstallSecHostTool(flatpakId: string): Promise<string> {
   return await pollSecurityJob(job, 60);
 }
 export async function launchSecHostTool(flatpakId: string): Promise<string> { return await invoke<string>("sec_host_tool_launch", { flatpakId }); }
+
+// ---------------------------------------------------------------------
+// Gaming tab: the install/launch/uninstall tool grid, the two one-shot
+// Flatpak permission fixes (Discord screen share, OBS PipeWire capture),
+// and the first-failure playbook / Fix My Game folder shortcuts. Mirrors
+// page_gaming_tools_grid.py / page_gaming_fixes.py.
+// ---------------------------------------------------------------------
+
+export interface GamingTool { flatpak: string; name: string; desc: string; installed: boolean }
+export async function fetchGamingTools(): Promise<GamingTool[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<GamingTool[]>("gaming_tools"); } catch { return null; }
+}
+
+async function pollGamingJob(job: string, maxIterations: number): Promise<string> {
+  for (let i = 0; i < maxIterations; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 3000));
+    const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
+    if (!state || state.state === "running") continue;
+    if (state.state === "complete") return state.detail;
+    throw new Error(state.detail);
+  }
+  throw new Error("Still running; check back in a moment.");
+}
+
+export async function installGamingTool(flatpakId: string): Promise<string> {
+  const job = await invoke<string>("gaming_tool_install", { flatpakId });
+  return await pollGamingJob(job, 240); // up to 12 minutes
+}
+export async function uninstallGamingTool(flatpakId: string): Promise<string> {
+  if (!confirmUserAction("Remove this tool?")) return "Cancelled.";
+  const job = await invoke<string>("gaming_tool_uninstall", { flatpakId });
+  return await pollGamingJob(job, 60);
+}
+export async function launchGamingTool(flatpakId: string): Promise<string> { return await invoke<string>("gaming_tool_launch", { flatpakId }); }
+
+export async function fixDiscordScreenshare(): Promise<string> { return await invoke<string>("fix_discord_screenshare"); }
+export async function fixObsPipewire(): Promise<string> { return await invoke<string>("fix_obs_pipewire"); }
+export async function fetchPrefixResetHint(): Promise<string | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string>("prefix_reset_hint"); } catch { return null; }
+}
+export async function fetchSupportSnapshotCommand(): Promise<string | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string>("support_snapshot_command"); } catch { return null; }
+}
+export async function openGameFolder(key: "compatdata" | "shadercache"): Promise<string> { return await invoke<string>("open_game_folder", { key }); }
 export interface ProtonDbResult { app_id: string; tier: string; detail: string }
 export interface AntiCheatEntry { game: string; status: string; detail: string }
 export async function fetchProtonDbMany(appIds: string[]): Promise<ProtonDbResult[] | null> {

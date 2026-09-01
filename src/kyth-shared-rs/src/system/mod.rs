@@ -42,6 +42,7 @@ pub mod hub_snapshot;
 pub mod gaming_library;
 pub mod software_catalog;
 pub mod security_container;
+pub mod gaming_tools;
 pub mod gaming_compat;
 pub mod boot_health;
 pub mod runtime_output;

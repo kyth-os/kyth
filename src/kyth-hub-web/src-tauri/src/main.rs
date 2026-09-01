@@ -1173,7 +1173,17 @@ fn main() {
             commands::security::sec_host_tools,
             commands::security::sec_host_tool_install,
             commands::security::sec_host_tool_uninstall,
-            commands::security::sec_host_tool_launch
+            commands::security::sec_host_tool_launch,
+            commands::gaming::gaming_tools,
+            commands::gaming::gaming_tool_install,
+            commands::gaming::gaming_tool_uninstall,
+            commands::gaming::gaming_tool_launch,
+            commands::gaming::gaming_job_status,
+            commands::gaming::fix_discord_screenshare,
+            commands::gaming::fix_obs_pipewire,
+            commands::gaming::prefix_reset_hint,
+            commands::gaming::support_snapshot_command,
+            commands::gaming::open_game_folder
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

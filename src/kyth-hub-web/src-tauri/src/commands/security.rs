@@ -9,9 +9,7 @@
 //! `security_container`'s module doc for why the Python progress-bar
 //! parser wasn't ported.
 
-use std::collections::HashMap;
-use std::process::{Command, Output};
-use std::sync::{Mutex, OnceLock};
+use std::process::Command;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -20,77 +18,7 @@ use kyth_shared::system::security_container::{
     self, KaliTier, DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE,
 };
 
-static SECURITY_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
-
-fn security_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
-    SECURITY_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn new_job_id(prefix: &str) -> String {
-    format!(
-        "{prefix}-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    )
-}
-
-fn start_job(prefix: &str, pending: &str) -> Result<String, String> {
-    let job = new_job_id(prefix);
-    security_jobs()
-        .lock()
-        .map_err(|_| "security job store is unavailable".to_string())?
-        .insert(job.clone(), ("running".into(), pending.to_string()));
-    Ok(job)
-}
-
-fn finish_job(job: String, state: &str, detail: String) {
-    if let Ok(mut store) = security_jobs().lock() {
-        store.insert(job, (state.to_string(), detail));
-    }
-}
-
-/// Same truncation/direction convention as `commands::updates::just_output_detail`:
-/// keep the tail of combined stdout+stderr, since that's where the actual
-/// error usually is in apt/distrobox output.
-fn failure_detail(action: &str, output: &Output) -> String {
-    let mut text = String::from_utf8_lossy(&output.stdout).to_string();
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    if !stderr.trim().is_empty() {
-        if !text.is_empty() {
-            text.push('\n');
-        }
-        text.push_str(&stderr);
-    }
-    let text = kyth_shared::system::process::strip_ansi(text.trim());
-    let tail: String = text.chars().rev().take(500).collect::<String>().chars().rev().collect();
-    if tail.trim().is_empty() {
-        match output.status.code() {
-            Some(code) => format!("{action} failed (exit {code})."),
-            None => format!("{action} stopped before it could complete."),
-        }
-    } else {
-        format!("{action} failed — {}", tail.trim())
-    }
-}
-
-fn askpass_env(command: &mut Command) {
-    if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
-        command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
-    }
-}
-
-fn spawn_argv_job(job: String, argv: Vec<String>, timeout: Duration, on_done: impl FnOnce(Result<Output, std::io::Error>) -> (String, String) + Send + 'static) {
-    std::thread::spawn(move || {
-        let mut command = Command::new(&argv[0]);
-        command.args(&argv[1..]);
-        askpass_env(&mut command);
-        let result = kyth_shared::system::process::run_bounded_command(command, timeout);
-        let (state, detail) = on_done(result);
-        finish_job(job, &state, detail);
-    });
-}
+use super::job::{failure_detail, spawn_argv_job, start_job};
 
 #[tauri::command]
 pub(crate) fn kali_status() -> bool {
@@ -172,12 +100,7 @@ pub(crate) fn kali_enter_terminal() -> Result<String, String> {
 
 #[tauri::command]
 pub(crate) fn security_job_status(job: String) -> crate::InstallStatus {
-    let (state, detail) = security_jobs()
-        .lock()
-        .ok()
-        .and_then(|store| store.get(&job).cloned())
-        .unwrap_or(("unknown".into(), "Job not found.".into()));
-    crate::InstallStatus { id: job, state, detail }
+    super::job::job_status(job)
 }
 
 #[derive(Serialize)]
