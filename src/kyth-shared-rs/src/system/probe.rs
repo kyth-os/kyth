@@ -11,6 +11,11 @@ use std::io::Write;
 
 use serde_json::Value;
 
+struct ProbeCacheLock(PathBuf);
+impl Drop for ProbeCacheLock {
+    fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
+}
+
 /// Same table as `probe.py`'s `DISK_TTL` — how many seconds old a cached
 /// section may be before `read_section` refuses to return it. Keep this in
 /// sync with `probe.py`'s copy by hand; that file is still the source of
@@ -88,7 +93,7 @@ pub fn write_cache_file(path: &Path, document: &Value) -> Result<(), String> {
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     let _guard = loop {
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
-            Ok(file) => break file,
+            Ok(_) => break ProbeCacheLock(lock.clone()),
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
             Err(error) => return Err(format!("could not acquire probe cache lock: {error}")),
         }
@@ -97,9 +102,17 @@ pub fn write_cache_file(path: &Path, document: &Value) -> Result<(), String> {
     let mut file = std::fs::File::create(&temporary).map_err(|e| format!("could not write probe cache: {e}"))?;
     file.write_all(&encoded).and_then(|_| file.sync_all()).map_err(|e| format!("could not flush probe cache: {e}"))?;
     drop(file);
-    let result = std::fs::rename(&temporary, path).map_err(|e| { let _ = std::fs::remove_file(&temporary); format!("could not replace probe cache: {e}") });
-    let _ = std::fs::remove_file(&lock);
-    result
+    std::fs::rename(&temporary, path).map_err(|e| { let _ = std::fs::remove_file(&temporary); format!("could not replace probe cache: {e}") })
+}
+
+/// Merge freshly collected values into the version-2 cache document.
+pub fn update_sections(path: &Path, sections: &serde_json::Map<String, Value>, updated_at: f64) -> Result<(), String> {
+    let mut document = load_cache_file(path).unwrap_or_else(|| serde_json::json!({"version": 2, "sections": {}}));
+    let store = document.get_mut("sections").and_then(Value::as_object_mut).ok_or_else(|| "invalid probe cache sections".to_string())?;
+    for (key, data) in sections { store.insert(key.clone(), serde_json::json!({"ts": updated_at, "data": data})); }
+    document["version"] = Value::from(2);
+    document["generated_at"] = Value::from(updated_at);
+    write_cache_file(path, &document)
 }
 
 fn now_unix() -> f64 {
@@ -267,5 +280,15 @@ mod tests {
         let document = json!({"sections":{"bootc-branch":{"ts":1,"data":"testing"}}});
         write_cache_file(&path, &document).unwrap();
         assert_eq!(load_cache_file(&path), Some(document));
+    }
+
+    #[test]
+    fn updates_sections_in_the_existing_cache_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe-cache.json");
+        let mut sections = serde_json::Map::new();
+        sections.insert("bootc-branch".into(), json!("testing"));
+        update_sections(&path, &sections, 42.0).unwrap();
+        assert_eq!(load_cache_file(&path).unwrap()["sections"]["bootc-branch"], json!({"ts":42.0,"data":"testing"}));
     }
 }
