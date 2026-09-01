@@ -864,7 +864,7 @@ fn installed_flatpaks() -> Vec<kyth_shared::system::software_catalog::InstalledF
 }
 
 #[tauri::command]
-fn uninstall_flatpak(app_id: String) -> Result<String, String> {
+fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     let scope = kyth_shared::system::software_catalog::installed_flatpaks()
         .into_iter()
@@ -916,7 +916,7 @@ fn uninstall_flatpak(app_id: String) -> Result<String, String> {
             .unwrap()
             .insert(job_for_thread, (state.into(), detail));
     });
-    Ok(job)
+    Ok(InstallActionLaunch { job, state: "running".into(), detail: format!("Uninstalling {app_id}…") })
 }
 
 fn privileged_flatpak_uninstall(app_id: &str) -> Result<String, String> {
@@ -956,8 +956,11 @@ pub(crate) struct InstallStatus {
     detail: String,
 }
 
+#[derive(serde::Serialize)]
+pub(crate) struct InstallActionLaunch { job: String, state: String, detail: String }
+
 #[tauri::command]
-fn install_flatpak(app_id: String) -> Result<String, String> {
+fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     let job = format!(
         "flatpak-{}",
@@ -994,7 +997,7 @@ fn install_flatpak(app_id: String) -> Result<String, String> {
             .unwrap()
             .insert(job_for_thread, (state.into(), detail));
     });
-    Ok(job)
+    Ok(InstallActionLaunch { job, state: "running".into(), detail: format!("Installing {app_id}…") })
 }
 
 #[tauri::command]

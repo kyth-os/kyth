@@ -1043,6 +1043,7 @@ export async function fetchAppImages(): Promise<AppImageEntry[] | null> {
 }
 
 export interface InstalledFlatpak { id: string; name: string; version: string; branch: string; arch: string; scope: "user" | "system"; icon_url: string }
+interface InstallActionLaunch { job: string; state: "running"; detail: string; }
 export async function fetchInstalledFlatpaks(): Promise<InstalledFlatpak[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<InstalledFlatpak[]>("installed_flatpaks"); } catch { return null; }
@@ -1055,7 +1056,9 @@ export async function importAppImage(path: string): Promise<string> {
 }
 export async function uninstallFlatpak(id: string): Promise<string> {
   if (!confirmUserAction(`Uninstall ${id}? This removes the application from this system.`)) return "Cancelled.";
-  const job = await invoke<string>("uninstall_flatpak", { appId: id });
+  const launch = await invoke<InstallActionLaunch>("uninstall_flatpak", { appId: id });
+  if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Uninstall did not start.");
+  const job = launch.job;
   for (let i = 0; i < 120; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await fetchInstallStatus(job);
@@ -1066,7 +1069,11 @@ export async function uninstallFlatpak(id: string): Promise<string> {
   throw new Error("Uninstall is still running; refresh Flatpak in a moment.");
 }
 export async function launchAppImage(path: string): Promise<string> { return await invoke<string>("launch_appimage", { path }); }
-export async function installFlatpak(appId: string): Promise<string> { return await invoke<string>("install_flatpak", { appId }); }
+export async function installFlatpak(appId: string): Promise<string> {
+  const launch = await invoke<InstallActionLaunch>("install_flatpak", { appId });
+  if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Install did not start.");
+  return launch.job;
+}
 export async function fetchInstallStatus(id: string): Promise<InstallStatus | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<InstallStatus>("install_status", { job: id }); } catch { return null; }
