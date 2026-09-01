@@ -126,6 +126,13 @@ class BuildAssemblyContracts(unittest.TestCase):
         for hold in ("--exclude='gamescope*'", "--exclude='akmod-*'", "--exclude='kmod-*'"):
             self.assertNotIn(hold, dockerfile)
 
+    def test_hub_web_builder_copies_compile_time_embedded_catalogs(self):
+        """The isolated Hub builder must contain every include_str! asset."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        builder = dockerfile[:dockerfile.index("# Base Image")]
+        self.assertIn("COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json", builder)
+        self.assertIn("COPY src/kyth-welcome /build/kyth-hub-web/kyth-welcome", builder)
+
     def test_fedora_nvidia_devel_tracks_coordinated_latest_kernel(self):
         script = (BUILD_FILES / "scripts/lib/fedora-kernel.sh").read_text(encoding="utf-8")
         upgrade = script.index("dnf5 upgrade -y --refresh")
