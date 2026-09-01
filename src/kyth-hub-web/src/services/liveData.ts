@@ -1162,14 +1162,16 @@ async function pollGamingJob(job: string, maxIterations: number): Promise<string
   }
   throw new Error("Still running; check back in a moment.");
 }
+interface GamingActionLaunch { job: string; state: "running"; detail: string; }
+function gamingJob(launch: GamingActionLaunch): string { if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Gaming action did not start."); return launch.job; }
 
 export async function installGamingTool(flatpakId: string): Promise<string> {
-  const job = await invoke<string>("gaming_tool_install", { flatpakId });
+  const job = gamingJob(await invoke<GamingActionLaunch>("gaming_tool_install", { flatpakId }));
   return await pollGamingJob(job, 240); // up to 12 minutes
 }
 export async function uninstallGamingTool(flatpakId: string): Promise<string> {
   if (!confirmUserAction("Remove this tool?")) return "Cancelled.";
-  const job = await invoke<string>("gaming_tool_uninstall", { flatpakId });
+  const job = gamingJob(await invoke<GamingActionLaunch>("gaming_tool_uninstall", { flatpakId }));
   return await pollGamingJob(job, 60);
 }
 export async function launchGamingTool(flatpakId: string): Promise<string> { return await invoke<string>("gaming_tool_launch", { flatpakId }); }

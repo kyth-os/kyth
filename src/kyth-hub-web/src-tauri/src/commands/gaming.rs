@@ -23,6 +23,8 @@ pub(crate) struct GamingToolResponse {
     desc: String,
     installed: bool,
 }
+#[derive(Serialize)]
+pub(crate) struct GamingActionLaunch { pub(crate) job: String, pub(crate) state: String, pub(crate) detail: String }
 
 #[tauri::command]
 pub(crate) fn gaming_tools() -> Vec<GamingToolResponse> {
@@ -42,9 +44,10 @@ fn validated_gaming_tool(flatpak_id: &str) -> Result<&'static gaming_tools::Gami
 }
 
 #[tauri::command]
-pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<String, String> {
+pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaunch, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
     let name = tool.name.to_string();
+    let launch_detail = format!("Installing {name}…");
     let argv = vec![
         "bash".to_string(),
         "-c".to_string(),
@@ -58,13 +61,14 @@ pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<String, String> 
         Ok(output) => ("failed".to_string(), failure_detail("Installation", &output)),
         Err(err) => ("failed".to_string(), format!("Could not start installation: {err}")),
     });
-    Ok(job)
+    Ok(GamingActionLaunch { job, state: "running".into(), detail: launch_detail })
 }
 
 #[tauri::command]
-pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<String, String> {
+pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<GamingActionLaunch, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
     let name = tool.name.to_string();
+    let launch_detail = format!("Uninstalling {name}…");
     let argv = vec!["flatpak".to_string(), "uninstall".to_string(), "-y".to_string(), flatpak_id];
     let job = start_job("gaming-uninstall", &format!("Uninstalling {name}…"))?;
     spawn_argv_job(job.clone(), argv, Duration::from_secs(120), move |result| match result {
@@ -72,7 +76,7 @@ pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<String, String
         Ok(output) => ("failed".to_string(), failure_detail("Uninstall", &output)),
         Err(err) => ("failed".to_string(), format!("Could not start uninstall: {err}")),
     });
-    Ok(job)
+    Ok(GamingActionLaunch { job, state: "running".into(), detail: launch_detail })
 }
 
 #[tauri::command]
