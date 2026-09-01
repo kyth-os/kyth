@@ -12,4 +12,4 @@ When exposing a Rust backend capability through a desktop UI, use the Tauri/Reac
 - Keep Rust responsible for commands, privileged operations, system state, and data; keep layout, presentation, and interaction composition in React.
 - Do not introduce a separate visual language or default to a new native UI toolkit for a Rust-backed feature.
 - Preserve viewport-safe responsive behavior: content must remain contained and usable at the supported window sizes.
-- Keep Slint available only for explicit recovery/compatibility paths unless the user specifically requests otherwise.
+- The Hub has no Slint shell — Tauri/React is the only Hub UI, and `tests/test_kyth_hub_native_contract.py` guards against a Slint binary or `ui/hub.slint` reappearing. Do not add one back without the user explicitly requesting it.
