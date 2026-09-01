@@ -547,6 +547,8 @@ async function waitJustJob(job: string): Promise<string> {
   throw new Error("This action is still running; check the status here again in a moment.");
 }
 
+export interface UpdateActionLaunch { job: string; state: "running"; detail: string; }
+
 async function waitUpdateJob(job: string): Promise<string> {
   // Upgrade downloads can legitimately take an hour on a slow connection.
   for (let i = 0; i < 7200; i += 1) {
@@ -556,6 +558,11 @@ async function waitUpdateJob(job: string): Promise<string> {
     if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
   }
   throw new Error("The update is still running; refresh the Updates page in a moment.");
+}
+
+async function waitUpdateLaunch(launch: UpdateActionLaunch): Promise<string> {
+  if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Update action did not start.");
+  return await waitUpdateJob(launch.job);
 }
 
 async function runJustJob(recipe: string): Promise<string> {
@@ -835,18 +842,15 @@ export async function fetchUpdateWatcherStatus(): Promise<UpdateWatcherStatus | 
 }
 export async function setUpdateWatcherEnabled(enabled: boolean): Promise<string> {
   if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
-  const job = await invoke<string>("set_update_watcher_enabled", { enabled });
-  return await waitUpdateJob(job);
+  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("set_update_watcher_enabled", { enabled }));
 }
 export async function checkForUpdatesNow(): Promise<string> {
   if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
-  const job = await invoke<string>("check_for_updates_now");
-  return await waitUpdateJob(job);
+  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("check_for_updates_now"));
 }
 export async function deferUpdateWatcher(): Promise<string> {
   if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
-  const job = await invoke<string>("defer_update_watcher");
-  return await waitUpdateJob(job);
+  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("defer_update_watcher"));
 }
 
 // Process helpers — live session + ansi + disk bytes
@@ -962,26 +966,22 @@ export async function fetchUserName(): Promise<string | null> {
 export async function invokeBootcUpgrade(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction("Download and stage the next system update? It will require a reboot to apply.")) return "Cancelled.";
-  const job = await invoke<string>("bootc_upgrade");
-  return await waitUpdateJob(job);
+  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("bootc_upgrade"));
 }
 export async function invokeBootcRollback(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction("Roll back to the previous system deployment? This changes the next boot target.")) return "Cancelled.";
-  const job = await invoke<string>("bootc_rollback");
-  return await waitUpdateJob(job);
+  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("bootc_rollback"));
 }
 export async function invokeApplyStaged(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction("Restart now to apply the staged system update?")) return "Cancelled.";
-  const job = await invoke<string>("apply_staged");
-  return await waitUpdateJob(job);
+  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("apply_staged"));
 }
 export async function invokeBootcSwitchBranch(branch: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction(`Switch the system update channel to ${branch}? This stages a new deployment.`)) return "Cancelled.";
-  const job = await invoke<string>("bootc_switch_branch", { branch });
-  return await waitUpdateJob(job);
+  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("bootc_switch_branch", { branch }));
 }
 export async function invokeGuardianExecute(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");

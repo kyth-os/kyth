@@ -98,7 +98,14 @@ fn start_just_job(recipe: &str, args: &[&str]) -> Result<String, String> {
 /// is always a fixed argv; `just` is intentionally not involved here. The
 /// privileged safety helper remains the root boundary for upgrade policy and
 /// boot-health recording, while Rust owns lifecycle, timeout, and UI output.
-fn start_update_job(operation: &str, argv: Vec<String>, timeout: Duration) -> Result<String, String> {
+#[derive(Serialize)]
+pub(crate) struct UpdateActionLaunch {
+    pub(crate) job: String,
+    pub(crate) state: String,
+    pub(crate) detail: String,
+}
+
+fn start_update_job(operation: &str, argv: Vec<String>, timeout: Duration) -> Result<UpdateActionLaunch, String> {
     kyth_shared::commands::normalize_command(&argv)
         .map_err(|_| "update produced an invalid command".to_string())?;
     let job = format!("update-{}-{}", operation, std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
@@ -141,7 +148,7 @@ fn start_update_job(operation: &str, argv: Vec<String>, timeout: Duration) -> Re
             store.insert(job_for_thread, (state, detail));
         }
     });
-    Ok(job)
+    Ok(UpdateActionLaunch { job, state: "running".into(), detail: format!("{operation} is running…") })
 }
 
 #[tauri::command]
@@ -156,7 +163,7 @@ pub(crate) fn just_run_status(job: String) -> crate::InstallStatus {
 }
 
 #[tauri::command]
-pub(crate) fn bootc_upgrade() -> Result<String, String> {
+pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
     if !std::path::Path::new("/usr/bin/bootc").exists() && !std::path::Path::new("/usr/bin/rpm-ostree").exists() {
         return Err("bootc is not installed on this system.".to_string());
     }
@@ -164,12 +171,12 @@ pub(crate) fn bootc_upgrade() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub(crate) fn bootc_rollback() -> Result<String, String> {
+pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
     start_update_job("Rollback", vec!["sudo", "-A", "/usr/bin/bootc", "rollback"].into_iter().map(String::from).collect(), Duration::from_secs(300))
 }
 
 #[tauri::command]
-pub(crate) fn bootc_switch_branch(branch: String) -> Result<String, String> {
+pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, String> {
     let channel = kyth_shared::system::bootc_policy::switch_channel_arg(&branch)
         .ok_or_else(|| "unknown channel".to_string())?;
     let operation = format!("switch-{channel}");
@@ -179,7 +186,7 @@ pub(crate) fn bootc_switch_branch(branch: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-pub(crate) fn apply_staged() -> Result<String, String> {
+pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
     if !std::path::Path::new("/usr/libexec/kyth-finalize-staged").exists() {
         return Err("The staged-update finalizer is not installed on this system.".to_string());
     }
@@ -212,7 +219,7 @@ pub(crate) fn update_watcher_status() -> UpdateWatcherStatusResponse {
 }
 
 #[tauri::command]
-pub(crate) fn set_update_watcher_enabled(enabled: bool) -> Result<String, String> {
+pub(crate) fn set_update_watcher_enabled(enabled: bool) -> Result<UpdateActionLaunch, String> {
     let action = if enabled { "enable" } else { "disable" };
     let operation = if enabled { "Enable automatic updates" } else { "Disable automatic updates" };
     start_update_job(
@@ -224,7 +231,7 @@ pub(crate) fn set_update_watcher_enabled(enabled: bool) -> Result<String, String
 }
 
 #[tauri::command]
-pub(crate) fn check_for_updates_now() -> Result<String, String> {
+pub(crate) fn check_for_updates_now() -> Result<UpdateActionLaunch, String> {
     start_update_job(
         "Check for updates now",
         vec!["sudo", "-A", "systemctl", "start", "kyth-update-watcher.service"]
@@ -234,7 +241,7 @@ pub(crate) fn check_for_updates_now() -> Result<String, String> {
 }
 
 #[tauri::command]
-pub(crate) fn defer_update_watcher() -> Result<String, String> {
+pub(crate) fn defer_update_watcher() -> Result<UpdateActionLaunch, String> {
     start_update_job(
         "Defer automatic updates",
         vec!["sudo", "-A", "systemctl", "stop", "kyth-update-watcher.timer"]
