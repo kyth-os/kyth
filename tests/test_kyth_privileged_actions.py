@@ -58,6 +58,39 @@ class PrivilegedActionTests(unittest.TestCase):
         with self.assertRaises(PrivilegedActionError):
             systemctl_action("start", "bad;unit.mount")
 
+    def test_rejects_unsupported_privileged_inputs(self):
+        with self.assertRaises(PrivilegedActionError):
+            bootc_action("rollback", "ghcr.io/example/kyth:testing")
+        with self.assertRaises(PrivilegedActionError):
+            systemctl_action("status", "bluetooth.service")
+        with self.assertRaises(PrivilegedActionError):
+            systemctl_action("start", "bluetooth.service", now=True)
+        with self.assertRaises(PrivilegedActionError):
+            helper_action("not-a-helper")
+        with self.assertRaises(PrivilegedActionError):
+            helper_action("sleep-mode", "bad\nvalue")
+        with self.assertRaises(PrivilegedActionError):
+            helper_action("rclone-update", "unexpected")
+        with self.assertRaises(PrivilegedActionError):
+            helper_action("xone-dongle-install", "unexpected")
+        with self.assertRaises(PrivilegedActionError):
+            helper_action("xone-firmware-install", "unexpected")
+        with self.assertRaises(PrivilegedActionError):
+            helper_action("hardware-setup", "unexpected")
+        with self.assertRaises(PrivilegedActionError):
+            openconnect_action(gateway="vpn.example", protocol="unknown", os_emulation="linux")
+        with self.assertRaises(PrivilegedActionError):
+            openconnect_action(gateway="vpn.example", protocol="gp", os_emulation="bsd")
+        with self.assertRaises(PrivilegedActionError):
+            openconnect_action(gateway="vpn.example", protocol="gp", os_emulation="linux", username="bad\nuser")
+        with self.assertRaises(PrivilegedActionError):
+            openconnect_action(
+                gateway="vpn.example", protocol="gp", os_emulation="linux",
+                password_stdin=True, cookie="cookie",
+            )
+        with self.assertRaises(PrivilegedActionError):
+            scheduler_action("not-a-scheduler")
+
     def test_manual_upgrade_uses_quarantine_guard(self):
         self.assertEqual(
             bootc_action("upgrade").command(),
