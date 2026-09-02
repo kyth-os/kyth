@@ -7,7 +7,7 @@ runtime parity on an installed image.
 
 ## Status snapshot (2026-09-02)
 
-Current target: the `testing` branch with the Hub migration cutover changes.
+Current target: `testing` at `2e401cab` with the Hub migration cutover changes.
 The prior pre-build gates are complete. The local shared-crate gate now passes
 491 Rust tests across 12 suites,
 including native telemetry, extended Guardian, firmware staging, watcher
@@ -19,14 +19,12 @@ KRunner desktop-entry utilities are included in the shared Rust build. No
 Python/Qt update notifier is installed or autostarted.
 
 GitHub Actions Validation run
-[`33538517283`](https://github.com/kyth-os/kyth/actions/runs/33538517283)
-is green for this commit, including the Hub web shell job. The testing ISO
-build and publish run
-[`33543074273`](https://github.com/kyth-os/kyth/actions/runs/33543074273)
-completed successfully. Its VM acceptance job was skipped by direction, so no
-installed-image or real-session runtime gate has been signed off. Acceptance
-is intentionally waived for the YOLO cutover; the image/runtime checkboxes
-remain visibly unchecked, while implementation work proceeds.
+[`33665906864`](https://github.com/kyth-os/kyth/actions/runs/33665906864)
+is green for this commit, including the Hub web shell and coverage/lint jobs.
+The available testing ISO build result is from an earlier commit, so it is not
+evidence for this cutover. No installed-image or real-session runtime gate has
+been signed off. Acceptance is intentionally waived for the YOLO cutover; the
+image/runtime checkboxes remain visibly unchecked.
 
 ## Pre-build gates
 

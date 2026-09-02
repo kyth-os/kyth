@@ -35,12 +35,13 @@ binaries (post-update confidence, first-login app status, and Steam launcher
 export); none is an active Hub action authority. The update watcher is also
 the sole update notifier, so no Python/Qt tray process is installed or
 autostarted.
-The matching testing ISO was built and published successfully by testing
-workflow `33543074273`; its VM acceptance job was skipped. Per the current
-YOLO migration direction, installed-image/user acceptance is intentionally
-waived for this cutover and remains unverified. The remaining transitional
-Python service package is a technical follow-up item, not an acceptance
-finding.
+The pushed cutover commit passed GitHub Validation workflow
+`33665906864` (all four jobs, including the Hub shell and coverage/lint gates).
+The available testing ISO result is from an earlier commit and must not be
+used as evidence for this cutover. Per the current YOLO migration direction,
+installed-image/user acceptance is intentionally waived for this cutover and
+remains unverified. The remaining transitional Python service package is a
+technical follow-up item, not an acceptance finding.
 
 The source parity record is [Kyth Hub Parity](../src/kyth-hub-web/PARITY.md),
 and the Rust port boundary is [MIGRATION.md](../src/kyth-shared-rs/MIGRATION.md).
