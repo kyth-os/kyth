@@ -7,8 +7,7 @@ source "../../lib/config-helpers.sh"
 # Write the BLS entry after bootc releases the sysroot lock, and again at
 # shutdown if the in-session finalize was skipped (raw `bootc upgrade`).
 # See docs/update-safety.md.
-install -m 0755 /ctx/sysconfig/kyth-finalize-staged /usr/libexec/kyth-finalize-staged
-ln -sfn /usr/libexec/kyth-finalize-staged /usr/bin/kyth-finalize-staged
+test -x /usr/libexec/kyth-finalize-staged
 
 install -m 0644 /ctx/sysconfig/systemd/kyth-boot-rw.service /usr/lib/systemd/system/kyth-boot-rw.service
 systemctl enable kyth-boot-rw.service 2>/dev/null || true

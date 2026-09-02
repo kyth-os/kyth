@@ -1,7 +1,6 @@
 # shellcheck shell=bash
 # ── Misc maintenance/utility tools ─────────────────────────────────────────────
 install -m 0755 /ctx/kyth-davinci-install /usr/bin/kyth-davinci-install
-install -m 0755 /ctx/kyth-bootc-guard /usr/bin/kyth-bootc-guard
 install -m 0755 /ctx/kyth-duperemove /usr/bin/kyth-duperemove
 install -m 0755 /ctx/kyth-distrobox-root-launch /usr/bin/kyth-distrobox-root-launch
 install -m 0755 /ctx/kyth-kali-desktop-fixup /usr/bin/kyth-kali-desktop-fixup

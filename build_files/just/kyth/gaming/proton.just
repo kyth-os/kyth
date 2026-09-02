@@ -34,8 +34,9 @@ install-umu:
     sudo install -m 0755 "${UMU_BIN}" /usr/local/bin/umu-run
     UMU_PKGDIR=$(find "${TMPDIR_UMU}" -maxdepth 3 -name 'umu' -type d | grep -v '__pycache__' | head -n1)
     if [[ "${UMU_TARBALL}" != *-zipapp.tar && -n "${UMU_PKGDIR}" ]]; then
-        PY_SITEPKG=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")
-        sudo mkdir -p "${PY_SITEPKG}"; sudo cp -r "${UMU_PKGDIR}" "${PY_SITEPKG}/"
+        echo "This umu-launcher release contains an unpacked Python payload; refusing to install it in zero-Python mode." >&2
+        echo "Retry after the project publishes its zipapp release artifact." >&2
+        exit 1
     fi
     echo "umu-launcher installed: $(umu-run --version 2>/dev/null || echo 'ok')"
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { confirmUserAction, runJustRecipe } from "../services/liveData";
+import { confirmUserAction, runHubRecipeAction } from "../services/liveData";
 
 /** Shared "run a mutating system action, then say what happened" helper.
  *
@@ -78,7 +78,7 @@ export function RecipeButton({
       disabled={busy !== null}
       onClick={() =>
         confirmUserAction(`Run ${recipe}? It may change system state or open a privileged prompt.`) &&
-        run(recipe, `Starting ${recipe}…`, () => runJustRecipe(recipe))
+        run(recipe, `Starting ${recipe}…`, () => runHubRecipeAction(recipe))
       }
     />
   );

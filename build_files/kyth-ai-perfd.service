@@ -11,8 +11,8 @@ Type=simple
 ExecStart=/usr/bin/kyth-ai-perfd
 Restart=on-failure
 RestartSec=10
-# User service — reads system probe cache, writes /etc via pkexec/sysctl where needed
-Environment=PYTHONPATH=/usr/lib/kyth_shared:/usr/lib/kyth-welcome
+# User service — native Rust policy loop; privileged writes remain best-effort
+# under the unit sandbox and are retried on the next TTL-bound cycle.
 # Long-running background daemon alongside the desktop session — deprioritized
 # so a bug/leak here degrades itself, not the interactive session it's meant
 # to be tuning for (matches kyth-guardian.service's pattern).

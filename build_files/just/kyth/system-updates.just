@@ -33,7 +33,7 @@ kyth-upgrade:
     # waydroid' from ujust setup-waydroid); requested-local-packages covers
     # local RPM files; layered-commit-packages covers commit-layered ones.
     layered=$(rpm-ostree status --json 2>/dev/null \
-        | python3 -c "import sys,json; d=json.load(sys.stdin).get('deployments', [{}])[0]; pkgs=d.get('requested-packages', []) + d.get('requested-local-packages', []) + d.get('layered-commit-packages', []); print(' '.join(pkgs) if pkgs else '')" 2>/dev/null || true)
+        | jq -r '(.deployments[0] // {}) | [.["requested-packages"][]?, .["requested-local-packages"][]?, .["layered-commit-packages"][]?] | join(" ")' 2>/dev/null || true)
 
     if [[ -n "${layered}" ]]; then
         echo "  ERROR: rpm-ostree packages are layered:" >&2
@@ -57,17 +57,13 @@ kyth-upgrade:
     # ── OS update via bootc ───────────────────────────────────────────────────
     echo "── OS (bootc) ──────────────────────────────────────────────────────"
     booted_digest=$(bootc status --format json 2>/dev/null \
-        | python3 -c "import sys,json; s=json.load(sys.stdin); \
-          print(s.get('status',{}).get('booted',{}).get('image',{}) \
-                 .get('imageDigest','unknown'))" 2>/dev/null || echo "unknown")
+        | jq -r '.status.booted.image.imageDigest // "unknown"' 2>/dev/null || echo "unknown")
 
     sudo kyth-safe-upgrade
     sudo /usr/libexec/kyth-finalize-staged 2>/dev/null || sudo ostree admin finalize-staged || true
 
     staged_digest=$(bootc status --format json 2>/dev/null \
-        | python3 -c "import sys,json; s=json.load(sys.stdin); \
-          print(s.get('status',{}).get('staged',{}).get('image',{}) \
-                 .get('imageDigest','') or '')" 2>/dev/null || echo "")
+        | jq -r '.status.staged.image.imageDigest // empty' 2>/dev/null || echo "")
 
     if [[ -n "${staged_digest}" && "${staged_digest}" != "${booted_digest}" ]]; then
         os_updated=1
@@ -188,7 +184,7 @@ switch-channel channel="stable" *args:
         echo "Dry-run: perf delta + snapshot cost"
         /usr/bin/kyth-system-audit 2>&1 | head -n 20 || true
         /usr/bin/kyth-gaming-audit 2>&1 | head -n 20 || true
-        python3 -c "from kyth_shared.perf_gate import check_perf_gate; import json; print(json.dumps(check_perf_gate(current_ms=16.0), indent=2))" 2>&1 | head -n 20 || true
+        /usr/bin/kyth-perf-gate status 2>&1 | head -n 20 || true
         echo "Snapshot timeline (last 3):"
         /usr/bin/btrfs subvolume list / 2>&1 | head -n 20 || /usr/bin/snapper list 2>&1 | head -n 20 || echo "no snapshot tool"
         exit 0

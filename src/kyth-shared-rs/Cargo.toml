@@ -50,6 +50,30 @@ path = "src/steam_game_export_bin.rs"
 name = "kyth-hub-desktop-entries"
 path = "src/hub_desktop_entries_bin.rs"
 
+[[bin]]
+name = "kyth-safe-upgrade"
+path = "src/safe_upgrade_bin.rs"
+
+[[bin]]
+name = "kyth-bootc-guard"
+path = "src/bootc_guard_bin.rs"
+
+[[bin]]
+name = "kyth-finalize-staged"
+path = "src/finalize_staged_bin.rs"
+
+[[bin]]
+name = "kyth-btrfs-maint"
+path = "src/storage_maintenance_bin.rs"
+
+[[bin]]
+name = "kyth-ai-perfd"
+path = "src/ai_perf_daemon_bin.rs"
+
+[[bin]]
+name = "kyth-perf-gate-rs"
+path = "src/perf_gate_bin.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

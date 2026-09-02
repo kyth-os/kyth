@@ -7,7 +7,8 @@ install -m 0644 /ctx/kyth-sched.service /usr/lib/systemd/user/kyth-sched.service
 # the former Python fixture is intentionally not installed.
 install -m 0644 /ctx/kyth-telem.service /usr/lib/systemd/user/kyth-telem.service
 
-install -m 0755 /ctx/kyth-ai-perfd /usr/bin/kyth-ai-perfd
+# kyth-ai-perfd is the native Rust daemon copied from the hub-web-builder.
+# The former Python launcher remains source-only for compatibility fixtures.
 install -m 0644 /ctx/kyth-ai-perfd.service /usr/lib/systemd/user/kyth-ai-perfd.service
 
 # kyth-update-watcher is the native Rust binary copied from the hub-web-builder

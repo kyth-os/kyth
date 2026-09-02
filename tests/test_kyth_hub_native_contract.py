@@ -28,8 +28,8 @@ class NativeHubContractTests(unittest.TestCase):
             self.assertRegex(handler.group(1), rf"\b{command}\b", command)
 
     def test_recipe_lifecycle_is_registered_and_structured(self):
-        self.assertIn("commands::updates::just_run", MAIN)
-        self.assertIn("commands::updates::just_run_status", MAIN)
+        self.assertIn("commands::updates::run_hub_action", MAIN)
+        self.assertIn("commands::updates::hub_action_status", MAIN)
         self.assertIn("struct InstallStatus", MAIN)
         for state in ("running", "complete", "failed", "unknown"):
             self.assertIn(f'"{state}"', MAIN)

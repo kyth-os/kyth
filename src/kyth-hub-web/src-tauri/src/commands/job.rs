@@ -52,7 +52,7 @@ pub(crate) fn job_status(job: String) -> crate::InstallStatus {
     crate::InstallStatus { id: job, state, detail }
 }
 
-/// Same truncation/direction convention as `commands::updates::just_output_detail`:
+/// Same truncation/direction convention as the Hub action output helper:
 /// keep the tail of combined stdout+stderr, since that's where the actual
 /// error usually is in apt/flatpak/distrobox output.
 pub(crate) fn failure_detail(action: &str, output: &Output) -> String {

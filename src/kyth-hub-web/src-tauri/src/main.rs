@@ -226,7 +226,7 @@ fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
         return Err("recipe not pending".to_string());
     }
     // Guardian ids are dotted (`audio.restart`) and are not just recipes —
-    // handing them to `just_run` ran nothing and reported "launched" for
+    // handing them to the typed Hub action bridge ran nothing and reported "launched" for
     // every one of them, advisory notifications included. `execute_recipe`
     // carries guardian.py's own eligibility gate and runs the recipe's argv.
     let detail = kyth_shared::guardian::execute_recipe(&recipe_id)?;
@@ -1240,8 +1240,8 @@ fn main() {
             compatibility_games,
             take_pending_page,
             commands::updates::just_list,
-            commands::updates::just_run,
-            commands::updates::just_run_status,
+            commands::updates::run_hub_action,
+            commands::updates::hub_action_status,
             commands::updates::bootc_upgrade,
             commands::updates::bootc_rollback,
             commands::updates::bootc_switch_branch,

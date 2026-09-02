@@ -530,7 +530,7 @@ export async function fetchSecurebootState(): Promise<string | null> {
 // buttons for no-argument recipes until it has a safe, user-friendly form for
 // choosing those arguments.
 export interface JustRecipe { name: string; params: string; comment: string }
-export interface JustActionLaunch { job: string; state: "running"; detail: string; }
+export interface HubActionLaunch { job: string; state: "running"; detail: string; }
 export async function fetchJustList(): Promise<JustRecipe[] | null> {
   if (!inTauriShell()) return null;
   try {
@@ -544,14 +544,14 @@ export async function fetchJustList(): Promise<JustRecipe[] | null> {
 async function waitJustJob(job: string): Promise<string> {
   for (let i = 0; i < 1800; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
-    const state = await invoke<InstallStatus>("just_run_status", { job });
+    const state = await invoke<InstallStatus>("hub_action_status", { job });
     if (state.state === "complete") return state.detail;
     if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
   }
   throw new Error("This action is still running; check the status here again in a moment.");
 }
 
-async function waitJustLaunch(launch: JustActionLaunch): Promise<string> {
+async function waitHubActionLaunch(launch: HubActionLaunch): Promise<string> {
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Recipe did not start.");
   return await waitJustJob(launch.job);
 }
@@ -574,13 +574,13 @@ async function waitUpdateLaunch(launch: UpdateActionLaunch): Promise<string> {
   return await waitUpdateJob(launch.job);
 }
 
-async function runJustJob(recipe: string): Promise<string> {
+async function runHubAction(recipe: string): Promise<string> {
   if (!inTauriShell()) throw new Error("This action is only available in the Hub app.");
-  return await waitJustLaunch(await invoke<JustActionLaunch>("just_run", { recipe }));
+  return await waitHubActionLaunch(await invoke<HubActionLaunch>("run_hub_action", { action: recipe }));
 }
 
-export async function runJustRecipe(recipe: string): Promise<string> {
-  return await runJustJob(recipe);
+export async function runHubRecipeAction(recipe: string): Promise<string> {
+  return await runHubAction(recipe);
 }
 
 // Update card view-model — the Rust port of the Qt Update page's

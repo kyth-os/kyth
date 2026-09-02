@@ -2,7 +2,6 @@
 # shellcheck shell=bash
 # ── Storage-gated maintenance ────────────────────────────────────────────────
 # Gate btrfs/duperemove on AC+idle+!gaming to avoid I/O spikes during gaming.
-install -m 0755 /ctx/kyth-btrfs-maint /usr/bin/kyth-btrfs-maint
 install -m 0755 /ctx/kyth-storage-gate /usr/libexec/kyth-storage-gate
 install -m 0644 /ctx/kyth-storage-maint.service /usr/lib/systemd/system/kyth-storage-maint.service
 install -m 0644 /ctx/kyth-storage-maint.timer /usr/lib/systemd/system/kyth-storage-maint.timer

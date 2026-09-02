@@ -43,6 +43,10 @@ installed-image/user acceptance is intentionally waived for this cutover and
 remains unverified. The remaining transitional Python service package is a
 technical follow-up item, not an acceptance finding.
 
+The current local P0 follow-up also closes the last static Hub-action routing
+gap: Secure Boot enrollment is in the Rust `HubAction` allowlist, and contract
+tests reject any static `RecipeButton` that is not represented by that enum.
+
 The source parity record is [Kyth Hub Parity](../src/kyth-hub-web/PARITY.md),
 and the Rust port boundary is [MIGRATION.md](../src/kyth-shared-rs/MIGRATION.md).
 
@@ -104,7 +108,7 @@ and 7.
 | `src/kyth-shared-rs/src/privileged_bin.rs` and `kyth-privileged.service` | Root-owned local socket for Hub-authorized system mutations | Native Rust daemon | Keep the fixed operation allowlist, peer-credential gate, bounded execution, stdin-only secrets, and audit behavior |
 | `kyth-telem.service` and `src/kyth-shared-rs/src/telemetry_writer_bin.rs` | MangoHud CSV ingestion and telemetry SQLite writes | Feature-gated native Rust writer | Native build/schema/CSV parity is covered by Rust tests; installed-image acceptance remains waived |
 | `kyth-windows-verify` and `ujust windows-verify` | Standalone tunable/recipe for a migration readiness report | Outside the Hub action path; the Hub uses native `migration_readiness` instead | Retire the Python tunable wrapper with the remaining compatibility fixtures after the observation window |
-| `kyth-vpn-status`, `kyth-ai-perfd`, and other Python helpers | Independent system utilities | Out of Hub UI scope unless their output/action is exposed by Hub | Audit ownership when closing the corresponding Hub workflow |
+| `kyth-vpn-status` and other compatibility helpers | Independent system utilities | Out of Hub UI scope unless their output/action is exposed by Hub | Audit ownership when closing the corresponding Hub workflow; `kyth-ai-perfd` is now native Rust |
 
 ## Phases
 
@@ -142,7 +146,9 @@ acceptance remains in Phase 2 and strict service ownership remains in Phase 5.
 - [x] Ensure every read returns an honest degraded state when a probe/service is
   absent, stale, or unavailable.
 - [x] Ensure every action has a typed Rust command, fixed allowlist/argv policy,
-  bounded timeout, structured job status, and refresh-after-success behavior.
+      bounded timeout, structured job status, and refresh-after-success behavior.
+- [x] Ensure every static recipe button maps to the closed Rust `HubAction`
+      enum; unknown action names fail at Tauri deserialization.
 - [x] Keep secret-bearing values out of React state, status text, audit details,
   process arguments, URLs, and logs.
 - [x] Keep focused Tauri command tests in CI; the canonical Hub build script now
@@ -325,7 +331,8 @@ also pass. The installed-image security/rollback drill was not run.
 
 ### Phase 7 — Declare completion and monitor
 
-Status: not started.
+Status: code cleanup in progress (2026-09-02); direct Python-backed Just recipe
+parsing and the installed AI performance daemon are now native/non-Python.
 
 - Publish the final parity matrix, VM qualification reports, and release
   notes.
@@ -334,6 +341,20 @@ Status: not started.
   failures before deleting compatibility artifacts permanently.
 - After the observation window, remove dead migration code, stale docs, and
   compatibility aliases.
+- [x] Replace the installed Python `kyth-ai-perfd` launcher with the native
+  Rust daemon using the shared performance-policy, gaming-activity, and
+  hardware-policy modules (2026-09-02).
+- [x] Remove Python JSON parsing from the probe, OS update, JetBrains Toolbox,
+  LSFG-VK, and runtime perf-gate Just recipes (2026-09-02); use the native
+  probe/perf-gate binaries or `jq` for data-only JSON extraction.
+- [ ] Port the remaining indirect recipe executors: the compatibility
+  `kyth-tunable` dispatcher and Python diagnostic helpers such as
+  `kyth-health-check`, `kyth-resume-check`, `kyth-nvidia-status`,
+  `kyth-controller-check`, and `kyth-game-boost`.
+- Audit the remaining non-Hub compatibility Python modules and unexposed
+  Just recipes; remove or port them if the product requirement is upgraded
+  from “all Hub entry points are Rust/Tauri” to “no Python may execute in any
+  Kyth runtime workflow.”
 
 Exit criteria: Tauri/Rust is the only supported System Hub implementation and
 the old Python/Qt Hub is absent from the production image and supported code
@@ -360,6 +381,7 @@ paths.
 | P1 | Complete extended Guardian/model parity and update-watcher lock, firmware, retry, and session/network gates. | 5 (complete 2026-09-02; image acceptance waived) |
 | P1 | Reconcile any other Hub-facing Python authorities listed in `MIGRATION.md` before declaring strict mode complete. | 5 (complete 2026-09-02; native Rust authorities installed) |
 | P2 | Remove remaining compatibility service fixtures and stale support references after strict-mode cutover. | 7 (complete 2026-09-02; native helper entry points, dead fixtures, and stale VPN launch references removed) |
+| P2 | Port remaining indirect recipe executors (`kyth-tunable` and Python diagnostic/game helpers) and remove their compatibility modules. | 7 (in progress; direct recipe parsing and `kyth-ai-perfd` are complete 2026-09-02) |
 | P2 | Run a post-cutover observation window before deleting compatibility code. | 7 (waived/not started for YOLO cutover; installed-image acceptance was skipped) |
 
 ## Definition of done

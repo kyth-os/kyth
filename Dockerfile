@@ -58,7 +58,7 @@ RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/regi
     --mount=type=cache,id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target \
     cargo build --release --locked && \
     cp target/release/kyth-hub-shell /build/kyth-hub-shell && \
-    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries) && \
+    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries --bin kyth-safe-upgrade --bin kyth-bootc-guard --bin kyth-finalize-staged --bin kyth-btrfs-maint --bin kyth-ai-perfd --bin kyth-perf-gate-rs) && \
     cp /build/kyth-shared-rs/target/release/kyth-probe /build/kyth-probe && \
     cp /build/kyth-shared-rs/target/release/kyth-guardian /build/kyth-guardian && \
     cp /build/kyth-shared-rs/target/release/kyth-update-watcher /build/kyth-update-watcher && \
@@ -68,7 +68,13 @@ RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/regi
     cp /build/kyth-shared-rs/target/release/kyth-post-update-check /build/kyth-post-update-check && \
     cp /build/kyth-shared-rs/target/release/kyth-firstboot-app-status /build/kyth-firstboot-app-status && \
     cp /build/kyth-shared-rs/target/release/kyth-steam-game-export /build/kyth-steam-game-export && \
-    cp /build/kyth-shared-rs/target/release/kyth-hub-desktop-entries /build/kyth-hub-desktop-entries
+    cp /build/kyth-shared-rs/target/release/kyth-hub-desktop-entries /build/kyth-hub-desktop-entries && \
+    cp /build/kyth-shared-rs/target/release/kyth-safe-upgrade /build/kyth-safe-upgrade && \
+    cp /build/kyth-shared-rs/target/release/kyth-bootc-guard /build/kyth-bootc-guard && \
+    cp /build/kyth-shared-rs/target/release/kyth-finalize-staged /build/kyth-finalize-staged && \
+    cp /build/kyth-shared-rs/target/release/kyth-btrfs-maint /build/kyth-btrfs-maint && \
+    cp /build/kyth-shared-rs/target/release/kyth-ai-perfd /build/kyth-ai-perfd && \
+    cp /build/kyth-shared-rs/target/release/kyth-perf-gate-rs /build/kyth-perf-gate-rs
 
 # Base Image
 ARG BASE_IMAGE
@@ -267,6 +273,12 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-post-update-check /usr/bin/
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-firstboot-app-status /usr/bin/kyth-firstboot-app-status
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-steam-game-export /usr/bin/kyth-steam-game-export
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-hub-desktop-entries /usr/bin/kyth-hub-desktop-entries
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-safe-upgrade /usr/bin/kyth-safe-upgrade
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-bootc-guard /usr/bin/kyth-bootc-guard
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-finalize-staged /usr/libexec/kyth-finalize-staged
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-btrfs-maint /usr/bin/kyth-btrfs-maint
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-ai-perfd /usr/bin/kyth-ai-perfd
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-perf-gate-rs /usr/bin/kyth-perf-gate-rs
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \

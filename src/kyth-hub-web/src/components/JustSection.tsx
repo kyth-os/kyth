@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { fetchJustList, type JustRecipe } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionStatus } from "./SectionActions";
 
-// "This PC > Recipes (Just)" — now live via Tauri `just_list`/`just_run`
-// (port of page_just.py). Falls back to preview note when not in Tauri
-// or `just` is not installed.
+// "This PC > Recipes (Just)" — read-only inventory via Tauri `just_list`.
+// Mutating actions are exposed only through the explicit HubAction enum in
+// Rust; arbitrary recipe names are never executable from this page.
 //
 // Only recipes that take no arguments get a button: a launch passes no
 // arguments, so a parameterized recipe would silently run its defaults.
@@ -16,7 +16,7 @@ export function JustSection({ section }: { section: HubSection }) {
   const [recipes, setRecipes] = useState<JustRecipe[] | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
-  const { status, busy, run } = useSectionAction();
+  const [status] = useState<string | null>(null);
   useEffect(() => {
     let c = false;
     fetchJustList().then((r) => {
@@ -60,13 +60,9 @@ export function JustSection({ section }: { section: HubSection }) {
               {shown.map((r) => (
                 <div key={r.name} style={{ display: "flex", alignItems: "center", gap: 12, padding: "8px 0", borderBottom: "1px solid var(--hairline)" }}>
                   <div style={{ minWidth: 190 }}>
-                    {r.params ? (
-                      <code style={{ fontSize: 12 }}>
-                        {r.name} <span className="card-copy">{r.params}</span>
-                      </code>
-                    ) : (
-                      <RecipeButton recipe={r.name} label={r.name} busy={busy} run={run} />
-                    )}
+                    <code style={{ fontSize: 12 }}>
+                      {r.name} {r.params && <span className="card-copy">{r.params}</span>}
+                    </code>
                   </div>
                   <span className="card-copy" style={{ fontSize: 12, flex: 1 }}>{r.comment}</span>
                 </div>
@@ -78,7 +74,7 @@ export function JustSection({ section }: { section: HubSection }) {
               </p>
             )}
             <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>
-              Recipes that take arguments are shown as text until the Hub has a safe form for choosing the argument.
+              Recipes are shown for reference; mutating actions are available from their typed Hub controls.
             </p>
             <ActionStatus status={status} />
           </div>

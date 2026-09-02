@@ -49,10 +49,7 @@ class PythonPackagingTests(unittest.TestCase):
             shared["project"]["scripts"]["kyth-hardware-policy"],
             "kyth_shared.hardware_policy:main",
         )
-        self.assertEqual(
-            shared["project"]["scripts"]["kyth-safe-upgrade"],
-            "kyth_shared.safe_upgrade:main",
-        )
+        self.assertNotIn("kyth-safe-upgrade", shared["project"]["scripts"])
         self.assertEqual(
             shared["project"]["scripts"]["kyth-setup-transfer"],
             "kyth_shared.setup_transfer:main",

@@ -107,7 +107,7 @@ class HubWebActionTests(unittest.TestCase):
         # It must delegate, not just format a reassuring string. The guarded
         # native command keeps the channel mapping fixed and auditable.
         self.assertIn("kyth-bootc-guard", text)
-        self.assertIn("switch-{channel}", text)
+        self.assertIn('format!("switch-{}"', text)
         self.assertNotIn("start_just_job", text)
         self.assertNotIn('Command::new("just")', text)
         self.assertIn("switch_channel_arg", text)
@@ -226,6 +226,15 @@ class HubWebCoverageTests(unittest.TestCase):
         self.assertTrue(referenced, "no RecipeButton call sites found")
         self.assertEqual(set(), referenced - shipped, "RecipeButton names a recipe that does not exist")
 
+    def test_recipe_buttons_are_in_the_typed_rust_hub_action_allowlist(self):
+        updates = (TAURI_SRC / "commands" / "updates.rs").read_text(encoding="utf-8")
+        allowed = set(re.findall(r'=>\s*"([a-z0-9-]+)"', updates))
+        referenced = set()
+        for source in HUB_WEB.rglob("*.tsx"):
+            referenced.update(re.findall(r'recipe="([^"]+)"', source.read_text(encoding="utf-8")))
+        self.assertTrue(referenced, "no static RecipeButton call sites found")
+        self.assertEqual(set(), referenced - allowed, "RecipeButton bypasses the Rust HubAction allowlist")
+
     def test_recipe_buttons_do_not_use_parameterized_recipes(self):
         # `just_run` spawns `just <name>` with no arguments, so a recipe with
         # parameters runs its *defaults*, which need not match the button.
@@ -264,11 +273,7 @@ class HubWebCoverageTests(unittest.TestCase):
         # the row itself, on the `params` field just_list now returns.
         text = (HUB_WEB / "components" / "JustSection.tsx").read_text(encoding="utf-8")
         self.assertIn("r.params", text, "JustSection ignores whether a recipe takes arguments")
-        row = re.search(r"\{r\.params \?(.*?)\)\}", text, re.S)
-        self.assertIsNotNone(row, "JustSection does not branch on r.params")
-        has_params, no_params = row.group(1).split(") : (", 1)
-        self.assertNotIn("RecipeButton", has_params, "parameterized recipes still get a button")
-        self.assertIn("RecipeButton", no_params, "argument-free recipes lost their button")
+        self.assertNotIn("RecipeButton", text, "dynamic recipe names must not become executable buttons")
         # The field has to survive the bridge, or the branch is always false.
         self.assertIn("params: string", LIVE_DATA)
 

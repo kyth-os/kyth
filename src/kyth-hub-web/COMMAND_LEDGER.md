@@ -49,8 +49,9 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
    Rust response fields.
 2. `probe_backend` is a multiplexed command, so selector coverage must be
    tested separately from command-name coverage.
-3. `just_run` is shared by read/check and mutating recipes; the recipe trust
-   class is not represented in its Rust signature.
+3. `run_hub_action` is shared by read/check and mutating recipes; its closed
+   Rust `HubAction` enum represents the recipe allowlist, while the recipe
+   body remains bounded OS orchestration behind the Tauri command.
 4. The mutating wrappers return plain strings rather than a structured action
    result, so confirmation and failure semantics remain a follow-up item.
 
@@ -65,7 +66,7 @@ frontend/Rust invocation tests.
 | --- | --- | --- | --- |
 | Guardian | `guardian_check`, `guardian_control`, `guardian_execute_recipe`, status/history reads | check / mutate | Fixed recipe policy, eligibility and cooldowns; completion must be polled before success is shown. |
 | Privilege broker | `privileged_action`, `privileged_action_status` | mutate / read | Fixed operation allowlist only; local peer authorization; secrets never enter argv, status, or audit detail. |
-| Updates and channels | `bootc_upgrade`, `bootc_rollback`, `bootc_switch_branch`, `collect_availability`, `just_run`, job status | check / mutate | Explicit confirmation for state changes; named recipes and channel values are allowlisted. |
+| Updates and channels | `bootc_upgrade`, `bootc_rollback`, `bootc_switch_branch`, `collect_availability`, `run_hub_action`, job status | check / mutate | Explicit confirmation for state changes; `HubAction` and channel values are allowlisted. |
 | Applications | `install_flatpak`, `uninstall_flatpak`, AppImage import/chmod/launch, install status | mutate / read | User Flatpak removal stays user-scoped; system changes use their dedicated policy path. |
 | Network and migration | `smb_save_configured_share`, `smb_remove_configured_share`, cloud/app launch handoffs, VPN launch, printer discovery/setup text | read / check / mutate | Credentials remain outside config; command-returning helpers are copyable text, never generic execution. |
 | Hardware and desktop | firmware, PipeWire, Plasma preset, controllers, display/hardware reads | read / check / mutate | Expensive scans stay on demand; mutating presets require confirmation and bounded argv. |

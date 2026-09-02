@@ -35,7 +35,7 @@ pub const UBLUE_JUSTFILE: &str = "/usr/share/ublue-os/justfile";
 pub struct JustRecipe {
     pub name: String,
     /// Parameters as `just --list` prints them (`flavor="fedora"`), empty for
-    /// a recipe that takes none. `just_run` spawns the name with no arguments,
+    /// a recipe that takes none. `run_hub_action` spawns the name with no arguments,
     /// so a non-empty `params` means running it from the Hub would silently
     /// use the defaults — the listing renders those rows as text, not buttons.
     pub params: String,

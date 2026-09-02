@@ -7,9 +7,10 @@ runtime parity on an installed image.
 
 ## Status snapshot (2026-09-02)
 
-Current target: `testing` at `2e401cab` with the Hub migration cutover changes.
+Current target: `testing` at `192ee5ba` with the Hub migration cutover changes;
+the local worktree also contains the P0 closed-action-allowlist fix.
 The prior pre-build gates are complete. The local shared-crate gate now passes
-491 Rust tests across 12 suites,
+493 Rust tests across 16 suites,
 including native telemetry, extended Guardian, firmware staging, watcher
 retry/lock coverage, the privileged socket policy, secret redaction, and SAML
 redirect validation. The native telemetry writer and privileged daemon release
@@ -31,7 +32,7 @@ image/runtime checkboxes remain visibly unchecked.
 - [x] Dashboard and Updates command ledger is present.
 - [x] Frontend/Rust contract tests pass.
 - [x] Rust command modules compile and their unit tests pass (the canonical
-      script compiles the Tauri crate; its five unit tests were run separately).
+      script compiles the Tauri crate; its eight unit tests were run separately).
 - [x] Privileged operations are allowlisted and validate inputs centrally.
 - [x] Frontend confirms privileged and destructive actions without displaying
       BitLocker secrets.
@@ -40,6 +41,9 @@ image/runtime checkboxes remain visibly unchecked.
 - [x] `npm ci` succeeds from the lockfile in a clean build environment.
 - [x] `cargo build --locked` succeeds for the Tauri shell and shared crate.
 - [x] The asset-embed assertion finds every built JS/CSS asset in the binary.
+- [x] Every static Hub action is represented by the closed Rust `HubAction`
+      allowlist, including Secure Boot enrollment; unknown action names are
+      rejected during Tauri deserialization.
 
 ## Image and runtime gates
 
@@ -109,6 +113,15 @@ Python authority for Hub-facing reads and actions:
 
 ## P2 compatibility-retirement gate
 
+- [x] Replace the installed Python `kyth-ai-perfd` launcher with the native
+      Rust daemon; its policy loop uses the shared Rust performance modules and
+      retains the bounded 30-second TTL behavior.
+- [x] Remove Python JSON parsing from the probe, OS update, JetBrains Toolbox,
+      LSFG-VK, and runtime perf-gate Just recipes; data-only extraction uses
+      native commands or `jq`.
+- [ ] Port the remaining indirect Python-backed recipe executors, chiefly the
+      compatibility `kyth-tunable` dispatcher and non-Hub diagnostic/game
+      helpers.
 - [x] Remove the obsolete Python/build fixtures for the native update watcher,
       telemetry writer, privileged socket boundary, network-share executor,
       and standalone VPN client.
@@ -171,8 +184,8 @@ Tauri shell. Run the focused unit-test gate explicitly when iterating with:
 Phase 6 source validation on 2026-09-02 also passed:
 
 ```text
-(cd src/kyth-shared-rs && cargo test --locked)       # 491 passed
-(cd src/kyth-hub-web/src-tauri && cargo test --locked) # 6 passed
+(cd src/kyth-shared-rs && cargo test --locked)       # 493 passed
+(cd src/kyth-hub-web/src-tauri && cargo test --locked) # 8 passed
 (cd src/kyth-hub-web && npm run test:contracts)      # pass
 (cd src/kyth-hub-web && npm run test:smoke)          # pass
 (cd src/kyth-hub-web && npm run build)               # pass

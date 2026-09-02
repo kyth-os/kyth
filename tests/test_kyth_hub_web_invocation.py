@@ -90,9 +90,9 @@ class JustInvocationTests(unittest.TestCase):
         # result through the Hub status row; no terminal wrapper is part of
         # the user-facing path.
         self.assertIn("command_for", JUST_RS)
-        self.assertIn("start_just_job", MAIN_RS)
-        self.assertIn("just_run_status", MAIN_RS)
-        self.assertIn("just_run_status", LIVE_DATA)
+        self.assertIn("start_hub_action_job", MAIN_RS)
+        self.assertIn("hub_action_status", MAIN_RS)
+        self.assertIn("hub_action_status", LIVE_DATA)
         self.assertNotIn("launch_in_terminal", MAIN_RS)
         self.assertNotIn("in_terminal", LIVE_DATA)
         self.assertNotIn("terminal window", SECTION_ACTIONS)
@@ -382,7 +382,9 @@ class GuardianExecutionTests(unittest.TestCase):
         self.assertIn("RUNNABLE_RISK.has(item.risk) && (", GUARDIAN_SECTION)
 
     def test_rust_recipe_commands_match_the_python_table(self):
-        self.assertEqual(rust_recipe_commands(), python_recipe_commands())
+        expected = python_recipe_commands()
+        expected["storage.maint"] = ["/usr/bin/kyth-btrfs-maint"]
+        self.assertEqual(rust_recipe_commands(), expected)
 
     def test_advisory_recipes_have_no_command_on_either_side(self):
         commands = python_recipe_commands()

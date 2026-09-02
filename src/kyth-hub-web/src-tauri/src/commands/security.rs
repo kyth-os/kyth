@@ -4,7 +4,7 @@
 //! templates/catalog — nothing here accepts a free-form command or Flatpak
 //! id from the webview.
 //!
-//! Jobs report running/complete/failed like `just_run` and the App Store's
+//! Jobs report running/complete/failed like `run_hub_action` and the App Store's
 //! Flatpak install job, not a live percentage — see
 //! `security_container`'s module doc for why the Python progress-bar
 //! parser wasn't ported.

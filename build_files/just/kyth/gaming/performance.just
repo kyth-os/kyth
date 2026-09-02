@@ -38,7 +38,11 @@ install-lsfg-vk:
     LAYER_JSON_DIR="${HOME}/.local/share/vulkan/implicit_layer.d"
     echo "Fetching latest lsfg-vk release..."
     release_json=$(curl -fsSL "${LSFG_REPO}")
-    tarball_url=$(printf '%s' "${release_json}" | python3 -c "import sys,json; data=json.load(sys.stdin); print(next(a['browser_download_url'] for a in data['assets'] if a['name'].endswith('.tar.gz')))")
+    tarball_url=$(printf '%s' "${release_json}" | jq -r '[.assets[]? | select(.name | endswith(".tar.gz")) | .browser_download_url][0] // empty')
+    if [[ -z "${tarball_url}" ]]; then
+        echo "ERROR: no LSFG-VK tarball was published in the latest release." >&2
+        exit 1
+    fi
     tarball_name="${tarball_url##*/}"
     tmpdir=$(mktemp -d); trap 'rm -rf "${tmpdir}"' EXIT
     echo "Downloading ${tarball_name}..."
@@ -107,5 +111,4 @@ health-check:
     #!/usr/bin/env bash
     set -euo pipefail
     /usr/bin/kyth-health-check
-
 

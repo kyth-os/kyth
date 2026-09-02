@@ -3,13 +3,13 @@ use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
-static JUST_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+static HUB_ACTION_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
 static UPDATE_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
 
-fn just_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
-    JUST_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+fn hub_action_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
+    HUB_ACTION_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn update_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
@@ -60,19 +60,70 @@ fn just_output_detail(recipe: &str, output: &std::process::Output) -> String {
 }
 
 #[derive(Serialize)]
-pub(crate) struct JustActionLaunch {
+pub(crate) struct HubActionLaunch {
     pub(crate) job: String,
     pub(crate) state: String,
     pub(crate) detail: String,
 }
 
-fn start_just_job(recipe: &str, args: &[&str]) -> Result<JustActionLaunch, String> {
-    let argv = kyth_shared::system::just::command_for(recipe, args)
-        .ok_or_else(|| "recipe or argument is not allowlisted".to_string())?;
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum HubAction {
+    SetupTailscale, UpdateHealth, ResumeCheck, DeviceInfo, StartupApps, FirmwareUpdate,
+    HealthCheck, GamingStackStatus, FixDualbootClock, SetupBootWindowsSteam, ReclaimWindows,
+    InstallLudusavi, InstallMsFonts, SetupKythDevBox, AiDevStatus, AiDevSetup, SetupWaydroid,
+    RemoveWaydroid, InstallVscode, InstallBoxbuddy, InstallJetbrainsToolbox, GamingMode,
+    BalancedMode, HdrPerGame, EnableBpftune, DisableBpftune, InstallSteam, InstallHeroic,
+    InstallLutris, InstallBottles, InstallPrismlauncher, InstallItch, InstallEpicLauncher,
+    InstallBattlenet, InstallEaApp, InstallUbisoftConnect, PreheatShaders, EnableObsCapture,
+    GameBoost, ControllerCheck, ExportSteamGames, InstallObs, InstallGpuScreenRecorder,
+    InstallGoverlay, InstallMangojuice, InstallUmu, InstallLact, InstallPiper, InstallSolaar,
+    NvidiaStatus, ListPresets, SetupPrinter, EnrollSecureboot, SystemAudit, GamingAudit,
+}
+
+impl HubAction {
+    fn recipe(&self) -> &'static str {
+        match self {
+            Self::SetupTailscale => "setup-tailscale", Self::UpdateHealth => "update-health",
+            Self::ResumeCheck => "resume-check", Self::DeviceInfo => "device-info",
+            Self::StartupApps => "startup-apps", Self::FirmwareUpdate => "firmware-update",
+            Self::HealthCheck => "health-check", Self::GamingStackStatus => "gaming-stack-status",
+            Self::FixDualbootClock => "fix-dualboot-clock", Self::SetupBootWindowsSteam => "setup-boot-windows-steam",
+            Self::ReclaimWindows => "reclaim-windows", Self::InstallLudusavi => "install-ludusavi",
+            Self::InstallMsFonts => "install-ms-fonts", Self::SetupKythDevBox => "setup-kyth-dev-box",
+            Self::AiDevStatus => "ai-dev-status", Self::AiDevSetup => "ai-dev-setup",
+            Self::SetupWaydroid => "setup-waydroid", Self::RemoveWaydroid => "remove-waydroid",
+            Self::InstallVscode => "install-vscode", Self::InstallBoxbuddy => "install-boxbuddy",
+            Self::InstallJetbrainsToolbox => "install-jetbrains-toolbox", Self::GamingMode => "gaming-mode",
+            Self::BalancedMode => "balanced-mode", Self::HdrPerGame => "hdr-per-game",
+            Self::EnableBpftune => "enable-bpftune", Self::DisableBpftune => "disable-bpftune",
+            Self::InstallSteam => "install-steam", Self::InstallHeroic => "install-heroic",
+            Self::InstallLutris => "install-lutris", Self::InstallBottles => "install-bottles",
+            Self::InstallPrismlauncher => "install-prismlauncher", Self::InstallItch => "install-itch",
+            Self::InstallEpicLauncher => "install-epic-launcher", Self::InstallBattlenet => "install-battlenet",
+            Self::InstallEaApp => "install-ea-app", Self::InstallUbisoftConnect => "install-ubisoft-connect",
+            Self::PreheatShaders => "preheat-shaders", Self::EnableObsCapture => "enable-obs-capture",
+            Self::GameBoost => "game-boost", Self::ControllerCheck => "controller-check",
+            Self::ExportSteamGames => "export-steam-games", Self::InstallObs => "install-obs",
+            Self::InstallGpuScreenRecorder => "install-gpu-screen-recorder", Self::InstallGoverlay => "install-goverlay",
+            Self::InstallMangojuice => "install-mangojuice", Self::InstallUmu => "install-umu",
+            Self::InstallLact => "install-lact", Self::InstallPiper => "install-piper",
+            Self::InstallSolaar => "install-solaar", Self::NvidiaStatus => "nvidia-status",
+            Self::ListPresets => "list-presets", Self::SetupPrinter => "setup-printer",
+            Self::EnrollSecureboot => "enroll-secureboot",
+            Self::SystemAudit => "system-audit", Self::GamingAudit => "gaming-audit",
+        }
+    }
+}
+
+fn start_hub_action_job(action: HubAction) -> Result<HubActionLaunch, String> {
+    let recipe = action.recipe();
+    let argv = kyth_shared::system::just::command_for(recipe, &[])
+        .ok_or_else(|| "Hub action is not allowlisted".to_string())?;
     kyth_shared::commands::normalize_command(&argv)
         .map_err(|_| "recipe produced an invalid command".to_string())?;
-    let job = format!("just-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
-    just_jobs().lock().map_err(|_| "just job store is unavailable".to_string())?.insert(job.clone(), ("running".into(), format!("Running {recipe}…")));
+    let job = format!("hub-action-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_nanos());
+    hub_action_jobs().lock().map_err(|_| "Hub action job store is unavailable".to_string())?.insert(job.clone(), ("running".into(), format!("Running {recipe}…")));
     let job_for_thread = job.clone();
     let recipe_for_thread = recipe.to_string();
     std::thread::spawn(move || {
@@ -96,11 +147,11 @@ fn start_just_job(recipe: &str, args: &[&str]) -> Result<JustActionLaunch, Strin
             }
             Err(error) => ("failed".to_string(), format!("Could not start {recipe_for_thread}: {error}")),
         };
-        if let Ok(mut store) = just_jobs().lock() {
+        if let Ok(mut store) = hub_action_jobs().lock() {
             store.insert(job_for_thread, (state, detail));
         }
     });
-    Ok(JustActionLaunch { job, state: "running".into(), detail: format!("Running {recipe}…") })
+    Ok(HubActionLaunch { job, state: "running".into(), detail: format!("Running {recipe}…") })
 }
 
 /// Start an Updates-page operation as a native Rust-managed job. The command
@@ -163,22 +214,22 @@ fn start_update_job(operation: &str, argv: Vec<String>, timeout: Duration) -> Re
 }
 
 #[tauri::command]
-pub(crate) fn just_run(recipe: String) -> Result<JustActionLaunch, String> {
-    start_just_job(&recipe, &[])
+pub(crate) fn run_hub_action(action: HubAction) -> Result<HubActionLaunch, String> {
+    start_hub_action_job(action)
 }
 
 #[tauri::command]
-pub(crate) fn just_run_status(job: String) -> crate::InstallStatus {
-    let (state, detail) = just_jobs().lock().ok().and_then(|store| store.get(&job).cloned()).unwrap_or(("unknown".into(), "Recipe job not found.".into()));
+pub(crate) fn hub_action_status(job: String) -> crate::InstallStatus {
+    let (state, detail) = hub_action_jobs().lock().ok().and_then(|store| store.get(&job).cloned()).unwrap_or(("unknown".into(), "Hub action job not found.".into()));
     crate::InstallStatus { id: job, state, detail }
 }
 
 #[tauri::command]
 pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
-    if !std::path::Path::new("/usr/bin/bootc").exists() && !std::path::Path::new("/usr/bin/rpm-ostree").exists() {
-        return Err("bootc is not installed on this system.".to_string());
+    if !std::path::Path::new("/usr/bin/kyth-safe-upgrade").exists() {
+        return Err("The native KythOS update helper is not installed on this system.".to_string());
     }
-    start_update_job("Download and stage", vec!["sudo", "-A", "kyth-safe-upgrade"].into_iter().map(String::from).collect(), Duration::from_secs(3600))
+    start_update_job("Download and stage", vec!["sudo", "-A", "/usr/bin/kyth-safe-upgrade"].into_iter().map(String::from).collect(), Duration::from_secs(3600))
 }
 
 #[tauri::command]
@@ -190,7 +241,7 @@ pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
 pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, String> {
     let channel = kyth_shared::system::bootc_policy::switch_channel_arg(&branch)
         .ok_or_else(|| "unknown channel".to_string())?;
-    let operation = format!("switch-{channel}");
+    let operation = format!("switch-{}", if channel == "stable" { "latest" } else { channel });
     let mut argv = vec!["sudo", "-A", "/usr/bin/kyth-bootc-guard"].into_iter().map(String::from).collect::<Vec<_>>();
     argv.push(operation);
     start_update_job("Switch channel", argv, Duration::from_secs(300))
@@ -506,4 +557,21 @@ pub(crate) async fn update_health() -> UpdateHealthResponse {
             quarantined: 0,
             detail: "Native boot-health check could not complete.".to_string(),
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::HubAction;
+
+    #[test]
+    fn hub_action_deserializes_allowlisted_recipe() {
+        let action: HubAction = serde_json::from_str("\"enroll-secureboot\"").expect("known action");
+        assert_eq!(action.recipe(), "enroll-secureboot");
+    }
+
+    #[test]
+    fn hub_action_rejects_unknown_recipe() {
+        let result = serde_json::from_str::<HubAction>("\"run-arbitrary-command\"");
+        assert!(result.is_err());
+    }
 }

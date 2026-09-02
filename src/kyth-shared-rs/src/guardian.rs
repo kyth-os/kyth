@@ -71,7 +71,7 @@ pub fn recipes() -> &'static [Recipe] {
         Recipe { id: "portal.restart-user", title: "Restart desktop portals", component: "portal", command: &["systemctl", "--user", "restart", "xdg-desktop-portal.service"], risk: "safe", requires_auth: false, automatic: true, cooldown: 900, verification: "portal", recovery: "If file pickers or screen sharing were blank, retry them now." },
         Recipe { id: "plasma.restart-user", title: "Restart Plasma shell", component: "plasma", command: &["systemctl", "--user", "restart", "plasma-plasmashell.service"], risk: "safe", requires_auth: false, automatic: true, cooldown: 900, verification: "plasma", recovery: "If the panel or task manager vanished, it should reappear. Open windows are kept." },
         Recipe { id: "disk.review", title: "Review storage usage", component: "storage", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 3600, verification: "storage", recovery: "Open Hub > This PC > Hardware > Storage; Guardian never deletes files." },
-        Recipe { id: "storage.maint", title: "Run storage maintenance", component: "storage", command: &["/usr/libexec/kyth-storage-gate"], risk: "safe", requires_auth: false, automatic: false, cooldown: 86400, verification: "storage", recovery: "Gated btrfs scrub/balance (AC+idle+!gaming). Not a timer auto-fix — a scrub can outlive the 90s oneshot." },
+        Recipe { id: "storage.maint", title: "Run storage maintenance", component: "storage", command: &["/usr/bin/kyth-btrfs-maint"], risk: "safe", requires_auth: false, automatic: false, cooldown: 86400, verification: "storage", recovery: "Gated btrfs scrub/balance (AC+idle+!gaming). Not a timer auto-fix — a scrub can outlive the 90s oneshot." },
         Recipe { id: "firmware.refresh", title: "Refresh firmware metadata", component: "firmware", command: &["flock", "-w", "10", "/run/kyth-fwupd.lock", "fwupdmgr", "refresh", "--force"], risk: "safe", requires_auth: false, automatic: true, cooldown: 43200, verification: "firmware", recovery: "Refreshes LVFS metadata only; does not flash devices." },
         Recipe { id: "display.reconfigure", title: "Re-apply display outputs", component: "display", command: &["systemctl", "--user", "restart", "plasma-kscreen.service"], risk: "safe", requires_auth: false, automatic: true, cooldown: 21600, verification: "display", recovery: "Restarts KScreen and enables connected outputs after dock/HDR change; no reboot." },
         Recipe { id: "controller.repair", title: "Restart controller stack", component: "controller", command: &["sudo", "-A", "systemctl", "restart", "joycond.service"], risk: "confirm", requires_auth: true, automatic: false, cooldown: 21600, verification: "controller", recovery: "Restarts system joycond after suspend; may ask for permission. Re-pair if needed." },
@@ -209,8 +209,7 @@ fn run_executor(id: &str) -> Result<String, String> {
             Ok("firmware metadata refreshed".to_string())
         }
         "storage.maint" => {
-            run_ok(&["/usr/libexec/kyth-storage-gate"], Duration::from_secs(15))?;
-            run_ok(&["/usr/bin/kyth-btrfs-maint"], Duration::from_secs(60))?;
+            run_ok(&["/usr/bin/kyth-btrfs-maint"], Duration::from_secs(3600))?;
             Ok("storage maintenance started".to_string())
         }
         _ => Err(NOT_ELIGIBLE.to_string()),

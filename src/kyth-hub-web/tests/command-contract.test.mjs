@@ -73,8 +73,8 @@ const rustCommands = [
   "set_update_watcher_enabled",
   "check_for_updates_now",
   "defer_update_watcher",
-  "just_run",
-  "just_run_status",
+  "run_hub_action",
+  "hub_action_status",
 ];
 
 test("Dashboard wrappers are present and used by the page", () => {

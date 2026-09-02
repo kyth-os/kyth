@@ -129,7 +129,7 @@ fn collect_symptoms() -> Vec<Value> {
         if let Some((total, free)) = disk_usage(path) {
             let used = total.saturating_sub(free);
             if total >= 2 * 1024 * 1024 * 1024 && (used.saturating_mul(100) / total >= 90 || free < 5 * 1024 * 1024 * 1024) {
-                let recipe = if Path::new("/usr/libexec/kyth-storage-gate").exists() { "storage.maint" } else { "disk.review" };
+                let recipe = if Path::new("/usr/bin/kyth-btrfs-maint").exists() { "storage.maint" } else { "disk.review" };
                 symptoms.push(symptom("storage", format!("{} filesystem is {}% full", if path == "/" { "Root" } else { "Home" }, used.saturating_mul(100) / total), format!("{path} has less than 5 GiB free or is at least 90% full"), &[recipe]));
             }
         }
