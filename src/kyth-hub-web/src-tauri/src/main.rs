@@ -886,10 +886,11 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    app_installs().lock().unwrap().insert(
-        job.clone(),
-        ("running".into(), format!("Uninstalling {app_id}…")),
-    );
+    let pending_detail = format!("Uninstalling {app_id}…");
+    app_installs()
+        .lock()
+        .unwrap()
+        .insert(job.clone(), ("running".into(), pending_detail.clone()));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let result: Result<(bool, String), String> = if scope == "system" {
@@ -924,7 +925,7 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             .unwrap()
             .insert(job_for_thread, (state.into(), detail));
     });
-    Ok(InstallActionLaunch { job, state: "running".into(), detail: format!("Uninstalling {app_id}…") })
+    Ok(InstallActionLaunch { job, state: "running".into(), detail: pending_detail })
 }
 
 fn privileged_flatpak_uninstall(app_id: &str) -> Result<String, String> {
@@ -977,10 +978,11 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    app_installs().lock().unwrap().insert(
-        job.clone(),
-        ("running".into(), format!("Installing {app_id}…")),
-    );
+    let pending_detail = format!("Installing {app_id}…");
+    app_installs()
+        .lock()
+        .unwrap()
+        .insert(job.clone(), ("running".into(), pending_detail.clone()));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let result = std::process::Command::new("flatpak")
@@ -1005,7 +1007,7 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             .unwrap()
             .insert(job_for_thread, (state.into(), detail));
     });
-    Ok(InstallActionLaunch { job, state: "running".into(), detail: format!("Installing {app_id}…") })
+    Ok(InstallActionLaunch { job, state: "running".into(), detail: pending_detail })
 }
 
 #[tauri::command]
