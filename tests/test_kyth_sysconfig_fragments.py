@@ -200,11 +200,13 @@ class SysconfigFragmentTests(unittest.TestCase):
                         self.assertNotIn("*", line)
 
     def test_firstboot_missing_apps_is_a_successful_status(self):
-        body = (ROOT / "build_files" / "kyth-firstboot-app-status").read_text(
+        cargo = (ROOT / "src" / "kyth-shared-rs" / "Cargo.toml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("check_firstboot_app_status", body)
-        self.assertTrue(body.rstrip().endswith("main()"))
+        binary = (ROOT / "src" / "kyth-shared-rs" / "src" / "firstboot_app_status_bin.rs")
+        self.assertIn('name = "kyth-firstboot-app-status"', cargo)
+        self.assertTrue(binary.is_file())
+        self.assertIn("write_app_status", binary.read_text(encoding="utf-8"))
 
     def test_coredump_size_is_capped(self):
         """Nothing else bounds systemd-coredump — a crash-looping game/Proton

@@ -51,9 +51,9 @@ install -m 0644 "${_welcome_src}/kyth-welcome.desktop" \
 	/usr/share/applications/kyth-welcome.desktop
 
 # Hub search in KRunner — generated from the same route manifest imported by
-# the React frontend. This generator is packaging-only and has no dependency
-# on the retired Python/Qt Hub package.
-python3 /ctx/scripts/branding/generate-hub-desktop-entries.py \
+# the React frontend. The generator is a build-time Rust binary and has no
+# dependency on the retired Python/Qt Hub package.
+/usr/bin/kyth-hub-desktop-entries \
 	/src/kyth-hub-web/src/data/hubRoutes.json \
 	/usr/share/applications/kyth-hub
 

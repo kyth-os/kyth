@@ -58,13 +58,17 @@ RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/regi
     --mount=type=cache,id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target \
     cargo build --release --locked && \
     cp target/release/kyth-hub-shell /build/kyth-hub-shell && \
-    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged) && \
+    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries) && \
     cp /build/kyth-shared-rs/target/release/kyth-probe /build/kyth-probe && \
     cp /build/kyth-shared-rs/target/release/kyth-guardian /build/kyth-guardian && \
     cp /build/kyth-shared-rs/target/release/kyth-update-watcher /build/kyth-update-watcher && \
     cp /build/kyth-shared-rs/target/release/kyth-network-share /build/kyth-network-share && \
     cp /build/kyth-shared-rs/target/release/kyth-telem /build/kyth-telem && \
-    cp /build/kyth-shared-rs/target/release/kyth-privileged /build/kyth-privileged
+    cp /build/kyth-shared-rs/target/release/kyth-privileged /build/kyth-privileged && \
+    cp /build/kyth-shared-rs/target/release/kyth-post-update-check /build/kyth-post-update-check && \
+    cp /build/kyth-shared-rs/target/release/kyth-firstboot-app-status /build/kyth-firstboot-app-status && \
+    cp /build/kyth-shared-rs/target/release/kyth-steam-game-export /build/kyth-steam-game-export && \
+    cp /build/kyth-shared-rs/target/release/kyth-hub-desktop-entries /build/kyth-hub-desktop-entries
 
 # Base Image
 ARG BASE_IMAGE
@@ -259,6 +263,10 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-update-watcher /usr/bin/kyt
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-network-share /usr/bin/kyth-network-share
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-telem /usr/bin/kyth-telem
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-privileged /usr/bin/kyth-privileged
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-post-update-check /usr/bin/kyth-post-update-check
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-firstboot-app-status /usr/bin/kyth-firstboot-app-status
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-steam-game-export /usr/bin/kyth-steam-game-export
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-hub-desktop-entries /usr/bin/kyth-hub-desktop-entries
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \

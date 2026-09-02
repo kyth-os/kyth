@@ -91,7 +91,7 @@ class PythonPackagingTests(unittest.TestCase):
         self.assertIn("/ctx/kyth-installer", helper_build)
         self.assertIn("mktemp -d /tmp/kyth-installer-package", helper_build)
         self.assertIn('"${installer_package_dir}"', helper_build)
-        self.assertIn("generate-hub-desktop-entries.py", helper_build)
+        self.assertIn("kyth-hub-desktop-entries", helper_build)
         self.assertNotIn('from kyth_welcome.krunner_desktop import', helper_build)
         self.assertNotIn('"${welcome_package_dir}"', helper_build)
         self.assertNotIn("kyth-partition-install.sh", helper_build)

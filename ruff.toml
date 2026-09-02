@@ -1,14 +1,8 @@
 target-version = "py311"
 line-length = 120
 
-# Ruff's default discovery only matches *.py, so the extensionless executables
-# in the extensionless update notifier were never linted — which is how it
-# shipped a NameError (Path used with no import) that the selected F82 rules
-# would have caught immediately. Listed individually on purpose:
-# kyth-welcome-launch is a bash script and must stay out.
-extend-include = [
-    "build_files/kyth-welcome/kyth-update-notifier",
-]
+# The only extensionless Hub executable is the Bash compatibility-named
+# launcher; keep it out of Ruff's Python discovery.
 
 [lint]
 # Correctness + blind-except (BLE001) — bare `except Exception:` now surfaces.
@@ -21,6 +15,3 @@ select = ["E9", "F63", "F7", "F82", "BLE001"]
 "build_files/**/*.py" = ["BLE001"]
 "tests/**/*.py" = ["BLE001"]
 ".github/scripts/**/*.py" = ["BLE001"]
-# Same grandfathering as build_files/**/*.py — these are only listed separately
-# because the glob above cannot match an extensionless filename.
-"build_files/kyth-welcome/kyth-update-notifier" = ["BLE001"]

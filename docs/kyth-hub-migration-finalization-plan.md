@@ -25,13 +25,16 @@ scope boundary is:
 ## Current status — 2026-09-02
 
 The React/Tauri shell is the primary implementation and its code-level build,
-contract, SSR, Rust, and embedded-asset checks pass on `testing` commit
-`1d2f7f07`. `kyth-welcome-launch` is now Tauri-only and fails clearly when
+contract, SSR, Rust, and embedded-asset checks pass on the `testing` branch.
+`kyth-welcome-launch` is Tauri-only and fails clearly when
 `/usr/bin/kyth-hub-shell` is absent; the normal image no longer installs the
 Python Hub package. The selected compatibility fixtures for the retired Hub
 authorities were removed in P2. Transitional Python helpers unrelated to the
-supported Hub remain for separate cleanup; none is an active Hub action
-authority.
+supported Hub have now been replaced at their installed entry points by Rust
+binaries (post-update confidence, first-login app status, and Steam launcher
+export); none is an active Hub action authority. The update watcher is also
+the sole update notifier, so no Python/Qt tray process is installed or
+autostarted.
 The matching testing ISO was built and published successfully by testing
 workflow `33543074273`; its VM acceptance job was skipped. Per the current
 YOLO migration direction, installed-image/user acceptance is intentionally
@@ -275,6 +278,11 @@ root-boundary fixtures were removed in P2.
   authority; shared Rust tests now cover telemetry ingestion, Guardian policy/
   probe contracts, firmware staging helpers, and update retry/status behavior
   (2026-09-02). Installed-image acceptance is tracked separately and waived.
+- [x] Replace the installed post-update confidence, first-login app-status,
+  and Steam launcher-export Python entry points with Rust binaries that reuse
+  the shared diagnostic, firstboot, and desktop-shortcut contracts (2026-09-02).
+- [x] Replace the packaging-time Python KRunner generator with the native Rust
+  `kyth-hub-desktop-entries` binary (2026-09-02).
 
 Exit criteria: every Hub-facing read/action has Rust-owned semantics and an
 approved non-UI service boundary; no Hub workflow depends on a Python module
@@ -309,7 +317,7 @@ Code-level exit criteria are met: native tests cover secret redaction, bounded
 execution, and SAML URL rejection. Full Phase 6 exit still requires an
 installed-image drill on the promoted digest.
 
-Validation evidence (2026-09-02): 491 shared Rust tests and 5 Tauri tests pass;
+Validation evidence (2026-09-02): 491 shared Rust tests and 6 Tauri tests pass;
 the frontend command-contract test, Hub SSR smoke test, Tauri release build,
 frontend production build, `git diff --check`, and fast repository validation
 also pass. The installed-image security/rollback drill was not run.
@@ -343,12 +351,14 @@ paths.
 | P1 | Replace Python-generated runtime route/search metadata. | 3, 4 (complete 2026-09-02) |
 | P1 | Remove `Justfile run-hub` Python/Qt startup behavior. | 3 (complete) |
 | P1 | Add Tauri command-unit tests to CI instead of compile-only coverage. | 1 (complete) |
+| P1 | Replace installed Python post-update, firstboot-status, and Steam-export helpers with native binaries. | 5 (complete 2026-09-02) |
+| P1 | Replace the packaging-time Python Hub desktop-entry generator. | 3, 4 (complete 2026-09-02) |
 | P0 | Replace the Python/PySide6 VPN/SAML app reached by `open_vpn_app`; expose the complete flow through Rust/Tauri. | 5 (complete 2026-09-02; standalone client and source fixture removed) |
 | P0 | Replace the Python root network-share helper behind the typed privileged socket; preserve fixed operations and credential isolation. | 5 (complete 2026-09-02; native binary installed and Python fixture removed) |
 | P1 | Enable and validate the Rust telemetry writer; remove the active Python `kyth-telem` daemon. | 5 (complete 2026-09-02; source fixture removed; image acceptance waived) |
 | P1 | Complete extended Guardian/model parity and update-watcher lock, firmware, retry, and session/network gates. | 5 (complete 2026-09-02; image acceptance waived) |
 | P1 | Reconcile any other Hub-facing Python authorities listed in `MIGRATION.md` before declaring strict mode complete. | 5 (complete 2026-09-02; native Rust authorities installed) |
-| P2 | Remove remaining compatibility service fixtures and stale support references after strict-mode cutover. | 7 (complete 2026-09-02; selected dead fixtures and stale VPN launch references removed) |
+| P2 | Remove remaining compatibility service fixtures and stale support references after strict-mode cutover. | 7 (complete 2026-09-02; native helper entry points, dead fixtures, and stale VPN launch references removed) |
 | P2 | Run a post-cutover observation window before deleting compatibility code. | 7 (waived/not started for YOLO cutover; installed-image acceptance was skipped) |
 
 ## Definition of done

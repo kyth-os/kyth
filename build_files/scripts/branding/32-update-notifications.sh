@@ -1,11 +1,7 @@
 # shellcheck shell=bash
 # ── Update / first-login notification UX ──────────────────────────────────────
-install -m 0755 /ctx/kyth-welcome/kyth-update-notifier /usr/bin/kyth-update-notifier
-install -m 0644 /ctx/kyth-welcome/kyth-update-notifier.desktop \
-	/usr/share/applications/kyth-update-notifier.desktop
-mkdir -p /etc/skel/.config/autostart
-install -m 0644 /ctx/kyth-welcome/kyth-update-notifier.desktop \
-	/etc/skel/.config/autostart/kyth-update-notifier.desktop
+# The native kyth-update-watcher owns update checks and notifications. Do not
+# install the retired PySide/Qt tray notifier or create a second update path.
 
 write_config /etc/xdg/autostart/kyth-post-update-check.desktop <<'POSTUPDATEAUTOSTARTEOF'
 [Desktop Entry]
@@ -33,7 +29,3 @@ Exec=/usr/bin/kyth-steam-game-export
 NoDisplay=true
 X-KDE-autostart-after=panel
 STEAMEXPORTAUTOSTARTEOF
-
-# Build-time syntax check only; the notifier imports shared services and does
-# not depend on the retired Python/Qt Hub package being installed.
-python3 -c 'import ast, pathlib; ast.parse(pathlib.Path("/usr/bin/kyth-update-notifier").read_text())'

@@ -34,6 +34,22 @@ required-features = ["telemetry-writer"]
 name = "kyth-privileged"
 path = "src/privileged_bin.rs"
 
+[[bin]]
+name = "kyth-post-update-check"
+path = "src/post_update_check_bin.rs"
+
+[[bin]]
+name = "kyth-firstboot-app-status"
+path = "src/firstboot_app_status_bin.rs"
+
+[[bin]]
+name = "kyth-steam-game-export"
+path = "src/steam_game_export_bin.rs"
+
+[[bin]]
+name = "kyth-hub-desktop-entries"
+path = "src/hub_desktop_entries_bin.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

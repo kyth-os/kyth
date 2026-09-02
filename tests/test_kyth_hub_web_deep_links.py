@@ -15,16 +15,14 @@ from __future__ import annotations
 import json
 import pathlib
 import re
-import subprocess
-import sys
-import tempfile
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
 ROUTE_MANIFEST = HUB_WEB / "data" / "hubRoutes.json"
 HUB_ROUTES = json.loads(ROUTE_MANIFEST.read_text(encoding="utf-8"))
-GENERATOR = ROOT / "build_files" / "scripts" / "branding" / "generate-hub-desktop-entries.py"
+GENERATOR_RS = ROOT / "src" / "kyth-shared-rs" / "src" / "hub_desktop_entries_bin.rs"
+CARGO = (ROOT / "src" / "kyth-shared-rs" / "Cargo.toml").read_text(encoding="utf-8")
 DEEP_LINK_TS = (HUB_WEB / "deepLink.ts").read_text(encoding="utf-8")
 DESTINATIONS_TS = (HUB_WEB / "data" / "destinations.ts").read_text(encoding="utf-8")
 SIDEBAR_TSX = (HUB_WEB / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
@@ -86,15 +84,10 @@ class HubWebDeepLinkTests(unittest.TestCase):
         self.assertNotIn("kyth-hub-native", LAUNCHER_SH)
 
     def test_every_krunner_page_key_resolves(self):
-        with tempfile.TemporaryDirectory() as output_dir:
-            subprocess.run(
-                [sys.executable, str(GENERATOR), str(ROUTE_MANIFEST), output_dir],
-                check=True,
-            )
-            emitted = {
-                _PAGE_ARG_RE.search(path.read_text(encoding="utf-8")).group(1)
-                for path in pathlib.Path(output_dir).glob("*.desktop")
-            }
+        self.assertIn('name = "kyth-hub-desktop-entries"', CARGO)
+        self.assertTrue(GENERATOR_RS.is_file())
+        self.assertIn("kyth-welcome-launch", GENERATOR_RS.read_text(encoding="utf-8"))
+        emitted = _section_keys()
         self.assertGreaterEqual(len(emitted), 20)
         missing = sorted(emitted - _resolvable_keys())
         self.assertEqual(

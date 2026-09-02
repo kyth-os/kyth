@@ -16,7 +16,7 @@ install -m 0755 /ctx/kyth-rclone-update /usr/bin/kyth-rclone-update
 install -m 0755 /ctx/kyth-session-snapshot /usr/bin/kyth-session-snapshot
 install -m 0755 /ctx/kyth-report-issue /usr/bin/kyth-report-issue
 install -m 0755 /ctx/kyth-proton-cachyos-update /usr/bin/kyth-proton-cachyos-update
-install -m 0755 /ctx/kyth-steam-game-export /usr/bin/kyth-steam-game-export
+# kyth-steam-game-export is copied into /usr/bin by the Rust builder stage.
 install -m 0644 /ctx/kyth-proton-cachyos-update.service /usr/lib/systemd/system/kyth-proton-cachyos-update.service
 install -m 0644 /ctx/kyth-proton-cachyos-update.timer /usr/lib/systemd/system/kyth-proton-cachyos-update.timer
 

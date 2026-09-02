@@ -1,8 +1,8 @@
 # shellcheck shell=bash
 # ── Read-only diagnostic/health-check scripts ──────────────────────────────────
 # kyth-smoke-check is installed as a kyth-shared console entry point.
-install -m 0755 /ctx/kyth-post-update-check /usr/bin/kyth-post-update-check
-install -m 0755 /ctx/kyth-firstboot-app-status /usr/bin/kyth-firstboot-app-status
+# Native Rust compatibility-named utilities are copied into /usr/bin by the
+# Dockerfile builder stage; the former Python entry points are not installed.
 install -m 0755 /ctx/kyth-controller-check /usr/bin/kyth-controller-check
 install -m 0755 /ctx/kyth-resume-check /usr/bin/kyth-resume-check
 install -m 0755 /ctx/kyth-nvidia-status /usr/bin/kyth-nvidia-status

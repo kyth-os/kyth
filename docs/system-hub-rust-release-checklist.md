@@ -7,15 +7,16 @@ runtime parity on an installed image.
 
 ## Status snapshot (2026-09-02)
 
-Current target: `testing` at `1d2f7f07` (`Complete hub parity controls`) plus
-uncommitted local P1/P2/Phase 6 migration work. The prior pre-build gates are
-complete. The local shared-crate gate now passes 491 Rust tests across 8 suites,
+Current target: the `testing` branch with the Hub migration cutover changes.
+The prior pre-build gates are complete. The local shared-crate gate now passes
+491 Rust tests across 12 suites,
 including native telemetry, extended Guardian, firmware staging, watcher
 retry/lock coverage, the privileged socket policy, secret redaction, and SAML
 redirect validation. The native telemetry writer and privileged daemon release
 builds also pass.
-The frontend/CI results below describe the prior testing commit; these local
-P1 changes have not been committed or pushed.
+The native post-update, first-login app-status, Steam launcher-export, and
+KRunner desktop-entry utilities are included in the shared Rust build. No
+Python/Qt update notifier is installed or autostarted.
 
 GitHub Actions Validation run
 [`33538517283`](https://github.com/kyth-os/kyth/actions/runs/33538517283)
@@ -80,7 +81,8 @@ Python pieces are transitional authorities or source artifacts:
   `telemetry-writer` feature; its former Python fixture was removed in P2 and
   is not installed or enabled;
 - retired Python Hub UI source and UI-only tests, removed in Phase 4; the
-  packaging-only route metadata generator remains intentionally supported; and
+  route metadata generator is now the native Rust `kyth-hub-desktop-entries`
+  build utility; and
 - any workflow whose Rust command is not yet listed in the command ledger.
 
 ## Strict service-ownership gate
@@ -172,7 +174,7 @@ Phase 6 source validation on 2026-09-02 also passed:
 
 ```text
 (cd src/kyth-shared-rs && cargo test --locked)       # 491 passed
-(cd src/kyth-hub-web/src-tauri && cargo test --locked) # 5 passed
+(cd src/kyth-hub-web/src-tauri && cargo test --locked) # 6 passed
 (cd src/kyth-hub-web && npm run test:contracts)      # pass
 (cd src/kyth-hub-web && npm run test:smoke)          # pass
 (cd src/kyth-hub-web && npm run build)               # pass
