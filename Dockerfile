@@ -198,6 +198,7 @@ RUN python3 -m pip install \
 # Hash-gated — only re-runs when sysconfig-static.sh or sysconfig/ or data/
 # change. Keeps the post-upgrade layer chain short and avoids users pulling
 # a new sysconfig layer when only packages changed.
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-finalize-staged /usr/libexec/kyth-finalize-staged
 ARG SYSCONFIG_HASH=unset
 RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx/sysconfig-static.sh \
     --mount=type=bind,source=build_files/scripts/sysconfig,target=/ctx/sysconfig \
@@ -275,7 +276,6 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-steam-game-export /usr/bin/
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-hub-desktop-entries /usr/bin/kyth-hub-desktop-entries
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-safe-upgrade /usr/bin/kyth-safe-upgrade
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-bootc-guard /usr/bin/kyth-bootc-guard
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-finalize-staged /usr/libexec/kyth-finalize-staged
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-btrfs-maint /usr/bin/kyth-btrfs-maint
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-ai-perfd /usr/bin/kyth-ai-perfd
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-perf-gate-rs /usr/bin/kyth-perf-gate-rs
