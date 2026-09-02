@@ -11,3 +11,4 @@ pub(crate) mod privilege;
 pub(crate) mod process;
 pub(crate) mod security;
 pub(crate) mod updates;
+pub(crate) mod vpn;

@@ -15,9 +15,7 @@
 # frontend got embedded at all — see the assertion at the bottom — and (2)
 # whether every Hub section component constructs without throwing, which
 # `npm run test:smoke` below now covers by server-rendering each one
-# (`tests/hub-shell-smoke.test.mjs`, via `react-dom/server`) — the React
-# analog of `.githooks/pre-push`'s offscreen PySide6 `MainWindow` smoke test
-# for the old Qt Hub.
+# (`tests/hub-shell-smoke.test.mjs`, via `react-dom/server`).
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -38,6 +36,9 @@ echo "== kyth-hub-web: headless section construction smoke =="
 
 echo "== kyth-shared-rs: cargo test =="
 (cd "$kyth_shared_rs" && cargo test --locked)
+
+echo "== kyth-hub-web/src-tauri: cargo test =="
+(cd "$hub_web/src-tauri" && cargo test --locked)
 
 echo "== kyth-hub-web/src-tauri: cargo build =="
 # A full build, not `cargo check`: the assertion below needs a real binary to

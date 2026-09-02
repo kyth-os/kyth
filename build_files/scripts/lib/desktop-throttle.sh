@@ -6,7 +6,7 @@
 # actual contention — idle, the job still runs at full speed. MemoryHigh/
 # MemoryMax cap this job's own cgroup so a spike (the ~180-file test
 # suite's Hub-smoke construction/teardown is already flagged as OOM-prone
-# — see test_kyth_welcome_hub_smoke.py's own "skip under coverage" guard)
+# — see the live-desktop validation notes in AGENTS.md)
 # gets reclaimed or OOM-killed inside its own scope instead of taking down
 # sibling cgroups like the desktop session's.
 #

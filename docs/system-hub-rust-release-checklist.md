@@ -5,18 +5,42 @@ System Hub the default launcher. The checklist is intentionally separate from
 the migration roadmap: a green Rust build does not by itself demonstrate
 runtime parity on an installed image.
 
+## Status snapshot (2026-09-02)
+
+Current target: `testing` at `1d2f7f07` (`Complete hub parity controls`) plus
+uncommitted local P1/P2/Phase 6 migration work. The prior pre-build gates are
+complete. The local shared-crate gate now passes 491 Rust tests across 8 suites,
+including native telemetry, extended Guardian, firmware staging, watcher
+retry/lock coverage, the privileged socket policy, secret redaction, and SAML
+redirect validation. The native telemetry writer and privileged daemon release
+builds also pass.
+The frontend/CI results below describe the prior testing commit; these local
+P1 changes have not been committed or pushed.
+
+GitHub Actions Validation run
+[`33538517283`](https://github.com/kyth-os/kyth/actions/runs/33538517283)
+is green for this commit, including the Hub web shell job. The testing ISO
+build and publish run
+[`33543074273`](https://github.com/kyth-os/kyth/actions/runs/33543074273)
+completed successfully. Its VM acceptance job was skipped by direction, so no
+installed-image or real-session runtime gate has been signed off. Acceptance
+is intentionally waived for the YOLO cutover; the image/runtime checkboxes
+remain visibly unchecked, while implementation work proceeds.
+
 ## Pre-build gates
 
 - [x] Dashboard and Updates command ledger is present.
 - [x] Frontend/Rust contract tests pass.
-- [x] Rust command modules compile and their unit tests pass.
+- [x] Rust command modules compile and their unit tests pass (the canonical
+      script compiles the Tauri crate; its five unit tests were run separately).
 - [x] Privileged operations are allowlisted and validate inputs centrally.
 - [x] Frontend confirms privileged and destructive actions without displaying
       BitLocker secrets.
-- [ ] CI `hub-shell` job is green on the release commit.
-- [ ] `npm ci` succeeds from the lockfile in a clean build environment.
-- [ ] `cargo build --locked` succeeds for the Tauri shell and shared crate.
-- [ ] The asset-embed assertion finds every built JS/CSS asset in the binary.
+- [x] CI `hub-shell` job is green on the current testing commit
+      (`1d2f7f07`; Validation run `33538517283`).
+- [x] `npm ci` succeeds from the lockfile in a clean build environment.
+- [x] `cargo build --locked` succeeds for the Tauri shell and shared crate.
+- [x] The asset-embed assertion finds every built JS/CSS asset in the binary.
 
 ## Image and runtime gates
 
@@ -35,18 +59,87 @@ runtime parity on an installed image.
 
 ## Python retirement gate
 
-Do not delete or stop installing the Python Hub/services until all image and
-runtime gates above pass on both stable and testing images. The Python pieces
-that remain authorities or compatibility fallbacks are:
+For this YOLO cutover, the Python Hub UI package is no longer installed in the
+normal image even though installed-image acceptance is waived. The remaining
+Python pieces are transitional authorities or source artifacts:
 
-- `kyth-probe` and `kyth-guardian` headless services used by the Rust shell;
-- the Python launcher fallback for old images without the Tauri binary; and
+- `kyth-guardian` now owns the extended deterministic sweep and a bounded,
+  schema-validated local-model investigation path; missing model assets are
+  explicit degraded state;
+- the native Rust update watcher owns the installed scheduling/status path,
+  including firmware staging, free-space/lock gates, retryable status, and
+  session/network safety conditions;
+- the Tauri VPN command now owns the profile editor, openconnect worker, and
+  SAML webview; the legacy `kyth-vpn-connect` package and Python/Qt source were
+  removed in P2;
+- network-share mutations use the typed privileged socket and native Rust root
+  helper; and
+- the fixed privileged socket daemon is the native Rust `kyth-privileged`
+  binary; its former Python fixture was removed in P2; and
+- `kyth-telem` is the native Rust telemetry writer built with the
+  `telemetry-writer` feature; its former Python fixture was removed in P2 and
+  is not installed or enabled;
+- retired Python Hub UI source and UI-only tests, removed in Phase 4; the
+  packaging-only route metadata generator remains intentionally supported; and
 - any workflow whose Rust command is not yet listed in the command ledger.
+
+## Strict service-ownership gate
+
+These remain unchecked until the migration is genuinely off the remaining
+Python authority for Hub-facing reads and actions:
+
+- [x] Replace the Python/PySide6 VPN profile editor, openconnect worker, and
+      SAML browser with a Rust/Tauri workflow; the legacy package is not
+      installed.
+- [x] Replace the Python root network-share helper behind the fixed privileged
+      socket with the native Rust binary, retaining credential isolation and
+      audit behavior.
+- [x] Replace the Python root-owned privileged socket daemon with the native
+      Rust `kyth-privileged` binary, retaining peer-credential checks, fixed
+      argv allowlisting, BitLocker stdin handling, bounded execution, and audit
+      behavior (native unit tests pass; image acceptance waived).
+- [x] Enable and validate the Rust telemetry writer, then remove the active
+      Python `kyth-telem` daemon (native fixture tests pass; image acceptance
+      waived).
+- [x] Complete extended Guardian/model probe parity and service-level tests;
+      unavailable model assets remain an explicit degraded state.
+- [x] Complete update-watcher lock, firmware staging, retryable-status, and
+      network/session safety parity (native fixture tests pass; image
+      acceptance waived).
+
+## P2 compatibility-retirement gate
+
+- [x] Remove the obsolete Python/build fixtures for the native update watcher,
+      telemetry writer, privileged socket boundary, network-share executor,
+      and standalone VPN client.
+- [x] Remove stale Python/Qt VPN launch references and fixture-only tests.
+- [ ] Run a post-cutover observation window. This is waived/not started for
+      the YOLO cutover because installed-image/user acceptance was skipped;
+      treat runtime qualification as an explicit operational risk.
+
+## Phase 6 security and rollback gate
+
+- [x] Tauri declares an explicit minimal capability for the main shell and
+      Rust-managed VPN sign-in window.
+- [x] Bounded helper output is centrally redacted before it reaches UI job
+      status, diagnostics, or privileged audit output.
+- [x] BitLocker, VPN, and network-share credentials remain off process
+      arguments; privileged responses redact any echoed request secrets.
+- [x] SAML redirect and callback URLs are size-bounded and reject insecure,
+      credential-bearing, fragmented, or malformed destinations.
+- [x] Telemetry-free local startup, command-failure, service-absence, and
+      update-health diagnostics are mapped in the
+      [Kyth Hub Rust rollback runbook](kyth-hub-rust-rollback-runbook.md).
+- [x] Release-blocking signals and the revert/removal procedure are defined in
+      the rollback runbook.
+- [ ] Execute the security review and rollback drill on the exact installed
+      image. This is waived/not started for the YOLO cutover; source/build
+      gates passing is not installed-image acceptance.
 
 ## Rollback triggers
 
-Keep the Python launcher fallback and revert the Rust default if any of these
-occur after an image build:
+Keep the previous image available for rollback and revert the Rust default if
+any of these occur after an image build:
 
 - the shell fails to start or does not render its embedded frontend;
 - a deep link opens the wrong page or a second launch opens another window;
@@ -65,6 +158,34 @@ build_files/scripts/check-hub-web-shell.sh
 
 It runs the clean frontend install, production build, frontend/Rust contract
 tests, a headless SSR construction smoke test of every Hub section component
-(`tests/hub-shell-smoke.test.mjs` — the React analog of the old Qt Hub's
-offscreen PySide6 `MainWindow` smoke test), shared Rust tests, Tauri build,
+(`tests/hub-shell-smoke.test.mjs`), shared Rust tests, Tauri build,
 and embedded-asset assertion.
+
+The script uses both `cargo test --locked` and `cargo build --locked` for the
+Tauri shell. Run the focused unit-test gate explicitly when iterating with:
+
+```text
+(cd src/kyth-hub-web/src-tauri && cargo test --locked)
+```
+
+Phase 6 source validation on 2026-09-02 also passed:
+
+```text
+(cd src/kyth-shared-rs && cargo test --locked)       # 491 passed
+(cd src/kyth-hub-web/src-tauri && cargo test --locked) # 5 passed
+(cd src/kyth-hub-web && npm run test:contracts)      # pass
+(cd src/kyth-hub-web && npm run test:smoke)          # pass
+(cd src/kyth-hub-web && npm run build)               # pass
+./build_files/scripts/validate.sh --fast             # pass
+git diff --check                                      # pass
+```
+
+The environment does not provide `cargo fmt`/`rustfmt`; formatting was
+therefore not independently run. The exact-image security review and rollback
+drill remain unchecked because installed-image acceptance is waived for this
+YOLO cutover.
+
+`npm run tauri:build` compiled the optimized `kyth-hub-shell` application and
+loaded the capability configuration, but final AppImage bundling was blocked by
+the environment's read-only filesystem. This is an environment limitation, not
+a passing installed-image package result.

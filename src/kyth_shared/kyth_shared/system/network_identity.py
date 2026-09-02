@@ -1,9 +1,9 @@
 """Network identity — single view for VPN / SMB / cloud (R8-4).
 
-Today `page_vpn.py`, `page_network_shares.py`, `page_cloud_storage/*`,
-`services/vpn.py`, `services/network_share_helper.py`, `services/cloud_sync.py`
-each own a credential file and a `probe_cached("vpn-status", ...)` style
-helper. Hub has to ask three places to answer “am I connected for work”.
+The transitional Python service package historically gave separate ownership
+of VPN, network-share, and cloud-sync state. The supported Tauri/Rust Hub now
+uses one native read boundary instead of asking three places whether “am I
+connected for work”.
 
 This module is the single Hub import that merges those three into one
 `NetworkIdentity` via the unified ProbeService, so the Hub can render one

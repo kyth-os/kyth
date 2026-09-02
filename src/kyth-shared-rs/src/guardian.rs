@@ -224,7 +224,10 @@ fn executor_supported(id: &str) -> bool {
         | "controller.repair" | "portal.restart-user" | "firmware.refresh" | "storage.maint")
 }
 
-fn save_state(state: &Value) -> Result<(), String> {
+/// Persist Guardian state for the native service and the Tauri command path.
+/// The write remains atomic so a concurrent Hub read sees either the previous
+/// state or the complete new state.
+pub fn save_state(state: &Value) -> Result<(), String> {
     let path = state_path();
     let parent = path.parent().ok_or_else(|| "invalid Guardian state path".to_string())?;
     std::fs::create_dir_all(parent).map_err(|_| "could not create Guardian state directory".to_string())?;
@@ -232,6 +235,47 @@ fn save_state(state: &Value) -> Result<(), String> {
     std::fs::write(&temp, serde_json::to_vec_pretty(state).map_err(|_| "could not encode Guardian state".to_string())?)
         .map_err(|_| "could not write Guardian state".to_string())?;
     std::fs::rename(temp, path).map_err(|_| "could not commit Guardian state".to_string())
+}
+
+/// Record a native service check using the same history shape consumed by the
+/// Hub's pending-recommendation projection.
+pub fn record_service_check(
+    symptoms: &[Value],
+    decisions: &[Value],
+) -> Result<Value, String> {
+    let mut state = load_state();
+    let occurrences = state
+        .get_mut("occurrences")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "Guardian occurrences are unavailable".to_string())?;
+    let active = symptoms
+        .iter()
+        .filter_map(|symptom| symptom.get("component").and_then(Value::as_str))
+        .collect::<std::collections::HashSet<_>>();
+    for recipe in recipes() {
+        let count = if active.contains(recipe.component) {
+            occurrences
+                .get(recipe.component)
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .saturating_add(1)
+        } else {
+            0
+        };
+        occurrences.insert(recipe.component.to_string(), Value::from(count));
+    }
+    let history = state
+        .get_mut("history")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| "Guardian history is unavailable".to_string())?;
+    history.extend(decisions.iter().cloned());
+    if history.len() > 200 {
+        let keep_from = history.len() - 200;
+        history.drain(0..keep_from);
+    }
+    state["last_check"] = Value::from(now_unix());
+    save_state(&state)?;
+    Ok(state)
 }
 
 fn cooldown_active(state: &Value, recipe: &Recipe) -> bool {
@@ -343,7 +387,7 @@ fn now_unix() -> f64 {
     SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct PendingItem {
     pub recipe_id: String,
     pub detail: String,

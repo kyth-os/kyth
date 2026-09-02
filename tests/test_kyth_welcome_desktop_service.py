@@ -67,16 +67,5 @@ class DesktopServiceTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
-    def test_call_sites_use_shared_constant_not_hand_rolled_copies(self):
-        for relative in (
-            "page_repair.py",
-            "page_software_installed.py",
-        ):
-            text = (KYTH_WELCOME / relative).read_text(encoding="utf-8")
-            with self.subTest(file=relative):
-                self.assertIn("REFRESH_DESKTOP_DATABASE_SH", text)
-                self.assertNotIn("kbuildsycoca6 --noincremental 2>/dev/null || true", text)
-
-
 if __name__ == "__main__":
     unittest.main()

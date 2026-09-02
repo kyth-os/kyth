@@ -6,14 +6,14 @@ import {
   UPDATES_SECTIONS,
   type HubSection,
 } from "./hubSections";
+import routeManifest from "./hubRoutes.json";
 
 /** The destinations and the sections each one owns.
  *
  * Single source of truth for "what pages exist and where they live":
- * deepLink.ts builds its `--page` route table from this, and search.ts
- * builds its index from it. Both used to be written out separately, which
- * is how deepLink.ts came to know only 5 of the 26 shipped page keys —
- * anything this list gains is picked up by both callers at once.
+ * hubRoutes.json is the source for this table, the deepLink.ts `--page` route
+ * table, the search.ts index, and packaging-time KRunner entries. Adding a
+ * section to the manifest updates every consumer together.
  */
 export interface Destination {
   key: string;
@@ -21,10 +21,16 @@ export interface Destination {
   sections: HubSection[];
 }
 
-export const DESTINATIONS: Destination[] = [
-  { key: "Play", route: "/play", sections: PLAY_SECTIONS },
-  { key: "Apps", route: "/apps", sections: APPS_SECTIONS },
-  { key: "This PC", route: "/this-pc", sections: THIS_PC_SECTIONS },
-  { key: "Move In", route: "/move-in", sections: MOVE_IN_SECTIONS },
-  { key: "Updates", route: "/updates", sections: UPDATES_SECTIONS },
-];
+const sectionsByDestination: Record<string, HubSection[]> = {
+  Play: PLAY_SECTIONS,
+  Apps: APPS_SECTIONS,
+  "This PC": THIS_PC_SECTIONS,
+  "Move In": MOVE_IN_SECTIONS,
+  Updates: UPDATES_SECTIONS,
+};
+
+export const DESTINATIONS: Destination[] = routeManifest.destinations.map(({ key, route }) => ({
+  key,
+  route,
+  sections: sectionsByDestination[key],
+}));

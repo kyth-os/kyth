@@ -1,10 +1,8 @@
-import ast
 import re
 import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-
 
 class QualityContractsTests(unittest.TestCase):
     def test_quality_dependencies_are_exactly_pinned(self):
@@ -18,9 +16,6 @@ class QualityContractsTests(unittest.TestCase):
     def test_validation_publishes_coverage_even_on_failure(self):
         workflow = (ROOT / ".github/workflows/validation.yml").read_text()
         self.assertIn("./build_files/scripts/run-quality.sh", workflow)
-        # Scope the slice to the quality job alone — sibling jobs (hub-shell)
-        # legitimately shell out to `just`, and they have no coverage artifact
-        # to strand, so a slice running to end-of-file would misfire on them.
         quality_job = re.split(
             r"^  [a-z][a-z0-9-]*:$",
             workflow.split("  quality:\n", 1)[1],
@@ -37,27 +32,16 @@ class QualityContractsTests(unittest.TestCase):
         self.assertIn("./build_files/scripts/run-quality.sh", preflight)
 
     def test_validation_tool_archives_do_not_require_archive_owners(self):
-        installer = (
-            ROOT / "build_files/scripts/install-validation-tools.sh"
-        ).read_text()
+        installer = (ROOT / "build_files/scripts/install-validation-tools.sh").read_text()
         self.assertIn("--no-same-owner", installer)
         self.assertIn('SHELLCHECK_VERSION="${SHELLCHECK_VERSION:-', installer)
         self.assertIn('download_and_verify "shellcheck"', installer)
 
     def test_critical_modules_have_explicit_thresholds(self):
-        # Floors are data (coverage-floors.json), not inline in the gate
-        # script — see check-critical-coverage.py's --update-floors, which
-        # ratchets them mechanically instead of requiring a hand-edit here.
         gate = (ROOT / "build_files/config/coverage-floors.json").read_text()
         for module in (
-            "installer_service.py",
-            "recovery.py",
-            "privileged.py",
-            "updates.py",
-            "windows_installer.py",
-            "thirdparty.py",
-            "user_polish.py",
-            "vm_acceptance.py",
+            "installer_service.py", "recovery.py", "privileged.py", "updates.py",
+            "windows_installer.py", "thirdparty.py", "user_polish.py", "vm_acceptance.py",
         ):
             self.assertIn(module, gate)
 
@@ -75,69 +59,28 @@ class QualityContractsTests(unittest.TestCase):
         self.assertTrue(report.is_file())
         self.assertTrue(budgets.is_file())
 
-    def test_primary_ui_shells_do_not_bypass_command_gateway(self):
-        ui_paths = (
-            ROOT / "build_files/kyth-welcome/kyth_welcome/windows.py",
-            ROOT / "build_files/kyth-welcome/kyth_welcome/wizard/window.py",
-            ROOT / "build_files/kyth-welcome/kyth_welcome/wizard/steps_finish.py",
+    def test_retired_python_hub_ui_is_absent(self):
+        package_root = ROOT / "src/kyth-welcome/kyth_welcome"
+        self.assertFalse((ROOT / "src/kyth-welcome/kyth-welcome").exists())
+        self.assertFalse((package_root / "app.py").exists())
+        self.assertFalse((package_root / "page_registry.py").exists())
+        self.assertFalse((package_root / "windows.py").exists())
+        metadata = (ROOT / "src/kyth-welcome/pyproject.toml").read_text()
+        self.assertNotIn("PySide6", metadata)
+        self.assertNotIn("kyth_welcome.app", metadata)
+
+    def test_transitional_package_contains_no_hub_pages(self):
+        package_root = ROOT / "src/kyth-welcome/kyth_welcome"
+        self.assertEqual(
+            {path.name for path in package_root.glob("page_*.py")},
+            set(),
         )
-        violations = []
-        for path in ui_paths:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    violations.extend(
-                        f"{path.relative_to(ROOT)} imports subprocess"
-                        for alias in node.names
-                        if alias.name == "subprocess"
-                    )
-                elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
-                    violations.append(
-                        f"{path.relative_to(ROOT)} imports from subprocess"
-                    )
-        self.assertEqual(violations, [])
-
-    def test_page_and_wizard_modules_do_not_call_subprocess_directly(self):
-        """System Hub pages must run commands through the async worker
-        framework in services/runtime.py (TrackedThread/Worker/
-        StreamingProcessWorker), not by shelling out on the GUI thread.
-
-        A multi-commit cleanup (see git log for "blocking the GUI thread")
-        moved every direct subprocess/os.system call out of page_*/wizard/
-        code and into services/. This test keeps a new page or wizard step
-        from silently reintroducing one.
-        """
-        welcome_root = ROOT / "build_files/kyth-welcome/kyth_welcome"
-        checked_dirs = [
-            path for path in welcome_root.glob("page_*") if path.is_dir()
-        ] + [welcome_root / "wizard"]
-        checked_files = [
-            path for path in welcome_root.glob("page_*.py") if path.is_file()
-        ]
-        for directory in checked_dirs:
-            checked_files.extend(directory.rglob("*.py"))
-
-        violations = []
-        for path in checked_files:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    violations.extend(
-                        f"{path.relative_to(ROOT)} imports {alias.name}"
-                        for alias in node.names
-                        if alias.name == "subprocess"
-                    )
-                elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
-                    violations.append(f"{path.relative_to(ROOT)} imports from subprocess")
-                elif (
-                    isinstance(node, ast.Attribute)
-                    and node.attr in ("system", "popen")
-                    and isinstance(node.value, ast.Name)
-                    and node.value.id == "os"
-                ):
-                    violations.append(f"{path.relative_to(ROOT)} calls os.{node.attr}")
-        self.assertEqual(violations, [])
-
+        wizard_dir = package_root / "wizard"
+        self.assertFalse(
+            wizard_dir.is_dir()
+            and any(path.name != "__pycache__" for path in wizard_dir.iterdir())
+        )
+        self.assertTrue((package_root / "services").is_dir())
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,15 +1,12 @@
-// Headless construction smoke test — the React/Tauri analog of
-// `.githooks/pre-push`'s offscreen PySide6 `MainWindow` smoke test
-// (`tests/test_kyth_welcome_hub_smoke.py`), which `check-hub-web-shell.sh`
-// used to say this shell didn't have.
+// Headless construction smoke test for the supported React/Tauri Hub.
 //
 // A native Tauri window needs a real GTK/WebKit display, so this doesn't
 // launch the actual `kyth-hub-shell` binary (that would need Xvfb and is a
 // separate, larger follow-up) — it renders every Hub section component
 // server-side (`react-dom/server`, via Vite's `ssrLoadModule` so real
 // TSX/JSX runs, no jsdom needed) with its real `HubSection` data. That
-// exercises exactly the failure class CLAUDE.md calls out for the Qt hook:
-// "a page module has an import-time or construction-time bug" — a
+// exercises the failure class where a section component has an import-time or
+// construction-time bug — a
 // component that throws the moment React calls it, before any button is
 // ever clicked. `useEffect` bodies don't run under SSR, so this doesn't
 // catch a bug that only shows up after mount's data fetch resolves; the

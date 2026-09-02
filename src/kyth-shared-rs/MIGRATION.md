@@ -19,15 +19,15 @@ for — see `src/kyth-hub-web/src-tauri/src/main.rs`'s `probe_backend`,
 
 | This crate | Ports the read path of | Behavior deliberately NOT ported |
 |---|---|---|
-| `system::probe` | `kyth_shared.system.probe` read path plus pure cache-section invalidation | The collector, locking, and cache-write side (`collect_snapshot`, `write_cache_file`) — `kyth-probe.service` stays Python and keeps writing the cache this reads. |
-| `guardian` | `kyth_shared.guardian` read state, recipe policy, and the explicit Hub repair path | `collect_symptoms()`/`inspect()` — the live probe sweep (a dozen-plus subprocess calls across audio/network/bluetooth/portal/...). The Rust repair path is limited to the user-requested, policy-gated recipes wired in `guardian_actions.py`; Python remains authoritative for the service sweep and state writer. |
+| `system::probe` | Cache reads/invalidation plus the native bounded collector and atomic cache writer used by the Rust `kyth-probe` binary | The legacy Python collector remains in the source tree only for compatibility tests; it is not installed or used by the image service path. |
+| `guardian` | `kyth_shared.guardian` state, recipe policy, bounded repair executors, verification, native extended probes, and the native `kyth-guardian` service CLI's model-assisted decision path when a preinstalled model/runtime is available | Model download/removal remains outside the Hub command surface; unavailable model assets are reported explicitly and never treated as healthy. The legacy Python file is source-only for compatibility tests. |
 | `system::runtime_output` | Pure parsers from `kyth_shared.system.runtime_output` | The commands that collect the raw output remain in their owning probes; this module only parses bounded output. |
-| `system::bootc_query`, `system::registry`, `system::update_*` | Hub-facing bootc status, registry manifest, update summaries, and the watcher status read | Image mutation, downloads, watcher writes, and updater installation remain outside this crate. |
+| `system::bootc_query`, `system::registry`, `system::update_*` | Hub-facing bootc status, registry manifest, update summaries, and the native watcher status/write contract | Image mutation remains an explicit bounded caller action; the installed native Rust `kyth-update-watcher` owns scheduling and status persistence. |
 | `system::snapshot` | Read-only Snapper/Btrfs snapshot and bootc deployment timeline | Snapshot creation, deletion, rollback, and cache/state writes remain outside this crate. |
-| `system::safe_upgrade_policy` | Rollout-ring config decoding and fixed `/boot` remount/finalize argv projection | Root checks, bootc upgrade execution, locking, disk-space checks, state writes, and bootloader mutation remain Python-owned. |
+| `system::safe_upgrade_policy` | Rollout-ring config decoding and fixed `/boot` remount/finalize argv projection | The native watcher owns root checks, registry comparison, `/sysroot` free-space gating, non-blocking upgrade locking, firmware staging, bounded `bootc upgrade`, retryable status persistence, and session/network gates. |
 | `system::snapshot_autoclean` | Bounded Btrfs quota/Snapper timeline cleanup command planning and filesystem-status normalization | Quota mutation, Snapper cleanup, and deletion remain caller-owned. |
-| `system::telemetry_ingest` | Pure MangoHud CSV parsing, game-name derivation, launcher detection, and numeric normalization for `kyth-telem` | MangoHud configuration, SQLite writes, `/proc` inspection, and the active daemon remain Python-owned pending service-level parity tests. |
-| `system::telemetry_writer` (`telemetry-writer` feature) | Opt-in SQLite schema creation and CSV session/frame ingestion | Not enabled in Hub or image builds; the Python daemon remains the active writer until real-output and migration tests pass. |
+| `system::telemetry_ingest` | MangoHud CSV parsing, game-name derivation, launcher detection, and numeric normalization for `kyth-telem` | The legacy Python parser remains only as a compatibility fixture. |
+| `system::telemetry_writer` (`telemetry-writer` feature) | Native `kyth-telem` MangoHud config ownership, SQLite WAL/schema creation, `/proc` game-name enrichment, stable CSV scanning, duplicate suppression, and session/frame ingestion | Modelled real-output fixtures are covered by Rust tests; installed-image acceptance remains explicitly waived for this cutover. |
 | `system::gpu` | `kyth_shared.system.gpu` | `loaded_kernel_modules`, `rpm_package_installed`, `query_nvidia_smi` — only `lspci_gpu_lines` had a caller. |
 | `system::hardware_policy` | Read-only `hardware_policy` inventory, TOML parsing, selector matching, and evaluation | Policy application, modprobe/scheduler writes, and persisted state/report writes remain Python-owned. |
 | `system::storage` | (new — was inline Python in the retired `storage_bridge.py`, not really "kyth_shared") | — |
@@ -87,7 +87,9 @@ for — see `src/kyth-hub-web/src-tauri/src/main.rs`'s `probe_backend`,
 | `system::display_policy` | VRR/night-colour config normalization, persistence, and KWin policy mapping | KWin/KScreen/D-Bus mutation remains outside Rust. |
 | `system::plasma_hdr` | HDR/VRR preset settings, bounded KWin argv projection, and section-aware status parsing | KWin writes, output HDR application, and D-Bus reconfiguration remain caller-owned. |
 | `system::display_live` | Bounded KScreen inspection plan, debounce policy, and mode readback evaluation | Live display mutation remains a guarded desktop action. |
-| `system::vpn_saml` | VPN sleep-survival flag and ordered TERM/KILL command projection | Process signaling and worker lifecycle remain caller-owned. |
+| `system::vpn_saml` | VPN profile validation, fixed openconnect argv/stdin projection, bounded SAML URL/cookie parsing, same-origin ACS validation, and redacted log projection | The Tauri caller owns process signaling, worker lifecycle, and the embedded SAML webview; the former standalone Python/PySide6 app and launcher were removed in P2. |
+| Hub VPN/SAML boundary | Typed `open_vpn_app`, profile summary, native connect/disconnect jobs, SAML webview, and cookie handoff in the Tauri shell | The standalone Python client and source fixture were removed in P2; real IdP/provider qualification remains an operational gate. |
+| Hub privileged action boundary | Tauri validation plus the fixed `/run/kyth/privileged.sock` operation allowlist, native Rust `kyth-privileged` daemon, and native Rust `/usr/libexec/kyth-network-share` executor | The former Python socket daemon and network-share wrapper were removed in P2; the installed root boundary keeps peer credentials, fixed argv, credential isolation, mount-unit ownership, bounded execution, and audit behavior. |
 | `system::network_services` | Cloud-drive and Tailscale offline preference models and persistence | rclone mounts, Tailscale control, and credential/network operations remain outside Rust. |
 | `system::extended_preferences` | Fan curves, Fcitx/PipeWire gaming, PCIe/PSI, Wine sync, mimalloc, sccache, and shader-cache preference/rendering helpers | Hardware probing, service activation, preload application, and active device writes remain outside Rust. |
 | `system::desktop_preferences` | Flatpak override arguments, Plasma drift section flattening, and window-snap preference models | Flatpak/KDE mutation and session reconfiguration remain outside Rust. |
@@ -142,10 +144,10 @@ Most functions ported are pure reads against on-disk state, parsers, or a
 single bounded subprocess call. A few explicit Hub actions are exceptions:
 Guardian repairs, firmware update helpers, PipeWire configuration, and
 software catalog import/install helpers are user-invoked and bounded; they
-must not be expanded into generic command execution. The crate still does
-not run Guardian's live multi-probe sweep, and it does not contain installer
-partitioning or other high-risk writers. Keep those boundaries explicit when
-adding another port.
+must not be expanded into generic command execution. The native Guardian
+service now runs its extended multi-probe sweep, while installer partitioning
+and other high-risk writers remain outside this crate. Keep those boundaries
+explicit when adding another port.
 
 ## How more of it moves over
 
@@ -169,12 +171,13 @@ One module (or one function) at a time, in this order of preference:
    path/state parameter rather than mutating process-global env vars (see
    `system::probe::read_section_in` / `guardian::load_state_from`) — keeps
    tests parallel-safe and avoids flakiness from shared mutable env state.
-4. **The Python module stays authoritative until its Rust port is proven.**
-   Nothing here deletes or stops calling the Python original elsewhere in
-   the codebase (kyth-welcome, ujust recipes, systemd units all keep using
-   `kyth_shared` directly) — this crate is additive, a second consumer path
-   for the Tauri shell specifically, not a replacement deployed everywhere
-   at once.
+4. **The Python module stays source-only after its Rust service port is proven.**
+   Remaining Python callers (including independent helpers and ujust recipes)
+   are not treated as migrated merely because the Tauri shell has a Rust read
+   or launch wrapper. The installed probe, Guardian, update-watcher, telemetry,
+   VPN, privileged-socket, and network-share service paths now use native Rust;
+   remaining compatibility fixtures for other services are tracked separately
+   and are not active Hub authorities.
 
 ## Why a separate crate instead of folding into kyth-hub-shell
 

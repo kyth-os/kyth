@@ -10,6 +10,7 @@
 
 use crate::system::telemetry_ingest::{derive_game_name, detect_launcher, parse_mangohud_csv, safe_float};
 use rusqlite::{params, Connection, OptionalExtension};
+use std::path::PathBuf;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -70,6 +71,57 @@ struct Frame {
 
 pub fn initialize_database(conn: &Connection) -> Result<(), String> {
     conn.execute_batch(SCHEMA).map_err(|error| format!("could not initialize telemetry database: {error}"))
+}
+
+pub fn database_path() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/root"));
+    home.join(".local/share/kyth/telemetry.db")
+}
+
+pub fn sessions_path() -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/root"));
+    home.join(".local/share/kyth/gaming-sessions")
+}
+
+pub fn open_database(path: impl AsRef<Path>) -> Result<Connection, String> {
+    if let Some(parent) = path.as_ref().parent() {
+        std::fs::create_dir_all(parent).map_err(|error| format!("could not create telemetry data directory: {error}"))?;
+    }
+    let conn = Connection::open(path).map_err(|error| format!("could not open telemetry database: {error}"))?;
+    conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
+        .map_err(|error| format!("could not configure telemetry database: {error}"))?;
+    initialize_database(&conn)?;
+    Ok(conn)
+}
+
+/// Keep MangoHud output pointed at the writer's stable landing zone. This is
+/// deliberately a small config edit: unrelated user settings are preserved.
+pub fn ensure_mangohud_output(home: impl AsRef<Path>, sessions: impl AsRef<Path>) -> Result<(), String> {
+    let home = home.as_ref();
+    let sessions = sessions.as_ref();
+    std::fs::create_dir_all(sessions).map_err(|error| format!("could not create telemetry session directory: {error}"))?;
+    let config = home.join(".config/MangoHud/MangoHud.conf");
+    if let Some(parent) = config.parent() { std::fs::create_dir_all(parent).map_err(|error| format!("could not create MangoHud config directory: {error}"))?; }
+    let output_line = format!("output_folder={}", sessions.display());
+    let old = std::fs::read_to_string(&config).unwrap_or_default();
+    let mut found = false;
+    let mut lines = Vec::new();
+    for line in old.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("output_folder") && trimmed["output_folder".len()..].trim_start().starts_with('=') {
+            if !found { lines.push(output_line.clone()); found = true; }
+        } else {
+            lines.push(line.to_string());
+        }
+    }
+    if !found {
+        if !old.is_empty() { lines.push(String::new()); }
+        lines.push("# Added by kyth-telem".to_string());
+        lines.push(output_line);
+    }
+    let text = format!("{}\n", lines.join("\n"));
+    if text != old { crate::atomic_io::atomic_write_text(&config, &text, Some(0o600)).map_err(|error| format!("could not update MangoHud config: {error}"))?; }
+    Ok(())
 }
 
 fn unix_mtime(path: &Path) -> Result<i64, String> {
@@ -159,7 +211,7 @@ pub fn ingest_csv(conn: &mut Connection, path: &Path, ingested_at: i64) -> Resul
     };
 
     let stem = path.file_stem().and_then(|value| value.to_str()).unwrap_or("unknown");
-    let (game_name, executable) = derive_game_name(stem);
+    let (game_name, executable) = derive_game_name_with_proc(stem);
     let launcher = detect_launcher(&executable, parsed.metadata.get("driver").map(String::as_str));
     let mtime = unix_mtime(path)?;
     let times: Vec<f64> = frames.iter().map(|frame| frame.ts).filter(|value| *value > 0.0).collect();
@@ -215,6 +267,53 @@ pub fn ingest_csv(conn: &mut Connection, path: &Path, ingested_at: i64) -> Resul
     Ok(session_id > 0)
 }
 
+fn proc_env(pid: &str, key: &str) -> Option<String> {
+    let path = Path::new("/proc").join(pid).join("environ");
+    let bytes = std::fs::read(path).ok()?;
+    bytes.split(|byte| *byte == 0).find_map(|item| {
+        let mut parts = item.splitn(2, |byte| *byte == b'=');
+        let name = parts.next()?;
+        let value = parts.next()?;
+        (name == key.as_bytes()).then(|| String::from_utf8_lossy(value).trim().to_string())
+    }).filter(|value| !value.is_empty())
+}
+
+fn guess_game_name_from_proc(executable: &str) -> Option<String> {
+    let wanted = Path::new(executable).file_name()?.to_string_lossy().to_ascii_lowercase();
+    let entries = std::fs::read_dir("/proc").ok()?;
+    for entry in entries.flatten() {
+        let pid = entry.file_name().to_string_lossy().into_owned();
+        if !pid.chars().all(|char| char.is_ascii_digit()) { continue; }
+        let Ok(exe) = std::fs::read_link(entry.path().join("exe")) else { continue; };
+        let name = exe.file_name().map(|value| value.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+        if name != wanted && !name.starts_with(&wanted) { continue; }
+        for key in ["STEAM_GAME", "STEAM_APP_ID", "HEROIC_APP_NAME", "GAME_NAME"] {
+            if let Some(value) = proc_env(&pid, key) { return Some(value); }
+        }
+    }
+    None
+}
+
+fn derive_game_name_with_proc(stem: &str) -> (String, String) {
+    let (fallback, executable) = derive_game_name(stem);
+    (guess_game_name_from_proc(&executable).unwrap_or(fallback), executable)
+}
+
+pub fn scan_directory(conn: &mut Connection, directory: impl AsRef<Path>, min_file_age: u64, now: SystemTime, ingested_at: i64) -> Result<usize, String> {
+    let mut entries = std::fs::read_dir(directory).map_err(|error| format!("could not scan telemetry directory: {error}"))?
+        .flatten().collect::<Vec<_>>();
+    entries.sort_by_key(|entry| entry.file_name());
+    let mut count = 0;
+    for entry in entries {
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()).is_none_or(|value| !value.eq_ignore_ascii_case("csv")) { continue; }
+        let age = entry.metadata().ok().and_then(|metadata| metadata.modified().ok()).and_then(|mtime| now.duration_since(mtime).ok());
+        if age.is_none_or(|value| value < std::time::Duration::from_secs(min_file_age)) { continue; }
+        if ingest_csv(conn, &path, ingested_at)? { count += 1; }
+    }
+    Ok(count)
+}
+
 pub fn current_unix_time() -> i64 {
     SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
 }
@@ -245,5 +344,26 @@ mod tests {
         let mut conn = Connection::open_in_memory().unwrap();
         initialize_database(&conn).unwrap();
         assert!(!ingest_csv(&mut conn, &path, 200).unwrap());
+    }
+
+    #[test]
+    fn scans_only_stable_csv_files_and_preserves_mangohud_settings() {
+        let directory = tempdir().unwrap();
+        let config_home = directory.path().join("home");
+        let sessions = config_home.join(".local/share/kyth/gaming-sessions");
+        let config = config_home.join(".config/MangoHud/MangoHud.conf");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, "fps_limit=60\noutput_folder=/old\n").unwrap();
+        ensure_mangohud_output(&config_home, &sessions).unwrap();
+        let configured = std::fs::read_to_string(config).unwrap();
+        assert!(configured.contains("fps_limit=60"));
+        assert!(configured.contains(&format!("output_folder={}", sessions.display())));
+
+        let csv = sessions.join("scan-game_2025-01-15_14:22:01.csv");
+        std::fs::write(&csv, "gpu\nAMD\ntime,fps,frametime\n0,60,16.6\n1,58,35\n").unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        assert_eq!(scan_directory(&mut conn, &sessions, 15, SystemTime::now() + std::time::Duration::from_secs(20), 200).unwrap(), 1);
+        assert_eq!(scan_directory(&mut conn, &sessions, 15, SystemTime::now() + std::time::Duration::from_secs(20), 201).unwrap(), 0);
     }
 }

@@ -19,10 +19,8 @@ __all__ = [
     "SteamCopyWorker",
     "UpdateCheckWorker",
     "UserFilesCopyWorker",
-    "VpnConnectWorker",
     "WindowsLibraryWorker",
     "_ProtonDbBatchWorker",
-    "_VpnConnectWorker",
     "ControllerProbeWorker",
     "CompatRefreshWorker",
     "GitHubIssueWorker",
@@ -35,9 +33,6 @@ def __getattr__(name: str):
     if name == "TelemetryWorker":
         from .telemetry import TelemetryWorker
         return TelemetryWorker
-    if name in {"VpnConnectWorker", "_VpnConnectWorker"}:
-        from .vpn import VpnConnectWorker
-        return VpnConnectWorker
     if name in {
         "SteamCopyWorker",
         "RcloneAuthorizeWorker",

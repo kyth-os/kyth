@@ -40,7 +40,7 @@ def _vpn_has_address() -> bool:
 
 def _launch_client() -> None:
     subprocess.Popen(
-        ["/usr/bin/kyth-vpn-connect"],
+        ["/usr/bin/kyth-welcome-launch", "--page", "VPN"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,

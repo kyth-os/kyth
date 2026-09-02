@@ -9,6 +9,31 @@ description = "Rust port of src/kyth_shared — Hub-facing reads and explicitly 
 name = "release-identity"
 path = "src/release_identity_bin.rs"
 
+[[bin]]
+name = "kyth-probe"
+path = "src/probe_bin.rs"
+
+[[bin]]
+name = "kyth-guardian"
+path = "src/guardian_bin.rs"
+
+[[bin]]
+name = "kyth-update-watcher"
+path = "src/update_watcher_bin.rs"
+
+[[bin]]
+name = "kyth-network-share"
+path = "src/network_share_bin.rs"
+
+[[bin]]
+name = "kyth-telem"
+path = "src/telemetry_writer_bin.rs"
+required-features = ["telemetry-writer"]
+
+[[bin]]
+name = "kyth-privileged"
+path = "src/privileged_bin.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -17,6 +42,7 @@ sha2 = "0.10"
 toml = "0.8"
 rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 rustix = { version = "0.38", features = ["fs", "process"] }
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3"

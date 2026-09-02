@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -19,6 +19,13 @@ const actions = await readFile(resolve(root, "src/components/SectionActions.tsx"
 const rust = await readFile(resolve(root, "src-tauri/src/main.rs"), "utf8");
 const updatesRust = await readFile(resolve(root, "src-tauri/src/commands/updates.rs"), "utf8");
 const parity = await readFile(resolve(root, "PARITY.md"), "utf8");
+
+async function sourceFiles(directory) {
+  const entries = await readdir(directory, { withFileTypes: true, recursive: true });
+  return entries
+    .filter((entry) => entry.isFile() && /\.(?:ts|tsx)$/.test(entry.name))
+    .map((entry) => resolve(entry.parentPath ?? directory, entry.name));
+}
 
 const dashboardWrappers = [
   "fetchGuardianSnapshot",
@@ -116,12 +123,31 @@ test("ledger commands are registered in the Tauri handler", () => {
   }
 });
 
-test("every frontend invoke is registered in the Tauri handler", () => {
+test("every frontend invoke is registered in the Tauri handler", async () => {
   const handler = rust.match(/generate_handler!\[([\s\S]*?)\]/)?.[1] ?? "";
-  const invoked = new Set([...service.matchAll(/invoke(?:<[^>]+>)?\(\"([^\"]+)\"/g)].map((match) => match[1]));
+  const invoked = new Set();
+  for (const file of await sourceFiles(resolve(root, "src"))) {
+    const text = await readFile(file, "utf8");
+    for (const match of text.matchAll(/invoke(?:<[^>]+>)?\(\"([^\"]+)\"/g)) invoked.add(match[1]);
+  }
   assert.ok(invoked.size > 0, "no frontend invoke calls found");
   for (const command of invoked) {
     assert.match(handler, new RegExp(`\\b${command}\\b`), `${command} is invoked by the frontend but not registered`);
+  }
+});
+
+test("frontend stays behind the typed Tauri/Rust boundary", async () => {
+  const forbidden = [
+    [/\b(?:PySide6|PyQt6)\b/, "Python/Qt UI dependency"],
+    [/from\s+["'](?:node:)?child_process["']|@tauri-apps\/plugin-shell/, "process or shell plugin"],
+    [/\b(?:spawn|exec|execFile|fork)\s*\(/, "direct process execution"],
+    [/\b(?:run_command|execute_command|run_argv|spawn_process)\b/, "generic command bridge"],
+  ];
+  for (const file of await sourceFiles(resolve(root, "src"))) {
+    const text = await readFile(file, "utf8");
+    for (const [pattern, label] of forbidden) {
+      assert.doesNotMatch(text, pattern, `${label} found in ${file}`);
+    }
   }
 });
 

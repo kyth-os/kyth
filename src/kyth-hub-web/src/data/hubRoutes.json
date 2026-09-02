@@ -1,0 +1,55 @@
+{
+  "destinations": [
+    {
+      "key": "Play",
+      "route": "/play",
+      "sections": [
+        { "key": "Gaming", "title": "Gaming", "description": "Install launchers, scan game libraries, set up capture, saves, and migration helpers." },
+        { "key": "Performance", "title": "Performance", "description": "Tune power, scheduler, and desktop performance behavior." },
+        { "key": "Compatibility", "title": "Compatibility", "description": "Check known game support, ProtonDB context, and blocked anti-cheat titles." },
+        { "key": "Controllers", "title": "Controllers", "description": "Pair, test, and troubleshoot game controllers." }
+      ]
+    },
+    {
+      "key": "Apps",
+      "route": "/apps",
+      "sections": [
+        { "key": "App Store", "title": "App Store", "description": "Discover, install, and remove trusted apps from one KythOS software center." },
+        { "key": "Work Setup", "title": "Work Setup", "description": "Set up office, mail, focus sessions, and workday conveniences." }
+      ]
+    },
+    {
+      "key": "This PC",
+      "route": "/this-pc",
+      "sections": [
+        { "key": "Guardian", "title": "Guardian", "description": "Self-healing: automatic health checks, safe fixes, history, and optional local AI diagnosis." },
+        { "key": "Hardware", "title": "Hardware", "description": "Inspect graphics, displays, audio, Bluetooth, storage, and device health." },
+        { "key": "Plasma Wayland", "title": "Desktop & displays", "description": "Check portals, PipeWire capture, display settings, shortcuts, and Plasma session repair." },
+        { "key": "Diagnostics", "title": "Health Report", "description": "Run system checks and gather useful troubleshooting information." },
+        { "key": "Repair", "title": "Repair", "description": "Rollback, restore, collect logs, and open recovery tools when something feels off." },
+        { "key": "NVIDIA", "title": "NVIDIA Drivers", "description": "Check NVIDIA driver state and open driver actions." },
+        { "key": "Kernel", "title": "Kernel", "description": "Choose installed kernels and understand advanced boot options." },
+        { "key": "Channels", "title": "Update channel", "description": "Choose stable or testing update channels." },
+        { "key": "Just", "title": "Recipes", "description": "Run Just recipes from Kyth Hub without opening a terminal." },
+        { "key": "Feedback", "title": "Feedback", "description": "Send feedback or report a problem with optional system details." }
+      ]
+    },
+    {
+      "key": "Move In",
+      "route": "/move-in",
+      "sections": [
+        { "key": "Move Files", "title": "Move Files", "description": "Copy files, saves, libraries, bookmarks, fonts, and familiar workflows." },
+        { "key": "Cloud Storage", "title": "Cloud Storage", "description": "Set up cloud sync and copy workflows for common providers." },
+        { "key": "Network Shares", "title": "Network Shares", "description": "Map SMB/CIFS shares and configure mount behavior." },
+        { "key": "VPN", "title": "VPN", "description": "Connect to VPN profiles, including GlobalProtect-style work VPNs." }
+      ]
+    },
+    {
+      "key": "Updates",
+      "route": "/updates",
+      "sections": [
+        { "key": "Update", "title": "Updates", "description": "Check OS updates, staged images, rollback status, and auto-update settings." }
+      ]
+    }
+  ]
+}

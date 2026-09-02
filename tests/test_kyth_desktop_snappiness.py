@@ -130,23 +130,6 @@ class WaitForDisplaySetupTests(unittest.TestCase):
         slept.assert_not_called()
 
 
-class AppstreamCatalogGuiTests(unittest.TestCase):
-    def test_cold_catalog_does_not_parse_xml(self) -> None:
-        try:
-            from kyth_welcome.page_software_flatpak._catalog import _CatalogMixin
-        except Exception as exc:  # noqa: BLE001
-            raise unittest.SkipTest(f"Qt not available: {exc}") from exc
-
-        class Harness(_CatalogMixin):
-            def __init__(self):
-                self._fp_appstream_cache = None
-
-        harness = Harness()
-        self.assertEqual(harness._fp_appstream_catalog(), {})
-        harness._fp_appstream_cache = {"com.example.App": {"name": "Example"}}
-        self.assertEqual(harness._fp_appstream_catalog()["com.example.App"]["name"], "Example")
-
-
 class SessionDefaultsTests(unittest.TestCase):
     def test_firstboot_status_default_delay_is_short(self) -> None:
         import inspect

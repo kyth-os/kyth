@@ -38,7 +38,9 @@ fn just_output_detail(recipe: &str, output: &std::process::Output) -> String {
         if !text.is_empty() { text.push('\n'); }
         text.push_str(&stderr);
     }
-    let text = kyth_shared::system::process::strip_ansi(text.trim());
+    let text = kyth_shared::system::process::redact_sensitive_text(
+        kyth_shared::system::process::strip_ansi(text.trim()).as_str(),
+    );
     let detail: String = text.chars().rev().take(800).collect::<String>().chars().rev().collect();
     if !detail.trim().is_empty() {
         return if output.status.success() {
@@ -140,7 +142,9 @@ fn start_update_job(operation: &str, argv: Vec<String>, timeout: Duration) -> Re
                     if !detail.is_empty() { detail.push('\n'); }
                     detail.push_str(&stderr);
                 }
-                let detail: String = kyth_shared::system::process::strip_ansi(&detail)
+                let detail: String = kyth_shared::system::process::redact_sensitive_text(
+                    kyth_shared::system::process::strip_ansi(&detail).as_str(),
+                )
                     .chars().rev().take(1200).collect::<String>().chars().rev().collect();
                 let state = if output.status.success() { "complete" } else { "failed" };
                 let detail = if detail.is_empty() {

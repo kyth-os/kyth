@@ -1,13 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# React/Tauri is the Hub UI. The Python launcher remains only as a fallback
-# for older images that predate the Tauri shell. Both preserve the same
-# --page contract.
+# React/Tauri is the only supported Hub UI. This wrapper owns the stable
+# desktop/notification/recipe --page contract and never falls back to Python.
 target_bin="/usr/bin/kyth-hub-shell"
-if [[ ! -x "${target_bin}" ]]; then
-    target_bin="/usr/bin/kyth-welcome"
-fi
 
 log_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/kyth"
 if ! mkdir -p "${log_dir}" 2>/dev/null; then
@@ -23,9 +19,15 @@ status=0
     echo "DISPLAY=${DISPLAY-}"
     echo "WAYLAND_DISPLAY=${WAYLAND_DISPLAY-}"
     echo "XDG_SESSION_TYPE=${XDG_SESSION_TYPE-}"
-    echo "QT_QPA_PLATFORM=${QT_QPA_PLATFORM-}"
-    "${target_bin}" "$@"
-    status=$?
+    echo "WEBKIT_DISABLE_DMABUF_RENDERER=${WEBKIT_DISABLE_DMABUF_RENDERER-}"
+    if [[ ! -x "${target_bin}" ]]; then
+        echo "Kyth Hub shell is not installed: ${target_bin}" >&2
+        status=127
+    elif "${target_bin}" "$@"; then
+        status=0
+    else
+        status=$?
+    fi
     if [[ "${status}" -ne 0 ]]; then
         echo "kyth-welcome launch failed: exit ${status}"
     fi
@@ -49,7 +51,7 @@ body_file="${report_dir}/system-hub-crash-$(date +%Y%m%d-%H%M%S).md"
     echo "- Exit code: ${status}"
     echo "- Session: ${XDG_SESSION_TYPE:-unknown}"
     echo "- Display: DISPLAY=${DISPLAY-} WAYLAND_DISPLAY=${WAYLAND_DISPLAY-}"
-    echo "- Qt platform: ${QT_QPA_PLATFORM:-default}"
+    echo "- WebKit DMA-BUF workaround: ${WEBKIT_DISABLE_DMABUF_RENDERER:-default}"
     echo
     echo "## Recent Hub launch log"
     echo

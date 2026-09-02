@@ -57,7 +57,14 @@ WORKDIR /build/kyth-hub-web/src-tauri
 RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/registry \
     --mount=type=cache,id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target \
     cargo build --release --locked && \
-    cp target/release/kyth-hub-shell /build/kyth-hub-shell
+    cp target/release/kyth-hub-shell /build/kyth-hub-shell && \
+    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged) && \
+    cp /build/kyth-shared-rs/target/release/kyth-probe /build/kyth-probe && \
+    cp /build/kyth-shared-rs/target/release/kyth-guardian /build/kyth-guardian && \
+    cp /build/kyth-shared-rs/target/release/kyth-update-watcher /build/kyth-update-watcher && \
+    cp /build/kyth-shared-rs/target/release/kyth-network-share /build/kyth-network-share && \
+    cp /build/kyth-shared-rs/target/release/kyth-telem /build/kyth-telem && \
+    cp /build/kyth-shared-rs/target/release/kyth-privileged /build/kyth-privileged
 
 # Base Image
 ARG BASE_IMAGE
@@ -243,9 +250,15 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/syscon
 # stage declared near the top of this file (before BASE_IMAGE's own FROM,
 # so it doesn't disturb that ARG's global scope). Ships on every channel;
 # kyth-welcome-launch (installed below via 23-kyth-helper-ctx-installs.sh)
-# is what actually gates which channel launches it instead of the classic
-# kyth-welcome.
+# is the single normal launch wrapper; it requires the Tauri shell and never
+# falls back to the classic kyth-welcome UI.
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-hub-shell /usr/bin/kyth-hub-shell
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-probe /usr/bin/kyth-probe
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-guardian /usr/bin/kyth-guardian
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-update-watcher /usr/bin/kyth-update-watcher
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-network-share /usr/bin/kyth-network-share
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-telem /usr/bin/kyth-telem
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-privileged /usr/bin/kyth-privileged
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \

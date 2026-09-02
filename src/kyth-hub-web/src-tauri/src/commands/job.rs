@@ -64,7 +64,9 @@ pub(crate) fn failure_detail(action: &str, output: &Output) -> String {
         }
         text.push_str(&stderr);
     }
-    let text = kyth_shared::system::process::strip_ansi(text.trim());
+    let text = kyth_shared::system::process::redact_sensitive_text(
+        kyth_shared::system::process::strip_ansi(text.trim()).as_str(),
+    );
     let tail: String = text.chars().rev().take(500).collect::<String>().chars().rev().collect();
     if tail.trim().is_empty() {
         match output.status.code() {

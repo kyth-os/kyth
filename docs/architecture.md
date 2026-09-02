@@ -36,16 +36,24 @@ temporary UI disconnect.
 
 ### System Hub
 
-`build_files/kyth-welcome/` contains the Python/PySide6 System Hub. It provides
-first-run setup, update controls, hardware status, gaming setup, software
-install helpers, network-share and cloud-storage helpers, VPN flows, diagnostics,
-and repair actions.
+`src/kyth-hub-web/` contains the supported React frontend and Tauri/Rust command
+shell for first-run setup, update controls, hardware status, gaming setup,
+software installation, network/storage helpers, diagnostics, and repair actions.
+The installed probe collector, Guardian extended sweep, update watcher,
+telemetry writer, VPN workflow, privileged socket daemon, and network-share
+executor are native Rust authorities. `build_files/kyth-welcome/` remains a
+source-only transitional service package outside the System Hub UI; the
+obsolete Python privileged daemon and standalone VPN/build fixtures were
+removed in P2.
 
 ### Runtime Helpers
 
 `build_files/` contains shell and Python helpers installed into the image, such
 as smoke checks, update checks, performance profiles, gamescope wrappers,
-controller checks, NVIDIA status checks, VPN helpers, and migration tools.
+controller checks, NVIDIA status checks, VPN helpers, and migration tools. The
+Python helpers that remain outside the Hub action path are listed in
+`docs/kyth-hub-migration-finalization-plan.md`; the native Rust service
+authorities are built from `src/kyth-shared-rs/`.
 
 ### CI/CD and Release Workflows
 

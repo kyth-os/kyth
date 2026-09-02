@@ -18,7 +18,7 @@ import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 const fieldStyle = { padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 13, minWidth: 180 } as const;
 const initialForm = { name: "", server: "", share_path: "", mount_point: "", username: "", password: "", domain: "", auto_mount: true, mount_now: true };
 
-// Credentials are sent only to the existing root helper through the narrow
+// Credentials are sent only to the native Rust root helper through the narrow
 // privileged socket. The user config holds display metadata only, never a password.
 export function NetworkSharesSection({ section }: { section: HubSection }) {
   const [summary, setSummary] = useState<NetworkSummary | null>(null);

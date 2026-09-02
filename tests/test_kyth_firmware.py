@@ -167,10 +167,6 @@ class FullUpdateAndHubUseTheSharedLockTests(unittest.TestCase):
         self.assertIn("flock -w 60 /run/kyth-fwupd.lock sudo -n /usr/bin/fwupdmgr refresh --force", source)
         self.assertIn("flock -w 60 /run/kyth-fwupd.lock sudo -n /usr/bin/fwupdmgr update --assume-yes --no-reboot-check", source)
 
-    def test_hub_firmware_button_flocks_before_fwupdmgr_upgrade(self):
-        source = (ROOT / "build_files" / "kyth-welcome" / "kyth_welcome" / "page_update_firmware.py").read_text(encoding="utf-8")
-        self.assertIn('["flock", "-w", "60", "/run/kyth-fwupd.lock", "fwupdmgr", "upgrade", "--no-reboot-check"]', source)
-
 
 if __name__ == "__main__":
     unittest.main()

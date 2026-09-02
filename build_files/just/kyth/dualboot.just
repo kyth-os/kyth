@@ -65,7 +65,7 @@ reclaim-windows:
     read -p "  Type 'yes' to open System Hub → Disks to reclaim (or 'no' to cancel): " ans
     if [[ "$ans" == "yes" ]]; then
         echo "  Opening System Hub — use Disks to delete the Windows partition and grow KythOS."
-        nohup /usr/bin/kyth-welcome >/dev/null 2>&1 &
+        nohup /usr/bin/kyth-welcome-launch --page "This PC" >/dev/null 2>&1 &
     else
         echo "  Cancelled — your Windows install is untouched. Run 'just dualboot-status' anytime."
     fi

@@ -1,8 +1,5 @@
-// Tauri shell for the Kyth Hub web frontend — the Rust replacement for
-// web_shell.py's QWebEngineView window (see that file's module docstring
-// for why a native shell exists at all: same single-instance + --page
-// deep-link contract the current PySide6 Hub has, just hosting the React
-// build instead of a QWidget tree).
+// Tauri shell for the Kyth Hub web frontend. It owns the native window,
+// single-instance behavior, `--page` deep links, and typed Rust commands.
 //
 // The four bridge commands below used to shell out to backend/*.py
 // scripts (see git history if you need the old ones) — they now call
@@ -120,12 +117,12 @@ fn guardian_snapshot() -> GuardianSnapshotResponse {
     }
 }
 
-/// Ask the existing Python Guardian service for a fresh check, then let the
-/// frontend re-read the disk-backed snapshot.  The Rust shell does not port
-/// the live probe sweep; Python remains the authority for that behavior.
+/// Ask the installed native Rust Guardian service for a fresh check, then let
+/// the frontend re-read the disk-backed snapshot. The service currently owns
+/// the deterministic core sweep and state writer; extended/model-assisted
+/// probes remain an explicitly tracked parity gap.
 #[derive(serde::Serialize)]
 struct GuardianActionLaunch { job: String, state: String, detail: String }
-
 #[tauri::command]
 fn guardian_check(investigate: bool) -> Result<GuardianActionLaunch, String> {
     if !std::path::Path::new("/usr/bin/kyth-guardian").exists() {
@@ -905,11 +902,7 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
                     } else {
                         (
                             false,
-                            String::from_utf8_lossy(&output.stderr)
-                                .trim()
-                                .chars()
-                                .take(400)
-                                .collect(),
+                            commands::process::bounded_text(&output.stderr),
                         )
                     }
                 })
@@ -994,11 +987,7 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             }
             Ok(output) => (
                 "failed",
-                String::from_utf8_lossy(&output.stderr)
-                    .trim()
-                    .chars()
-                    .take(400)
-                    .collect(),
+                commands::process::bounded_text(&output.stderr),
             ),
             Err(err) => ("failed", format!("Could not start Flatpak: {err}")),
         };
@@ -1118,19 +1107,7 @@ fn migration_readiness() -> kyth_shared::system::windows_verify::WindowsParity {
     kyth_shared::system::windows_verify::verify(home, std::path::Path::new("/var/home").exists())
 }
 
-/// The existing Python VPN utility owns the profile editor and SAML browser
-/// flow. This fixed launch path makes that complete workflow reachable from
-/// the default Tauri Hub without accepting arbitrary commands or arguments.
-#[tauri::command]
-fn open_vpn_app() -> Result<String, String> {
-    std::process::Command::new("/usr/bin/kyth-vpn-connect")
-        .spawn()
-        .map_err(|error| format!("could not open the VPN connection app: {error}"))?;
-    Ok("Opened the full VPN connection app.".to_string())
-}
-
-/// A profile summary contains no password, cookie, or SAML material. The
-/// full VPN app remains the authority for connecting and editing profiles.
+/// A profile summary contains no password, cookie, or SAML material.
 #[derive(Serialize)]
 struct VpnSavedProfile {
     gateway: String,
@@ -1315,7 +1292,10 @@ fn main() {
             commands::updates::collect_availability,
             ntfs_devices,
             migration_readiness,
-            open_vpn_app,
+            commands::vpn::open_vpn_app,
+            commands::vpn::vpn_connect,
+            commands::vpn::vpn_status,
+            commands::vpn::vpn_disconnect,
             vpn_saved_profile,
             commands::dashboard::boot_runtime_checks,
             desktop_stack_checks,

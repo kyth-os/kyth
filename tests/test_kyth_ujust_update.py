@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pathlib
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -44,6 +45,8 @@ class UjustUpdateTests(unittest.TestCase):
         self.assertIn("kyth-bootc-guard status", source)
 
     def test_update_recipe_lists_from_the_justfile(self):
+        if shutil.which("just") is None:
+            self.skipTest("just is unavailable on this validation runner")
         result = subprocess.run(
             ["just", "--justfile", str(JUST), "--list"],
             check=False,

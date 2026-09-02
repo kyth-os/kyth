@@ -10,7 +10,7 @@ runtime state that doesn't exist on a fresh CI checkout regardless). The
 gate has never been able to catch a regression.
 
 This measures kyth_shared.system.probe.collect_probe_results() — pure
-stdlib, no PySide6, so it runs in the same bare environment validate.sh
+stdlib-only, so it runs in the same bare environment as validate.sh
 already has — and checks it against a ledger tracked in the repo instead
 of host state, so CI has real history to compare against.
 

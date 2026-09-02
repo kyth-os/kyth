@@ -117,7 +117,6 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 _install_qt_stubs()
 
-from kyth_welcome import page_vpn  # noqa: E402
 from kyth_welcome.services import gaming, hardware  # noqa: E402
 
 
@@ -133,17 +132,6 @@ def _exercise(text: str) -> None:
     acf = gaming._parse_steam_acf_text(text)
     assert isinstance(acf, dict)
 
-    field, value, username = page_vpn._parse_gp_saml_cookie(text)
-    assert isinstance(field, str)
-    assert isinstance(value, str)
-    assert isinstance(username, str)
-
-    redacted = page_vpn._redact_vpn_log_line(text)
-    assert isinstance(redacted, str)
-
-    connected = page_vpn._vpn_line_is_connected(text)
-    assert isinstance(connected, bool)
-
 
 def TestOneInput(data: bytes) -> None:
     # LLVMFuzzerTestOneInput-compatible entry point for ClusterFuzzLite.
@@ -157,8 +145,6 @@ def _smoke() -> None:
         b'Output: 1 HDMI-A-1\nconnected\nenabled\nModes: 0:1920x1080@144*! 1:1280x720@60\nVrr: Never\nHdr: disabled\n',
         b'Output: 1 DP-1\nconnected\nenabled\nModes: 0:1920x1080@..\nVrr: never\n',
         b'"appid" "123"\n"name" "Portal 2"\n"installdir" "Portal 2"\n',
-        b"prelogin-cookie=secret&saml-username=alice",
-        b"GlobalProtect login returned prelogin-cookie=secret",
     )
     for case in cases:
         TestOneInput(case)

@@ -1,4 +1,3 @@
-import importlib
 import pathlib
 import sys
 import types
@@ -67,7 +66,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 _install_qt_stubs()
 
-from kyth_welcome import page_vpn  # noqa: E402
 from kyth_welcome.services import appstream, first_run, gaming, hardware, network, process, repair, software, updates, welcome  # noqa: E402
 
 
@@ -170,52 +168,6 @@ class AppDefaultsTests(unittest.TestCase):
             ("com.brave.Browser", "Brave"),
             first_run.DEFAULT_FIRST_RUN_APPS,
         )
-
-
-class LazyPageTests(unittest.TestCase):
-    def test_lazy_page_uses_page_new_for_qt_style_objects(self):
-        widgets_module = types.ModuleType("kyth_welcome.widgets")
-
-        class DummyPage:
-            new_calls = 0
-
-            def __new__(cls, *args, **kwargs):
-                cls.new_calls += 1
-                return super().__new__(cls)
-
-        widgets_module.Page = DummyPage
-        sys.modules["kyth_welcome.widgets"] = widgets_module
-        sys.modules.pop("kyth_welcome.lazy_page", None)
-
-        lazy_page = importlib.import_module("kyth_welcome.lazy_page")
-
-        @lazy_page.compose_on_first_init(lambda: ())
-        class Shell(DummyPage):
-            pass
-
-        instance = Shell()
-        self.assertIsInstance(instance, DummyPage)
-
-
-class VpnParserTests(unittest.TestCase):
-    def test_parse_gp_saml_cookie(self):
-        field, value, username = page_vpn._parse_gp_saml_cookie(
-            "prelogin-cookie=secret&saml-username=alice"
-        )
-        self.assertEqual(field, "prelogin-cookie")
-        self.assertEqual(value, "secret")
-        self.assertEqual(username, "alice")
-
-    def test_redact_vpn_log_line(self):
-        redacted = page_vpn._redact_vpn_log_line(
-            "GlobalProtect login returned prelogin-cookie=secret"
-        )
-        self.assertNotIn("secret", redacted)
-        self.assertIn("<redacted>", redacted)
-
-    def test_vpn_line_is_connected(self):
-        self.assertTrue(page_vpn._vpn_line_is_connected("Established DTLS connection"))
-        self.assertFalse(page_vpn._vpn_line_is_connected("Authentication failed"))
 
 
 class HomeHeroViewTests(unittest.TestCase):

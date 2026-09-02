@@ -11,7 +11,7 @@ pub struct StaticMetrics {
     pub installer_js_max_file_bytes: u64,
     pub probe_collector_count: u64,
     pub system_hub_inline_styles: u64,
-    pub system_hub_python_modules: u64,
+    pub system_hub_source_files: u64,
 }
 
 pub fn max_file_size(sizes: impl IntoIterator<Item = u64>) -> u64 {
@@ -30,13 +30,13 @@ pub fn static_metrics(
     installer_js_sizes: impl IntoIterator<Item = u64>,
     probe_source: &str,
     inline_style_count: u64,
-    python_module_count: u64,
+    source_file_count: u64,
 ) -> StaticMetrics {
     StaticMetrics {
         installer_js_max_file_bytes: max_file_size(installer_js_sizes),
         probe_collector_count: probe_collector_count(probe_source),
         system_hub_inline_styles: inline_style_count,
-        system_hub_python_modules: python_module_count,
+        system_hub_source_files: source_file_count,
     }
 }
 
@@ -112,6 +112,6 @@ mod tests {
         assert_eq!(budget_failures(&metrics, &budgets), vec!["installer_js_max_file_bytes: 9 exceeds budget 8"]);
         let report = report_with_runtime("local", &metrics, &budgets, &json!({}), Some(&json!({"probe_duration_ms": 12.5})));
         assert_eq!(report["runtime"]["probe_duration_ms"], 12.5);
-        assert_eq!(report["static"]["system_hub_python_modules"], 8);
+        assert_eq!(report["static"]["system_hub_source_files"], 8);
     }
 }

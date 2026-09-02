@@ -39,19 +39,6 @@ check-dockerfile check_base_image=default_base_image:
 test *args:
     ./build_files/scripts/run-tests.sh {{ args }}
 
-# Run the heavy Hub construction smoke explicitly, inside a memory cap.
-[group('Quality')]
-test-hub-smoke:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    gui_python=python3
-    [[ -x .venv-gui/bin/python ]] && gui_python=.venv-gui/bin/python
-    PYTHONPATH=build_files/kyth-welcome:build_files/kyth_shared \
-    QT_QPA_PLATFORM=offscreen KYTH_FORCE_HEAVY_GUI_SMOKE=1 \
-    systemd-run --user --scope --collect --quiet \
-        -p CPUWeight=20 -p IOWeight=10 -p MemoryHigh=25% -p MemoryMax=40% \
-        -- "${gui_python}" -m unittest tests.test_kyth_welcome_hub_smoke
-
 # Verify codecs/drivers are baked (Nobara-style one-click, no post-install dnf)
 [group('Quality')]
 verify-codecs image="localhost/kyth:latest":
@@ -303,29 +290,24 @@ format:
     fi
     /usr/bin/find . -iname "*.sh" -type f -exec shfmt --write "{}" ';'
 
-# Set up a local venv to run System Hub outside the image (handles read-only $HOME overlay).
+# Set up the React/Tauri Hub's frontend dependencies for local development.
 [group('Utility')]
 setup-hub:
     #!/usr/bin/env bash
     set -euo pipefail
-    python3 -m venv .venv
-    .venv/bin/pip install --disable-pip-version-check PySide6
-    .venv/bin/pip install --disable-pip-version-check -e build_files/kyth_shared -e build_files/kyth-welcome
-    echo "Hub venv ready: .venv/bin/kyth-welcome"
+    npm --prefix src/kyth-hub-web ci
+    echo "React/Tauri Hub ready: run 'just run-hub'"
 
-# Run System Hub locally from the checkout (uses .venv if present).
+# Run the React/Tauri Hub locally from the checkout.
 [group('Utility')]
 run-hub *args:
     #!/usr/bin/env bash
     set -euo pipefail
-    if [[ -x .venv/bin/kyth-welcome ]]; then
-        exec .venv/bin/kyth-welcome {{ args }}
+    if [[ ! -d src/kyth-hub-web/node_modules ]]; then
+        echo "Hub dependencies are missing. Run: just setup-hub" >&2
+        exit 1
     fi
-    if /usr/bin/python3 -c "import PySide6" 2>/dev/null || /usr/bin/python3 -c "import PyQt6" 2>/dev/null; then
-        exec env PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome /usr/bin/python3 build_files/kyth-welcome/kyth-welcome {{ args }}
-    fi
-    echo "No Qt binding found. Run: just setup-hub" >&2
-    exit 1
+    exec npm --prefix src/kyth-hub-web run tauri:dev -- {{ args }}
 
 # Health like cachy-doctor (probe + zram/btrfs/scx); no daemon.
 [group('Utility')]
@@ -448,7 +430,7 @@ perf-compare:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Reproducible perf compare (hyperfine + systemd-analyze + probe json):"
-    echo "  hyperfine 'python3 -m unittest tests.test_kyth_welcome_hub_smoke' --warmup 1"
+    echo "  hyperfine 'just check-hub-shell' --warmup 1"
     echo "  systemd-analyze; cat /run/user/1000/kyth/probe-cache.json | jq ."
 
 [group('Utility')]

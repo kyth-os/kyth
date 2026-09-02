@@ -12,21 +12,24 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BUDGETS_PATH = ROOT / "build_files/config/optimization-budgets.json"
-HUB_ROOT = ROOT / "build_files/kyth-welcome/kyth_welcome"
+HUB_ROOT = ROOT / "src/kyth-hub-web/src"
 INSTALLER_WEBUI = ROOT / "build_files/kyth-installer/kyth_installer/webui"
 
 
 def _static_metrics() -> dict[str, int]:
     js_sizes = {path.name: path.stat().st_size for path in INSTALLER_WEBUI.glob("*.js")}
-    hub_modules = list(HUB_ROOT.rglob("*.py"))
+    hub_sources = [
+        path for path in HUB_ROOT.rglob("*")
+        if path.is_file() and path.suffix in {".ts", ".tsx"}
+    ]
     return {
         "installer_js_max_file_bytes": max(js_sizes.values(), default=0),
         "probe_collector_count": _probe_collector_count(),
         "system_hub_inline_styles": sum(
-            path.read_text(encoding="utf-8").count(".setStyleSheet(")
-            for path in hub_modules
+            path.read_text(encoding="utf-8").count("style={{")
+            for path in hub_sources
         ),
-        "system_hub_python_modules": len(hub_modules),
+        "system_hub_source_files": len(hub_sources),
     }
 
 
@@ -43,25 +46,7 @@ def _probe_collector_count() -> int:
 def _runtime_metrics() -> dict[str, object]:
     metrics: dict[str, object] = {}
     env = os.environ.copy()
-    env["PYTHONPATH"] = os.pathsep.join(
-        str(ROOT / source_root)
-        for source_root in ("build_files/kyth_shared", "build_files/kyth-welcome")
-    )
-    started = time.perf_counter()
-    imported = subprocess.run(
-        [sys.executable, "-c", "import kyth_welcome.app"],
-        cwd=ROOT,
-        env=env,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if imported.returncode:
-        metrics["system_hub_cold_import_error"] = imported.stderr.strip().splitlines()[-1]
-    else:
-        metrics["system_hub_cold_import_ms"] = round(
-            (time.perf_counter() - started) * 1000, 2,
-        )
+    env["PYTHONPATH"] = str(ROOT / "build_files/kyth_shared")
     started = time.perf_counter()
     probe_code = (
         "import json; from kyth_shared.system.probe import collect_probe_results; "

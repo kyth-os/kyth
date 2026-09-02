@@ -25,7 +25,7 @@ fn validated_request(operation: &str, payload: &Value) -> Result<Value, String> 
             validate_flatpak_id(app_id)?;
             Ok(json!({ "operation": "flatpak_uninstall", "app_id": app_id }))
         }
-        "firmware_update" | "nvidia_install" | "windows_verify" | "secureboot_enroll" => {
+        "firmware_update" | "nvidia_install" | "secureboot_enroll" => {
             Ok(json!({ "operation": operation }))
         }
         "kernel_switch" => {
@@ -242,17 +242,17 @@ pub(crate) fn send_request(request: Value) -> Result<String, String> {
     let value: Value = serde_json::from_str(&response)
         .map_err(|error| format!("invalid privileged service response: {error}"))?;
     if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
-        Ok(value
+        let detail = value
             .get("detail")
             .and_then(Value::as_str)
-            .unwrap_or("Operation complete.")
-            .to_string())
+            .unwrap_or("Operation complete.");
+        Ok(kyth_shared::privileged::redact_request_detail(&request, detail))
     } else {
-        Err(value
+        let detail = value
             .get("detail")
             .and_then(Value::as_str)
-            .unwrap_or("privileged operation failed")
-            .to_string())
+            .unwrap_or("privileged operation failed");
+        Err(kyth_shared::privileged::redact_request_detail(&request, detail))
     }
 }
 

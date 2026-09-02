@@ -1956,12 +1956,14 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
+ "url",
 ]
 
 [[package]]
 name = "kyth-shared"
 version = "0.1.0"
 dependencies = [
+ "libc",
  "regex",
  "rusqlite",
  "rustix 0.38.44",

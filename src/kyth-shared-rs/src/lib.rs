@@ -37,3 +37,5 @@ pub mod secret_scan;
 pub mod setup_transfer;
 pub mod desktop_polish;
 pub mod system;
+pub mod network_share;
+pub mod privileged;

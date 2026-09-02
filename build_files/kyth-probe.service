@@ -16,13 +16,9 @@ CacheDirectoryMode=0700
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
-# PrivateUsers deliberately absent: --system mode's bootc collector shells out to
-# `sudo -n kyth-bootc-guard status-json` (probe.py::_collect_bootc via
-# kyth_shared/system/bootc_query.py). Even running as root already, a
-# private user namespace remaps that root to an unprivileged UID outside
-# it, so the real-root ownership check on /etc/sudoers fails every run —
-# "unable to open /etc/sudoers: Invalid argument" — leaving the bootc
-# status cache the Hub's Update page reads permanently empty/stale.
+# PrivateUsers deliberately absent: the native Rust bootc collector uses the
+# installed root-only guard when needed, and a private user namespace would
+# remap root outside the real host identity boundary.
 ProtectSystem=strict
 ProtectHome=read-only
 ProtectClock=yes

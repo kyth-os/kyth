@@ -1,4 +1,5 @@
-use std::process::{Command, Output};
+use std::process::Output;
+use std::time::Duration;
 
 /// Common error type for helper-process launches from Tauri commands.
 #[derive(Debug)]
@@ -20,21 +21,25 @@ impl std::fmt::Display for CommandError {
 /// one place. Callers decide whether non-zero exit status is a failure,
 /// because some probes intentionally use exit status as data.
 pub(crate) fn output(program: &str, args: &[&str]) -> Result<Output, CommandError> {
-    Command::new(program)
-        .args(args)
-        .output()
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                CommandError::Spawn(error)
-            } else {
-                CommandError::Output(error)
-            }
-        })
+    let argv = std::iter::once(program.to_string())
+        .chain(args.iter().map(|arg| (*arg).to_string()))
+        .collect::<Vec<_>>();
+    kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(900)).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            CommandError::Spawn(error)
+        } else {
+            CommandError::Output(error)
+        }
+    })
 }
 
 /// Prevent helper output from becoming an unbounded UI error message.
 pub(crate) fn bounded_text(bytes: &[u8]) -> String {
-    String::from_utf8_lossy(bytes).trim().chars().take(400).collect()
+    let text = kyth_shared::system::process::strip_ansi(&String::from_utf8_lossy(bytes));
+    kyth_shared::system::process::redact_sensitive_text(text.trim())
+        .chars()
+        .take(400)
+        .collect()
 }
 
 #[cfg(test)]

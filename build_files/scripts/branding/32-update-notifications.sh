@@ -34,11 +34,6 @@ NoDisplay=true
 X-KDE-autostart-after=panel
 STEAMEXPORTAUTOSTARTEOF
 
-python3 -c '
-import importlib.machinery, importlib.util, pathlib
-path = pathlib.Path("/usr/bin/kyth-welcome")
-loader = importlib.machinery.SourceFileLoader("kyth_welcome_smoke", str(path))
-spec = importlib.util.spec_from_loader(loader.name, loader)
-module = importlib.util.module_from_spec(spec)
-loader.exec_module(module)
-'
+# Build-time syntax check only; the notifier imports shared services and does
+# not depend on the retired Python/Qt Hub package being installed.
+python3 -c 'import ast, pathlib; ast.parse(pathlib.Path("/usr/bin/kyth-update-notifier").read_text())'

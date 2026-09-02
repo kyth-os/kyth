@@ -1,7 +1,6 @@
 """TaskSupervisor.finish_owner_task connect-before-check race regression.
 
-Runs offscreen (QT_QPA_PLATFORM=offscreen); skips gracefully without PySide6
-(same pattern as test_kyth_welcome_hub_smoke.py).
+Runs offscreen (QT_QPA_PLATFORM=offscreen); skips gracefully without PySide6.
 """
 from __future__ import annotations
 

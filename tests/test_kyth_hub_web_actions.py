@@ -13,6 +13,7 @@ These are static checks over the shipped sources for that reason.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import unittest
@@ -28,7 +29,9 @@ MAIN_RS += "\n" + "\n".join(path.read_text(encoding="utf-8") for path in sorted(
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
 COMMAND_LEDGER = (ROOT / "src" / "kyth-hub-web" / "COMMAND_LEDGER.md").read_text(encoding="utf-8")
 
-HUB_SECTIONS = (HUB_WEB / "data" / "hubSections.ts").read_text(encoding="utf-8")
+HUB_ROUTES = json.loads(
+    (HUB_WEB / "data" / "hubRoutes.json").read_text(encoding="utf-8")
+)
 
 # The mutating wrappers, and the section each one belongs to.
 MUTATING_WRAPPERS = {
@@ -191,7 +194,11 @@ class HubWebCoverageTests(unittest.TestCase):
     def test_every_section_key_has_a_component(self):
         # HubPage renders nothing for a key with no component, which reads
         # as a blank tab rather than an error.
-        keys = re.findall(r'key: "([^"]+)"', HUB_SECTIONS)
+        keys = [
+            section["key"]
+            for destination in HUB_ROUTES["destinations"]
+            for section in destination["sections"]
+        ]
         self.assertGreaterEqual(len(keys), 20, "hubSections.ts keys not parsed")
         wired = set()
         for page in ("Play.tsx", "Apps.tsx", "ThisPc.tsx", "MoveIn.tsx", "Updates.tsx"):

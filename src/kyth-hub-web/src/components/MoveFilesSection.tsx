@@ -99,7 +99,18 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
               })
             }
           />
-          <ActionButton label={busy === "windows-verify" ? "Checking…" : "Check the Windows install"} disabled={busy !== null} onClick={() => run("windows-verify", "Checking Windows install…", () => runPrivilegedAction("windows_verify"))} />
+          <ActionButton
+            label={busy === "windows-verify" ? "Checking…" : "Check the Windows install"}
+            disabled={busy !== null}
+            onClick={() =>
+              run("windows-verify", "Checking Windows install…", async () => {
+                const migration = await fetchMigrationReadiness();
+                setReadiness(migration);
+                if (!migration) return "Windows migration readiness is unavailable outside the Hub shell.";
+                return `Windows migration: ${migration.parity}. Drives ${migration.drives}; files ${migration.files}; bookmarks ${migration.bookmarks}; cloud ${migration.onedrive}; ${migration.pwa}.`;
+              })
+            }
+          />
           <RecipeButton recipe="fix-dualboot-clock" label="Fix dual-boot clock" busy={busy} run={run} />
           <RecipeButton recipe="setup-boot-windows-steam" label="Prepare Windows + Steam" busy={busy} run={run} />
           <RecipeButton recipe="reclaim-windows" label="Reclaim Windows space" busy={busy} run={run} />

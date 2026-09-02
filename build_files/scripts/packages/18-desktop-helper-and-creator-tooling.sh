@@ -186,6 +186,6 @@ install_available_optional_packages desktop "${optional_desktop_packages[@]}"
 # webkit2gtk4.1/gtk3/libsoup3: runtime deps for /usr/bin/kyth-hub-shell (the
 # React+Tauri Kyth Hub rewrite, src/kyth-hub-web — built in the hub-web-builder
 # stage of the top-level Dockerfile). Installed unconditionally since the
-# binary itself ships on every channel; kyth-welcome-launch's runtime branch
-# check is what actually gates which channel launches it. dbus is not listed
+# binary itself ships on every channel; kyth-welcome-launch requires this binary
+# and reports a clear failure if packaging is incomplete. dbus is not listed
 # here — it's already a hard dependency of the base Plasma desktop.

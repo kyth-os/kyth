@@ -1,13 +1,11 @@
 //! Port of `kyth_shared.system.probe`'s READ path — `kyth-probe.service`
-//! (or an interactive Hub session) writes the on-disk cache this reads;
-//! this module never writes it and never triggers a fresh probe. See
-//! `probe.py`'s own module docstring for the full picture — this only
-//! ports `read_section` and what it needs, not the collector/write side.
+//! The native probe service collects and writes the on-disk cache this reads;
+//! the Hub itself only reads it. The collector preserves the compatibility
+//! cache schema while keeping every child process bounded.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
-use std::io::Write;
 
 use serde_json::Value;
 
@@ -16,10 +14,9 @@ impl Drop for ProbeCacheLock {
     fn drop(&mut self) { let _ = std::fs::remove_file(&self.0); }
 }
 
-/// Same table as `probe.py`'s `DISK_TTL` — how many seconds old a cached
-/// section may be before `read_section` refuses to return it. Keep this in
-/// sync with `probe.py`'s copy by hand; that file is still the source of
-/// truth for what `kyth-probe.service` actually populates.
+/// Cache contract shared with the legacy Python compatibility module — how
+/// many seconds old a cached section may be before `read_section` refuses to
+/// return it. The installed `kyth-probe.service` now uses this Rust module.
 pub fn disk_ttl() -> HashMap<&'static str, f64> {
     HashMap::from([
         ("bootc-status-data", 90.0),
@@ -61,9 +58,231 @@ fn system_cache_path() -> PathBuf {
     PathBuf::from("/var/cache/kyth/probe-cache.json")
 }
 
-/// Same precedence as `probe.py`'s `cache_read_paths(system=False)` — this
-/// crate only ever runs as the logged-in desktop user, never root, so the
-/// `system=True` branch isn't ported.
+/// Select the cache destination for the native probe service.  The system
+/// service passes `system=true`; the user service keeps its cache under the
+/// session runtime directory and falls back to the user's cache directory.
+pub fn default_write_path(system: bool) -> PathBuf {
+    if system || rustix::process::getuid().is_root() {
+        return system_cache_path();
+    }
+    let runtime = user_runtime_cache_path();
+    if runtime
+        .parent()
+        .map(|parent| std::fs::create_dir_all(parent).is_ok())
+        .unwrap_or(false)
+    {
+        runtime
+    } else {
+        user_home_cache_path()
+    }
+}
+
+/// Atomically replace a cache document.  Cache readers can therefore never
+/// observe a partially serialized probe result, even when a service timeout
+/// overlaps a Hub refresh.
+pub fn write_cache_file(path: &Path, document: &Value) -> std::io::Result<()> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidInput, "cache path has no parent"))?;
+    if !document.is_object() || document.get("sections").and_then(Value::as_object).is_none() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "probe cache document must contain an object sections field",
+        ));
+    }
+    std::fs::create_dir_all(parent)?;
+    let lock = path.with_extension(format!(
+        "{}.lock",
+        path.extension().and_then(|extension| extension.to_str()).unwrap_or("cache")
+    ));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    let _guard = loop {
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
+            Ok(_) => break ProbeCacheLock(lock.clone()),
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists
+                    && std::time::Instant::now() < deadline =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(error) => return Err(error),
+        }
+    };
+    let tmp = parent.join(format!(
+        ".probe-{}-{}.json",
+        std::process::id(),
+        now_unix() as u128
+    ));
+    let payload = serde_json::to_vec(document)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    let result = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        use std::io::Write;
+        file.write_all(&payload)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)?;
+        Ok::<(), std::io::Error>(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&tmp);
+    }
+    result
+}
+
+/// Merge freshly collected sections into the shared cache document.
+pub fn update_sections(
+    sections: &serde_json::Map<String, Value>,
+    path: Option<&Path>,
+    system: bool,
+) -> std::io::Result<PathBuf> {
+    let target = path
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| default_write_path(system));
+    let mut document = load_cache_file(&target).unwrap_or_else(|| {
+        serde_json::json!({"version": 2, "generated_at": 0.0, "sections": {}})
+    });
+    let object = document
+        .as_object_mut()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "probe cache is not an object"))?;
+    let cache_sections = object
+        .entry("sections")
+        .or_insert_with(|| Value::Object(serde_json::Map::new()))
+        .as_object_mut()
+        .ok_or_else(|| std::io::Error::new(std::io::ErrorKind::InvalidData, "probe sections are not an object"))?;
+    let now = now_unix();
+    for (key, data) in sections {
+        cache_sections.insert(
+            key.clone(),
+            serde_json::json!({"ts": now, "data": data}),
+        );
+    }
+    object.insert("version".into(), Value::from(2));
+    object.insert("generated_at".into(), Value::from(now));
+    write_cache_file(&target, &Value::Object(object.clone()))?;
+    Ok(target)
+}
+
+fn command_output(program: &str, args: &[&str], timeout_secs: u64) -> Option<String> {
+    let mut argv = vec![program.to_string()];
+    argv.extend(args.iter().map(|arg| (*arg).to_string()));
+    let output = crate::system::process::run_bounded(&argv, std::time::Duration::from_secs(timeout_secs)).ok()?;
+    output.status.success().then(|| String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+fn collect_flatpak_apps() -> Value {
+    let Some(output) = command_output("flatpak", &["list", "--app", "--columns=application"], 15) else {
+        return Value::Null;
+    };
+    let mut apps = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    apps.sort();
+    apps.dedup();
+    Value::Array(apps.into_iter().map(Value::String).collect())
+}
+
+fn collect_flatpak_updates() -> Value {
+    let mut total = 0i64;
+    let mut succeeded = false;
+    for scope in ["--system", "--user"] {
+        if let Some(output) = command_output(
+            "flatpak",
+            &["remote-ls", "--updates", scope, "--columns=application"],
+            30,
+        ) {
+            succeeded = true;
+            total += output.lines().filter(|line| !line.trim().is_empty()).count() as i64;
+        }
+    }
+    succeeded.then_some(Value::from(total)).unwrap_or(Value::Null)
+}
+
+fn collect_hardware() -> Option<(Value, Value)> {
+    let evaluation = crate::system::hardware_policy::evaluate_system().ok()?;
+    let has_nvidia = evaluation
+        .inventory
+        .pci
+        .iter()
+        .any(|device| device.vendor == "10de" && device.class_code.starts_with("03"));
+    let is_hybrid = evaluation
+        .capabilities
+        .iter()
+        .any(|capability| capability == "gpu.hybrid" || capability == "gpu.offload");
+    let capabilities = evaluation.capabilities.iter().take(8).cloned().collect::<Vec<_>>();
+    let profiles = evaluation
+        .profiles
+        .iter()
+        .filter_map(|profile| profile.get("id").and_then(Value::as_str))
+        .take(3)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let summary = serde_json::json!({
+        "has_nvidia": has_nvidia,
+        "is_hybrid": is_hybrid,
+        "capabilities": capabilities,
+        "profiles": profiles,
+    });
+    Some((Value::Bool(has_nvidia), summary))
+}
+
+/// Collect the sections formerly emitted by `kyth_shared.system.probe`.
+/// Every operation is bounded and failure is represented as JSON `null`, so a
+/// missing optional utility cannot prevent the rest of the cache from being
+/// refreshed.
+pub fn collect_snapshot() -> serde_json::Map<String, Value> {
+    let mut sections = serde_json::Map::new();
+    let status_data = crate::system::bootc_query::fetch_status_data();
+    let status_text = crate::system::bootc_query::fetch_status_text();
+    let reference = status_data
+        .as_ref()
+        .and_then(crate::system::bootc_query::image_reference_from_status)
+        .or_else(|| {
+            crate::system::bootc_query::image_reference_from_status_with_output(
+                &status_data.clone().unwrap_or(Value::Null),
+                &status_text,
+            )
+        });
+    sections.insert("bootc-status-data".into(), status_data.unwrap_or(Value::Null));
+    sections.insert("bootc-status-text".into(), Value::String(status_text));
+    sections.insert(
+        "bootc-branch".into(),
+        crate::system::bootc_policy::branch_from_ref(reference.as_deref())
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    sections.insert(
+        "kernel-flavor".into(),
+        Value::String(crate::system::bootc::current_kernel_flavor()),
+    );
+    sections.insert("flatpak-apps".into(), collect_flatpak_apps());
+    sections.insert("flatpak-updates".into(), collect_flatpak_updates());
+    if let Some((nvidia, hardware)) = collect_hardware() {
+        sections.insert("nvidia-detect".into(), nvidia);
+        sections.insert("hardware-summary".into(), hardware.clone());
+        sections.insert("display-detect".into(), hardware);
+    } else {
+        sections.insert("nvidia-detect".into(), Value::Null);
+        sections.insert("hardware-summary".into(), Value::Null);
+        sections.insert("display-detect".into(), Value::Null);
+    }
+    sections.insert(
+        "controllers-detect".into(),
+        serde_json::to_value(crate::system::controllers::detect_controllers()).unwrap_or(Value::Null),
+    );
+    sections.insert(
+        "network-summary".into(),
+        serde_json::to_value(crate::system::network_identity::get_network_identity())
+            .unwrap_or(Value::Null),
+    );
+    sections
+}
+
+/// Same precedence as the compatibility module's `cache_read_paths` for a
+/// logged-in desktop user. The system service writes the shared system path;
+/// readers always accept it as the final fallback.
 pub fn cache_read_paths() -> Vec<PathBuf> {
     vec![user_runtime_cache_path(), user_home_cache_path(), system_cache_path()]
 }
@@ -76,43 +295,6 @@ fn load_cache_file(path: &Path) -> Option<Value> {
     }
     data.get("sections")?.as_object()?;
     Some(data)
-}
-
-/// Atomically persist a validated probe-cache document.  This is the native
-/// writer counterpart to Python's `write_cache_file`: callers still own
-/// collection and locking policy, while a partial write can never replace a
-/// usable cache.
-pub fn write_cache_file(path: &Path, document: &Value) -> Result<(), String> {
-    if !document.is_object() || document.get("sections").and_then(Value::as_object).is_none() {
-        return Err("probe cache document must contain an object sections field".into());
-    }
-    let parent = path.parent().ok_or_else(|| "probe cache path has no parent".to_string())?;
-    std::fs::create_dir_all(parent).map_err(|e| format!("could not create probe cache directory: {e}"))?;
-    let encoded = serde_json::to_vec(document).map_err(|e| format!("could not encode probe cache: {e}"))?;
-    let lock = path.with_extension(format!("{}.lock", path.extension().and_then(|e| e.to_str()).unwrap_or("cache")));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    let _guard = loop {
-        match std::fs::OpenOptions::new().write(true).create_new(true).open(&lock) {
-            Ok(_) => break ProbeCacheLock(lock.clone()),
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && std::time::Instant::now() < deadline => std::thread::sleep(std::time::Duration::from_millis(50)),
-            Err(error) => return Err(format!("could not acquire probe cache lock: {error}")),
-        }
-    };
-    let temporary = parent.join(format!(".probe-cache-{}", std::process::id()));
-    let mut file = std::fs::File::create(&temporary).map_err(|e| format!("could not write probe cache: {e}"))?;
-    file.write_all(&encoded).and_then(|_| file.sync_all()).map_err(|e| format!("could not flush probe cache: {e}"))?;
-    drop(file);
-    std::fs::rename(&temporary, path).map_err(|e| { let _ = std::fs::remove_file(&temporary); format!("could not replace probe cache: {e}") })
-}
-
-/// Merge freshly collected values into the version-2 cache document.
-pub fn update_sections(path: &Path, sections: &serde_json::Map<String, Value>, updated_at: f64) -> Result<(), String> {
-    let mut document = load_cache_file(path).unwrap_or_else(|| serde_json::json!({"version": 2, "sections": {}}));
-    let store = document.get_mut("sections").and_then(Value::as_object_mut).ok_or_else(|| "invalid probe cache sections".to_string())?;
-    for (key, data) in sections { store.insert(key.clone(), serde_json::json!({"ts": updated_at, "data": data})); }
-    document["version"] = Value::from(2);
-    document["generated_at"] = Value::from(updated_at);
-    write_cache_file(path, &document)
 }
 
 fn now_unix() -> f64 {
@@ -288,7 +470,22 @@ mod tests {
         let path = dir.path().join("probe-cache.json");
         let mut sections = serde_json::Map::new();
         sections.insert("bootc-branch".into(), json!("testing"));
-        update_sections(&path, &sections, 42.0).unwrap();
-        assert_eq!(load_cache_file(&path).unwrap()["sections"]["bootc-branch"], json!({"ts":42.0,"data":"testing"}));
+        update_sections(&sections, Some(&path), false).unwrap();
+        let written = load_cache_file(&path).unwrap();
+        assert_eq!(written["version"], 2);
+        assert_eq!(written["sections"]["bootc-branch"]["data"], "testing");
+    }
+
+    #[test]
+    fn update_sections_writes_an_atomic_versioned_document() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe-cache.json");
+        let mut sections = serde_json::Map::new();
+        sections.insert("network-summary".into(), json!({"vpn_connected": false}));
+        update_sections(&sections, Some(&path), false).unwrap();
+        let written: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
+        assert_eq!(written["version"], 2);
+        assert!(written["generated_at"].as_f64().unwrap() > 0.0);
+        assert_eq!(written["sections"]["network-summary"]["data"]["vpn_connected"], false);
     }
 }

@@ -6,7 +6,7 @@ missing binary, returncode 2, empty stdout, or TimeoutExpired return
 ( False / 0 ) and never raise, so bootc/flatpak work proceeds.
 
 Mirrors the subprocess patterns previously duplicated in:
-- build_files/kyth-update-watcher
+- src/kyth-shared-rs/src/update_watcher_bin.rs
 - build_files/kyth-full-update
 - build_files/kyth-welcome/kyth_welcome/services/workers/updates.py
 - build_files/kyth-welcome/kyth_welcome/services/hardware/io.py

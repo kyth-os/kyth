@@ -55,27 +55,6 @@ class UpdateSnapshotTests(unittest.TestCase):
             self.assertEqual(snapshot.result, "skipped")
             self.assertEqual(snapshot.remote_digest, "")
 
-    def test_all_update_consumers_use_the_shared_snapshot(self):
-        consumers = (
-            ROOT / "build_files" / "kyth-update-watcher",
-            ROOT / "build_files" / "kyth-welcome" / "kyth-update-notifier",
-            ROOT
-            / "build_files"
-            / "kyth-welcome"
-            / "kyth_welcome"
-            / "page_update_auto.py",
-            ROOT
-            / "build_files"
-            / "kyth-welcome"
-            / "kyth_welcome"
-            / "services"
-            / "workers"
-            / "updates.py",
-        )
-        for path in consumers:
-            with self.subTest(path=path.relative_to(ROOT)):
-                self.assertIn("update_status import", path.read_text(encoding="utf-8"))
-
 
 if __name__ == "__main__":
     unittest.main()

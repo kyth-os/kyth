@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 use super::runtime_output::count_fwupd_updates;
+use std::fs::OpenOptions;
+use rustix::fs::{flock, FlockOperation};
 
 fn run_with_timeout(cmd: &[String], timeout: Duration) -> Option<(i32, String)> {
     if cmd.is_empty() { return None; }
@@ -46,6 +48,26 @@ pub fn run_firmware_update(timeout: u64) -> (bool, String) {
     }
 }
 
+/// Refresh metadata, count pending devices, and stage updates while sharing
+/// the same non-blocking lock used by Guardian and the Hub firmware probe.
+/// A lock miss is intentionally a no-op: another owner will finish the batch.
+pub fn stage_firmware_batch() -> (bool, i32, String) {
+    let path = std::env::var_os("KYTH_FWUPD_LOCK").map(std::path::PathBuf::from).unwrap_or_else(|| "/run/kyth-fwupd.lock".into());
+    let Some(parent) = path.parent() else { return (false, 0, String::new()); };
+    if std::fs::create_dir_all(parent).is_err() { return (false, 0, String::new()); }
+    let Ok(lock) = OpenOptions::new().create(true).write(true).open(path) else { return (false, 0, String::new()); };
+    if flock(&lock, FlockOperation::NonBlockingLockExclusive).is_err() { return (false, 0, String::new()); }
+    let _ = run_firmware_refresh(60);
+    let count = check_firmware_updates(20);
+    if count <= 0 {
+        let _ = flock(&lock, FlockOperation::Unlock);
+        return (false, 0, String::new());
+    }
+    let result = run_firmware_update(600);
+    let _ = flock(&lock, FlockOperation::Unlock);
+    (result.0, count, result.1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -53,5 +75,10 @@ mod tests {
     fn commands() {
         assert_eq!(firmware_devices_command(), vec!["fwupdmgr","get-devices"]);
         assert_eq!(firmware_updates_command(), vec!["fwupdmgr","get-updates"]);
+    }
+
+    #[test]
+    fn fwupd_count_is_nonnegative_when_no_updates_exist() {
+        assert_eq!(count_fwupd_updates("No updates available\n"), 0);
     }
 }

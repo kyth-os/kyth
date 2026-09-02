@@ -4,9 +4,8 @@ import type { ComponentType, SVGProps } from "react";
 
 // The web Hub's left rail. Updates is deliberately last: it is a global,
 // high-value action, but should stay out of the way of the everyday workflow.
-// (page_registry.py) — this is a reskin of that navigation model, not a
-// new one, so a page key still means the same thing on both sides during
-// migration.
+// The route manifest is the single navigation model, so a page key has one
+// meaning across the sidebar, deep-link resolver, and packaging metadata.
 const destinations: { to: string; label: string; hint: string; Icon: ComponentType<SVGProps<SVGSVGElement>> }[] = [
   { to: "/", label: "Home", hint: "Health and the next step", Icon: IconHome },
   { to: "/play", label: "Play", hint: "Games, boost, controllers", Icon: IconPlay },

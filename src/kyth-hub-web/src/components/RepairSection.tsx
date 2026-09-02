@@ -9,6 +9,7 @@ import {
   fetchSnapshotCount,
   fetchSnapshotTimeline,
   fetchInstallStatus,
+  fetchMigrationReadiness,
   installFlatpak,
   openBackupApp,
   invokeBootcRollback,
@@ -196,7 +197,17 @@ export function RepairSection({ section }: { section: HubSection }) {
           <RecipeButton recipe="device-info" label="Collect device info" busy={busy} run={run} />
           <RecipeButton recipe="startup-apps" label="Review startup apps" busy={busy} run={run} />
           <RecipeButton recipe="firmware-update" label="Check firmware updates" busy={busy} run={run} />
-          <RecipeButton recipe="windows-verify" label="Verify Windows migration" busy={busy} run={run} />
+          <ActionButton
+            label={busy === "windows-verify" ? "Checking Windows migration…" : "Verify Windows migration"}
+            disabled={busy !== null}
+            onClick={() =>
+              run("windows-verify", "Checking Windows migration…", async () => {
+                const migration = await fetchMigrationReadiness();
+                if (!migration) return "Windows migration readiness is unavailable outside the Hub shell.";
+                return `Windows migration: ${migration.parity}. Drives ${migration.drives}; files ${migration.files}; bookmarks ${migration.bookmarks}; cloud ${migration.onedrive}; ${migration.pwa}.`;
+              })
+            }
+          />
           <ActionButton
             label={busy === "recheck" ? "Re-reading…" : "Re-check"}
             disabled={busy !== null}

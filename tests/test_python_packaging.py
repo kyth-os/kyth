@@ -15,7 +15,7 @@ class PythonPackagingTests(unittest.TestCase):
         expected = {
             "build_files/kyth_shared": "kyth-shared",
             "build_files/kyth-installer": "kyth-installer",
-            "build_files/kyth-welcome": "kyth-welcome",
+            "build_files/kyth-welcome": "kyth-hub-services",
         }
 
         for relative, project_name in expected.items():
@@ -65,10 +65,7 @@ class PythonPackagingTests(unittest.TestCase):
             installer["project"]["scripts"]["kyth-partition-install"],
             "kyth_installer.partition_cli:main",
         )
-        self.assertEqual(
-            welcome["project"]["scripts"]["kyth-welcome"],
-            "kyth_welcome.app:main",
-        )
+        self.assertNotIn("scripts", welcome["project"])
 
     def test_image_builds_install_python_projects_via_pip(self):
         dockerfile = (ROOT / "Dockerfile").read_text()
@@ -91,13 +88,16 @@ class PythonPackagingTests(unittest.TestCase):
         self.assertIn("mktemp -d /tmp/kyth-installer-packages", installer_build)
         self.assertIn('"${installer_package_root}/kyth-installer"', installer_build)
         self.assertIn("python3 -m pip install", helper_build)
-        self.assertIn("/ctx/kyth-welcome", helper_build)
-        self.assertIn("mktemp -d /tmp/kyth-welcome-package", helper_build)
-        self.assertIn('"${welcome_package_dir}"', helper_build)
-        self.assertIn('"${welcome_package_dir}/kyth-installer"', helper_build)
+        self.assertIn("/ctx/kyth-installer", helper_build)
+        self.assertIn("mktemp -d /tmp/kyth-installer-package", helper_build)
+        self.assertIn('"${installer_package_dir}"', helper_build)
+        self.assertIn("generate-hub-desktop-entries.py", helper_build)
+        self.assertNotIn('from kyth_welcome.krunner_desktop import', helper_build)
+        self.assertNotIn('"${welcome_package_dir}"', helper_build)
         self.assertNotIn("kyth-partition-install.sh", helper_build)
         self.assertNotIn("/usr/lib/kyth-installer", installer_build)
         self.assertNotIn("/usr/lib/kyth-welcome", helper_build)
+        self.assertNotIn("PySide6", (ROOT / "src/kyth-welcome/pyproject.toml").read_text())
 
     def test_runtime_scripts_do_not_mutate_import_paths(self):
         offenders = []

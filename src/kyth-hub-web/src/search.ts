@@ -1,7 +1,7 @@
 import type { ComponentType, SVGProps } from "react";
 import { DESTINATIONS } from "./data/destinations";
 
-/** Hub search — port of page_registry.py's `rank_search_results`.
+/** Hub search over the shared route manifest.
  *
  * The Topbar shipped a search input with no `value` and no `onChange`: it
  * accepted typing and did nothing, while the Qt Hub's equivalent box has

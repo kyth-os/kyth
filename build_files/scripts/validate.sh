@@ -99,19 +99,6 @@ export XDG_CONFIG_HOME="${test_home}/config"
 export XDG_DATA_HOME="${test_home}/data"
 export XDG_STATE_HOME="${test_home}/state"
 mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}"
-# test_kyth_welcome_hub_smoke.py already skips itself under `coverage run`
-# (run-quality.sh) as "OOM-prone" — this plain `unittest discover` isn't
-# under coverage, so that guard doesn't fire here, and it's the one place
-# this suite runs full-strength on a live desktop rather than a CI runner.
-# CI sets CI/GITHUB_ACTIONS itself; anywhere else, skip it here the same
-# way — MemoryHigh/MemoryMax above contain it either way, this just avoids
-# leaning on that as the only guard. Direct invocation
-# (`python -m unittest tests.test_kyth_welcome_hub_smoke`, e.g. the
-# pre-push hook's own explicit Hub-smoke step) is unaffected — this only
-# reaches that one process's env, not a sibling command run afterward.
-if [[ -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]]; then
-	export KYTH_SKIP_HEAVY_GUI_SMOKE=1
-fi
 if [[ ${validate_fast} -eq 1 ]]; then
 	echo "==> Python unit tests SKIPPED (--fast / live-desktop guard) — CI validation.yml gates the full suite"
 else

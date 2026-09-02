@@ -1,8 +1,8 @@
 # shellcheck shell=bash
-# ── KythOS Helper app — packaged Python install ───────────────────────────────
+# ── KythOS Hub launcher and installer packaging ──────────────────────────────
 # /ctx is a read-only BuildKit bind mount. Setuptools creates build metadata
 # beside a local project, so stage the package in the writable build tmpfs.
-welcome_package_dir="$(mktemp -d /tmp/kyth-welcome-package.XXXXXX)"
+installer_package_dir="$(mktemp -d /tmp/kyth-installer-package.XXXXXX)"
 # /ctx/kyth-welcome and /ctx/kyth-installer are symlinks to ../src/... inside
 # build_files. When build_files is bind-mounted as /ctx, those symlinks dangle
 # and BuildKit overlay mounts do not reliably hide them. Use /src fallback.
@@ -38,32 +38,26 @@ _installer_src="$(_resolve_ctx_src kyth-installer)"
 echo "branding: welcome_src=${_welcome_src} installer_src=${_installer_src} (ctx_welcome_exists=$(test -d /ctx/kyth-welcome && echo yes || echo no) src_exists=$(test -d /src/kyth-welcome && echo yes || echo no) ctx_islink=$(test -L /ctx/kyth-welcome && echo yes || echo no))" >&2
 ls -ld "/ctx/kyth-welcome" "/src/kyth-welcome" 2>&1 | head -n 5 >&2 || true
 ls -ld "/ctx/kyth-installer" "/src/kyth-installer" 2>&1 | head -n 5 >&2 || true
-cp -a "${_welcome_src}/." "${welcome_package_dir}/"
-cp -a "${_installer_src}" "${welcome_package_dir}/kyth-installer"
+cp -a "${_installer_src}/." "${installer_package_dir}/"
 python3 -m pip install \
 	--no-cache-dir \
 	--no-deps \
 	--no-build-isolation \
 	--prefix=/usr \
-	"${welcome_package_dir}" \
-	"${welcome_package_dir}/kyth-installer"
-rm -rf "${welcome_package_dir}"
+	"${installer_package_dir}"
+rm -rf "${installer_package_dir}"
 install -m 0755 "${_welcome_src}/kyth-welcome-launch" /usr/bin/kyth-welcome-launch
 install -m 0644 "${_welcome_src}/kyth-welcome.desktop" \
 	/usr/share/applications/kyth-welcome.desktop
 
-# Hub search in KRunner — one NoDisplay .desktop entry per Hub page, the
-# same mechanism KDE's own System Settings KCMs use to be searchable
-# without appearing in the app grid. No custom D-Bus runner/daemon needed:
-# krunner's existing "Applications" runner already indexes these via
-# Name/Comment/Keywords. Generated from page_registry.SEARCH_ITEMS so the
-# two can't drift apart.
-python3 -c "
-from kyth_welcome.krunner_desktop import write_desktop_entries
-write_desktop_entries('/usr/share/applications/kyth-hub')
-"
+# Hub search in KRunner — generated from the same route manifest imported by
+# the React frontend. This generator is packaging-only and has no dependency
+# on the retired Python/Qt Hub package.
+python3 /ctx/scripts/branding/generate-hub-desktop-entries.py \
+	/src/kyth-hub-web/src/data/hubRoutes.json \
+	/usr/share/applications/kyth-hub
 
-unset _welcome_src _installer_src welcome_package_dir
+unset _welcome_src _installer_src installer_package_dir
 write_config /usr/share/applications/kyth-app-store.desktop <<'APPSTOREEOF'
 [Desktop Entry]
 Type=Application
@@ -78,7 +72,10 @@ Keywords=apps;store;software;flatpak;install;remove;
 StartupNotify=true
 StartupWMClass=kyth-welcome
 APPSTOREEOF
-install -m 0755 /ctx/kyth-network-share /usr/libexec/kyth-network-share
+# The native Rust helper is copied into the base stage by Dockerfile. Keep the
+# stable /usr/libexec path used by kyth-privileged, but do not install the
+# legacy Python wrapper from the build context.
+install -m 0755 /usr/bin/kyth-network-share /usr/libexec/kyth-network-share
 install -m 0755 /ctx/kyth-set-sleep-mode /usr/libexec/kyth-set-sleep-mode
 install -m 0755 /ctx/kyth-retry-hardware-setup /usr/libexec/kyth-retry-hardware-setup
 

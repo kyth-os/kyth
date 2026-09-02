@@ -1,11 +1,9 @@
 """Hub deep links — every --page key that ships must resolve.
 
-kyth-welcome-launch forwards `--page KEY` unchanged to the Tauri Hub, with the
-older Python Hub as a compatibility fallback. Nothing in
+kyth-welcome-launch forwards `--page KEY` unchanged to the Tauri Hub. Nothing in
 that chain validates the key: an unknown one falls back to "/" and silently
-opens Home instead of the requested page. That is how `--page "App Store"`
-(shipped in 23-kyth-helper-ctx-installs.sh) and 19 krunner entries regressed
-when deepLink.ts's route table only listed the rail destinations.
+opens Home instead of the requested page. The shared route manifest prevents
+the packaging-time KRunner entries and the React deep-link table from drifting.
 
 deepLink.ts derives its table from data/destinations.ts, which in turn
 lists the section arrays from hubSections.ts, so checking the data source
@@ -14,39 +12,19 @@ of the mapping code itself, which parsing the TS logic would not.
 """
 from __future__ import annotations
 
+import json
 import pathlib
 import re
+import subprocess
 import sys
-import types
+import tempfile
 import unittest
 
-
-def _install_qt_stubs() -> None:
-    class _Dummy:
-        def __init__(self, *args, **kwargs):
-            pass
-
-        def __call__(self, *args, **kwargs):
-            return self
-
-        def __getattr__(self, _name):
-            return self
-
-    qt = types.ModuleType("kyth_welcome.qt")
-    for name in ("QLabel", "QPushButton", "QTextEdit", "QThread", "QWidget"):
-        setattr(qt, name, _Dummy)
-    qt.Signal = _Dummy
-    sys.modules["kyth_welcome.qt"] = qt
-
-
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
-_install_qt_stubs()
-
-from kyth_welcome.krunner_desktop import build_entries  # noqa: E402
-
 HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
-SECTIONS_TS = (HUB_WEB / "data" / "hubSections.ts").read_text(encoding="utf-8")
+ROUTE_MANIFEST = HUB_WEB / "data" / "hubRoutes.json"
+HUB_ROUTES = json.loads(ROUTE_MANIFEST.read_text(encoding="utf-8"))
+GENERATOR = ROOT / "build_files" / "scripts" / "branding" / "generate-hub-desktop-entries.py"
 DEEP_LINK_TS = (HUB_WEB / "deepLink.ts").read_text(encoding="utf-8")
 DESTINATIONS_TS = (HUB_WEB / "data" / "destinations.ts").read_text(encoding="utf-8")
 SIDEBAR_TSX = (HUB_WEB / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
@@ -75,7 +53,11 @@ HUB_PAGE_CODE = _code_only(HUB_PAGE_TSX)
 
 
 def _section_keys() -> set[str]:
-    return set(re.findall(r'key:\s*"([^"]+)"', SECTIONS_TS))
+    return {
+        section["key"]
+        for destination in HUB_ROUTES["destinations"]
+        for section in destination["sections"]
+    }
 
 
 def _destination_keys() -> set[str]:
@@ -86,7 +68,7 @@ def _destination_keys() -> set[str]:
     seeded by deepLink.ts's own route table, since it is a route with no
     sections rather than a destination.
     """
-    keys = set(re.findall(r'key:\s*"([^"]+)",\s*route:\s*"/[a-z-]*"', DESTINATIONS_CODE))
+    keys = {destination["key"] for destination in HUB_ROUTES["destinations"]}
     if re.search(r'\{\s*Welcome:\s*"/"', DEEP_LINK_CODE):
         keys.add("Welcome")
     return keys
@@ -99,13 +81,20 @@ def _resolvable_keys() -> set[str]:
 class HubWebDeepLinkTests(unittest.TestCase):
     def test_tauri_hub_is_the_default_without_a_slint_recovery_path(self):
         self.assertIn('target_bin="/usr/bin/kyth-hub-shell"', LAUNCHER_SH)
+        self.assertNotIn('/usr/bin/kyth-welcome', LAUNCHER_SH)
         self.assertNotIn("KYTH_USE_NATIVE_UI", LAUNCHER_SH)
         self.assertNotIn("kyth-hub-native", LAUNCHER_SH)
 
     def test_every_krunner_page_key_resolves(self):
-        emitted = {
-            _PAGE_ARG_RE.search(content).group(1) for content in build_entries().values()
-        }
+        with tempfile.TemporaryDirectory() as output_dir:
+            subprocess.run(
+                [sys.executable, str(GENERATOR), str(ROUTE_MANIFEST), output_dir],
+                check=True,
+            )
+            emitted = {
+                _PAGE_ARG_RE.search(path.read_text(encoding="utf-8")).group(1)
+                for path in pathlib.Path(output_dir).glob("*.desktop")
+            }
         self.assertGreaterEqual(len(emitted), 20)
         missing = sorted(emitted - _resolvable_keys())
         self.assertEqual(

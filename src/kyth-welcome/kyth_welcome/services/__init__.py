@@ -14,5 +14,5 @@ Layering:
   gaming/            — tools, steam, health, protondb, compat, partitions
   repair             — setup-transfer / snapshot / bootc reset command builders
   sched / telem      — kyth-sched status + MangoHud session history
-  *                  — domain services (software, network, updates, vpn, cloud_sync, …)
+  *                  — domain services (software, network, updates, cloud_sync, …)
 """

@@ -11,7 +11,6 @@ Supported operations are:
 - `firmware_update`
 - `nvidia_install`
 - `kernel_switch` with `flavor` `fedora` or `cachy`
-- `windows_verify`
 - `secureboot_enroll`
 - `bitlocker_unlock` with an allowlisted `/dev` device and key on stdin
 

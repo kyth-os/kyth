@@ -43,7 +43,9 @@ PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-ins
   python3 -m unittest tests.test_kyth_probe_cache.SomeTestCase.test_thing -v
 ```
 
-`.githooks/pre-push` also runs a headless PySide6 smoke test that instantiates every System Hub page (`kyth_welcome.windows.MainWindow`, `QT_QPA_PLATFORM=offscreen`) — a common source of pre-push failures when a page module has an import-time or construction-time bug. Reproduce it directly if `just validate` passes but pre-push still fails.
+The retired Python/Qt Hub no longer has a local UI smoke test. Use
+`just check-hub-shell` for React/Tauri SSR, contract, Rust, and embedded-asset
+coverage; installed-image acceptance is tracked separately in the migration plan.
 
 Feature flags (image build):
 ```bash
@@ -87,8 +89,13 @@ Fedora Kinoite / Universal Blue base
 ```
 
 - **`Dockerfile`** assembles the final image via a sequence of `RUN --mount=type=bind` steps, each pulling in one `build_files/scripts/*.sh` fragment (packages, thirdparty repos, sysconfig, mesa-git, secureboot, branding, plymouth). Adding a new build-time concern usually means adding a new ordered fragment here rather than editing existing ones.
-- **`build_files/kyth_shared/kyth_shared/`** is a large library of small, single-purpose Python modules — one file per tunable, preset, or feature (e.g. `swappiness.py`, `zram.py`, `vrr.py`, `gaming_scan_atomic.py`, `cloud_idempotent.py`). Runtime helpers, `ujust` recipes, and System Hub services all import from here. Follow this convention for new host-tuning logic: a small, independently testable module rather than growing an existing one. Several are explicitly idempotent/transactional (see recent commit history: `PST/fonts idempotent`, `rclone idempotent`, `transactional profile switch`) — new state-mutating modules should follow that pattern (safe to re-run, and either fully applies or fully rolls back).
-- **`build_files/kyth-welcome/`** is the System Hub — a PySide6 desktop app plus a standalone VPN app sharing the same services. Pages are lazily composed: a page module defines a thin `Page` subclass, and `lazy_page.compose_on_first_init` mixes in the real tab implementation only when the user first navigates there (see `page_registry.py`, `lazy_page.py`). This keeps Hub startup cheap even though there are dozens of pages. Cross-page state (probe results, update status) goes through shared caches in `services/probe.py` / `services/hub_state.py` so multiple pages/notifications don't repeat expensive system probes.
+- **`build_files/kyth_shared/kyth_shared/`** is a large library of small, single-purpose Python modules — one file per tunable, preset, or feature (e.g. `swappiness.py`, `zram.py`, `vrr.py`, `gaming_scan_atomic.py`, `cloud_idempotent.py`). Remaining Python runtime helpers, `ujust` recipes, and compatibility services still import from here; the installed probe collector, Guardian deterministic core, and update watcher use native Rust from `src/kyth-shared-rs/`. Follow this convention for new host-tuning logic: a small, independently testable module rather than growing an existing one. Several are explicitly idempotent/transactional (see recent commit history: `PST/fonts idempotent`, `rclone idempotent`, `transactional profile switch`) — new state-mutating modules should follow that pattern (safe to re-run, and either fully applies or fully rolls back).
+- **`build_files/kyth-welcome/`** is a transitional service source tree. The
+  supported System Hub UI is `src/kyth-hub-web/`; the retired VPN/SAML client,
+  network-share helper, and privileged socket daemon fixtures were removed in
+  P2. The native probe, Guardian core, update-watcher, telemetry writer, VPN
+  workflow, privileged socket, and network-share executor are Rust-owned; do
+  not describe them as active Python authorities.
 - **`build_files/kyth-installer/`** is the local-only installer service (Python backend in `kyth_installer/`, JS/HTML frontend in `kyth_installer/webui/`) that drives `bootc install to-disk`. Disk-affecting logic is split across `plan_*.py` (compute a plan), `partition_ops*.py` / `disk/` (execute it), and `recovery.py`/`assurance.py` (verify + durable transaction logging). Treat anything touching these as high-risk: prefer adding tests in `tests/test_kyth_installer_*` alongside changes.
 - **`build_files/just/kyth.just`** imports domain-specific `*.just` files (gaming, performance, network, diagnostics, dualboot, secureboot, containers, ...) — these become the `ujust` recipes shipped inside the built OS, distinct from the repo-root `Justfile` used for building the OS itself.
 - **`tests/`** is flat (no subpackages) with ~100+ files named after the module/feature under test; `PYTHONPATH` must include `kyth_shared`, `kyth-welcome`, and `kyth-installer` for imports to resolve (see commands above).
@@ -116,7 +123,7 @@ build_base/             # Layer 1: CachyOS kernel + base Fedora Kinoite 44
 build_files/             # Layer 2+: packages, gaming tweaks, branding, and installed runtime code
   build-live-iso.sh     # Local Titanoboa live ISO wrapper
   kyth-installer/        # Graphical installer (Python backend + web UI, packaged into the live ISO)
-  kyth-welcome/          # System Hub app (kyth_welcome/), VPN app, first-run wizard
+  kyth-welcome/          # Transitional service helpers and standalone VPN support
   kyth_shared/           # Shared library: one small module per host tunable/feature/preset
   branding/              # KythOS logos and branding CSS
   scripts/               # Build-layer fragments: packages, thirdparty, sysconfig, branding, proton-cachyos, mesa-git

@@ -1,15 +1,15 @@
 //! Port of `kyth_shared.system.update_status` — watcher snapshot and
 //! TTL-bounded check_state.
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const DEFAULT_UPDATE_STATUS_PATH: &str = "/var/lib/kyth/update-watcher-status.json";
 
-/// Read-only projection of the cross-process watcher state. The watcher and
-/// its atomic writer remain Python-owned; Rust only consumes this file.
+/// Cross-process update state shared by the native watcher and the Hub.
 #[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[derive(Serialize)]
 #[serde(default)]
 pub struct UpdateSnapshot {
     pub result: String,
@@ -64,6 +64,16 @@ pub fn read_update_snapshot_in(path: impl AsRef<Path>, max_age: i64, now: i64) -
 pub fn read_update_snapshot(max_age: i64) -> Option<UpdateSnapshot> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs() as i64;
     read_update_snapshot_in(DEFAULT_UPDATE_STATUS_PATH, max_age, now)
+}
+
+/// Persist watcher state without exposing partially-written JSON to the Hub.
+pub fn write_update_snapshot(snapshot: &UpdateSnapshot) -> std::io::Result<()> {
+    crate::atomic_io::atomic_write_json(DEFAULT_UPDATE_STATUS_PATH, snapshot, Some(0o600))
+}
+
+/// Testable writer variant for service-level parity tests.
+pub fn write_update_snapshot_to(path: impl AsRef<Path>, snapshot: &UpdateSnapshot) -> std::io::Result<()> {
+    crate::atomic_io::atomic_write_json(path, snapshot, Some(0o600))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

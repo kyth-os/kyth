@@ -197,7 +197,7 @@ Check the [gaming validation matrix](docs/gaming-validation-matrix.md) and
 | Deployment | OCI image published at `ghcr.io/kyth-os/kyth` and installed/updated with bootc |
 | Kernel | Fedora-signed kernel by default; CachyOS is an optional image variant |
 | Installer | Local-only Python installer service and graphical kiosk frontend, deploying a pinned image with bootc |
-| System Hub | Python/PySide6 application in `build_files/kyth-welcome/` with lazy pages and separated service modules |
+| System Hub | React frontend embedded in the Tauri/Rust shell at `src/kyth-hub-web/` |
 | Runtime services | Update watcher, shared probe cache, notifications, scheduler controls, hardware setup, and focused helpers |
 | User applications | Primarily Flatpaks, keeping application lifecycle separate from the host deployment |
 
@@ -300,7 +300,8 @@ just install-git-hooks
 | `Dockerfile` | Final desktop image assembly |
 | `build_base/` | Shared base image and kernel-flavor construction |
 | `build_files/` | Installed helpers, units, configuration, packages, branding, Hub, and installer source |
-| `build_files/kyth-welcome/` | System Hub, VPN UI, services, workers, and first-run wizard |
+| `src/kyth-hub-web/` | React/Tauri System Hub frontend and Rust command shell |
+| `build_files/kyth-welcome/` | Transitional service helpers and standalone VPN support; not the Hub UI |
 | `build_files/kyth-installer/` | Installer application packaged into the live environment |
 | `build_files/just/` | Installed `ujust` recipes for system administration |
 | `installer/` | Live ISO payload assembly |

@@ -131,8 +131,6 @@ function privilegedActionPrompt(operation: string, payload: PrivilegedPayload): 
       return "Install the NVIDIA driver? This stages a system image change.";
     case "firmware_update":
       return "Apply firmware updates? The device may reboot during this operation.";
-    case "windows_verify":
-      return "Run the privileged Windows installation check?";
     case "network_share_add":
       return `Add network share ${typeof payload.name === "string" ? payload.name : ""}? Its credentials are sent only to the local privileged helper and saved in a protected root-owned file.`;
     case "network_share_remove":
@@ -796,8 +794,21 @@ export async function fetchNetworkSummaryLive(): Promise<NetworkSummary | null> 
 }
 
 export async function openVpnApp(): Promise<string> {
-  if (!inTauriShell()) throw new Error("The full VPN connection app is available from the installed Kyth Hub.");
+  if (!inTauriShell()) throw new Error("Native VPN controls are available from the installed Kyth Hub.");
   return await invoke<string>("open_vpn_app");
+}
+export async function startVpnConnection(profile: { gateway: string; protocol: string; os_emulation: string; username: string; password: string }): Promise<string> {
+  if (!inTauriShell()) throw new Error("VPN connections require the installed Kyth Hub.");
+  return await invoke<string>("vpn_connect", profile);
+}
+export interface VpnConnectionStatus { id: string; state: "connecting" | "authentication_required" | "connected" | "disconnected" | "failed" | "unknown"; detail: string; }
+export async function fetchVpnConnectionStatus(job: string): Promise<VpnConnectionStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<VpnConnectionStatus>("vpn_status", { job }); } catch { return null; }
+}
+export async function disconnectVpnConnection(job: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("VPN connections require the installed Kyth Hub.");
+  return await invoke<string>("vpn_disconnect", { job });
 }
 export interface VpnSavedProfile { gateway: string; protocol: string; os: string; }
 export async function fetchVpnSavedProfile(): Promise<VpnSavedProfile | null> {

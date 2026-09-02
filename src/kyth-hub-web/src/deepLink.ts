@@ -3,17 +3,13 @@ import { listen } from "@tauri-apps/api/event";
 import { inTauriShell } from "./services/tauriEnv";
 import { DESTINATIONS } from "./data/destinations";
 
-// Mirrors web_shell.py's _ROUTE_FOR_PAGE table (the QWebEngineView-shell
-// prototype this replaces) — same page-key contract the current Qt Hub's
-// page_registry.py keys use, just consumed here instead of on the Python
-// side. Kept on the TS side, not duplicated in Rust, since the router
+// Builds the page-key route table from the shared manifest. Kept on the TS
+// side, not duplicated in Rust, since the router
 // already owns "what routes exist" (see App.tsx).
 //
-// The 21 section keys are derived from hubSections.ts rather than written
-// out again here: krunner_desktop.py ships a .desktop entry per page key
-// and 23-kyth-helper-ctx-installs.sh ships `--page "App Store"`, so a key
-// this table misses doesn't error — it silently lands on Home. Deriving
-// keeps that from happening the next time a section is added.
+// The 21 section keys are derived from the shared hubRoutes.json manifest
+// rather than written out again here. Packaging-time KRunner entries use the
+// same manifest, so adding a section updates both launch surfaces together.
 function buildRouteTable(): Record<string, string> {
   const table: Record<string, string> = { Welcome: "/" };
   for (const { key: dest, route, sections } of DESTINATIONS) {
@@ -29,8 +25,8 @@ function buildRouteTable(): Record<string, string> {
 
 const ROUTE_FOR_PAGE = buildRouteTable();
 
-// page_registry.py's resolve_page_key() folds these onto Welcome before
-// dispatching; unknown keys already fall back to "/" below, so these exist
+// Legacy aliases fold onto Welcome before dispatching; unknown keys already
+// fall back to "/" below, so these exist
 // to keep the contract explicit rather than accidental.
 const WELCOME_ALIASES = new Set(["home", "hub", "kyth hub", "system hub", "pulse", "kyth pulse"]);
 

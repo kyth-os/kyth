@@ -14,12 +14,10 @@ import {
   IconTransfer,
   IconWrench,
 } from "../components/icons";
+import routeManifest from "./hubRoutes.json";
 
-// Titles and descriptions here are copied verbatim from page_registry.py's
-// SEARCH_INDEX (the current Qt Hub's own search descriptions) — not
-// invented for the web prototype. Section keys and grouping match
-// DESTINATION_SECTIONS exactly, so this is the same information architecture
-// as the Qt Hub. Section bodies read through the typed Tauri bridge and show
+// Titles and descriptions are owned by the route manifest, not duplicated in
+// React. Section bodies read through the typed Tauri bridge and show
 // an explicit empty state when a real device has no reading yet.
 export interface HubSection {
   key: string;
@@ -28,42 +26,48 @@ export interface HubSection {
   Icon: ComponentType<SVGProps<SVGSVGElement>>;
 }
 
-export const PLAY_SECTIONS: HubSection[] = [
-  { key: "Gaming", title: "Gaming", description: "Install launchers, scan game libraries, set up capture, saves, and migration helpers.", Icon: IconPlay },
-  { key: "Performance", title: "Performance", description: "Tune power, scheduler, and desktop performance behavior.", Icon: IconChip },
-  { key: "Compatibility", title: "Compatibility", description: "Check known game support, ProtonDB context, and blocked anti-cheat titles.", Icon: IconShield },
-  { key: "Controllers", title: "Controllers", description: "Pair, test, and troubleshoot game controllers.", Icon: IconGamepad },
-];
+const SECTION_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
+  Gaming: IconPlay,
+  Performance: IconChip,
+  Compatibility: IconShield,
+  Controllers: IconGamepad,
+  "App Store": IconGrid,
+  "Work Setup": IconMonitor,
+  Update: IconRefresh,
+  Guardian: IconShield,
+  Hardware: IconChip,
+  "Plasma Wayland": IconMonitor,
+  Diagnostics: IconDatabase,
+  Repair: IconWrench,
+  NVIDIA: IconChip,
+  Kernel: IconChip,
+  Channels: IconRefresh,
+  Just: IconGrid,
+  Feedback: IconBell,
+  "Move Files": IconTransfer,
+  "Cloud Storage": IconCloud,
+  "Network Shares": IconDatabase,
+  VPN: IconLock,
+};
 
-export const APPS_SECTIONS: HubSection[] = [
-  { key: "App Store", title: "App Store", description: "Discover, install, and remove trusted apps from one KythOS software center.", Icon: IconGrid },
-  { key: "Work Setup", title: "Work Setup", description: "Set up office, mail, focus sessions, and workday conveniences.", Icon: IconMonitor },
-];
+function sectionsFor(destinationKey: string): HubSection[] {
+  const destination = routeManifest.destinations.find(({ key }) => key === destinationKey);
+  if (!destination) throw new Error(`Unknown Hub destination: ${destinationKey}`);
+  return destination.sections.map((section) => ({
+    ...section,
+    Icon: SECTION_ICONS[section.key],
+  }));
+}
 
-export const UPDATES_SECTIONS: HubSection[] = [
-  { key: "Update", title: "Updates", description: "Check OS updates, staged images, rollback status, and auto-update settings.", Icon: IconRefresh },
-];
+export const PLAY_SECTIONS = sectionsFor("Play");
 
-// Guardian..Repair are the Qt Hub's primary This PC tabs; NVIDIA..Feedback
-// live under its "More" tab (see page_registry.py's comment on
-// DESTINATION_SECTIONS). Updates has its own destination in the web Hub;
+export const APPS_SECTIONS = sectionsFor("Apps");
+
+export const UPDATES_SECTIONS = sectionsFor("Updates");
+
+// Guardian..Repair are the primary This PC tabs; NVIDIA..Feedback live under
+// its "More" tab. Updates has its own destination in the web Hub;
 // This PC keeps the remaining ten sections flattened into one row.
-export const THIS_PC_SECTIONS: HubSection[] = [
-  { key: "Guardian", title: "Guardian", description: "Self-healing: automatic health checks, safe fixes, history, and optional local AI diagnosis.", Icon: IconShield },
-  { key: "Hardware", title: "Hardware", description: "Inspect graphics, displays, audio, Bluetooth, storage, and device health.", Icon: IconChip },
-  { key: "Plasma Wayland", title: "Desktop & displays", description: "Check portals, PipeWire capture, display settings, shortcuts, and Plasma session repair.", Icon: IconMonitor },
-  { key: "Diagnostics", title: "Health Report", description: "Run system checks and gather useful troubleshooting information.", Icon: IconDatabase },
-  { key: "Repair", title: "Repair", description: "Rollback, restore, collect logs, and open recovery tools when something feels off.", Icon: IconWrench },
-  { key: "NVIDIA", title: "NVIDIA Drivers", description: "Check NVIDIA driver state and open driver actions.", Icon: IconChip },
-  { key: "Kernel", title: "Kernel", description: "Choose installed kernels and understand advanced boot options.", Icon: IconChip },
-  { key: "Channels", title: "Update channel", description: "Choose stable or testing update channels.", Icon: IconRefresh },
-  { key: "Just", title: "Recipes", description: "Run Just recipes from Kyth Hub without opening a terminal.", Icon: IconGrid },
-  { key: "Feedback", title: "Feedback", description: "Send feedback or report a problem with optional system details.", Icon: IconBell },
-];
+export const THIS_PC_SECTIONS = sectionsFor("This PC");
 
-export const MOVE_IN_SECTIONS: HubSection[] = [
-  { key: "Move Files", title: "Move Files", description: "Copy files, saves, libraries, bookmarks, fonts, and familiar workflows.", Icon: IconTransfer },
-  { key: "Cloud Storage", title: "Cloud Storage", description: "Set up cloud sync and copy workflows for common providers.", Icon: IconCloud },
-  { key: "Network Shares", title: "Network Shares", description: "Map SMB/CIFS shares and configure mount behavior.", Icon: IconDatabase },
-  { key: "VPN", title: "VPN", description: "Connect to VPN profiles, including GlobalProtect-style work VPNs.", Icon: IconLock },
-];
+export const MOVE_IN_SECTIONS = sectionsFor("Move In");

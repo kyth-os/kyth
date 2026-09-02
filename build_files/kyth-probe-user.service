@@ -17,12 +17,8 @@ MemoryHigh=384M
 MemoryMax=512M
 TimeoutStartSec=120
 PrivateTmp=yes
-# NoNewPrivileges deliberately absent: runs per-user (graphical-session.target) and its
-# bootc collector shells out to `sudo -n kyth-bootc-guard status-json`
-# (probe.py::_collect_bootc via kyth_shared/system/bootc_query.py). NNP
-# blocks the kernel from honoring sudo's setuid bit at exec for this
-# non-root caller outright — "unable to open /etc/sudoers: Invalid
-# argument" — leaving the per-user bootc status cache permanently empty.
+# NoNewPrivileges deliberately absent: the native Rust bootc collector may
+# use the existing bounded, non-interactive guard for a per-user status read.
 ProtectSystem=strict
 ProtectHome=read-only
 ProtectClock=yes

@@ -8,8 +8,8 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 
 # dbus_utils imports QDBusConnection/QDBusInterface from ..qt, which pulls in
 # PySide6/PyQt6. Neither is installed in this test environment. Other test
-# modules (test_kyth_page_registry, test_kyth_welcome_parsers) also stub
-# kyth_welcome.qt in sys.modules with their own narrower dummies and leave
+# Other service tests may stub kyth_welcome.qt in sys.modules with narrower
+# dummies and leave
 # them installed process-wide, so under `unittest discover` this module may
 # see an existing stub that lacks QDBus* — patch just what's missing rather
 # than overwriting whatever is already there.
