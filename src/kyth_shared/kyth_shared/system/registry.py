@@ -74,7 +74,9 @@ def default_inspect_runner(ref: str) -> subprocess.CompletedProcess[bytes]:
     return run_command(
         ["skopeo", "inspect", "--raw", "--no-creds", f"docker://{ref}"],
         capture_output=True,
-        timeout=10,
+        # GHCR can be slow while its CDN or an image manifest is cold. Keep
+        # the probe bounded, but allow a healthy slow response to complete.
+        timeout=30,
         check=False,
     )
 

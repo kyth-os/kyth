@@ -3,7 +3,7 @@
 Centralizes bootc_status_data + remote_digest_for_ref + flatpak --updates +
 BootHealthState into one terminal state machine. Issue #164: coordinator
 never reached terminal if one probe missed TTL — now check_state is TTL-bounded
-and always reaches available|uptodate|error within 15s.
+and always reaches available|uptodate|error within the 45s Hub budget.
 
 This is a thin facade over existing probe_cached/bootc/registry helpers so
 existing tests and callers keep working; new Hub code should import from here.

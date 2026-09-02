@@ -303,7 +303,7 @@ pub fn update_availability_view(
     }
     let body = if !detail.is_empty()
         && detail.to_lowercase()
-            != "checking timed out after 15 s. click check now to retry (skopeo/flatpak may be slow offline)."
+            != "checking timed out after 45 s. click check now to retry (skopeo/flatpak may be slow offline)."
     {
         format!("{}{}", detail, ts_hint)
     } else {

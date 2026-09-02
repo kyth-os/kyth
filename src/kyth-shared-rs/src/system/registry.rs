@@ -12,6 +12,8 @@ pub struct UpdateCheckResult {
     pub manifest_raw: Vec<u8>,
 }
 
+pub const REGISTRY_INSPECT_TIMEOUT: Duration = Duration::from_secs(30);
+
 pub fn booted_image_digest(status_data: &Value) -> Option<String> {
     crate::system::bootc_query::image_digest_from_status(status_data, "booted")
 }
@@ -80,7 +82,7 @@ pub fn check_registry_update(
     branch: &str,
     registry: &str,
 ) -> UpdateCheckResult {
-    check_registry_update_with_timeout(status_data, branch, registry, Duration::from_secs(15))
+    check_registry_update_with_timeout(status_data, branch, registry, REGISTRY_INSPECT_TIMEOUT)
 }
 
 pub fn check_registry_update_with_timeout(

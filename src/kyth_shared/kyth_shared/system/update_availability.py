@@ -2,7 +2,7 @@
 
 The Update page previously stitched three independent sources:
   * `bootc_status_data()` (local booted/staged digests, cached 5 s)
-  * `check_registry_update()` → `skopeo inspect` (remote digest, 45 s timeout)
+  * `check_registry_update()` → `skopeo inspect` (remote digest, 30 s timeout)
   * `flatpak remote-ls --updates` (flatpak count)
 
 `UpdateCheckCoordinator` required *both* probes to complete, but neither had
@@ -32,9 +32,9 @@ logger = logging.getLogger(__name__)
 
 FLATPAK_CACHE_TTL = 30.0
 BOOTC_CACHE_TTL = 60.0
-# Hub-side deadline for the whole availability probe. 45 s skopeo + flatpak
-# should never keep the spinner longer than this.
-AVAILABILITY_TIMEOUT_S = 15
+# Hub-side deadline for the whole availability probe. The registry probe is
+# bounded at 30 s, and the UI gives the concurrent probes a 45 s total budget.
+AVAILABILITY_TIMEOUT_S = 45
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,7 +105,7 @@ def collect_availability(*, branch: str | None = None, use_cached: bool = True) 
     except (OSError, ValueError) as exc:
         return AvailabilityStatus(state="error", detail=str(exc))
 
-    # Registry check — the slow path (skopeo, 45 s inner timeout)
+    # Registry check — the slow path (skopeo, 30 s inner timeout)
     try:
         result = check_registry_update(
             status_data=status_data,

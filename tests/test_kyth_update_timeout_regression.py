@@ -21,7 +21,7 @@ class UpdateTimeoutRegressionTests(unittest.TestCase):
         c = UpdateCheckCoordinator()
         c.begin()
         self.assertFalse(c.has_partial())
-        r = c.as_result(timeout_detail="Check timed out after 15 s.")
+        r = c.as_result(timeout_detail="Check timed out after 45 s.")
         self.assertEqual(r.system_state, "error")
         self.assertEqual(r.flatpak_count, 0)
 

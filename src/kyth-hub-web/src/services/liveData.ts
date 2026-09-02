@@ -884,7 +884,7 @@ export async function fetchPlasmaPresets(): Promise<string[] | null> {
   try { return await invoke<string[]>("plasma_presets"); } catch { return null; }
 }
 
-// Update availability collect (Hub-side 15s deadline, issue #164)
+// Update availability collect (Hub-side 45s deadline, issue #164)
 export interface AvailabilityStatusLive { state: string; detail: string; flatpak_count: number; flatpak_detail: string; staged: boolean; manifest_raw: string; blocked_reason: string; }
 export async function fetchCollectAvailability(branch?: string | null, useCached = true): Promise<AvailabilityStatusLive | null> {
   if (!inTauriShell()) return null;

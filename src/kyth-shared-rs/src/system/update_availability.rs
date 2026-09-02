@@ -1,8 +1,8 @@
-//! Port of `kyth_shared.system.update_availability` — Hub-side 15s deadline.
+//! Port of `kyth_shared.system.update_availability` — Hub-side 45s deadline.
 
 use std::time::{Duration, Instant};
 
-pub const AVAILABILITY_TIMEOUT: Duration = Duration::from_secs(15);
+pub const AVAILABILITY_TIMEOUT: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Clone)]
 pub struct AvailabilityStatus {
@@ -75,7 +75,8 @@ pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> Availabil
     };
 
     let remaining = deadline.saturating_duration_since(Instant::now());
-    let registry = crate::system::registry::check_registry_update_with_timeout(&status_data, &b, crate::system::bootc_policy::REGISTRY, remaining);
+    let registry_timeout = remaining.min(crate::system::registry::REGISTRY_INSPECT_TIMEOUT);
+    let registry = crate::system::registry::check_registry_update_with_timeout(&status_data, &b, crate::system::bootc_policy::REGISTRY, registry_timeout);
     if registry.state == "error" {
         let mut status = error_status(registry.detail);
         status.manifest_raw = String::from_utf8_lossy(&registry.manifest_raw).to_string();

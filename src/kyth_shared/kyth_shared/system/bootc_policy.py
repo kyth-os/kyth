@@ -177,7 +177,7 @@ def update_availability_view(
             f"{body} Click Update Now to retry the download.",
             True, False,
         )
-    if detail and detail.lower() not in {"checking timed out after 15 s. click check now to retry (skopeo/flatpak may be slow offline).".lower()}:
+    if detail and detail.lower() not in {"checking timed out after 45 s. click check now to retry (skopeo/flatpak may be slow offline).".lower()}:
         body = f"{detail}{ts_hint}"
     else:
         body = f"Could not reach the update server — check your network connection.{ts_hint}"

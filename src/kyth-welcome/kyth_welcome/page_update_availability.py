@@ -1,6 +1,7 @@
 from datetime import datetime
 
 # __KYTH_GENERATED_IMPORTS__
+from kyth_shared.system.update_availability import AVAILABILITY_TIMEOUT_S
 from .core_base import restyle
 from .services.bootc import bootc_image_timestamp, has_staged_update, update_availability_view
 from .services.runtime import guard_disposed,  release_worker_when_finished
@@ -85,8 +86,8 @@ class _UpdateAvailabilityMixin:
         self._check_coordinator.begin()
         self._flatpak_count = 0
         self._remote_manifest = ""
-        # Hub-side deadline — issue #164: neither skopeo (45 s) nor flatpak
-        # should keep the spinner forever. After 15 s force a terminal state.
+        # Hub-side deadline — issue #164: neither skopeo nor flatpak should
+        # keep the spinner forever. After 45 s force a terminal state.
         old_timer = getattr(self, "_avail_deadline_timer", None)
         if old_timer is not None:
             try:
@@ -97,11 +98,11 @@ class _UpdateAvailabilityMixin:
         self._avail_deadline_timer = QTimer(self)
         self._avail_deadline_timer.setSingleShot(True)
         self._avail_deadline_timer.timeout.connect(self._on_availability_timeout)
-        self._avail_deadline_timer.start(15000)
+        self._avail_deadline_timer.start(AVAILABILITY_TIMEOUT_S * 1000)
 
         # P2-6: ProbeCollector batching — system + flatpak checks already run concurrently
         # via two DataWorkers (ThreadPoolExecutor-style). Keep them started together
-        # so neither blocks the other behind the 15 s deadline; coordinator merges.
+        # so neither blocks the other behind the 45 s deadline; coordinator merges.
         # Start system update check
         self._check_worker = UpdateCheckWorker(use_cached_snapshot=not force_refresh)
         self._check_worker.result.connect(guard_disposed(self._on_system_check_result))
@@ -125,7 +126,7 @@ class _UpdateAvailabilityMixin:
         else:
             self._finish_availability_check(AvailabilityCheckResult(
                 system_state="error",
-                system_detail="Checking timed out after 15 s. Click Check Now to retry (skopeo/flatpak may be slow offline).",
+                system_detail=f"Checking timed out after {AVAILABILITY_TIMEOUT_S} s. Click Check Now to retry (skopeo/flatpak may be slow offline).",
                 flatpak_count=0,
                 manifest_raw="",
                 flatpak_detail="",

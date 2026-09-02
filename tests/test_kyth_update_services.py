@@ -3,6 +3,7 @@ import pathlib
 import subprocess
 import sys
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -13,6 +14,7 @@ from kyth_welcome.services.updates import (  # noqa: E402
     UpdateProbeResult,
     booted_image_digest,
     check_registry_update,
+    default_inspect_runner,
     firmware_check_commands,
 )
 from kyth_welcome.services.registry import (  # noqa: E402
@@ -23,6 +25,24 @@ from kyth_welcome.services.registry import (  # noqa: E402
 
 
 class UpdateServiceTests(unittest.TestCase):
+    @mock.patch("kyth_shared.system.registry.run_command")
+    def test_default_inspect_runner_allows_slow_ghcr_response(self, run_command):
+        expected = subprocess.CompletedProcess([], 0, b"{}", b"")
+        run_command.return_value = expected
+
+        result = default_inspect_runner("ghcr.io/kyth-os/kyth:testing")
+
+        self.assertIs(result, expected)
+        run_command.assert_called_once_with(
+            [
+                "skopeo", "inspect", "--raw", "--no-creds",
+                "docker://ghcr.io/kyth-os/kyth:testing",
+            ],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
     def test_coordinator_completes_after_both_probes_in_any_order(self):
         coordinator = UpdateCheckCoordinator()
         coordinator.begin()
