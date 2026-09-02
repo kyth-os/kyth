@@ -16,7 +16,8 @@ BUILD_FILES = ROOT / "build_files"
 
 def _all_build_text() -> str:
     parts = []
-    for path in BUILD_FILES.rglob("*"):
+    build_sources = [ROOT / "Dockerfile", *BUILD_FILES.rglob("*")]
+    for path in build_sources:
         if path.is_file() and path.suffix in {"", ".sh", ".py"}:
             try:
                 parts.append(path.read_text(encoding="utf-8"))
@@ -43,6 +44,10 @@ class ShippedCommandContracts(unittest.TestCase):
     def setUpClass(cls):
         cls.build_text = _all_build_text()
         cls.source_names = {path.name for path in BUILD_FILES.rglob("*") if path.is_file()}
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        cls.source_names.update(
+            re.findall(r"(?:/build|/usr/bin)/(kyth-[A-Za-z0-9-]+)", dockerfile)
+        )
 
     def _assert_kyth_target_is_staged(self, target: str, source: Path) -> None:
         name = Path(target).name
