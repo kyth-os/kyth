@@ -1,6 +1,7 @@
 """Installer core service for executing installer actions independently of HTTP transport."""
 from __future__ import annotations
 
+import shutil
 from typing import TYPE_CHECKING
 
 from kyth_installer import context as context_module
@@ -39,7 +40,10 @@ class InstallerService:
         partition = disk._normal_device_path(body.get("partition", ""))
         if error or not partition:
             return None, None, None, error or {"ok": False, "message": "Disk and partition are required."}
-        if disk._parent_disk(partition) != disk_path:
+        native_error = journal.rust_validate_target(partition)
+        if native_error is not None:
+            return None, None, None, {"ok": False, "message": native_error}
+        if not shutil.which("kyth-installer-exec") and disk._parent_disk(partition) != disk_path:
             return None, None, None, {"ok": False, "message": "Partition does not belong to the active disk."}
         return disk_path, journal, partition, None
 

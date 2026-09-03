@@ -55,6 +55,8 @@ fn operation_args_valid(args: &[String]) -> bool {
             "bootc-install"
                 | "disk"
                 | "journal-validate"
+                | "journal-target"
+                | "journal-commit"
                 | "transaction-write"
                 | "configuration-write"
                 | "secure-boot-plan"
@@ -74,6 +76,23 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         let input = serde_json::from_slice::<installer_journal::JournalValidationInput>(&input)
             .map_err(|error| format!("invalid journal validation JSON: {error}"))?;
         println!("{}", installer_journal::validate_request(input));
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "journal-target" {
+        let input = serde_json::from_slice::<installer_journal::JournalTargetInput>(&input)
+            .map_err(|error| format!("invalid journal target JSON: {error}"))?;
+        println!("{}", installer_journal::validate_target_request(input));
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "journal-commit" {
+        let input = serde_json::from_slice::<installer_journal::JournalCommitInput>(&input)
+            .map_err(|error| format!("invalid journal commit JSON: {error}"))?;
+        let response = installer_journal::commit_request(input)?;
+        println!(
+            "{}",
+            serde_json::to_string(&response)
+                .map_err(|error| format!("could not encode journal response: {error}"))?
+        );
         return Ok(ExitCode::SUCCESS);
     }
     if args[1] == "transaction-write" {
@@ -208,6 +227,14 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "journal-validate".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "journal-target".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "journal-commit".into()
         ]));
         assert!(operation_args_valid(&[
             "--operation".into(),

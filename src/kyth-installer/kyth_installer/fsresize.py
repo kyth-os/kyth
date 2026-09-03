@@ -193,18 +193,8 @@ def _shrink_btrfs(partition: str, new_size_bytes: int, log) -> None:
             pass
 
 
-def shrink_filesystem(partition: str, fstype: str, new_size_bytes: int, log) -> None:
-    """Shrink the filesystem on `partition` to `new_size_bytes` in place.
-
-    Must run before any partition-table boundary change (parted resizepart)
-    — parted only moves the table entry, it never touches filesystem
-    metadata, so calling it first on a still-larger filesystem corrupts it.
-    Raises for any filesystem type without a safe, supported shrink path
-    (fail closed rather than silently truncating an unsupported filesystem).
-    """
-    # Re-check battery/encryption at the last moment before destructive
-    # filesystem shrink — user may have unplugged AC or locked BitLocker
-    # between preflight and this call.
+def validate_shrink_request(partition: str, fstype: str) -> None:
+    """Run last-moment power, encryption, and filesystem safety guards."""
     try:
         from .assurance import _battery_check, _encryption_check
 
@@ -230,6 +220,19 @@ def shrink_filesystem(partition: str, fstype: str, new_size_bytes: int, log) -> 
             "protection (Control Panel > BitLocker Drive Encryption, or "
             "'manage-bde -off C:'), wait for decryption to finish, then try again."
         )
+
+
+def shrink_filesystem(partition: str, fstype: str, new_size_bytes: int, log) -> None:
+    """Shrink the filesystem on `partition` to `new_size_bytes` in place.
+
+    Must run before any partition-table boundary change (parted resizepart)
+    — parted only moves the table entry, it never touches filesystem
+    metadata, so calling it first on a still-larger filesystem corrupts it.
+    Raises for any filesystem type without a safe, supported shrink path
+    (fail closed rather than silently truncating an unsupported filesystem).
+    """
+    validate_shrink_request(partition, fstype)
+    fstype = (fstype or "").lower()
     if fstype in ("ntfs", "ntfs3"):
         _shrink_ntfs(partition, new_size_bytes, log)
     elif fstype in ("ext2", "ext3", "ext4"):

@@ -269,14 +269,14 @@ Port components only after behavioral parity and focused tests exist:
   partition journal model, serialization, and safety checks remain covered,
   while GPT backup/restore, table creation, partition create/delete/flag
   operations, and supported filesystem formatting now go through the
-  root-only Rust `kyth-installer-exec` helper. Python still owns target
-  validation and journal commit/rollback orchestration. The helper also
+  root-only Rust `kyth-installer-exec` helper. Rust now also validates
+  partition targets and owns journal locking, backup/restore, operation
+  ordering, filesystem shrinking, and commit failure rollback. The helper
   synchronizes completed partition-table backups and their parent directory
-  before they can be used as recovery snapshots. Filesystem-specific
-  shrinking is now executed by the typed
-  Rust helper for NTFS, ext, and Btrfs; Python retains target validation,
-  pre-shrink safety guards, stage ordering, error guidance, mount lifecycle
-  orchestration, and journal orchestration. Both manual-journal and guided
+  before they can be used as recovery snapshots. Python retains only the
+  compatibility fallback when the helper is absent, last-moment power and
+  encryption guards before filesystem shrink, and the event/transaction
+  adapter around the native journal operation. Both manual-journal and guided
   NTFS partition-boundary resize use the same typed Rust operation, including
   its fixed interactive confirmation and cancellation-safe child handling.
 - **Done as a typed state and persistence boundary:** Rust owns transaction

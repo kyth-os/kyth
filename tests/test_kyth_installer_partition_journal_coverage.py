@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from contextlib import nullcontext
@@ -419,6 +420,76 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         # _find_root_partition returns None when no root (238)
         journal = self._journal()
         self.assertIsNone(journal._find_root_partition())
+
+    def test_native_commit_bridges_step_events_and_journal_metadata(self):
+        journal = self._journal(dry_run=False)
+        journal.add_op("create", {"start_bytes": 1024, "size_bytes": 4096, "fs_type": "btrfs"})
+        record = mock.Mock()
+        response_journal = {
+            "disk": "/dev/sda",
+            "ops": [{"kind": "create", "params": {"partition": "/dev/sda2"}, "index": 0}],
+            "committed": True,
+            "root_partition": "/dev/sda2",
+            "irreversible_completed": False,
+        }
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, _command, _start, _end, log, _progress, **_kwargs):
+                log(json.dumps({"event": "step", "kind": "create", "status": "started", "target": "/dev/sda"}))
+                log(json.dumps({"event": "step", "kind": "create", "status": "completed", "target": "/dev/sda2"}))
+                log(json.dumps({"ok": True, "journal": response_journal}))
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            response = journal._rust_commit(mock.Mock(), record=record)
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(journal.root_partition, "/dev/sda2")
+        self.assertEqual(journal.ops[0]["params"]["partition"], "/dev/sda2")
+        self.assertEqual(record.call_count, 2)
+
+    def test_native_commit_rejects_missing_or_malformed_final_response(self):
+        journal = self._journal(dry_run=False)
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, _command, _start, _end, log, _progress, **_kwargs):
+                log(json.dumps({"ok": True, "journal": {"ops": "malformed"}}))
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "malformed journal metadata"):
+                journal._rust_commit(mock.Mock())
+
+    def test_native_commit_does_not_abort_for_transaction_event_write_failure(self):
+        journal = self._journal(dry_run=False)
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, _command, _start, _end, log, _progress, **_kwargs):
+                log(json.dumps({"event": "step", "kind": "delete", "status": "started"}))
+                log(json.dumps({"ok": True, "journal": {"ops": [], "committed": True}}))
+
+        def broken_record(*_args):
+            raise RuntimeError("transaction writer unavailable")
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            response = journal._rust_commit(mock.Mock(), record=broken_record)
+        self.assertTrue(response["ok"])
 
 
 if __name__ == "__main__":
