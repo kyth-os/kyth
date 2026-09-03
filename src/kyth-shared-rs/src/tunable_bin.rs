@@ -13,6 +13,7 @@ use kyth_shared::system::{
     extended_preferences::{self, ThpConfig},
     flatpak_prefetch,
     flatpak_trim,
+    gaming_kargs,
     hdr_per_game,
     hdr_store,
     net_latency,
@@ -111,6 +112,7 @@ fn native_other(name: &str) -> bool {
             | "system-audit"
             | "fcitx-latency"
             | "boot-timeout"
+            | "kargs-apply"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1561,6 +1563,38 @@ fn dispatch_boot_timeout(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_kargs_apply(action: &str) -> ExitCode {
+    let config_path = gaming_kargs::kargs_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = gaming_kargs::load_kargs(&config_path);
+            let cmdline = std::fs::read_to_string("/proc/cmdline").unwrap_or_default();
+            let drift = gaming_kargs::kargs_drift(&config, &cmdline);
+            println!("profile={} missing={} extra={} desired={} kind=other", config.profile, drift.missing.len(), drift.extra.len(), drift.desired.len());
+            ExitCode::SUCCESS
+        }
+        "gaming" | "performance" | "balanced" => {
+            if let Err(code) = ensure_root("kargs-apply", &[action.to_string()]) { return code; }
+            let mut config = gaming_kargs::load_kargs(&config_path);
+            config.profile = if action == "gaming" { "gaming" } else if action == "performance" { "performance" } else { "balanced" }.into();
+            if let Err(error) = gaming_kargs::save_kargs(&config_path, &config) {
+                eprintln!("kyth-kargs-apply: {error}");
+                return ExitCode::from(1);
+            }
+            println!("kargs-apply {}", config.profile);
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("kargs-apply", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-kargs-apply [gaming|performance|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2168,6 +2202,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "system-audit" => dispatch_system_audit(action),
             "fcitx-latency" => dispatch_fcitx_latency(action),
             "boot-timeout" => dispatch_boot_timeout(action),
+            "kargs-apply" => dispatch_kargs_apply(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2277,7 +2312,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 89);
+        assert_eq!(names.len(), 90);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2324,6 +2359,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "system-audit"));
         assert!(names.iter().any(|name| name == "fcitx-latency"));
         assert!(names.iter().any(|name| name == "boot-timeout"));
+        assert!(names.iter().any(|name| name == "kargs-apply"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
