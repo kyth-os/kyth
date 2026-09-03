@@ -81,6 +81,7 @@ fn native_other(name: &str) -> bool {
             | "trim-tune"
             | "uksmd"
             | "irq-tune"
+            | "fscache"
     )
 }
 
@@ -747,6 +748,55 @@ fn dispatch_irq_tune(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_fscache(action: &str) -> ExitCode {
+    let config_path = kyth_shared::system::runtime_preferences::fscache_path(None::<&Path>);
+    let destination = generated_path("cachefilesd.conf.d", "99-kyth-fscache.conf", "/etc/cachefilesd.conf.d/99-kyth-fscache.conf");
+    match action {
+        "status" => {
+            let config = kyth_shared::system::runtime_preferences::load_fscache(&config_path);
+            println!("enabled={} active={} kind=other", config.enabled, if destination.is_file() { "enabled" } else { "off" });
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("fscache", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::runtime_preferences::FscacheConfig { enabled: true };
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_fscache(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_fscache(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-fscache: {error}");
+                return ExitCode::from(1);
+            }
+            println!("fscache gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" => {
+            if let Err(code) = ensure_root("fscache", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::runtime_preferences::FscacheConfig { enabled: false };
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_fscache(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_fscache(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-fscache: {error}");
+                return ExitCode::from(1);
+            }
+            println!("fscache balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("fscache", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::runtime_preferences::load_fscache(&config_path);
+            if let Err(error) = kyth_shared::system::runtime_preferences::generate_fscache(&config, &destination) {
+                eprintln!("kyth-fscache: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-fscache [gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1335,6 +1385,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "trim-tune" => dispatch_trim_tune(action),
             "uksmd" => dispatch_uksmd(action),
             "irq-tune" => dispatch_irq_tune(action),
+            "fscache" => dispatch_fscache(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1444,7 +1495,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 70);
+        assert_eq!(names.len(), 71);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1472,6 +1523,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "trim-tune"));
         assert!(names.iter().any(|name| name == "uksmd"));
         assert!(names.iter().any(|name| name == "irq-tune"));
+        assert!(names.iter().any(|name| name == "fscache"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
