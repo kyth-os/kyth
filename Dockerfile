@@ -58,7 +58,7 @@ RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/regi
     --mount=type=cache,id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target \
     cargo build --release --locked && \
     cp target/release/kyth-hub-shell /build/kyth-hub-shell && \
-    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries --bin kyth-safe-upgrade --bin kyth-bootc-guard --bin kyth-finalize-staged --bin kyth-btrfs-maint --bin kyth-ai-perfd --bin kyth-perf-gate-rs --bin kyth-doctor --bin kyth-health-check --bin kyth-smoke-check --bin kyth-resume-check --bin kyth-nvidia-status --bin kyth-controller-check --bin kyth-creator-check --bin kyth-exe-compat --bin kyth-snapshot-timeline --bin kyth-print-check --bin kyth-windows-verify --bin kyth-vm-acceptance-guest --bin kyth-tunable --bin kyth-configure-session --bin kyth-set-resolution --bin kyth-set-kickoff-icon --bin kyth-greeter-compositor) && \
+    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries --bin kyth-safe-upgrade --bin kyth-bootc-guard --bin kyth-finalize-staged --bin kyth-btrfs-maint --bin kyth-ai-perfd --bin kyth-perf-gate-rs --bin kyth-doctor --bin kyth-health-check --bin kyth-smoke-check --bin kyth-resume-check --bin kyth-nvidia-status --bin kyth-controller-check --bin kyth-creator-check --bin kyth-exe-compat --bin kyth-snapshot-timeline --bin kyth-print-check --bin kyth-windows-verify --bin kyth-vm-acceptance-guest --bin kyth-tunable --bin kyth-configure-session --bin kyth-set-resolution --bin kyth-set-kickoff-icon --bin kyth-greeter-compositor --bin kyth-config-apply) && \
     cp /build/kyth-shared-rs/target/release/kyth-probe /build/kyth-probe && \
     cp /build/kyth-shared-rs/target/release/kyth-guardian /build/kyth-guardian && \
     cp /build/kyth-shared-rs/target/release/kyth-update-watcher /build/kyth-update-watcher && \
@@ -77,6 +77,7 @@ RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/regi
     cp /build/kyth-shared-rs/target/release/kyth-set-resolution /build/kyth-set-resolution && \
     cp /build/kyth-shared-rs/target/release/kyth-set-kickoff-icon /build/kyth-set-kickoff-icon && \
     cp /build/kyth-shared-rs/target/release/kyth-greeter-compositor /build/kyth-greeter-compositor && \
+    cp /build/kyth-shared-rs/target/release/kyth-config-apply /build/kyth-config-apply && \
     cp /build/kyth-shared-rs/target/release/kyth-ai-perfd /build/kyth-ai-perfd && \
     cp /build/kyth-shared-rs/target/release/kyth-perf-gate-rs /build/kyth-perf-gate-rs && \
     cp /build/kyth-shared-rs/target/release/kyth-doctor /build/kyth-doctor && \
@@ -313,6 +314,7 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-configure-session /usr/bin/
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-set-resolution /usr/bin/kyth-set-resolution
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-set-kickoff-icon /usr/bin/kyth-set-kickoff-icon
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-greeter-compositor /usr/bin/kyth-greeter-compositor
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-config-apply /usr/bin/kyth-config-apply
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \
