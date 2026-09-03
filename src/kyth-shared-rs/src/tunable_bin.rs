@@ -82,6 +82,7 @@ fn native_other(name: &str) -> bool {
             | "uksmd"
             | "irq-tune"
             | "fscache"
+            | "journal-tune"
     )
 }
 
@@ -797,6 +798,57 @@ fn dispatch_fscache(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_journal_tune(action: &str) -> ExitCode {
+    let config_path = kyth_shared::system::runtime_preferences::journal_path(None::<&Path>);
+    let destination = generated_path("systemd/journald.conf.d", "99-kyth-perf.conf", "/etc/systemd/journald.conf.d/99-kyth-perf.conf");
+    match action {
+        "status" => {
+            let config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
+            println!("perf={} system_max_use={} runtime_max_use={} active={} kind=other", config.perf, config.system_max_use, config.runtime_max_use, if destination.is_file() { "kyth" } else { "balanced" });
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("journal-tune", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
+            config.perf = true;
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_journal(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_journal(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-journal-tune: {error}");
+                return ExitCode::from(1);
+            }
+            println!("journal-tune gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" => {
+            if let Err(code) = ensure_root("journal-tune", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
+            config.perf = false;
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_journal(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_journal(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-journal-tune: {error}");
+                return ExitCode::from(1);
+            }
+            println!("journal-tune balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("journal-tune", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
+            if let Err(error) = kyth_shared::system::runtime_preferences::generate_journal(&config, &destination) {
+                eprintln!("kyth-journal-tune: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-journal-tune [gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1386,6 +1438,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "uksmd" => dispatch_uksmd(action),
             "irq-tune" => dispatch_irq_tune(action),
             "fscache" => dispatch_fscache(action),
+            "journal-tune" => dispatch_journal_tune(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1495,7 +1548,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 71);
+        assert_eq!(names.len(), 72);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1524,6 +1577,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "uksmd"));
         assert!(names.iter().any(|name| name == "irq-tune"));
         assert!(names.iter().any(|name| name == "fscache"));
+        assert!(names.iter().any(|name| name == "journal-tune"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
