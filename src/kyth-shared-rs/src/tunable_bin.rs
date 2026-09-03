@@ -11,6 +11,7 @@ use kyth_shared::system::{
     bore,
     distrobox_cache,
     extended_preferences::{self, ThpConfig},
+    gaming_master,
     flatpak_prefetch,
     flatpak_trim,
     gaming_kargs,
@@ -79,6 +80,7 @@ fn native_other(name: &str) -> bool {
             | "btrfs-tune"
             | "epp-ac"
             | "gaming-cfs"
+            | "gaming-master"
             | "pcie"
             | "pipewire-gaming"
             | "psi-gaming"
@@ -1695,6 +1697,67 @@ fn dispatch_oom_gaming(action: &str) -> ExitCode {
     }
 }
 
+fn sysfs_path(subdirectory: &str) -> PathBuf {
+    env::var_os("KYTH_SYSFS_ROOT")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/sys"))
+        .join(subdirectory)
+}
+
+fn dispatch_gaming_master(action: &str) -> ExitCode {
+    let config_path = gaming_master::master_config_path(None::<&Path>);
+    match action {
+        "status" => {
+            let profile = gaming_master::load_master(&config_path);
+            println!("profile={} active=unknown kind=other", profile.as_str());
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("gaming-master", &[action.to_string()]) { return code; }
+            let thermal = gaming_master::thermal_high(sysfs_path("class/thermal"), 85);
+            let battery = gaming_master::battery_low(sysfs_path("class/power_supply"), 30);
+            let (profile, reason) = gaming_master::effective_gaming(Profile::Gaming, thermal, battery);
+            if let Err(error) = gaming_master::save_master(&config_path, profile) {
+                eprintln!("kyth-gaming-master: {error}");
+                return ExitCode::from(1);
+            }
+            if profile == Profile::Balanced {
+                eprintln!("kyth-gaming-master: staying balanced ({reason})");
+            }
+            println!("gaming-master {}", profile.as_str());
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("gaming-master", &[action.to_string()]) { return code; }
+            if let Err(error) = gaming_master::save_master(&config_path, Profile::Balanced) {
+                eprintln!("kyth-gaming-master: {error}");
+                return ExitCode::from(1);
+            }
+            println!("gaming-master balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("gaming-master", &[action.to_string()]) { return code; }
+            let requested = gaming_master::load_master(&config_path);
+            let thermal = gaming_master::thermal_high(sysfs_path("class/thermal"), 85);
+            let battery = gaming_master::battery_low(sysfs_path("class/power_supply"), 30);
+            let (profile, reason) = gaming_master::effective_gaming(requested, thermal, battery);
+            if profile != requested {
+                if let Err(error) = gaming_master::save_master(&config_path, profile) {
+                    eprintln!("kyth-gaming-master: {error}");
+                    return ExitCode::from(1);
+                }
+                eprintln!("kyth-gaming-master: staying balanced ({reason})");
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-gaming-master [gaming|balanced|off|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2305,6 +2368,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "kargs-apply" => dispatch_kargs_apply(action),
             "sched-arbiter" => dispatch_sched_arbiter(action),
             "oom-gaming" => dispatch_oom_gaming(action),
+            "gaming-master" => dispatch_gaming_master(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2414,7 +2478,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 92);
+        assert_eq!(names.len(), 93);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2464,6 +2528,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "kargs-apply"));
         assert!(names.iter().any(|name| name == "sched-arbiter"));
         assert!(names.iter().any(|name| name == "oom-gaming"));
-        assert!(!names.iter().any(|name| name == "gaming-master"));
+        assert!(names.iter().any(|name| name == "gaming-master"));
+        assert!(!names.iter().any(|name| name == "windows-verify"));
     }
 }
