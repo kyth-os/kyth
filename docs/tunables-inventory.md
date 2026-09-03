@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 57 (all 49 sysctl wrappers plus 8 other-kind wrappers); 37 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 62 (all 49 sysctl wrappers plus 13 other-kind wrappers); 32 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -64,8 +64,8 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 29 | kyth-kargs-apply | kargs_preset | other | kargs | registry (other) |
 | 30 | kyth-kwin-latency | kwin_latency | other | KWin env | registry (other) |
 | 31 | kyth-max-map-count | max_map_count | sysctl | `vm.max_map_count=2147483642` — **dup base** (base is 16777216) | gaming.toml (value conflict — keep 16777216 as base, gaming override TBD) |
-| 32 | kyth-mimalloc | mimalloc_preset | other | mimalloc | registry (other) |
-| 33 | kyth-mimalloc-run | mimalloc_preset | other | alias of above | registry (other) |
+| 32 | kyth-mimalloc | mimalloc_preset | other | mimalloc | native Rust dispatcher |
+| 33 | kyth-mimalloc-run | mimalloc_preset | other | alias of above | native Rust dispatcher |
 | 34 | kyth-min-free-kbytes | min_free_kbytes | sysctl | `vm.min_free_kbytes=131072` | gaming.toml |
 | 35 | kyth-net-backlog | net_backlog | sysctl | `net.core.netdev_max_backlog=5000` — **dup network** | gaming.toml vs network (network has 5000 already?) |
 | 36 | kyth-net-tune | net_latency | sysctl | 9 keys — **all dup network** | network.toml (already migrated, wrapper is redundant) |
@@ -85,14 +85,14 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 50 | kyth-readahead | readahead_preset | other | readahead | registry (other) |
 | 51 | kyth-rmem-default | rmem_default | sysctl | `net.core.rmem_default=262144` | gaming.toml |
 | 52 | kyth-rmem-max | rmem_max | sysctl | `net.core.rmem_max=16777216` — **dup network** | gaming.toml vs network |
-| 53 | kyth-sccache | sccache_preset | other | sccache | registry (other) |
+| 53 | kyth-sccache | sccache_preset | other | sccache | native Rust dispatcher |
 | 54 | kyth-sched-arbiter | sched_arbiter | other | sched arbiter | registry (other) |
 | 55 | kyth-sched-autogroup | sched_autogroup | sysctl | `kernel.sched_autogroup_enabled=0` — **dup base** | gaming.toml |
 | 56 | kyth-sched-child | sched_child | sysctl | `kernel.sched_child_runs_first=0` | gaming.toml |
 | 57 | kyth-sched-latency | sched_latency | sysctl | 5 keys `kernel.sched_*` | gaming.toml |
 | 58 | kyth-sched-nr-migrate | sched_nr_migrate | sysctl | `kernel.sched_nr_migrate=64` | gaming.toml |
 | 59 | kyth-selinux-gaming | selinux_gaming | other | selinux | registry (other) |
-| 60 | kyth-shader-cache-size | shader_cache_size | other | shader cache size | registry (other) |
+| 60 | kyth-shader-cache-size | shader_cache_size | other | shader cache size | native Rust dispatcher |
 | 61 | kyth-shader-tmpfs | shader_tmpfs | other | shader tmpfs | registry (other) |
 | 62 | kyth-somaxconn | somaxconn | sysctl | `net.core.somaxconn=8192` | gaming.toml |
 | 63 | kyth-steam-deadzone | steam_deadzone | other | steam | registry (other) |
@@ -121,7 +121,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 86 | kyth-vm-stat | vm_stat | sysctl | `vm.stat_interval=10` — **dup base** | gaming.toml |
 | 87 | kyth-vm-watermark | vm_watermark | sysctl | `vm.watermark_scale_factor=500` — **dup base** | gaming.toml |
 | 88 | kyth-windows-verify | windows_verify | other | windows | registry (other) |
-| 89 | kyth-wine-sync | wine_sync | other | wine sync | registry (other) |
+| 89 | kyth-wine-sync | wine_sync | other | wine sync | native Rust dispatcher |
 | 90 | kyth-wmem-default | wmem_default | sysctl | `net.core.wmem_default=262144` | gaming.toml |
 | 91 | kyth-wmem-max | wmem_max | sysctl | `net.core.wmem_max=16777216` — **dup network** | gaming.toml vs network |
 | 92 | kyth-work-cache | work_cache | other | work cache | registry (other) |

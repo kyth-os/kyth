@@ -64,6 +64,11 @@ fn native_other(name: &str) -> bool {
             | "pcie"
             | "pipewire-gaming"
             | "psi-gaming"
+            | "mimalloc"
+            | "mimalloc-run"
+            | "sccache"
+            | "shader-cache-size"
+            | "wine-sync"
     )
 }
 
@@ -381,6 +386,243 @@ fn write_optional(path: &Path, content: Option<&str>) -> std::io::Result<()> {
     Ok(())
 }
 
+fn dispatch_mimalloc(action: &str) -> ExitCode {
+    let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
+    let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
+    match action {
+        "status" => {
+            let config = extended_preferences::load_mimalloc(&config_path);
+            println!("enabled={} global={} per_game={} active={} kind=other", config.enabled, config.global, config.per_game, extended_preferences::mimalloc_status(&config, environment.is_file()));
+            ExitCode::SUCCESS
+        }
+        "on" | "gaming" => {
+            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) { return code; }
+            let config = extended_preferences::MimallocConfig { enabled: true, global: false, per_game: true };
+            if let Err(error) = extended_preferences::save_mimalloc(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_mimalloc_env(&config, &environment).map(|_| ()))
+            {
+                eprintln!("kyth-mimalloc: {error}");
+                return ExitCode::from(1);
+            }
+            println!("mimalloc per-game enabled");
+            ExitCode::SUCCESS
+        }
+        "off" | "balanced" => {
+            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) { return code; }
+            let config = extended_preferences::MimallocConfig { enabled: false, global: false, per_game: true };
+            if let Err(error) = extended_preferences::save_mimalloc(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_mimalloc_env(&config, &environment).map(|_| ()))
+            {
+                eprintln!("kyth-mimalloc: {error}");
+                return ExitCode::from(1);
+            }
+            println!("mimalloc disabled");
+            ExitCode::SUCCESS
+        }
+        "global" => {
+            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) { return code; }
+            let config = extended_preferences::MimallocConfig { enabled: true, global: true, per_game: true };
+            if let Err(error) = extended_preferences::save_mimalloc(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_mimalloc_env(&config, &environment).map(|_| ()))
+            {
+                eprintln!("kyth-mimalloc: {error}");
+                return ExitCode::from(1);
+            }
+            println!("mimalloc global enabled");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) { return code; }
+            let config = extended_preferences::load_mimalloc(&config_path);
+            if let Err(error) = extended_preferences::generate_mimalloc_env(&config, &environment) {
+                eprintln!("kyth-mimalloc: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-mimalloc [status|on|off|global|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_mimalloc_run(args: &[String]) -> ExitCode {
+    if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
+        println!("Usage: kyth-mimalloc-run [--status] -- <command> [args...]");
+        return ExitCode::SUCCESS;
+    }
+    if args.first().map(String::as_str) == Some("--status") {
+        let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
+        let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
+        let config = extended_preferences::load_mimalloc(&config_path);
+        println!("enabled={} global={} per_game={} status={}", config.enabled, config.global, config.per_game, extended_preferences::mimalloc_status(&config, environment.is_file()));
+        return ExitCode::SUCCESS;
+    }
+    let command_args = if args.first().map(String::as_str) == Some("--") { &args[1..] } else { args };
+    let Some(program) = command_args.first() else {
+        eprintln!("Usage: kyth-mimalloc-run [--status] -- <command> [args...]");
+        return ExitCode::from(1);
+    };
+    let mut command = std::process::Command::new(program);
+    command.args(&command_args[1..]);
+    let library = extended_preferences::find_mimalloc_library();
+    if Path::new(&library).is_file() {
+        let preload = match env::var("LD_PRELOAD") {
+            Ok(existing) if !existing.is_empty() => format!("{library}:{existing}"),
+            _ => library,
+        };
+        command.env("LD_PRELOAD", preload).env("MIMALLOC_LARGE_OS_PAGES", "1");
+    }
+    match command.status() {
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1).try_into().unwrap_or(1)),
+        Err(error) => {
+            eprintln!("kyth-mimalloc-run: {error}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_sccache(action: &str) -> ExitCode {
+    let config_path = module_config_path("sccache.toml", "/etc/kyth/sccache.toml");
+    let environment = generated_path("environment.d", "99-kyth-sccache.conf", "/etc/environment.d/99-kyth-sccache.conf");
+    let service = generated_path("systemd", "sccache.service", "/etc/systemd/system/sccache.service");
+    match action {
+        "status" => {
+            let config = extended_preferences::load_sccache(&config_path);
+            println!("enabled={} size={} active={} kind=other", config.enabled, config.size, extended_preferences::sccache_status(&environment));
+            ExitCode::SUCCESS
+        }
+        "on" | "gaming" => {
+            if let Err(code) = ensure_root("sccache", &[action.to_string()]) { return code; }
+            let config = extended_preferences::SccacheConfig { enabled: true, size: extended_preferences::load_sccache(&config_path).size };
+            if let Err(error) = extended_preferences::save_sccache(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_sccache(&config, &environment, &service).map(|_| ()))
+            {
+                eprintln!("kyth-sccache: {error}");
+                return ExitCode::from(1);
+            }
+            println!("sccache on");
+            ExitCode::SUCCESS
+        }
+        "off" | "balanced" => {
+            if let Err(code) = ensure_root("sccache", &[action.to_string()]) { return code; }
+            let config = extended_preferences::SccacheConfig { enabled: false, size: extended_preferences::load_sccache(&config_path).size };
+            if let Err(error) = extended_preferences::save_sccache(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_sccache(&config, &environment, &service).map(|_| ()))
+            {
+                eprintln!("kyth-sccache: {error}");
+                return ExitCode::from(1);
+            }
+            println!("sccache off");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("sccache", &[action.to_string()]) { return code; }
+            let config = extended_preferences::load_sccache(&config_path);
+            if let Err(error) = extended_preferences::generate_sccache(&config, &environment, &service) {
+                eprintln!("kyth-sccache: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-sccache [status|on|off|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn detect_vram_gb() -> u64 {
+    let Ok(entries) = std::fs::read_dir("/sys/class/drm") else { return 8; };
+    for entry in entries.flatten() {
+        let path = entry.path().join("device/mem_info_vram_total");
+        if let Ok(value) = std::fs::read_to_string(path) {
+            if let Ok(bytes) = value.trim().parse::<u64>() {
+                return bytes / 1024 / 1024 / 1024;
+            }
+        }
+    }
+    8
+}
+
+fn dispatch_shader_cache_size(action: &str) -> ExitCode {
+    let config_path = module_config_path("shader-cache-size.toml", "/etc/kyth/shader-cache-size.toml");
+    let environment = generated_path("environment.d", "99-kyth-shader-size.conf", "/etc/environment.d/99-kyth-shader-size.conf");
+    match action {
+        "status" => {
+            let config = extended_preferences::load_shader_size(&config_path);
+            let resolved = extended_preferences::resolve_shader_size(&config, detect_vram_gb());
+            println!("mode={} size={} resolved={} active={} kind=other", config.mode, config.size, resolved, extended_preferences::shader_size_status(&environment));
+            ExitCode::SUCCESS
+        }
+        "auto" | "gaming" | "balanced" => {
+            if let Err(code) = ensure_root("shader-cache-size", &[action.to_string()]) { return code; }
+            let config = extended_preferences::ShaderSizeConfig { mode: "auto".into(), size: extended_preferences::load_shader_size(&config_path).size };
+            if let Err(error) = extended_preferences::save_shader_size(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_shader_size(&config, detect_vram_gb(), &environment).map(|_| ()))
+            {
+                eprintln!("kyth-shader-cache-size: {error}");
+                return ExitCode::from(1);
+            }
+            println!("shader cache auto");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("shader-cache-size", &[action.to_string()]) { return code; }
+            let config = extended_preferences::load_shader_size(&config_path);
+            if let Err(error) = extended_preferences::generate_shader_size(&config, detect_vram_gb(), &environment) {
+                eprintln!("kyth-shader-cache-size: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-shader-cache-size [status|auto|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_wine_sync(action: &str) -> ExitCode {
+    let config_path = module_config_path("wine-sync.toml", "/etc/kyth/wine-sync.toml");
+    let environment = generated_path("environment.d", "99-kyth-wine-sync.conf", "/etc/environment.d/99-kyth-wine-sync.conf");
+    match action {
+        "status" => {
+            let config = extended_preferences::load_wine_sync(&config_path);
+            let (ntsync, futex2) = extended_preferences::probe_wine_sync();
+            let active = std::fs::read_to_string(&environment).ok();
+            println!("mode={} probe_ntsync={} probe_futex2={} env={} kind=other", config.mode, ntsync, futex2, extended_preferences::wine_sync_status(active.as_deref()));
+            ExitCode::SUCCESS
+        }
+        "auto" | "ntsync" | "fsync" | "esync" | "off" => {
+            if let Err(code) = ensure_root("wine-sync", &[action.to_string()]) { return code; }
+            let config = extended_preferences::WineSyncConfig { mode: action.into() };
+            if let Err(error) = extended_preferences::save_wine_sync(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_wine_env(&config, &environment).map(|_| ()))
+            {
+                eprintln!("kyth-wine-sync: {error}");
+                return ExitCode::from(1);
+            }
+            println!("wine sync {action}");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("wine-sync", &[action.to_string()]) { return code; }
+            let config = extended_preferences::load_wine_sync(&config_path);
+            if let Err(error) = extended_preferences::generate_wine_env(&config, &environment) {
+                eprintln!("kyth-wine-sync: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-wine-sync [status|auto|ntsync|fsync|esync|off|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_epp_ac(action: &str) -> ExitCode {
     let config_path = module_config_path("epp-ac.toml", "/etc/kyth/epp-ac.toml");
     let rule = generated_path("udev/rules.d", "61-kyth-epp-ac.rules", "/etc/udev/rules.d/61-kyth-epp-ac.rules");
@@ -677,6 +919,11 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "pcie" => dispatch_pcie(action),
             "pipewire-gaming" => dispatch_pipewire_gaming(action),
             "psi-gaming" => dispatch_psi_gaming(action),
+            "mimalloc" => dispatch_mimalloc(action),
+            "mimalloc-run" => dispatch_mimalloc_run(args),
+            "sccache" => dispatch_sccache(action),
+            "shader-cache-size" => dispatch_shader_cache_size(action),
+            "wine-sync" => dispatch_wine_sync(action),
             _ => ExitCode::from(2),
         };
     }
@@ -786,7 +1033,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 57);
+        assert_eq!(names.len(), 62);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -801,6 +1048,11 @@ mod tests {
         assert!(names.iter().any(|name| name == "pcie"));
         assert!(names.iter().any(|name| name == "pipewire-gaming"));
         assert!(names.iter().any(|name| name == "psi-gaming"));
+        assert!(names.iter().any(|name| name == "mimalloc"));
+        assert!(names.iter().any(|name| name == "mimalloc-run"));
+        assert!(names.iter().any(|name| name == "sccache"));
+        assert!(names.iter().any(|name| name == "shader-cache-size"));
+        assert!(names.iter().any(|name| name == "wine-sync"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
