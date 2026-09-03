@@ -18,6 +18,7 @@ use kyth_shared::system::{
     overlay,
     gpu_power,
     podman_btrfs,
+    preference_presets,
     readahead,
     scheduler_arbiter,
     sysctl_profiles,
@@ -92,6 +93,7 @@ fn native_other(name: &str) -> bool {
             | "podman-btrfs"
             | "gpu-power"
             | "numa"
+            | "selinux-gaming"
     )
 }
 
@@ -1113,6 +1115,45 @@ fn dispatch_numa(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_selinux_gaming(action: &str) -> ExitCode {
+    let config_path = preference_presets::selinux_gaming_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = preference_presets::load_selinux_gaming(&config_path);
+            println!("profile={} allow_execheap={} kind=other", config.profile, config.allow_execheap);
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) { return code; }
+            let config = preference_presets::SelinuxGamingConfig { profile: "gaming".into(), allow_execheap: true };
+            if let Err(error) = preference_presets::save_selinux_gaming(&config_path, &config) {
+                eprintln!("kyth-selinux-gaming: {error}");
+                return ExitCode::from(1);
+            }
+            println!("selinux-gaming gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) { return code; }
+            let config = preference_presets::SelinuxGamingConfig::default();
+            if let Err(error) = preference_presets::save_selinux_gaming(&config_path, &config) {
+                eprintln!("kyth-selinux-gaming: {error}");
+                return ExitCode::from(1);
+            }
+            println!("selinux-gaming balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-selinux-gaming [gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1708,6 +1749,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "podman-btrfs" => dispatch_podman_btrfs(action),
             "gpu-power" => dispatch_gpu_power(action),
             "numa" => dispatch_numa(action),
+            "selinux-gaming" => dispatch_selinux_gaming(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1817,7 +1859,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 77);
+        assert_eq!(names.len(), 78);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1852,6 +1894,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "podman-btrfs"));
         assert!(names.iter().any(|name| name == "gpu-power"));
         assert!(names.iter().any(|name| name == "numa"));
+        assert!(names.iter().any(|name| name == "selinux-gaming"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }

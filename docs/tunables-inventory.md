@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 77 (all 49 sysctl wrappers plus 28 other-kind wrappers); 17 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 78 (all 49 sysctl wrappers plus 29 other-kind wrappers); 16 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -91,7 +91,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 56 | kyth-sched-child | sched_child | sysctl | `kernel.sched_child_runs_first=0` | gaming.toml |
 | 57 | kyth-sched-latency | sched_latency | sysctl | 5 keys `kernel.sched_*` | gaming.toml |
 | 58 | kyth-sched-nr-migrate | sched_nr_migrate | sysctl | `kernel.sched_nr_migrate=64` | gaming.toml |
-| 59 | kyth-selinux-gaming | selinux_gaming | other | selinux | registry (other) |
+| 59 | kyth-selinux-gaming | selinux_gaming | other | selinux | native Rust dispatcher |
 | 60 | kyth-shader-cache-size | shader_cache_size | other | shader cache size | native Rust dispatcher |
 | 61 | kyth-shader-tmpfs | shader_tmpfs | other | shader tmpfs | registry (other) |
 | 62 | kyth-somaxconn | somaxconn | sysctl | `net.core.somaxconn=8192` | gaming.toml |
