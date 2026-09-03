@@ -15,6 +15,7 @@ use kyth_shared::system::{
     flatpak_trim,
     net_latency,
     overlay,
+    podman_btrfs,
     readahead,
     scheduler_arbiter,
     sysctl_profiles,
@@ -86,6 +87,7 @@ fn native_other(name: &str) -> bool {
             | "journal-tune"
             | "io-tune"
             | "podman-overlay"
+            | "podman-btrfs"
     )
 }
 
@@ -966,6 +968,66 @@ fn dispatch_podman_overlay(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_podman_btrfs(action: &str) -> ExitCode {
+    let config_path = podman_btrfs::config_path(None::<&Path>);
+    let destination = generated_path("containers/storage.conf.d", "99-kyth-btrfs.conf", "/etc/containers/storage.conf.d/99-kyth-btrfs.conf");
+    let on_btrfs = podman_on_btrfs();
+    match action {
+        "status" => {
+            let mode = podman_btrfs::load(&config_path);
+            println!("mode={} resolved={} active={} kind=other", mode.as_str(), podman_btrfs::resolve(mode, on_btrfs).as_str(), podman_btrfs::status(&destination, on_btrfs));
+            ExitCode::SUCCESS
+        }
+        "btrfs" | "gaming" => {
+            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) { return code; }
+            if let Err(error) = podman_btrfs::save(&config_path, podman_btrfs::PodmanMode::Btrfs)
+                .and_then(|_| podman_btrfs::generate(podman_btrfs::PodmanMode::Btrfs, on_btrfs, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-podman-btrfs: {error}");
+                return ExitCode::from(1);
+            }
+            println!("podman-btrfs btrfs");
+            ExitCode::SUCCESS
+        }
+        "overlay" | "off" => {
+            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) { return code; }
+            let mode = if action == "off" { podman_btrfs::PodmanMode::Off } else { podman_btrfs::PodmanMode::Overlay };
+            if let Err(error) = podman_btrfs::save(&config_path, mode)
+                .and_then(|_| podman_btrfs::generate(mode, on_btrfs, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-podman-btrfs: {error}");
+                return ExitCode::from(1);
+            }
+            println!("podman-btrfs {}", mode.as_str());
+            ExitCode::SUCCESS
+        }
+        "auto" | "balanced" => {
+            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) { return code; }
+            if let Err(error) = podman_btrfs::save(&config_path, podman_btrfs::PodmanMode::Auto)
+                .and_then(|_| podman_btrfs::generate(podman_btrfs::PodmanMode::Auto, on_btrfs, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-podman-btrfs: {error}");
+                return ExitCode::from(1);
+            }
+            println!("podman-btrfs auto");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) { return code; }
+            let mode = podman_btrfs::load(&config_path);
+            if let Err(error) = podman_btrfs::generate(mode, on_btrfs, &destination) {
+                eprintln!("kyth-podman-btrfs: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-podman-btrfs [btrfs|overlay|off|auto|gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1558,6 +1620,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "journal-tune" => dispatch_journal_tune(action),
             "io-tune" => dispatch_io_tune(action),
             "podman-overlay" => dispatch_podman_overlay(action),
+            "podman-btrfs" => dispatch_podman_btrfs(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1667,7 +1730,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 74);
+        assert_eq!(names.len(), 75);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1699,6 +1762,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "journal-tune"));
         assert!(names.iter().any(|name| name == "io-tune"));
         assert!(names.iter().any(|name| name == "podman-overlay"));
+        assert!(names.iter().any(|name| name == "podman-btrfs"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
