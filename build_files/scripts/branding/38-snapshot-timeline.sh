@@ -8,4 +8,5 @@ if command -v btrfs >/dev/null 2>&1 && btrfs filesystem show / >/dev/null 2>&1; 
         snapper -c root set-config TIMELINE_CREATE=yes TIMELINE_LIMIT_HOURLY=5 TIMELINE_LIMIT_DAILY=7 >/dev/null 2>&1 || true
     fi
 fi
-install -m 0755 /ctx/kyth-snapshot-timeline /usr/bin/kyth-snapshot-timeline
+# The native binary is installed from the hub-web-builder stage in Dockerfile.
+# Keep the Python source fixture out of the final image.

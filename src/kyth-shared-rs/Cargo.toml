@@ -106,6 +106,14 @@ path = "src/creator_check_bin.rs"
 name = "kyth-exe-compat"
 path = "src/exe_compat_bin.rs"
 
+[[bin]]
+name = "kyth-snapshot-timeline"
+path = "src/snapshot_timeline_bin.rs"
+
+[[bin]]
+name = "kyth-print-check"
+path = "src/print_check_bin.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

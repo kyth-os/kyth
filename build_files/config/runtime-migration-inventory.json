@@ -2755,19 +2755,20 @@
     {
       "current_implementation": "python",
       "cutover": "replace installed kyth-print-check entry point after parity gates",
-      "installed_implementation": "python",
+      "installed_implementation": "rust",
       "name": "kyth-print-check",
-      "owner": "fixture::build_files/kyth-print-check",
+      "owner": "native::kyth-print-check",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-print-check",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-print-check",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "read-only",
       "rollback": "restore previous installed kyth-print-check entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3800,19 +3801,20 @@
     {
       "current_implementation": "python",
       "cutover": "replace installed kyth-snapshot-timeline entry point after parity gates",
-      "installed_implementation": "python",
+      "installed_implementation": "rust",
       "name": "kyth-snapshot-timeline",
-      "owner": "fixture::build_files/kyth-snapshot-timeline",
+      "owner": "native::kyth-snapshot-timeline",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-snapshot-timeline",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-snapshot-timeline",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "read-only",
       "rollback": "restore previous installed kyth-snapshot-timeline entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
