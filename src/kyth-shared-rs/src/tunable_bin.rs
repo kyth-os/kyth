@@ -79,6 +79,7 @@ fn native_other(name: &str) -> bool {
             | "flatpak-trim"
             | "readahead"
             | "trim-tune"
+            | "uksmd"
     )
 }
 
@@ -638,6 +639,57 @@ fn dispatch_trim_tune(action: &str) -> ExitCode {
         }
         _ => {
             eprintln!("Usage: kyth-trim-tune [status|gaming|balanced|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_uksmd(action: &str) -> ExitCode {
+    let config_path = kyth_shared::system::runtime_preferences::uksmd_path(None::<&Path>);
+    let destination = generated_path("etc", "uksmd.conf", "/etc/uksmd.conf");
+    match action {
+        "status" => {
+            let config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
+            println!("enabled={} max_cpu_percent={} suggested={} active={} kind=other", config.enabled, config.max_cpu_percent, kyth_shared::system::runtime_preferences::uksmd_suggested("/proc/meminfo"), if destination.is_file() { "enabled" } else { "off" });
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("uksmd", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
+            config.enabled = true;
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_uksmd(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-uksmd: {error}");
+                return ExitCode::from(1);
+            }
+            println!("uksmd gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" => {
+            if let Err(code) = ensure_root("uksmd", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
+            config.enabled = false;
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_uksmd(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-uksmd: {error}");
+                return ExitCode::from(1);
+            }
+            println!("uksmd balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("uksmd", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
+            if let Err(error) = kyth_shared::system::runtime_preferences::generate_uksmd(&config, &destination) {
+                eprintln!("kyth-uksmd: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-uksmd [status|gaming|balanced|apply]");
             ExitCode::from(1)
         }
     }
@@ -1229,6 +1281,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "flatpak-trim" => dispatch_flatpak_trim(action),
             "readahead" => dispatch_readahead(action),
             "trim-tune" => dispatch_trim_tune(action),
+            "uksmd" => dispatch_uksmd(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1338,7 +1391,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 68);
+        assert_eq!(names.len(), 69);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1364,6 +1417,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "flatpak-trim"));
         assert!(names.iter().any(|name| name == "readahead"));
         assert!(names.iter().any(|name| name == "trim-tune"));
+        assert!(names.iter().any(|name| name == "uksmd"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
