@@ -58,7 +58,7 @@ RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/regi
     --mount=type=cache,id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target \
     cargo build --release --locked && \
     cp target/release/kyth-hub-shell /build/kyth-hub-shell && \
-    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries --bin kyth-safe-upgrade --bin kyth-bootc-guard --bin kyth-finalize-staged --bin kyth-btrfs-maint --bin kyth-ai-perfd --bin kyth-perf-gate-rs --bin kyth-doctor --bin kyth-health-check --bin kyth-smoke-check --bin kyth-resume-check --bin kyth-nvidia-status --bin kyth-controller-check) && \
+    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries --bin kyth-safe-upgrade --bin kyth-bootc-guard --bin kyth-finalize-staged --bin kyth-btrfs-maint --bin kyth-ai-perfd --bin kyth-perf-gate-rs --bin kyth-doctor --bin kyth-health-check --bin kyth-smoke-check --bin kyth-resume-check --bin kyth-nvidia-status --bin kyth-controller-check --bin kyth-creator-check) && \
     cp /build/kyth-shared-rs/target/release/kyth-probe /build/kyth-probe && \
     cp /build/kyth-shared-rs/target/release/kyth-guardian /build/kyth-guardian && \
     cp /build/kyth-shared-rs/target/release/kyth-update-watcher /build/kyth-update-watcher && \
@@ -80,7 +80,8 @@ RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/regi
     cp /build/kyth-shared-rs/target/release/kyth-smoke-check /build/kyth-smoke-check && \
     cp /build/kyth-shared-rs/target/release/kyth-resume-check /build/kyth-resume-check && \
     cp /build/kyth-shared-rs/target/release/kyth-nvidia-status /build/kyth-nvidia-status && \
-    cp /build/kyth-shared-rs/target/release/kyth-controller-check /build/kyth-controller-check
+    cp /build/kyth-shared-rs/target/release/kyth-controller-check /build/kyth-controller-check && \
+    cp /build/kyth-shared-rs/target/release/kyth-creator-check /build/kyth-creator-check
 
 # Base Image
 ARG BASE_IMAGE
@@ -291,6 +292,7 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-smoke-check /usr/bin/kyth-s
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-resume-check /usr/bin/kyth-resume-check
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-nvidia-status /usr/bin/kyth-nvidia-status
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-controller-check /usr/bin/kyth-controller-check
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-creator-check /usr/bin/kyth-creator-check
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \

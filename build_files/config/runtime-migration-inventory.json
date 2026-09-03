@@ -1010,19 +1010,20 @@
     {
       "current_implementation": "python",
       "cutover": "replace installed kyth-creator-check entry point after parity gates",
-      "installed_implementation": "python",
+      "installed_implementation": "rust",
       "name": "kyth-creator-check",
-      "owner": "fixture::build_files/kyth-creator-check",
+      "owner": "native::kyth-creator-check",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-creator-check",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-creator-check",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "read-only",
       "rollback": "restore previous installed kyth-creator-check entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
