@@ -261,7 +261,13 @@ Port components only after behavioral parity and focused tests exist:
   Shared parity cases live in
   `src/kyth-installer-web/src-tauri/testdata/installer_plan_cases.json`.
 - **Done as a parser:** disk and partition discovery from explicit `lsblk` snapshots; runtime probing and protected-disk policy remain Python-owned.
-- **Done as metadata/validation:** partition journal model, serialization, and safety checks; disk mutation remains Python-owned.
+- **Done as metadata/validation plus a typed execution boundary:** the
+  partition journal model, serialization, and safety checks remain covered,
+  while GPT backup/restore, table creation, partition create/delete/flag
+  operations, and supported filesystem formatting now go through the
+  root-only Rust `kyth-installer-exec` helper. Python still owns runtime
+  disk discovery, storage-dependent policy, filesystem shrinking, the
+  interactive partition resize, and journal commit/rollback orchestration.
 - **Done as a decoder/classifier:** transaction/recovery state and Rescue guidance; durable writes and recovery actions remain Python-owned.
 - **Done as a pure model:** streaming command output framing, bounded failure
   tails, independent I/O/network/absolute timeout decisions, and cooperative
@@ -270,11 +276,12 @@ Port components only after behavioral parity and focused tests exist:
 - **Done as a pure state model:** mount registration, release, LIFO cleanup
   ordering, and cleanup-state clearing; mount/unmount syscalls remain
   Python-owned behind the privileged service.
-- **Bootc image-write handoff in progress:** the typed bootc operation is now
-  validated and projected by Rust, then `kyth-installer-exec` pins and `exec`s
-  `/usr/bin/bootc`; Python still owns phase orchestration, power monitoring,
-  transaction reporting, and target configuration. The compatibility command
-  builder remains until the full storage/configuration executor is ported.
+- **Bootc image-write handoff complete at the process boundary:** the typed
+  bootc operation is validated and projected by Rust, then
+  `kyth-installer-exec` pins and `exec`s `/usr/bin/bootc`. Python still owns
+  phase orchestration, power monitoring, transaction reporting, and target
+  configuration. The compatibility command builder remains until the full
+  storage/configuration executor is ported.
 - **Done as a pure decision model:** Rust and Python agree on Secure Boot/MOK
   states and import-result classification; `mokutil`, passwords, and firmware
   interactions remain Python-owned.
