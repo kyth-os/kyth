@@ -305,6 +305,12 @@ Port components only after behavioral parity and focused tests exist:
   hostname, locale, keyboard layout, and timezone-link writes are validated,
   synced, and applied by `kyth-installer-exec`; Python retains account
   creation and phase sequencing.
+- **First storage/configuration execution slice now uses the typed Rust
+  executor:** Btrfs formatting, creation of the fixed `@`/`@home` subvolumes,
+  default-subvolume selection, installer staging-directory creation, and
+  append-only `/etc/fstab` updates all cross the root-only helper. Python keeps
+  phase orchestration, read-only UUID/EFI probes, and the compatibility fallback
+  until live-media parity is proven.
 - **Done as a typed decision boundary:** Rust and Python agree on Secure
   Boot/MOK states and import-result classification, and the installed helper
   supplies the decision to the privileged flow; `mokutil`, passwords, and

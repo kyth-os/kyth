@@ -10,6 +10,8 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 
+const MAX_FSTAB_LINE_BYTES: usize = 4096;
+
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct ConfigurationInput {
     pub target_root: String,
@@ -34,6 +36,12 @@ pub(crate) struct ConfigurationPlan {
     pub writes: Vec<ConfigWrite>,
     pub localtime_target: String,
     pub executor: &'static str,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct FstabAppendInput {
+    pub path: String,
+    pub line: String,
 }
 
 fn default_locale() -> String { "en_US.UTF-8".to_string() }
@@ -64,6 +72,23 @@ fn safe_root(value: &str) -> Result<String, String> {
             || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
     }) {
         return Err("target root contains unsupported characters.".to_string());
+    }
+    Ok(value.to_string())
+}
+
+fn safe_absolute_path(raw: &str, label: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty()
+        || value.len() > 4096
+        || !value.starts_with('/')
+        || value.contains("..")
+        || value.contains("//")
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
+        })
+    {
+        return Err(format!("{label} must be an absolute safe path."));
     }
     Ok(value.to_string())
 }
@@ -127,6 +152,61 @@ pub(crate) fn apply_plan(plan: ConfigurationPlan) -> Result<(), String> {
     Ok(())
 }
 
+fn safe_fstab_path(raw: &str) -> Result<String, String> {
+    let path = safe_root(raw)?;
+    if !path.ends_with("/etc/fstab") {
+        return Err("fstab path must point to an installed /etc/fstab".to_string());
+    }
+    Ok(path)
+}
+
+fn validate_fstab_line(line: &str) -> Result<(), String> {
+    if line.is_empty() || line.len() > MAX_FSTAB_LINE_BYTES || !line.ends_with('\n') {
+        return Err("fstab entry must be one bounded line".to_string());
+    }
+    let content = line.strip_suffix('\n').unwrap_or(line);
+    if content.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err("fstab entry contains control characters".to_string());
+    }
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() != 6 || !fields[0].starts_with("UUID=") {
+        return Err("fstab entry has an unsupported shape".to_string());
+    }
+    if fields[0].len() <= "UUID=".len()
+        || !fields[0]["UUID=".len()..].bytes().all(|byte| {
+            byte.is_ascii_hexdigit() || byte == b'-'
+        })
+        || (fields[1] != "none" && safe_absolute_path(fields[1], "fstab mount point").is_err())
+        || !fields[2].bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        || !fields[3].bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'=' | b',' | b':' | b'.' | b'_' | b'+' | b'@' | b'-'))
+        || fields[4] != "0"
+        || !matches!(fields[5], "0" | "2")
+    {
+        return Err("fstab entry contains unsupported values".to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn append_fstab(input: FstabAppendInput) -> Result<(), String> {
+    let path = safe_fstab_path(&input.path)?;
+    validate_fstab_line(&input.line)?;
+    let mut file = OpenOptions::new();
+    file.create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .mode(0o644);
+    let mut file = file
+        .open(&path)
+        .map_err(|error| format!("could not open installed fstab: {error}"))?;
+    file.write_all(input.line.as_bytes())
+        .map_err(|error| format!("could not append installed fstab: {error}"))?;
+    file.flush()
+        .map_err(|error| format!("could not flush installed fstab: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("could not sync installed fstab: {error}"))?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -178,5 +258,22 @@ mod tests {
             std::fs::read_link(etc.join("localtime")).unwrap(),
             Path::new("/usr/share/zoneinfo/UTC")
         );
+    }
+
+    #[test]
+    fn validates_and_appends_one_safe_fstab_entry() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let etc = directory.path().join("etc");
+        std::fs::create_dir(&etc).expect("etc directory");
+        let path = etc.join("fstab");
+        append_fstab(FstabAppendInput {
+            path: path.to_string_lossy().into_owned(),
+            line: "UUID=ABCD-1234 /var/home btrfs subvol=@home,compress=zstd:1 0 0\n".into(),
+        }).expect("fstab entry should append");
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "UUID=ABCD-1234 /var/home btrfs subvol=@home,compress=zstd:1 0 0\n");
+        assert!(append_fstab(FstabAppendInput {
+            path: etc.join("not-fstab").to_string_lossy().into_owned(),
+            line: "UUID=ABCD /data ext4 defaults 0 2\n".into(),
+        }).is_err());
     }
 }

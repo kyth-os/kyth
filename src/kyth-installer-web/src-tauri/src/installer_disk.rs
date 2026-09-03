@@ -92,6 +92,17 @@ pub(crate) enum DiskOperationInput {
         fs: String,
         label: String,
     },
+    BtrfsSubvolumeCreate {
+        mountpoint: String,
+        name: String,
+    },
+    BtrfsSubvolumeSetDefault {
+        mountpoint: String,
+        name: String,
+    },
+    EnsureDirectory {
+        path: String,
+    },
 }
 
 impl DiskOperationInput {
@@ -161,6 +172,14 @@ fn safe_absolute_path(raw: &str, label: &str) -> Result<String, String> {
 
 fn safe_mountpoint(raw: &str) -> Result<String, String> {
     safe_absolute_path(raw, "mount point")
+}
+
+fn safe_btrfs_subvolume_name(raw: &str) -> Result<String, String> {
+    let name = raw.trim();
+    if !matches!(name, "@" | "@home") {
+        return Err("unsupported Btrfs subvolume name".to_string());
+    }
+    Ok(name.to_string())
 }
 
 fn safe_mount_options(options: &[String]) -> Result<Vec<String>, String> {
@@ -552,6 +571,43 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             )
         }
         DiskOperationInput::FormatFilesystem { device, fs, label } => build_mkfs(device, fs, label),
+        DiskOperationInput::BtrfsSubvolumeCreate { mountpoint, name } => {
+            let mountpoint = safe_mountpoint(&mountpoint)?;
+            let name = safe_btrfs_subvolume_name(&name)?;
+            Ok(DiskPlan {
+                argv: vec![
+                    "/usr/sbin/btrfs".to_string(),
+                    "subvolume".to_string(),
+                    "create".to_string(),
+                    format!("{mountpoint}/{name}"),
+                ],
+                timeout_seconds: 60,
+                needs_confirmation: false,
+            })
+        }
+        DiskOperationInput::BtrfsSubvolumeSetDefault { mountpoint, name } => {
+            let mountpoint = safe_mountpoint(&mountpoint)?;
+            let name = safe_btrfs_subvolume_name(&name)?;
+            Ok(DiskPlan {
+                argv: vec![
+                    "/usr/sbin/btrfs".to_string(),
+                    "subvolume".to_string(),
+                    "set-default".to_string(),
+                    format!("{mountpoint}/{name}"),
+                ],
+                timeout_seconds: 60,
+                needs_confirmation: false,
+            })
+        }
+        DiskOperationInput::EnsureDirectory { path } => Ok(DiskPlan {
+            argv: vec![
+                "/usr/bin/mkdir".to_string(),
+                "-p".to_string(),
+                safe_absolute_path(&path, "directory path")?,
+            ],
+            timeout_seconds: 30,
+            needs_confirmation: false,
+        }),
     }
 }
 
@@ -898,6 +954,39 @@ mod tests {
         for input in cases {
             assert!(build_plan(input).is_err());
         }
+        assert!(build_plan(DiskOperationInput::BtrfsSubvolumeCreate {
+            mountpoint: "/tmp/kyth-btrfs-root".into(),
+            name: "../escape".into(),
+        }).is_err());
+    }
+
+    #[test]
+    fn projects_fixed_btrfs_subvolume_operations() {
+        let create = build_plan(DiskOperationInput::BtrfsSubvolumeCreate {
+            mountpoint: "/var/tmp/kyth-btrfs-root".into(),
+            name: "@home".into(),
+        }).expect("subvolume create should validate");
+        assert_eq!(
+            create.argv,
+            ["/usr/sbin/btrfs", "subvolume", "create", "/var/tmp/kyth-btrfs-root/@home"]
+        );
+
+        let default = build_plan(DiskOperationInput::BtrfsSubvolumeSetDefault {
+            mountpoint: "/var/tmp/kyth-btrfs-root".into(),
+            name: "@".into(),
+        }).expect("subvolume default should validate");
+        assert_eq!(
+            default.argv,
+            ["/usr/sbin/btrfs", "subvolume", "set-default", "/var/tmp/kyth-btrfs-root/@"]
+        );
+
+        let directory = build_plan(DiskOperationInput::EnsureDirectory {
+            path: "/var/tmp/kyth-alongside-target/boot/efi".into(),
+        }).expect("directory creation should validate");
+        assert_eq!(
+            directory.argv,
+            ["/usr/bin/mkdir", "-p", "/var/tmp/kyth-alongside-target/boot/efi"]
+        );
     }
 
     #[test]

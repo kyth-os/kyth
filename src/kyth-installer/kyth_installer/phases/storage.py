@@ -1,9 +1,11 @@
 """Storage preparation for install — Phase 2 verbatim from install.py."""
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 from collections.abc import Callable
@@ -78,28 +80,73 @@ def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerConte
     _as_root = phase_dependency("_as_root")
     _require_no_symlink = phase_dependency("_require_no_symlink")
     _safe_umount = phase_dependency("_safe_umount")
+    ensure_directory = phase_dependency("ensure_directory")
     mount_filesystem = phase_dependency("mount_filesystem")
     _run_cmd = phase_dependency("_run_cmd")
     log(f"Formatting {target_part} as btrfs ...")
-    _run_cmd(
-        ["mkfs.btrfs", "-f", "-L", "KythOS", target_part],
-        5, 10, log, progress,
-        publish=lambda event: _push(event, context),
-    )
+    helper = shutil.which("kyth-installer-exec")
+    if helper:
+        run_command(
+            _as_root(["kyth-installer-exec", "--operation", "disk"]),
+            input=json.dumps({
+                "operation": "format_filesystem",
+                "device": target_part,
+                "fs": "btrfs",
+                "label": "KythOS",
+            }, separators=(",", ":")),
+            text=True,
+            stdout=subprocess.DEVNULL,
+            check=True,
+            timeout=300,
+        )
+    else:
+        _run_cmd(
+            ["mkfs.btrfs", "-f", "-L", "KythOS", target_part],
+            5, 10, log, progress,
+            publish=lambda event: _push(event, context),
+        )
 
     log("Creating Btrfs subvolumes @ and @home ...")
     from ..config import STAGING_BTRFS_ROOT
     btrfs_temp_root = STAGING_BTRFS_ROOT  # noqa: S108 — _require_no_symlink guards this below
     _safe_umount(run_command, btrfs_temp_root)
     _require_no_symlink(btrfs_temp_root)
-    run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
+    ensure_directory(btrfs_temp_root, run=run_command, as_root=_as_root, check=True)
     context.register_mount(btrfs_temp_root)
     mount_filesystem(target_part, btrfs_temp_root, run=run_command, as_root=_as_root, check=True)
     try:
-        run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
-        run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@home"]), check=True)
+        for name in ("@", "@home"):
+            if helper:
+                run_command(
+                    _as_root(["kyth-installer-exec", "--operation", "disk"]),
+                    input=json.dumps({
+                        "operation": "btrfs_subvolume_create",
+                        "mountpoint": btrfs_temp_root,
+                        "name": name,
+                    }, separators=(",", ":")),
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    check=True,
+                    timeout=60,
+                )
+            else:
+                run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/{name}"]), check=True)
         log("Setting Btrfs default subvolume to @ ...")
-        run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
+        if helper:
+            run_command(
+                _as_root(["kyth-installer-exec", "--operation", "disk"]),
+                input=json.dumps({
+                    "operation": "btrfs_subvolume_set_default",
+                    "mountpoint": btrfs_temp_root,
+                    "name": "@",
+                }, separators=(",", ":")),
+                text=True,
+                stdout=subprocess.DEVNULL,
+                check=True,
+                timeout=60,
+            )
+        else:
+            run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
     finally:
         _safe_umount(run_command, btrfs_temp_root, check=True)
         context.release_mount(btrfs_temp_root)
@@ -115,8 +162,9 @@ def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerC
     run_command = phase_dependency("run_command")
     _as_root = phase_dependency("_as_root")
     mount_filesystem = phase_dependency("mount_filesystem")
+    ensure_directory = phase_dependency("ensure_directory")
     efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
-    run_command(_as_root(["mkdir", "-p", str(efi_mountpoint)]), check=True)
+    ensure_directory(str(efi_mountpoint), run=run_command, as_root=_as_root, check=True)
     context.register_mount(str(efi_mountpoint))
     try:
         result = run_command(
@@ -233,6 +281,7 @@ def _prepare_partition_target_storage(
     _require_no_symlink = phase_dependency("_require_no_symlink")
     _safe_umount = phase_dependency("_safe_umount")
     mount_filesystem = phase_dependency("mount_filesystem")
+    ensure_directory = phase_dependency("ensure_directory")
     unmount_filesystem = phase_dependency("unmount_filesystem")
     _run_cmd = phase_dependency("_run_cmd")
     _build_bootc_install_cmd = phase_dependency("_build_bootc_install_cmd")
@@ -255,7 +304,7 @@ def _prepare_partition_target_storage(
     _create_btrfs_subvolumes(target_part, log, progress, context)
 
     _require_no_symlink(alongside_mount)
-    run_command(_as_root(["mkdir", "-p", alongside_mount]), check=True)
+    ensure_directory(alongside_mount, run=run_command, as_root=_as_root, check=True)
     context.register_mount(alongside_mount)
     mount_filesystem(target_part, alongside_mount, options=["subvol=@"], run=run_command, as_root=_as_root, check=True)
     progress(11)

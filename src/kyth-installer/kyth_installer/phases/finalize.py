@@ -1,9 +1,12 @@
 """Filesystem finalization (fstab, hostname, user) — Phase 2 verbatim."""
 from __future__ import annotations
 
+import json
 import os
+import shutil
 import subprocess  # pylint: disable=unused-import
 import traceback
+from pathlib import Path
 
 from ..context import InstallRequest, InstallerContext, InstallLifecycle
 from ..assurance import validate_installed_target
@@ -53,6 +56,29 @@ def _fsck_pass_for(fstype: str) -> int:
 
 
 def _append_fstab_line(etc, fstab_line: str, log, description: str) -> bool:
+    if shutil.which("kyth-installer-exec"):
+        run_command = phase_dependency("run_command")
+        as_root = phase_dependency("_as_root")
+        try:
+            run_command(
+                as_root(["kyth-installer-exec", "--operation", "fstab-append"]),
+                input=json.dumps({
+                    "path": str(Path(etc, "fstab")),
+                    "line": fstab_line,
+                }, separators=(",", ":")),
+                text=True,
+                stdout=subprocess.DEVNULL,
+                check=True,
+                timeout=30,
+            )
+        except OSError as exc:
+            log(f"Warning: failed to update fstab for {description}: {format_os_error(exc, path=Path(etc, 'fstab'))}")
+            return False
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
+            log(f"Warning: failed to update fstab for {description}: {exc}")
+            return False
+        log(f"Fstab updated for {description}: {fstab_line.strip()}")
+        return True
     return append_fstab_line(
         etc, fstab_line, log, description, format_error=format_os_error,
     )

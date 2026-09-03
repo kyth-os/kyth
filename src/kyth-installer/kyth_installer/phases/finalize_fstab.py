@@ -42,9 +42,10 @@ def configure_alongside_fstab(
     run_command = phase_dependency("run_command")
     as_root = phase_dependency("_as_root")
     mount_filesystem = phase_dependency("mount_filesystem")
+    ensure_directory = phase_dependency("ensure_directory")
     safe_umount = phase_dependency("_safe_umount")
     target_home = Path(config_root) / "ostree/deploy/default/var/home"
-    run_command(as_root(["mkdir", "-p", str(target_home)]), check=True)
+    ensure_directory(str(target_home), run=run_command, as_root=as_root, check=True)
     safe_umount(run_command, str(target_home))
     mount_filesystem(target_part, str(target_home), options=["subvol=@home"], run=run_command, as_root=as_root, check=True)
     uuid_out = uuid_lookup(target_part, log)
@@ -61,6 +62,7 @@ def configure_manual_mounts(
     run_command = phase_dependency("run_command")
     as_root = phase_dependency("_as_root")
     mount_filesystem = phase_dependency("mount_filesystem")
+    ensure_directory = phase_dependency("ensure_directory")
     safe_umount = phase_dependency("_safe_umount")
     get_manual_mounts = phase_dependency("_get_manual_mounts")
     for mount in get_manual_mounts(context):
@@ -79,7 +81,7 @@ def configure_manual_mounts(
             else:
                 options = "defaults,compress=zstd:1" if fstype == "btrfs" else "defaults"
                 line = f"UUID={uuid_out} {fstab_mountpoint} {fstype} {options} 0 {fsck_pass_for(fstype)}\n"
-                run_command(as_root(["mkdir", "-p", str(target_path)]), check=False)
+                ensure_directory(str(target_path), run=run_command, as_root=as_root, check=False)
                 safe_umount(run_command, str(target_path))
             if not append_line(etc, line, log, f"{part} at {mountpoint}"):
                 continue

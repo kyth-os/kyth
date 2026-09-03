@@ -60,6 +60,7 @@ fn operation_args_valid(args: &[String]) -> bool {
                 | "journal-commit"
                 | "transaction-write"
                 | "configuration-write"
+                | "fstab-append"
                 | "secure-boot-plan"
                 | "orchestration"
                 | "power-check"
@@ -109,6 +110,12 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             .map_err(|error| format!("invalid configuration JSON: {error}"))?;
         let plan = installer_configuration::build_plan(input)?;
         installer_configuration::apply_plan(plan)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "fstab-append" {
+        let input = serde_json::from_slice::<installer_configuration::FstabAppendInput>(&input)
+            .map_err(|error| format!("invalid fstab append JSON: {error}"))?;
+        installer_configuration::append_fstab(input)?;
         return Ok(ExitCode::SUCCESS);
     }
     if args[1] == "secure-boot-plan" {
@@ -265,6 +272,10 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "configuration-write".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "fstab-append".into()
         ]));
         assert!(operation_args_valid(&[
             "--operation".into(),

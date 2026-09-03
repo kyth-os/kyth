@@ -26,6 +26,7 @@ from .system_privilege import (  # pylint: disable=unused-import  # noqa: F401
     require_root,  # pylint: disable=unused-import
 )
 from .system_mount import (  # pylint: disable=unused-import
+    ensure_directory,
     _lsblk_target_mounts,
     mount_filesystem,
     unmount_filesystem,

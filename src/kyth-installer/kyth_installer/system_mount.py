@@ -123,6 +123,26 @@ def unmount_filesystem(
     argv.append(mountpoint)
     return run(as_root(argv), **kwargs)
 
+
+def ensure_directory(
+    path: str,
+    *,
+    run=run_command,
+    as_root=_as_root,
+    **kwargs,
+):
+    """Create an installer directory through the typed Rust helper."""
+    if shutil.which("kyth-installer-exec"):
+        payload = {"operation": "ensure_directory", "path": path}
+        return run(
+            as_root(["kyth-installer-exec", "--operation", "disk"]),
+            input=json.dumps(payload, separators=(",", ":")),
+            text=True,
+            timeout=30,
+            **kwargs,
+        )
+    return run(as_root(["mkdir", "-p", path]), **kwargs)
+
 def _orig_lsblk_target_mounts(disk: str) -> list[tuple[str, str]]:
     """Return (device, mountpoint) pairs for mounted devices under disk."""
     result = run_command(
