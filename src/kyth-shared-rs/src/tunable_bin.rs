@@ -96,6 +96,7 @@ fn native_other(name: &str) -> bool {
             | "numa"
             | "selinux-gaming"
             | "shader-tmpfs"
+            | "steam-deadzone"
     )
 }
 
@@ -1207,6 +1208,45 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_steam_deadzone(action: &str) -> ExitCode {
+    let config_path = preference_presets::steam_deadzone_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = preference_presets::load_steam_deadzone(&config_path);
+            println!("profile={} deadzone={} kind=other", config.profile, config.deadzone);
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("steam-deadzone", &[action.to_string()]) { return code; }
+            let config = preference_presets::SteamDeadzoneConfig { profile: "gaming".into(), deadzone: 0.05 };
+            if let Err(error) = preference_presets::save_steam_deadzone(&config_path, &config) {
+                eprintln!("kyth-steam-deadzone: {error}");
+                return ExitCode::from(1);
+            }
+            println!("steam-deadzone gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("steam-deadzone", &[action.to_string()]) { return code; }
+            let config = preference_presets::SteamDeadzoneConfig::default();
+            if let Err(error) = preference_presets::save_steam_deadzone(&config_path, &config) {
+                eprintln!("kyth-steam-deadzone: {error}");
+                return ExitCode::from(1);
+            }
+            println!("steam-deadzone balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("steam-deadzone", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-steam-deadzone [gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1804,6 +1844,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "numa" => dispatch_numa(action),
             "selinux-gaming" => dispatch_selinux_gaming(action),
             "shader-tmpfs" => dispatch_shader_tmpfs(action),
+            "steam-deadzone" => dispatch_steam_deadzone(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1913,7 +1954,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 79);
+        assert_eq!(names.len(), 80);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1950,6 +1991,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "numa"));
         assert!(names.iter().any(|name| name == "selinux-gaming"));
         assert!(names.iter().any(|name| name == "shader-tmpfs"));
+        assert!(names.iter().any(|name| name == "steam-deadzone"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
