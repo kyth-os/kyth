@@ -97,6 +97,29 @@ def create_installer_user(
     executor = PrivilegedExecutor(run_command=run_command, as_root=as_root)
     log(f"Creating user: {username}")
     try:
+        if shutil.which("kyth-installer-exec"):
+            payload = {
+                "deploy_root": str(deploy_root),
+                "target_root": str(config_root),
+                "username": username,
+                "password_hash": password_hash,
+            }
+            try:
+                run_command(
+                    as_root(["kyth-installer-exec", "--operation", "create-user"]),
+                    input=json.dumps(payload, separators=(",", ":")),
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
+                    check=True,
+                    timeout=60,
+                )
+                ensure_accounts(deploy_root, log)
+                progress(97)
+                log(f"User '{username}' created")
+                return
+            except OSError as exc:
+                raise OSError(format_error(exc, path=deploy_root)) from exc
         creator(
             deploy_root, config_root, username, password_hash, log,
             run=lambda argv, **kw: executor.run(
