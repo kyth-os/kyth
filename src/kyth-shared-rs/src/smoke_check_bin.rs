@@ -7,7 +7,7 @@ use kyth_shared::system::process::run_bounded;
 use kyth_shared::system::smoke_check::{command_available, path_check, Report};
 
 fn command_ok(program: &str, args: &[&str]) -> bool {
-    if !std::env::var_os("PATH").into_iter().flat_map(|p| std::env::split_paths(&p)).any(|p| p.join(program).is_file()) { return false; }
+    if !std::env::var_os("PATH").into_iter().flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).any(|p| p.join(program).is_file()) { return false; }
     let mut argv = vec![program.to_string()];
     argv.extend(args.iter().map(|arg| (*arg).to_string()));
     run_bounded(&argv, Duration::from_secs(10)).map(|out| out.status.success()).unwrap_or(false)

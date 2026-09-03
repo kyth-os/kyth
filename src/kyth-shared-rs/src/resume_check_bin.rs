@@ -6,7 +6,7 @@ use kyth_shared::system::{process::run_bounded, runtime_diagnostics::{gpu_detect
 use kyth_shared::system::smoke_check::{Level, Report};
 
 fn available(program: &str) -> bool {
-    std::env::var_os("PATH").into_iter().flat_map(|p| std::env::split_paths(&p)).any(|p| p.join(program).is_file())
+    std::env::var_os("PATH").into_iter().flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>()).any(|p| p.join(program).is_file())
 }
 fn probe(program: &str, args: &[&str], timeout: u64) -> Option<std::process::Output> {
     if !available(program) { return None; }
