@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 72 (all 49 sysctl wrappers plus 23 other-kind wrappers); 22 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 73 (all 49 sysctl wrappers plus 24 other-kind wrappers); 21 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -58,7 +58,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 23 | kyth-hdr-per-game | hdr_per_game | other | hdr per game | registry (other) |
 | 24 | kyth-hdr-store | hdr_store | other | hdr store | registry (other) |
 | 25 | kyth-inotify-watches | inotify_watches | sysctl | `fs.inotify.max_user_watches=1048576` — **dup base** | gaming.toml |
-| 26 | kyth-io-tune | io_tune | other | `/etc/kyth/io.toml` | registry (other) |
+| 26 | kyth-io-tune | io_tune | other | `/etc/kyth/io.toml` | native Rust dispatcher |
 | 27 | kyth-irq-tune | irq_tune | other | `/etc/kyth/irq.toml` | native Rust dispatcher |
 | 28 | kyth-journal-tune | journal_tune | other | `/etc/kyth/journal.toml` | native Rust dispatcher |
 | 29 | kyth-kargs-apply | kargs_preset | other | kargs | registry (other) |

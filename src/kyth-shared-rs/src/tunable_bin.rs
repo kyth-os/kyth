@@ -83,6 +83,7 @@ fn native_other(name: &str) -> bool {
             | "irq-tune"
             | "fscache"
             | "journal-tune"
+            | "io-tune"
     )
 }
 
@@ -849,6 +850,57 @@ fn dispatch_journal_tune(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_io_tune(action: &str) -> ExitCode {
+    let config_path = kyth_shared::system::io_tune::config_path(None::<&Path>);
+    let destination = generated_path("udev/rules.d", "61-kyth-io-tune.rules", "/etc/udev/rules.d/61-kyth-io-tune.rules");
+    match action {
+        "status" => {
+            let config = kyth_shared::system::io_tune::load(&config_path);
+            println!("profile={} read_ahead_kb={} active={} kind=other", config.profile, config.read_ahead_kb, kyth_shared::system::io_tune::status(&destination));
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("io-tune", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::io_tune::load(&config_path);
+            config.profile = "kyth".into();
+            if let Err(error) = kyth_shared::system::io_tune::save(&config_path, &config)
+                .and_then(|_| kyth_shared::system::io_tune::generate(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-io-tune: {error}");
+                return ExitCode::from(1);
+            }
+            println!("io-tune gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" => {
+            if let Err(code) = ensure_root("io-tune", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::io_tune::load(&config_path);
+            config.profile = "balanced".into();
+            if let Err(error) = kyth_shared::system::io_tune::save(&config_path, &config)
+                .and_then(|_| kyth_shared::system::io_tune::generate(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-io-tune: {error}");
+                return ExitCode::from(1);
+            }
+            println!("io-tune balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("io-tune", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::io_tune::load(&config_path);
+            if let Err(error) = kyth_shared::system::io_tune::generate(&config, &destination) {
+                eprintln!("kyth-io-tune: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-io-tune [gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1439,6 +1491,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "irq-tune" => dispatch_irq_tune(action),
             "fscache" => dispatch_fscache(action),
             "journal-tune" => dispatch_journal_tune(action),
+            "io-tune" => dispatch_io_tune(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1548,7 +1601,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 72);
+        assert_eq!(names.len(), 73);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1578,6 +1631,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "irq-tune"));
         assert!(names.iter().any(|name| name == "fscache"));
         assert!(names.iter().any(|name| name == "journal-tune"));
+        assert!(names.iter().any(|name| name == "io-tune"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
