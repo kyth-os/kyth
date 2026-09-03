@@ -2478,19 +2478,20 @@
     {
       "current_implementation": "python",
       "cutover": "replace installed kyth-nvidia-status entry point after parity gates",
-      "installed_implementation": "python",
+      "installed_implementation": "rust",
       "name": "kyth-nvidia-status",
-      "owner": "fixture::build_files/kyth-nvidia-status",
+      "owner": "native::kyth-nvidia-status",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-nvidia-status",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-nvidia-status",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "read-only",
       "rollback": "restore previous installed kyth-nvidia-status entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {

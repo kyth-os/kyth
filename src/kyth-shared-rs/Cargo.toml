@@ -90,6 +90,10 @@ path = "src/smoke_check_bin.rs"
 name = "kyth-resume-check"
 path = "src/resume_check_bin.rs"
 
+[[bin]]
+name = "kyth-nvidia-status"
+path = "src/nvidia_status_bin.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
