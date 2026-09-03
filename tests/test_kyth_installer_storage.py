@@ -1644,7 +1644,7 @@ class InstallerSystemTests(unittest.TestCase):
     @patch.object(system, "Path")
     def test_mok_enrollment_skipped_when_secure_boot_disabled(self, mock_path_cls, mock_shutil, mock_run):
         mock_path_cls.return_value.exists.return_value = True
-        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_shutil.which.side_effect = lambda name: "/usr/bin/mokutil" if name == "mokutil" else None
         mock_run.return_value = MagicMock(stdout="SecureBoot disabled\n")
         result = system._try_stage_mok_enrollment(lambda _m: None, kernel="cachy")
         self.assertEqual(result, "skipped")
@@ -1656,7 +1656,7 @@ class InstallerSystemTests(unittest.TestCase):
     @patch.object(system, "Path")
     def test_mok_enrollment_reports_already_enrolled(self, mock_path_cls, mock_shutil, mock_run):
         mock_path_cls.return_value.exists.return_value = True
-        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_shutil.which.side_effect = lambda name: "/usr/bin/mokutil" if name == "mokutil" else None
         mock_run.side_effect = [
             MagicMock(stdout="SecureBoot enabled\n"),
             MagicMock(stdout="KythOS Secure Boot\n"),
@@ -1670,7 +1670,7 @@ class InstallerSystemTests(unittest.TestCase):
     @patch.object(system, "Path")
     def test_mok_enrollment_reports_already_pending(self, mock_path_cls, mock_shutil, mock_run):
         mock_path_cls.return_value.exists.return_value = True
-        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_shutil.which.side_effect = lambda name: "/usr/bin/mokutil" if name == "mokutil" else None
         mock_run.side_effect = [
             MagicMock(stdout="SecureBoot enabled\n"),
             MagicMock(stdout="no keys enrolled\n"),
@@ -1685,7 +1685,7 @@ class InstallerSystemTests(unittest.TestCase):
     @patch.object(system, "Path")
     def test_mok_enrollment_stages_successfully(self, mock_path_cls, mock_shutil, mock_run):
         mock_path_cls.return_value.exists.return_value = True
-        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_shutil.which.side_effect = lambda name: "/usr/bin/mokutil" if name == "mokutil" else None
         mock_run.side_effect = [
             MagicMock(stdout="SecureBoot enabled\n"),
             MagicMock(stdout="no keys enrolled\n"),
@@ -1702,7 +1702,7 @@ class InstallerSystemTests(unittest.TestCase):
     @patch.object(system, "Path")
     def test_mok_enrollment_reports_failed_import(self, mock_path_cls, mock_shutil, mock_run):
         mock_path_cls.return_value.exists.return_value = True
-        mock_shutil.which.return_value = "/usr/bin/mokutil"
+        mock_shutil.which.side_effect = lambda name: "/usr/bin/mokutil" if name == "mokutil" else None
         mock_run.side_effect = [
             MagicMock(stdout="SecureBoot enabled\n"),
             MagicMock(stdout="no keys enrolled\n"),

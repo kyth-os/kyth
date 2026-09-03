@@ -20,6 +20,8 @@ mod installer_recovery;
 #[allow(dead_code)]
 mod installer_transaction;
 mod installer_configuration;
+#[allow(dead_code)]
+mod installer_secure_boot;
 
 use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
@@ -55,6 +57,7 @@ fn operation_args_valid(args: &[String]) -> bool {
                 | "journal-validate"
                 | "transaction-write"
                 | "configuration-write"
+                | "secure-boot-plan"
         )
 }
 
@@ -84,6 +87,17 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             .map_err(|error| format!("invalid configuration JSON: {error}"))?;
         let plan = installer_configuration::build_plan(input)?;
         installer_configuration::apply_plan(plan)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "secure-boot-plan" {
+        let input = serde_json::from_slice::<installer_secure_boot::SecureBootInput>(&input)
+            .map_err(|error| format!("invalid Secure Boot JSON: {error}"))?;
+        let plan = installer_secure_boot::build_plan(input)?;
+        println!(
+            "{}",
+            serde_json::to_string(&plan)
+                .map_err(|error| format!("could not encode Secure Boot plan: {error}"))?
+        );
         return Ok(ExitCode::SUCCESS);
     }
     let (argv, needs_confirmation, operation) = match args[1].as_str() {
@@ -202,6 +216,10 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "configuration-write".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "secure-boot-plan".into()
         ]));
     }
 
