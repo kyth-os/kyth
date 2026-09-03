@@ -78,6 +78,7 @@ pub fn generate_irq(config: &IrqConfig, destination: impl AsRef<Path>, cpus: &st
     crate::atomic_io::atomic_write_text(destination, &format!("# Kyth IRQ affinity — generated\n[Service]\nExecStart=\nExecStart=/usr/sbin/irqbalance --banirq=0 --banned-cpus={banned}\n"), Some(0o644))?;
     Ok(Some(destination.to_path_buf()))
 }
+pub fn irq_status(destination: impl AsRef<Path>) -> &'static str { if destination.as_ref().is_file() { "kyth" } else { "balanced" } }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FscacheConfig { pub enabled: bool }

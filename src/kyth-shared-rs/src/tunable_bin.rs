@@ -80,6 +80,7 @@ fn native_other(name: &str) -> bool {
             | "readahead"
             | "trim-tune"
             | "uksmd"
+            | "irq-tune"
     )
 }
 
@@ -695,6 +696,57 @@ fn dispatch_uksmd(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_irq_tune(action: &str) -> ExitCode {
+    let config_path = kyth_shared::system::runtime_preferences::irq_path(None::<&Path>);
+    let dropin = generated_path("systemd/irqbalance.service.d", "99-kyth-irq.conf", "/etc/systemd/system/irqbalance.service.d/99-kyth-irq.conf");
+    match action {
+        "status" => {
+            let config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
+            println!("profile={} isolated_cpus={} active={} kind=other", config.profile, config.isolated_cpus, kyth_shared::system::runtime_preferences::irq_status(&dropin));
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("irq-tune", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
+            config.profile = "kyth".into();
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_irq(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "").map(|_| ()))
+            {
+                eprintln!("kyth-irq-tune: {error}");
+                return ExitCode::from(1);
+            }
+            println!("irq-tune gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" => {
+            if let Err(code) = ensure_root("irq-tune", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
+            config.profile = "balanced".into();
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_irq(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "").map(|_| ()))
+            {
+                eprintln!("kyth-irq-tune: {error}");
+                return ExitCode::from(1);
+            }
+            println!("irq-tune balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("irq-tune", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
+            if let Err(error) = kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "") {
+                eprintln!("kyth-irq-tune: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-irq-tune [status|gaming|balanced|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1282,6 +1334,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "readahead" => dispatch_readahead(action),
             "trim-tune" => dispatch_trim_tune(action),
             "uksmd" => dispatch_uksmd(action),
+            "irq-tune" => dispatch_irq_tune(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1391,7 +1444,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 69);
+        assert_eq!(names.len(), 70);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1418,6 +1471,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "readahead"));
         assert!(names.iter().any(|name| name == "trim-tune"));
         assert!(names.iter().any(|name| name == "uksmd"));
+        assert!(names.iter().any(|name| name == "irq-tune"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
