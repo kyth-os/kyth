@@ -292,12 +292,14 @@ Port components only after behavioral parity and focused tests exist:
   LIFO cleanup ordering, cleanup-state clearing, filesystem mounts,
   subvolume options, bind mounts, and recursive/lazy unmounts now use the
   root-only Rust disk helper when installed. Python retains the fixed-argv
-  compatibility fallback and phase orchestration.
+  compatibility fallback and phase-specific filesystem work.
 - **Bootc image-write handoff complete at the process boundary:** the typed
   bootc operation is validated and projected by Rust, then
   `kyth-installer-exec` pins and `exec`s `/usr/bin/bootc`. Python still owns
-  phase orchestration, power monitoring, transaction reporting, and target
-  configuration. The compatibility command builder remains until the full
+  phase-specific filesystem work, recovery reporting, and target
+  configuration. Rust now owns orchestration decisions, cancellation
+  classification, transaction-status ordering, and the power-supply probe.
+  The compatibility command builder remains until the full
   storage/configuration executor is ported.
 - **Non-secret target configuration now uses the typed Rust executor:**
   hostname, locale, keyboard layout, and timezone-link writes are validated,
