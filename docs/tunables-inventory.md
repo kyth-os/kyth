@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 88 (all 49 sysctl wrappers plus 39 other-kind wrappers); 6 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 89 (all 49 sysctl wrappers plus 40 other-kind wrappers); 5 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -35,7 +35,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 |---|---|---|---|---|---|
 | 1 | kyth-aio-max | aio_max | sysctl | `/etc/sysctl.d/99-kyth-aio-max.conf` → `fs.aio-max-nr=1048576` | gaming.toml |
 | 2 | kyth-ananicy | ananicy_preset | other | `/etc/kyth/ananicy.toml` | native Rust dispatcher |
-| 3 | kyth-boot-timeout | boot_loader | other | `/etc/kyth/loader.toml` → timeout 2 | registry (other) |
+| 3 | kyth-boot-timeout | boot_loader | other | `/etc/kyth/loader.toml` → timeout 2 | native Rust dispatcher |
 | 4 | kyth-bore | bore_tune | sysctl | `/etc/sysctl.d/99-kyth-bore.conf` → `kernel.sched_bore=1` | gaming.toml |
 | 5 | kyth-btrfs-autotune | btrfs_autotune | other | `/etc/kyth/btrfs-autotune.toml` | native Rust dispatcher |
 | 6 | kyth-btrfs-tune | btrfs_perf | other | btrfs perf | native Rust dispatcher |

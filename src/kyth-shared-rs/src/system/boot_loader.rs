@@ -52,6 +52,11 @@ pub fn load_loader_default() -> LoaderConfig {
     load_loader(loader_config_path(None::<PathBuf>))
 }
 
+pub fn save_loader(path: impl AsRef<Path>, config: &LoaderConfig) -> std::io::Result<()> {
+    let timeout = config.timeout.clamp(0, 10);
+    crate::atomic_io::atomic_write_text(path, &format!("# Kyth loader — offline\nfast = {}\ntimeout = {}\n", config.fast, timeout), Some(0o600))
+}
+
 pub fn loader_status(conf: impl AsRef<Path>) -> &'static str {
     let Ok(raw) = fs::read_to_string(conf) else { return "balanced"; };
     if raw.contains("timeout 0") || raw.contains("Kyth") { "fast" } else { "balanced" }
@@ -59,6 +64,18 @@ pub fn loader_status(conf: impl AsRef<Path>) -> &'static str {
 
 pub fn loader_status_default() -> &'static str {
     loader_status(DEFAULT_LOADER_CONF)
+}
+
+pub fn generate_loader_conf(config: &LoaderConfig, destination: impl AsRef<Path>) -> std::io::Result<Option<PathBuf>> {
+    let destination = destination.as_ref();
+    if !config.fast {
+        if destination.is_file() && fs::read_to_string(destination).ok().is_some_and(|text| text.contains("Kyth")) {
+            crate::atomic_io::atomic_write_text(destination, "timeout 2\n", Some(0o644))?;
+        }
+        return Ok(None);
+    }
+    crate::atomic_io::atomic_write_text(destination, &format!("# Kyth loader fast-path — generated, greenboot-aware\ntimeout {}\n", config.timeout), Some(0o644))?;
+    Ok(Some(destination.to_path_buf()))
 }
 
 #[cfg(test)]

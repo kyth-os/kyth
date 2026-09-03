@@ -110,6 +110,7 @@ fn native_other(name: &str) -> bool {
             | "gaming-audit"
             | "system-audit"
             | "fcitx-latency"
+            | "boot-timeout"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1511,6 +1512,55 @@ fn dispatch_fcitx_latency(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_boot_timeout(action: &str) -> ExitCode {
+    let config_path = kyth_shared::system::boot_loader::loader_config_path(None::<&Path>);
+    let destination = generated_path("boot", "loader.conf", "/boot/loader/loader.conf");
+    match action {
+        "status" => {
+            let config = kyth_shared::system::boot_loader::load_loader(&config_path);
+            println!("fast={} timeout={} active={} kind=other", config.fast, config.timeout, kyth_shared::system::boot_loader::loader_status(&destination));
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("boot-timeout", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::boot_loader::LoaderConfig { fast: true, timeout: 0 };
+            if let Err(error) = kyth_shared::system::boot_loader::save_loader(&config_path, &config)
+                .and_then(|_| kyth_shared::system::boot_loader::generate_loader_conf(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-boot-timeout: {error}");
+                return ExitCode::from(1);
+            }
+            println!("boot-timeout gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("boot-timeout", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::boot_loader::LoaderConfig::default();
+            if let Err(error) = kyth_shared::system::boot_loader::save_loader(&config_path, &config)
+                .and_then(|_| kyth_shared::system::boot_loader::generate_loader_conf(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-boot-timeout: {error}");
+                return ExitCode::from(1);
+            }
+            println!("boot-timeout balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("boot-timeout", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::boot_loader::load_loader(&config_path);
+            if let Err(error) = kyth_shared::system::boot_loader::generate_loader_conf(&config, &destination) {
+                eprintln!("kyth-boot-timeout: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-boot-timeout [gaming|balanced|off|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2117,6 +2167,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "gaming-audit" => dispatch_gaming_audit(action),
             "system-audit" => dispatch_system_audit(action),
             "fcitx-latency" => dispatch_fcitx_latency(action),
+            "boot-timeout" => dispatch_boot_timeout(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2226,7 +2277,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 88);
+        assert_eq!(names.len(), 89);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2272,6 +2323,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "gaming-audit"));
         assert!(names.iter().any(|name| name == "system-audit"));
         assert!(names.iter().any(|name| name == "fcitx-latency"));
+        assert!(names.iter().any(|name| name == "boot-timeout"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
