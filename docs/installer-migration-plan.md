@@ -316,6 +316,11 @@ Port components only after behavioral parity and focused tests exist:
   with parent-death cancellation by `kyth-installer-exec`. Python still owns
   output framing, progress/network telemetry, timeout policy, and the user
   cancellation request until the native stream protocol replaces that adapter.
+- **First recovery-action slice now runs in Rust:** the support-log export
+  validates the USB destination and configured artifact paths, skips symlink
+  sources, copies only bounded installer artifacts, and syncs the exported
+  files. Python retains removable-media discovery and the compatibility copy
+  path until recovery parity is complete.
 - **Done as a typed decision boundary:** Rust and Python agree on Secure
   Boot/MOK states and import-result classification, and the installed helper
   supplies the decision to the privileged flow; `mokutil`, passwords, and

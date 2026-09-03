@@ -68,6 +68,7 @@ fn operation_args_valid(args: &[String]) -> bool {
                 | "transaction-write"
                 | "configuration-write"
                 | "fstab-append"
+                | "recovery-export"
                 | "stream"
                 | "secure-boot-plan"
                 | "orchestration"
@@ -139,6 +140,17 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     }
 
     let input = read_operation_bytes()?;
+    if args[1] == "recovery-export" {
+        let input = serde_json::from_slice::<installer_recovery::RecoveryExportInput>(&input)
+            .map_err(|error| format!("invalid recovery export JSON: {error}"))?;
+        let response = installer_recovery::export_logs(input)?;
+        println!(
+            "{}",
+            serde_json::to_string(&response)
+                .map_err(|error| format!("could not encode recovery export response: {error}"))?
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
     if args[1] == "stream" {
         return run_stream(&input);
     }
@@ -329,6 +341,10 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "stream".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "recovery-export".into()
         ]));
         assert!(operation_args_valid(&[
             "--operation".into(),
