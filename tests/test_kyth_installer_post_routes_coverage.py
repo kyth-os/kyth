@@ -1,3 +1,4 @@
+import json
 import sys
 import tempfile
 import unittest
@@ -69,6 +70,30 @@ class PostRouteCoverageTests(unittest.TestCase):
                 response = self.routes.rescue_logs_to_usb({"usb_mount": str(mount)})
         self.assertEqual(response.status, 200)
         self.assertEqual(response.payload["copied"], ["install.log"])
+
+    def test_rescue_logs_uses_native_recovery_export_when_helper_is_installed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mount = Path(tmp) / "usb"
+            mount.mkdir()
+            native_response = mock.Mock(
+                stdout=json.dumps({
+                    "ok": True,
+                    "dest": f"{mount}/kyth-installer-logs",
+                    "copied": ["log"],
+                })
+            )
+            with (
+                mock.patch("kyth_installer.post_routes.shutil.which", return_value="/usr/bin/kyth-installer-exec"),
+                mock.patch("kyth_installer.runner.run_command", return_value=native_response) as run,
+                mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+            ):
+                response = self.routes.rescue_logs_to_usb({"usb_mount": str(mount)})
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.payload["copied"], ["log"])
+        self.assertEqual(run.call_args.args[0], ["kyth-installer-exec", "--operation", "recovery-export"])
+        payload = json.loads(run.call_args.kwargs["input"])
+        self.assertEqual(payload["usb_mount"], str(mount))
 
     def test_rescue_logs_reports_missing_media_empty_logs_and_copy_failure(self):
         self.assertEqual(

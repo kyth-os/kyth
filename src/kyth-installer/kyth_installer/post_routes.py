@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import shutil
 from dataclasses import dataclass
 from functools import partial
 from typing import Callable
@@ -127,6 +129,36 @@ class PostRouteService:
                 pass
         if not target or not os.path.isdir(target):
             return ApiResponse({"ok": False, "message": "No USB drive found. Insert a USB stick and try again."}, 400)
+        if shutil.which("kyth-installer-exec"):
+            try:
+                result = run_command(
+                    _as_root(["kyth-installer-exec", "--operation", "recovery-export"]),
+                    input=json.dumps(
+                        {
+                            "usb_mount": target,
+                            "log_path": str(LOG_FILE),
+                            "transaction_path": str(TRANSACTION_FILE),
+                            "failure_summary_path": str(FAILURE_SUMMARY_FILE),
+                        },
+                        separators=(",", ":"),
+                    ),
+                    text=True,
+                    capture_output=True,
+                    check=True,
+                    timeout=60,
+                )
+                response = json.loads(result.stdout or "{}")
+                if (
+                    not isinstance(response, dict)
+                    or response.get("ok") is not True
+                    or not isinstance(response.get("dest"), str)
+                    or not isinstance(response.get("copied"), list)
+                    or not all(isinstance(name, str) for name in response["copied"])
+                ):
+                    raise RuntimeError("native recovery export returned a malformed response")
+                return ApiResponse(response, 200)
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError, TypeError) as exc:  # noqa: BLE001 -- narrow: recovery export is best-effort
+                return ApiResponse({"ok": False, "message": str(exc)}, 500)
         try:
             dest = Path(target) / "kyth-installer-logs"
             run_command(_as_root(["mkdir", "-p", str(dest)]), check=False)

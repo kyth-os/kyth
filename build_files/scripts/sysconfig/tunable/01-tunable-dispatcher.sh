@@ -5,26 +5,30 @@
 # Preserves symlinks via ln -sf (not cp without -a, which would dereference).
 set -euo pipefail
 
-# Install dispatcher
+# Install dispatcher (bash compat entrypoint).
+# NOTE: /usr/bin/kyth-tunable-rs is already placed by the Dockerfile COPY from
+# hub-web-builder before this layer runs; do not reinstall it here.
 install -Dm0755 /ctx/kyth-tunable /usr/bin/kyth-tunable
 
-# Create compat symlinks for every tunable in tunables.toml
-# Use Python to read the registry so the list stays single-source.
-mapfile -t tunables < <(python3 -c '
-import tomllib
-from pathlib import Path
-p=Path("/ctx/config/tunables.toml")
-if not p.is_file():
-    p=Path("build_files/config/tunables.toml")
-with p.open("rb") as f:
-    data=tomllib.load(f)
-for name in sorted(data.get("tunables", {})):
-    print(name)
-')
+# Create compat symlinks for every tunable in the native registry.
+mapfile -t tunables < <(/usr/bin/kyth-tunable-rs --list)
+mapfile -t native_tunables < <(/usr/bin/kyth-tunable-rs --list-native)
+declare -A native_lookup=()
+for t in "${native_tunables[@]}"; do
+    native_lookup["$t"]=1
+done
+
+# All current registry entries have native Rust dispatch parity. Keep the
+# compatibility branch for forward-compatible registry additions and rollback
+# to older images.
 
 for t in "${tunables[@]}"; do
     # ln -sf preserves symlink semantics; cp without -a would dereference and duplicate the file
-    ln -sf kyth-tunable "/usr/bin/kyth-${t}"
+    if [[ ${native_lookup[$t]+yes} ]]; then
+        ln -sf kyth-tunable-rs "/usr/bin/kyth-${t}"
+    else
+        ln -sf kyth-tunable "/usr/bin/kyth-${t}"
+    fi
 done
 
-echo "tunable-dispatcher: installed kyth-tunable + ${#tunables[@]} symlinks"
+echo "tunable-dispatcher: installed kyth-tunable + ${#tunables[@]} symlinks (${#native_tunables[@]} native)"

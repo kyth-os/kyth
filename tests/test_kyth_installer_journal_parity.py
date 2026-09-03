@@ -44,6 +44,48 @@ class InstallerJournalParityTests(unittest.TestCase):
                 if case["name"] == "single-btrfs-root":
                     self.assertEqual(errors, [])
 
+    def test_installed_rust_validator_is_authoritative(self):
+        journal = journal_mod.Journal.__new__(journal_mod.Journal)
+        journal.disk = "/dev/sda"
+        journal.ops = [{
+            "kind": "set_mountpoint",
+            "params": {"partition": "/dev/sda2", "mountpoint": "/"},
+            "index": 0,
+        }]
+        journal._committed = False
+        journal._root_partition = None
+        journal.irreversible_completed = False
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch(
+                "kyth_installer.runner.run_command",
+                side_effect=OSError("helper unavailable"),
+            ),
+        ):
+            errors = journal._rust_validate([], "gpt", 128 * 1024**3)
+        self.assertEqual(
+            errors,
+            ["Rust journal validation failed; refusing to commit partition changes."],
+        )
+
+    def test_rust_validator_rejects_inconsistent_response(self):
+        journal = journal_mod.Journal.__new__(journal_mod.Journal)
+        journal.disk = "/dev/sda"
+        journal.ops = []
+        journal._committed = False
+        journal._root_partition = None
+        journal.irreversible_completed = False
+        completed = mock.Mock(stdout=json.dumps({"valid": True, "errors": ["bad"]}))
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.runner.run_command", return_value=completed),
+        ):
+            errors = journal._rust_validate([], "gpt", 128 * 1024**3)
+        self.assertEqual(
+            errors,
+            ["Rust journal validation failed; refusing to commit partition changes."],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

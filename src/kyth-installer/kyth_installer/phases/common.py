@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import threading
 import os
+import json
+import shutil
 
 from ..config import TRANSACTION_FILE
 from ..context import InstallerContext
-from ..recovery import write_transaction_state
+from ..recovery import transaction_state_payload, write_transaction_state
+from ..system import _as_root
 
 
 def _push(event: dict, context: InstallerContext) -> None:
@@ -90,23 +93,55 @@ def _record_transaction(
     message: str = "",
     log=None,
 ) -> None:
+    # Rust owns the durable status ordering. The compatibility writer remains
+    # only as a storage fallback when the native helper is not installed.
     try:
-        write_transaction_state(
-            TRANSACTION_FILE,
-            context=context,
-            status=status,
-            message=message,
+        from ..orchestration import decision
+
+        native = decision(
+            "transaction",
+            lifecycle=context.lifecycle.value,
+            phase=context.phase.value,
+            status=getattr(context, "transaction_status", ""),
+            next_status=status,
         )
-        # write_transaction_state already fsyncs file + parent via _atomic_write_json,
-        # but ensure parent dir is durable even if future impl changes.
-        try:
-            dfd = os.open(str(TRANSACTION_FILE.parent), os.O_DIRECTORY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-        except (OSError, ValueError):
-            pass
+        if native is not None and (
+            native.get("accepted") is not True or native.get("status") != status
+        ):
+            raise RuntimeError("native installer transaction transition was not accepted")
+        context.transaction_status = status
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+        if log is not None:
+            log(f"Warning: could not validate installer transaction transition: {exc}")
+        return
+    try:
+        payload = transaction_state_payload(context=context, status=status, message=message)
+        if shutil.which("kyth-installer-exec"):
+            from ..runner import run_command
+
+            run_command(
+                _as_root(["kyth-installer-exec", "--operation", "transaction-write"]),
+                input=json.dumps(
+                    {
+                        "operation": "transaction_write",
+                        "path": str(TRANSACTION_FILE),
+                        "state": payload,
+                    },
+                    separators=(",", ":"),
+                ),
+                text=True,
+                check=True,
+                timeout=30,
+                stdout=os.devnull,
+                stderr=os.devnull,
+            )
+        else:
+            write_transaction_state(
+                TRANSACTION_FILE,
+                context=context,
+                status=status,
+                message=message,
+            )
     except (OSError, ValueError) as exc:
         if log is not None:
             log(f"Warning: could not update installer transaction report: {exc}")

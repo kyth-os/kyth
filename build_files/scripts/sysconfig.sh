@@ -9,9 +9,6 @@ set -euo pipefail
 # Install optional helpers when provided by build context.
 # kyth-ai-dev and kyth-smoke-check are installed as kyth-shared entry points.
 
-if [[ -f /ctx/kyth-game-boost ]]; then
-	install -Dm0755 /ctx/kyth-game-boost /usr/bin/kyth-game-boost
-fi
 if [[ -f /ctx/game-performance ]]; then
 	install -Dm0755 /ctx/game-performance /usr/bin/game-performance
 elif [[ -f /usr/bin/kyth-game-boost ]]; then
@@ -36,7 +33,6 @@ fi
 
 # kyth-health-check is the native Rust binary copied from the hub-web-builder;
 # retain the Python launcher in the source tree for parity only.
-
 # Repair accounts/groups that may be missing after layering package changes.
 if [[ -x /usr/libexec/kyth-fix-system-accounts ]]; then
 	/usr/libexec/kyth-fix-system-accounts || true
@@ -126,7 +122,7 @@ systemctl enable kyth-bluetooth-enable.service 2>/dev/null || true
 # Left in place they'd ship as duplicate content outside any package/kyth
 # rechunk group, landing in the churny "unpackaged" catch-all on every build
 # that touches one of these small scripts.
-rm -f /ctx/kyth-vscode-wallet /ctx/kyth-game-boost /ctx/game-performance /ctx/kyth-ntfs-repair \
-	/ctx/kyth-shader-preheat /ctx/kyth-health-check \
+rm -f /ctx/kyth-vscode-wallet /ctx/game-performance /ctx/kyth-ntfs-repair \
+	/ctx/kyth-shader-preheat \
 	/ctx/kyth-sched-arbiter /ctx/kyth-power-arbiter /ctx/kyth-power-arbiter.service /ctx/kyth-storage-gate \
 	/ctx/kyth-readahead-hint /ctx/kyth-game-launch /ctx/kyth-shader-prune

@@ -12,6 +12,32 @@ from kyth_installer import system, system_mount  # noqa: E402
 
 
 class SystemMountCoverageTests(unittest.TestCase):
+    def test_mount_and_unmount_use_typed_helper_when_installed(self):
+        run = mock.Mock(return_value=SimpleNamespace(returncode=0))
+        root = mock.Mock(side_effect=lambda argv: ["sudo", *argv])
+        with mock.patch.object(
+            system_mount.shutil, "which", return_value="/usr/bin/kyth-installer-exec"
+        ):
+            system_mount.mount_filesystem(
+                "/dev/sda2", "/target", options=["subvol=@"],
+                run=run, as_root=root, check=True,
+            )
+            system_mount.unmount_filesystem(
+                "/target", recursive=True, lazy=True,
+                run=run, as_root=root, check=False,
+            )
+
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(
+            run.call_args_list[0].args[0],
+            ["sudo", "kyth-installer-exec", "--operation", "disk"],
+        )
+        mount_payload = json.loads(run.call_args_list[0].kwargs["input"])
+        self.assertEqual(mount_payload["options"], ["subvol=@"])
+        unmount_payload = json.loads(run.call_args_list[1].kwargs["input"])
+        self.assertTrue(unmount_payload["recursive"])
+        self.assertTrue(unmount_payload["lazy"])
+
     def test_lsblk_parser_walks_nested_mounts_deepest_first(self):
         payload = {
             "blockdevices": [{

@@ -7,6 +7,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod installer_plan;
+#[allow(dead_code)]
+mod installer_disk;
 mod installer_journal;
 mod installer_storage;
 mod installer_recovery;

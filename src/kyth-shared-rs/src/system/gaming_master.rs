@@ -9,6 +9,10 @@ pub fn master_config_path(path: Option<impl AsRef<Path>>) -> PathBuf {
 
 pub fn load_master(path: impl AsRef<Path>) -> Profile { load_profile(path) }
 
+pub fn save_master(path: impl AsRef<Path>, profile: Profile) -> std::io::Result<()> {
+    super::tuning_profile::save_profile(path, "Kyth master gaming performance", profile)
+}
+
 pub fn thermal_high(root: impl AsRef<Path>, threshold_c: i64) -> bool {
     let Ok(entries) = root.as_ref().read_dir() else { return false; };
     entries.flatten().filter(|entry| entry.file_name().to_string_lossy().starts_with("thermal_zone")).any(|entry| {
@@ -52,5 +56,13 @@ mod tests {
         assert!(battery_low(directory.path(), 30));
         assert_eq!(effective_gaming(Profile::Gaming, true, false).0, Profile::Balanced);
         assert_eq!(effective_gaming(Profile::Gaming, false, false).0, Profile::Gaming);
+    }
+
+    #[test]
+    fn saves_and_loads_master_profile() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("gaming-performance.toml");
+        save_master(&path, Profile::Gaming).unwrap();
+        assert_eq!(load_master(&path), Profile::Gaming);
     }
 }

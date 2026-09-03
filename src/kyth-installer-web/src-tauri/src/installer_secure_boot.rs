@@ -51,7 +51,7 @@ pub(crate) fn build_plan(input: SecureBootInput) -> Result<SecureBootPlan, Strin
         requires_password: false,
         requires_reboot_confirmation: false,
         message: message.to_string(),
-        executor: "kyth-installerd",
+        executor: "kyth-installer-exec",
     };
     if kernel != "cachy" && !input.force_stage {
         return Ok(skipped("standard KythOS kernel does not require custom MOK enrollment"));
@@ -72,7 +72,7 @@ pub(crate) fn build_plan(input: SecureBootInput) -> Result<SecureBootPlan, Strin
             requires_password: false,
             requires_reboot_confirmation: false,
             message: "Secure Boot state must be checked by the privileged service".to_string(),
-            executor: "kyth-installerd",
+            executor: "kyth-installer-exec",
         });
     }
     if enrolled == "yes" {
@@ -82,7 +82,7 @@ pub(crate) fn build_plan(input: SecureBootInput) -> Result<SecureBootPlan, Strin
             requires_password: false,
             requires_reboot_confirmation: false,
             message: "KythOS Secure Boot key is already enrolled".to_string(),
-            executor: "kyth-installerd",
+            executor: "kyth-installer-exec",
         });
     }
     if pending == "yes" {
@@ -92,7 +92,7 @@ pub(crate) fn build_plan(input: SecureBootInput) -> Result<SecureBootPlan, Strin
             requires_password: false,
             requires_reboot_confirmation: true,
             message: "KythOS Secure Boot enrollment is pending confirmation on the next boot".to_string(),
-            executor: "kyth-installerd",
+            executor: "kyth-installer-exec",
         });
     }
     Ok(SecureBootPlan {
@@ -101,7 +101,7 @@ pub(crate) fn build_plan(input: SecureBootInput) -> Result<SecureBootPlan, Strin
         requires_password: true,
         requires_reboot_confirmation: true,
         message: "The privileged service may stage KythOS MOK enrollment".to_string(),
-        executor: "kyth-installerd",
+        executor: "kyth-installer-exec",
     })
 }
 

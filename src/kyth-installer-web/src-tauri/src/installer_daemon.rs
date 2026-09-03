@@ -1,0 +1,592 @@
+//! Native root-facing transport for the installer compatibility backend.
+//!
+//! The destructive installer phases are still implemented by the Python
+//! backend while their Rust equivalents gain parity coverage.  This binary
+//! owns the privileged Unix socket, validates the session boundary, and
+//! exposes the backend only through a loopback connection.  The Python
+//! process never binds the user-visible socket.
+
+use std::ffi::CString;
+use std::fs::{self, OpenOptions};
+use std::io::{self, Read, Write};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use super::installer_storage;
+use super::installer_plan::{build_plan, InstallerPlanInput};
+
+const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+const BACKEND_SOCKET_SUFFIX: &str = ".backend";
+
+struct Options {
+    socket_path: PathBuf,
+    session_token_file: PathBuf,
+    socket_group: Option<String>,
+    peer_uid: Option<u32>,
+}
+
+fn value(args: &[String], name: &str) -> Result<String, String> {
+    let index = args.iter().position(|arg| arg == name).ok_or_else(|| format!("missing {name}"))?;
+    args.get(index + 1).cloned().ok_or_else(|| format!("missing value for {name}"))
+}
+
+fn options(args: &[String]) -> Result<Options, String> {
+    let socket_group = args.iter().position(|arg| arg == "--socket-group").map(|index| {
+        args.get(index + 1).cloned().ok_or_else(|| "missing value for --socket-group".to_string())
+    }).transpose()?;
+    let peer_uid = args.iter().position(|arg| arg == "--peer-uid").map(|index| {
+        args.get(index + 1).ok_or_else(|| "missing value for --peer-uid".to_string())?.parse::<u32>().map_err(|_| "invalid --peer-uid".to_string())
+    }).transpose()?;
+    Ok(Options {
+        socket_path: PathBuf::from(value(args, "--socket-path")?),
+        session_token_file: PathBuf::from(value(args, "--session-token-file")?),
+        socket_group,
+        peer_uid,
+    })
+}
+
+fn read_session_token(path: &Path) -> Result<String, String> {
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|error| format!("could not open installer session token: {error}"))?;
+    let metadata = file.metadata().map_err(|error| format!("could not stat installer session token: {error}"))?;
+    if !metadata.is_file() || metadata.uid() != 0 || metadata.mode() & 0o077 != 0 {
+        return Err("installer session token must be a root-owned private regular file".to_string());
+    }
+    let mut token = String::new();
+    (&file).take(513).read_to_string(&mut token).map_err(|error| format!("could not read installer session token: {error}"))?;
+    let token = token.trim();
+    if !(32..=512).contains(&token.len()) || !token.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-') {
+        return Err("installer session token has an invalid format".to_string());
+    }
+    Ok(token.to_string())
+}
+
+fn group_id(name: &str) -> Result<u32, String> {
+    let name = CString::new(name).map_err(|_| "socket group contains NUL".to_string())?;
+    // SAFETY: getgrnam reads the process' system group database and returns a
+    // pointer owned by libc; it is used only for the scalar gid value.
+    let entry = unsafe { libc::getgrnam(name.as_ptr()) };
+    if entry.is_null() {
+        return Err(format!("socket group does not exist: {}", name.to_string_lossy()));
+    }
+    // SAFETY: entry was checked non-null above.
+    Ok(unsafe { (*entry).gr_gid })
+}
+
+fn chown(path: &Path, gid: u32) -> Result<(), String> {
+    let path = CString::new(path.as_os_str().as_encoded_bytes()).map_err(|_| "socket path contains NUL".to_string())?;
+    // SAFETY: path is a NUL-free CString and -1 preserves the current owner.
+    if unsafe { libc::chown(path.as_ptr(), u32::MAX, gid) } != 0 {
+        return Err(format!("could not set socket group: {}", io::Error::last_os_error()));
+    }
+    Ok(())
+}
+
+fn listener(options: &Options) -> Result<UnixListener, String> {
+    let parent = options.socket_path.parent().ok_or_else(|| "socket path has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| format!("could not create installer socket directory: {error}"))?;
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o750)).map_err(|error| format!("could not secure installer socket directory: {error}"))?;
+    let gid = options.socket_group.as_deref().map(group_id).transpose()?;
+    if let Some(gid) = gid { chown(parent, gid)?; }
+
+    if fs::symlink_metadata(&options.socket_path).is_ok() {
+        let metadata = fs::symlink_metadata(&options.socket_path).map_err(|error| error.to_string())?;
+        if !metadata.file_type().is_socket() {
+            return Err("installer socket path is not a socket".to_string());
+        }
+        fs::remove_file(&options.socket_path).map_err(|error| format!("could not replace installer socket: {error}"))?;
+    }
+    let socket = UnixListener::bind(&options.socket_path).map_err(|error| format!("could not bind installer socket: {error}"))?;
+    fs::set_permissions(&options.socket_path, fs::Permissions::from_mode(if gid.is_some() { 0o660 } else { 0o600 }))
+        .map_err(|error| format!("could not secure installer socket: {error}"))?;
+    if let Some(gid) = gid { chown(&options.socket_path, gid)?; }
+    Ok(socket)
+}
+
+fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
+    let mut credentials = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut length = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: credentials and length point to valid writable storage for the
+    // socket option requested from this connected Unix stream.
+    let result = unsafe {
+        libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, &mut credentials as *mut _ as *mut _, &mut length)
+    };
+    if result != 0 { return Err(format!("could not inspect installer peer: {}", io::Error::last_os_error())); }
+    Ok(credentials.uid)
+}
+
+fn route_allowed(method: &str, target: &str) -> bool {
+    let path = target.split('?').next().unwrap_or(target);
+    match method {
+        "GET" => matches!(path, "/api/config" | "/api/disks" | "/api/partitions" | "/api/free-space" | "/api/timezones" | "/api/locales" | "/api/keymaps" | "/api/disk/pending" | "/api/disk/filesystems" | "/api/report" | "/api/rescue/probe" | "/api/log" | "/api/stream"),
+        "POST" => matches!(path, "/api/start" | "/api/cancel" | "/api/reboot" | "/api/disk/new-table" | "/api/disk/create" | "/api/disk/delete" | "/api/disk/resize" | "/api/disk/format" | "/api/disk/set-mountpoint" | "/api/disk/pending/remove" | "/api/disk/commit" | "/api/disk/rollback" | "/api/rescue/logs-to-usb"),
+        _ => false,
+    }
+}
+
+fn header_value<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
+    headers.lines().skip(1).find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.trim().eq_ignore_ascii_case(name).then_some(value.trim())
+    })
+}
+
+fn request_parts(request: &[u8]) -> Result<(&str, &str, &str), String> {
+    let header_end = header_end(request)?;
+    let headers = std::str::from_utf8(&request[..header_end]).map_err(|_| "installer request headers are not UTF-8".to_string())?;
+    let mut line = headers.lines().next().unwrap_or_default().split_whitespace();
+    let method = line.next().unwrap_or_default();
+    let target = line.next().unwrap_or_default();
+    let version = line.next().unwrap_or_default();
+    if line.next().is_some()
+        || method.is_empty()
+        || target.is_empty()
+        || !matches!(version, "HTTP/1.0" | "HTTP/1.1")
+    {
+        return Err("installer request line is invalid".to_string());
+    }
+    Ok((method, target, headers))
+}
+
+fn header_end(request: &[u8]) -> Result<usize, String> {
+    request
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|position| position + 4)
+        .ok_or_else(|| "installer request has no complete headers".to_string())
+}
+
+fn read_request(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
+    let mut request = Vec::with_capacity(4096);
+    let mut buffer = [0_u8; 4096];
+    let header_end = loop {
+        let count = stream.read(&mut buffer).map_err(|error| format!("could not read installer request: {error}"))?;
+        if count == 0 { return Err("installer client closed before sending a request".to_string()); }
+        request.extend_from_slice(&buffer[..count]);
+        if request.len() > MAX_REQUEST_BYTES { return Err("installer request is too large".to_string()); }
+        if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n") { break position + 4; }
+    };
+    let header_text = std::str::from_utf8(&request[..header_end - 4]).map_err(|_| "installer request headers are not UTF-8".to_string())?;
+    let content_length = header_value(header_text, "Content-Length").unwrap_or("0").parse::<usize>().map_err(|_| "installer content length is invalid".to_string())?;
+    if content_length > MAX_REQUEST_BYTES || header_end + content_length > MAX_REQUEST_BYTES { return Err("installer request body is too large".to_string()); }
+    while request.len() < header_end + content_length {
+        let count = stream.read(&mut buffer).map_err(|error| format!("could not read installer request body: {error}"))?;
+        if count == 0 { return Err("installer request body is incomplete".to_string()); }
+        request.extend_from_slice(&buffer[..count]);
+    }
+    request.truncate(header_end + content_length);
+    Ok(request)
+}
+
+fn forbidden(stream: &mut UnixStream) {
+    let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+}
+
+fn bad_start_request(stream: &mut UnixStream, message: &str) {
+    let body = serde_json::json!({"started": false, "message": message}).to_string();
+    let response = format!(
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(), body
+    );
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn json_response(stream: &mut UnixStream, status: &str, value: &serde_json::Value) {
+    let body = value.to_string();
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn add_display_sizes(value: &mut serde_json::Value) {
+    let Some(items) = value.as_array_mut() else {
+        return;
+    };
+    for item in items {
+        let Some(object) = item.as_object_mut() else {
+            continue;
+        };
+        let Some(size) = object
+            .get("size_bytes")
+            .and_then(serde_json::Value::as_u64)
+        else {
+            continue;
+        };
+        object.insert(
+            "size".to_string(),
+            serde_json::json!(kyth_shared::transfer::human_bytes(size as f64)),
+        );
+    }
+}
+
+fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|error| format!("could not run {program}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "{program} failed with exit code {}: {}",
+            output.status.code().unwrap_or(1),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|_| format!("{program} returned non-UTF-8 output"))
+}
+
+fn findmnt_sources(path: &str, recursive: bool) -> Result<Vec<String>, String> {
+    let mut args = Vec::with_capacity(5);
+    if recursive {
+        args.push("-R");
+    }
+    args.extend(["-n", "-o", "SOURCE", path]);
+    let output = Command::new("/usr/bin/findmnt")
+        .args(args)
+        .output()
+        .map_err(|error| format!("could not run findmnt: {error}"))?;
+    // findmnt uses exit code 1 for a path with no matching mount. That is a
+    // normal result for optional live-media paths, unlike a probe failure.
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(format!(
+            "findmnt failed with exit code {}: {}",
+            output.status.code().unwrap_or(1),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8(output.stdout)
+        .map_err(|_| "findmnt returned non-UTF-8 output".to_string())?
+        .lines()
+        .map(str::trim)
+        .filter(|source| source.starts_with("/dev/"))
+        .map(str::to_string)
+        .collect())
+}
+
+fn storage_lsblk_args(disk: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "--json".to_string(),
+        "--bytes".to_string(),
+        "--paths".to_string(),
+        "--output".to_string(),
+        "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO,MODEL,TRAN,ROTA,RM,PTTYPE,PKNAME".to_string(),
+    ];
+    if let Some(disk) = disk {
+        args.push(disk.to_string());
+    }
+    args
+}
+
+fn read_only_storage_route(method: &str, target: &str) -> Result<Option<serde_json::Value>, String> {
+    if method != "GET" {
+        return Ok(None);
+    }
+    let path = target.split('?').next().unwrap_or(target);
+    match path {
+        "/api/disks" => {
+            let disk_snapshot = command_output(
+                "/usr/bin/lsblk",
+                &storage_lsblk_args(None).iter().map(String::as_str).collect::<Vec<_>>(),
+            )?;
+            let ancestry_snapshot = command_output(
+                "/usr/bin/lsblk",
+                &["--json", "--bytes", "--paths", "--output", "NAME,PKNAME,TYPE"],
+            )?;
+            let mut protected_sources = Vec::new();
+            for mount in [
+                "/", "/boot", "/boot/efi", "/sysroot", "/run/initramfs/live", "/run/initramfs/iso",
+            ] {
+                protected_sources.extend(findmnt_sources(mount, false)?);
+            }
+            protected_sources.extend(findmnt_sources("/run/initramfs", true)?);
+            protected_sources.extend(findmnt_sources("/run/media", true)?);
+            let current_source = findmnt_sources("/", false)?.into_iter().next();
+            let records = installer_storage::runtime_disks_from_snapshots(
+                &disk_snapshot,
+                &ancestry_snapshot,
+                &protected_sources,
+                current_source.as_deref(),
+            )?;
+            let mut value = serde_json::to_value(records)
+                .map_err(|error| format!("could not serialize disk inventory: {error}"))?;
+            add_display_sizes(&mut value);
+            Ok(Some(value))
+        }
+        "/api/partitions" => {
+            let Some(disk) = query_value(target, "disk") else {
+                return Ok(Some(serde_json::json!([])));
+            };
+            let disk = super::installer_plan::normalize_device_path(disk)
+                .ok_or_else(|| "invalid disk query path".to_string())?;
+            let args = storage_lsblk_args(Some(&disk));
+            let snapshot = command_output("/usr/bin/lsblk", &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+            let mut value = serde_json::to_value(installer_storage::parse_partitions(&snapshot)?)
+                .map_err(|error| format!("could not serialize partition inventory: {error}"))?;
+            add_display_sizes(&mut value);
+            Ok(Some(value))
+        }
+        "/api/free-space" => {
+            let Some(disk) = query_value(target, "disk") else {
+                return Ok(Some(serde_json::json!([])));
+            };
+            let disk = super::installer_plan::normalize_device_path(disk)
+                .ok_or_else(|| "invalid disk query path".to_string())?;
+            let args = storage_lsblk_args(Some(&disk));
+            let snapshot = command_output("/usr/bin/lsblk", &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+            let sector = command_output("/usr/bin/blockdev", &["--getss", &disk])?
+                .trim()
+                .parse::<u64>()
+                .map_err(|_| "blockdev returned an invalid sector size".to_string())?;
+            let mut value = serde_json::to_value(installer_storage::free_regions(&snapshot, &disk, sector)?)
+                .map_err(|error| format!("could not serialize free-space inventory: {error}"))?;
+            add_display_sizes(&mut value);
+            Ok(Some(value))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn query_value<'a>(target: &'a str, name: &str) -> Option<&'a str> {
+    target
+        .split_once('?')?
+        .1
+        .split('&')
+        .find_map(|part| part.strip_prefix(&format!("{name}=")))
+}
+
+fn rebuild_request(request: &[u8], body: &[u8]) -> Result<Vec<u8>, String> {
+    let end = header_end(request)?;
+    let headers = std::str::from_utf8(&request[..end - 4])
+        .map_err(|_| "installer request headers are not UTF-8".to_string())?;
+    let retained = headers
+        .lines()
+        .filter(|line| {
+            line.split_once(':')
+                .map(|(name, _)| !name.trim().eq_ignore_ascii_case("Content-Length"))
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n");
+    let mut rebuilt = format!("{retained}\r\nContent-Length: {}\r\n\r\n", body.len()).into_bytes();
+    rebuilt.extend_from_slice(body);
+    Ok(rebuilt)
+}
+
+/// Normalize only the pure storage portion of an authenticated start request.
+///
+/// The Python service still repeats live discovery, current-disk policy, user
+/// acknowledgements, locale checks, and every destructive safety check. This
+/// boundary owns the request shape and canonical device/region projection so
+/// malformed paths and impossible guided-plan values never reach that worker.
+fn normalize_start_request(request: &[u8]) -> Result<Vec<u8>, String> {
+    let (method, target, _headers) = request_parts(request)?;
+    let path = target.split('?').next().unwrap_or(target);
+    if method != "POST" || path != "/api/start" {
+        return Ok(request.to_vec());
+    }
+
+    let end = header_end(request)?;
+    let mut value: serde_json::Value = serde_json::from_slice(&request[end..])
+        .map_err(|error| format!("Invalid installer request JSON: {error}"))?;
+    let input: InstallerPlanInput = serde_json::from_value(value.clone())
+        .map_err(|error| format!("Invalid installer plan: {error}"))?;
+    let plan = build_plan(input)?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "Installer start request must be a JSON object.".to_string())?;
+
+    object.insert("disk".to_string(), serde_json::json!(plan.disk));
+    object.insert("install_mode".to_string(), serde_json::json!(plan.mode));
+    object.insert(
+        "target_partition".to_string(),
+        serde_json::json!(plan.target_partition.unwrap_or_default()),
+    );
+    object.insert(
+        "resize_partition".to_string(),
+        serde_json::json!(plan.resize_partition.unwrap_or_default()),
+    );
+    object.insert(
+        "resize_gib".to_string(),
+        serde_json::json!(plan.resize_bytes / (1024 * 1024 * 1024)),
+    );
+    object.insert(
+        "free_region_start".to_string(),
+        serde_json::json!(plan.free_region_start.unwrap_or_default()),
+    );
+    object.insert(
+        "free_region_end".to_string(),
+        serde_json::json!(plan.free_region_end.unwrap_or_default()),
+    );
+    let body = serde_json::to_vec(&value)
+        .map_err(|error| format!("Could not serialize normalized installer request: {error}"))?;
+    rebuild_request(request, &body)
+}
+
+fn handle(mut client: UnixStream, backend_path: &Path, token: &str, expected_uid: Option<u32>) -> Result<(), String> {
+    if let Some(expected_uid) = expected_uid {
+        if peer_uid(&client)? != expected_uid { forbidden(&mut client); return Ok(()); }
+    }
+    let request = read_request(&mut client)?;
+    let (method, target, headers) = request_parts(&request)?;
+    if !route_allowed(method, target) || header_value(headers, "X-Kyth-Session-Token") != Some(token) { forbidden(&mut client); return Ok(()); }
+    match read_only_storage_route(method, target) {
+        Ok(Some(value)) => {
+            json_response(&mut client, "200 OK", &value);
+            return Ok(());
+        }
+        Err(error) if method == "GET" && matches!(target.split('?').next().unwrap_or(target), "/api/disks" | "/api/partitions" | "/api/free-space") => {
+            json_response(&mut client, "503 Service Unavailable", &serde_json::json!({"error": error}));
+            return Ok(());
+        }
+        Ok(None) => {}
+        Err(error) => return Err(error),
+    }
+    let request = match normalize_start_request(&request) {
+        Ok(request) => request,
+        Err(error) => {
+            if method == "POST" && target.split('?').next().unwrap_or(target) == "/api/start" {
+                bad_start_request(&mut client, &error);
+                return Ok(());
+            }
+            return Err(error);
+        }
+    };
+    let mut backend = UnixStream::connect(backend_path).map_err(|error| format!("could not connect to installer compatibility backend: {error}"))?;
+    backend.write_all(&request).map_err(|error| format!("could not forward installer request: {error}"))?;
+    io::copy(&mut backend, &mut client).map_err(|error| format!("could not forward installer response: {error}"))?;
+    Ok(())
+}
+
+struct ChildGuard(Child);
+
+impl Drop for ChildGuard {
+    fn drop(&mut self) { let _ = self.0.kill(); let _ = self.0.wait(); }
+}
+
+fn start_backend(token_path: &Path, backend_path: &Path) -> Result<ChildGuard, String> {
+    let child = Command::new("/usr/bin/python3")
+        .args(["-m", "kyth_installer.daemon", "--socket-path"])
+        .arg(backend_path)
+        .args(["--session-token-file"])
+        .arg(token_path)
+        .stdin(Stdio::null())
+        .spawn()
+        .map_err(|error| format!("could not start installer compatibility backend: {error}"))?;
+    Ok(ChildGuard(child))
+}
+
+fn wait_for_backend(backend_path: &Path) -> Result<(), String> {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match UnixStream::connect(backend_path) {
+            Ok(_) => return Ok(()),
+            Err(_error) if Instant::now() < deadline => thread::sleep(Duration::from_millis(25)),
+            Err(error) => return Err(format!("installer compatibility backend did not start: {error}")),
+        }
+    }
+}
+
+pub fn run(args: &[String]) -> Result<(), String> {
+    if unsafe { libc::geteuid() } != 0 { return Err("kyth-installerd must run as root".to_string()); }
+    let options = options(args)?;
+    let token = read_session_token(&options.session_token_file)?;
+    let backend_path = PathBuf::from(format!("{}{}", options.socket_path.display(), BACKEND_SOCKET_SUFFIX));
+    let _backend = start_backend(&options.session_token_file, &backend_path)?;
+    wait_for_backend(&backend_path)?;
+    let listener = listener(&options)?;
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                let token = token.clone();
+                let expected_uid = options.peer_uid;
+                let backend_path = backend_path.clone();
+                thread::spawn(move || { if let Err(error) = handle(stream, &backend_path, &token, expected_uid) { eprintln!("installer request failed: {error}"); } });
+            }
+            Err(error) => return Err(format!("installer socket accept failed: {error}")),
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{normalize_start_request, options, read_session_token, route_allowed};
+    use serde_json::Value;
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use tempfile::tempdir;
+
+    #[test]
+    fn options_require_the_native_socket_boundary() {
+        let parsed = options(&["--socket-path".into(), "/run/kyth-installer/api.sock".into(), "--session-token-file".into(), "/run/kyth-installer/session-token".into()]).unwrap();
+        assert_eq!(parsed.socket_path.to_str(), Some("/run/kyth-installer/api.sock"));
+        assert!(parsed.socket_group.is_none());
+    }
+
+    #[test]
+    fn route_allowlist_excludes_arbitrary_execution() {
+        assert!(route_allowed("GET", "/api/disks"));
+        assert!(route_allowed("POST", "/api/start"));
+        assert!(!route_allowed("POST", "/api/exec"));
+        assert!(!route_allowed("GET", "http://127.0.0.1:7777/api/disks"));
+    }
+
+    #[test]
+    fn token_reader_rejects_loose_modes_and_bad_format() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("token");
+        fs::write(&path, "short").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(read_session_token(&path).is_err());
+        fs::write(&path, "A".repeat(43)).unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        assert!(read_session_token(&path).is_err());
+    }
+
+    fn start_request(body: &str) -> Vec<u8> {
+        format!(
+            "POST /api/start HTTP/1.1\r\nHost: installer\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(), body
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn normalizes_start_request_before_forwarding() {
+        let request = start_request(
+            r#"{"disk":" sda ","install_mode":" Wipe ","resize_gib":0,"free_region_start":0,"free_region_end":0,"username":"alice","password":"secret"}"#,
+        );
+        let normalized = normalize_start_request(&request).expect("start request should normalize");
+        let end = normalized.windows(4).position(|window| window == b"\r\n\r\n").unwrap() + 4;
+        let body: Value = serde_json::from_slice(&normalized[end..]).expect("normalized body is JSON");
+        assert_eq!(body["disk"], "/dev/sda");
+        assert_eq!(body["install_mode"], "wipe");
+        assert_eq!(body["target_partition"], "");
+        assert_eq!(body["resize_partition"], "");
+        assert_eq!(body["resize_gib"], 0);
+        assert!(String::from_utf8_lossy(&normalized).contains(&format!("Content-Length: {}", normalized.len() - end)));
+    }
+
+    #[test]
+    fn rejects_invalid_start_plan_before_forwarding() {
+        let request = start_request(r#"{"disk":"../../etc/passwd","install_mode":"wipe"}"#);
+        let error = normalize_start_request(&request).expect_err("unsafe disk must fail closed");
+        assert!(error.contains("target disk"), "{error}");
+    }
+
+    #[test]
+    fn leaves_other_routes_byte_for_byte_unchanged() {
+        let request = b"GET /api/disks HTTP/1.1\r\nHost: installer\r\nContent-Length: 0\r\n\r\n";
+        assert_eq!(normalize_start_request(request).unwrap(), request);
+    }
+}

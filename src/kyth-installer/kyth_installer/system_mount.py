@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from .runner import run_command as _orig_run_command, run_as_root as _orig_as_root
 from .system_privilege import _require_no_symlink as _orig_safe_require, _safe_umount as _orig_safe_umount, _settle as _orig_settle
 
@@ -53,6 +54,95 @@ def run_command(*args, **kwargs):  # type: ignore
 
 _logger = logging.getLogger(__name__)
 
+
+def mount_filesystem(
+    device: str,
+    mountpoint: str,
+    *,
+    options: list[str] | tuple[str, ...] = (),
+    bind_source: str | None = None,
+    run=run_command,
+    as_root=_as_root,
+    **kwargs,
+):
+    """Mount through the typed Rust helper, with a legacy argv fallback."""
+    if shutil.which("kyth-installer-exec"):
+        payload = {
+            "operation": "mount_filesystem",
+            "device": bind_source if bind_source is not None else device,
+            "mountpoint": mountpoint,
+            "options": list(options),
+            "bind": bind_source is not None,
+        }
+        return run(
+            as_root(["kyth-installer-exec", "--operation", "disk"]),
+            input=json.dumps(payload, separators=(",", ":")),
+            text=True,
+            timeout=30,
+            **kwargs,
+        )
+    argv = ["mount"]
+    if bind_source is not None:
+        argv.extend(["--bind", bind_source, mountpoint])
+        return run(as_root(argv), **kwargs)
+    elif options:
+        argv.extend(["-o", ",".join(options)])
+    argv.extend([device, mountpoint])
+    return run(as_root(argv), **kwargs)
+
+
+def unmount_filesystem(
+    mountpoint: str,
+    *,
+    recursive: bool = False,
+    lazy: bool = False,
+    run=run_command,
+    as_root=_as_root,
+    **kwargs,
+):
+    """Unmount through the typed Rust helper, with a legacy argv fallback."""
+    if shutil.which("kyth-installer-exec"):
+        payload = {
+            "operation": "unmount_filesystem",
+            "mountpoint": mountpoint,
+            "recursive": recursive,
+            "lazy": lazy,
+        }
+        return run(
+            as_root(["kyth-installer-exec", "--operation", "disk"]),
+            input=json.dumps(payload, separators=(",", ":")),
+            text=True,
+            timeout=30,
+            **kwargs,
+        )
+    argv = ["umount"]
+    if recursive:
+        argv.append("-R")
+    if lazy:
+        argv.append("-l")
+    argv.append(mountpoint)
+    return run(as_root(argv), **kwargs)
+
+
+def ensure_directory(
+    path: str,
+    *,
+    run=run_command,
+    as_root=_as_root,
+    **kwargs,
+):
+    """Create an installer directory through the typed Rust helper."""
+    if shutil.which("kyth-installer-exec"):
+        payload = {"operation": "ensure_directory", "path": path}
+        return run(
+            as_root(["kyth-installer-exec", "--operation", "disk"]),
+            input=json.dumps(payload, separators=(",", ":")),
+            text=True,
+            timeout=30,
+            **kwargs,
+        )
+    return run(as_root(["mkdir", "-p", path]), **kwargs)
+
 def _orig_lsblk_target_mounts(disk: str) -> list[tuple[str, str]]:
     """Return (device, mountpoint) pairs for mounted devices under disk."""
     result = run_command(
@@ -97,7 +187,9 @@ def unmount_target_disk(disk: str, log) -> None:
     """Unmount any live-session mounts that would block wiping disk."""
     log(f"Unmounting any existing mounts on {disk} ...")
     for mount in ("/mnt", "/sysroot", "/target"):
-        run_command(_as_root(["umount", "-R", mount]), check=False)
+        unmount_filesystem(
+            mount, recursive=True, run=run_command, as_root=_as_root, check=False,
+        )
 
     try:
         mounts = _lsblk_target_mounts(disk)
@@ -109,8 +201,8 @@ def unmount_target_disk(disk: str, log) -> None:
 
     for dev, mount in mounts:
         log(f"Unmounting {dev} from {mount}")
-        result = run_command(
-            _as_root(["umount", "-R", mount]),
+        result = unmount_filesystem(
+            mount, recursive=True, run=run_command, as_root=_as_root,
             capture_output=True, text=True,
         )
         if result.returncode != 0:
@@ -142,6 +234,3 @@ def unmount_target_disk(disk: str, log) -> None:
             f"Target disk {disk} still has mounted partitions: {details}. "
             "Close any file manager or terminal using those paths and retry."
         )
-
-
-

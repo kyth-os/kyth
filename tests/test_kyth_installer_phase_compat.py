@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -33,6 +34,36 @@ class PhaseCompatibilityTests(unittest.TestCase):
                     format_error=formatter,
                 )
         formatter.assert_called_once()
+
+    def test_identity_configuration_uses_typed_rust_executor(self):
+        run = mock.MagicMock(return_value=mock.MagicMock(returncode=0))
+        with (
+            mock.patch.object(install, "run_command", run),
+            mock.patch.object(install, "_as_root", side_effect=lambda command: command),
+            mock.patch.object(
+                finalize_identity.shutil,
+                "which",
+                return_value="/usr/bin/kyth-installer-exec",
+            ),
+        ):
+            finalize_identity.configure_hostname_timezone(
+                "/target/etc",
+                {
+                    "hostname": "kyth",
+                    "timezone": "UTC",
+                    "locale": "en_US.UTF-8",
+                    "keymap": "us",
+                },
+                mock.Mock(),
+                format_error=str,
+            )
+        self.assertEqual(
+            run.call_args.args[0],
+            ["kyth-installer-exec", "--operation", "configuration-write"],
+        )
+        payload = json.loads(run.call_args.kwargs["input"])
+        self.assertEqual(payload["target_root"], "/target")
+        self.assertEqual(payload["timezone"], "UTC")
 
 
 if __name__ == "__main__":

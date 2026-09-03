@@ -41,7 +41,6 @@ python3 -m pip install \
 	--prefix=/usr \
 	"${installer_package_root}/kyth_shared" \
 	"${installer_package_root}/kyth-installer"
-install -m 0755 /src/build_files/kyth-installerd /usr/bin/kyth-installerd
 rm -rf "${installer_package_root}"
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
 install -Dm644 /src/build_files/kyth-installerd.service /usr/lib/systemd/system/kyth-installerd.service

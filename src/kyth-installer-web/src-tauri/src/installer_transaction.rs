@@ -1,11 +1,15 @@
-//! Read-only decoder for the installer transaction-state schema.
+//! Transaction-state schema, decoder, and durable writer.
 //!
-//! Python still owns atomic writes and file permissions. This module only
-//! decodes the support-safe JSON record and attaches the already-parity-tested
-//! Rescue guidance.
+//! The compatibility service supplies only support-safe state. The native
+//! helper owns the atomic replace and fsync boundary when installed; Python
+//! retains a compatibility writer for environments without the helper.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 
 use crate::installer_recovery::{rescue_guidance, RecoveryGuidance};
 
@@ -59,6 +63,82 @@ pub(crate) struct DecodedTransaction {
     pub guidance: RecoveryGuidance,
 }
 
+#[derive(Debug, Deserialize)]
+pub(crate) struct TransactionWriteInput {
+    pub path: String,
+    pub state: TransactionState,
+}
+
+fn safe_transaction_path(raw: &str) -> Result<PathBuf, String> {
+    let path = Path::new(raw.trim());
+    if !path.is_absolute()
+        || path.as_os_str().len() > 4096
+        || path.components().any(|component| {
+            matches!(component, std::path::Component::ParentDir)
+        })
+    {
+        return Err("transaction path must be an absolute safe path".to_string());
+    }
+    Ok(path.to_path_buf())
+}
+
+fn sync_directory(path: &Path) -> Result<(), String> {
+    File::open(path)
+        .map_err(|error| format!("could not open transaction directory: {error}"))?
+        .sync_all()
+        .map_err(|error| format!("could not sync transaction directory: {error}"))
+}
+
+pub(crate) fn write_request(input: TransactionWriteInput) -> Result<(), String> {
+    let path = safe_transaction_path(&input.path)?;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "transaction path has no parent directory".to_string())?;
+    fs::create_dir_all(parent)
+        .map_err(|error| format!("could not create transaction directory: {error}"))?;
+    let metadata = fs::symlink_metadata(parent)
+        .map_err(|error| format!("could not inspect transaction directory: {error}"))?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err("transaction directory must be a real directory".to_string());
+    }
+    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+        .map_err(|error| format!("could not secure transaction directory: {error}"))?;
+    if let Ok(metadata) = fs::symlink_metadata(&path) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err("transaction path must be a regular file".to_string());
+        }
+    }
+
+    let temporary = path.with_extension(format!(
+        "{}.tmp",
+        path.extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("json")
+    ));
+    let mut file = OpenOptions::new();
+    file.write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW);
+    let mut file = file
+        .open(&temporary)
+        .map_err(|error| format!("could not open temporary transaction state: {error}"))?;
+    serde_json::to_writer_pretty(&mut file, &input.state)
+        .map_err(|error| format!("could not encode transaction state: {error}"))?;
+    file.write_all(b"\n")
+        .map_err(|error| format!("could not finish transaction state: {error}"))?;
+    file.flush()
+        .map_err(|error| format!("could not flush transaction state: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("could not sync transaction state: {error}"))?;
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o600))
+        .map_err(|error| format!("could not secure transaction state: {error}"))?;
+    fs::rename(&temporary, &path)
+        .map_err(|error| format!("could not replace transaction state: {error}"))?;
+    sync_directory(parent)
+}
+
 pub(crate) fn decode(input: &str) -> Result<DecodedTransaction, String> {
     let state: TransactionState = serde_json::from_str(input)
         .map_err(|error| format!("invalid transaction state: {error}"))?;
@@ -93,5 +173,39 @@ mod tests {
             assert_eq!(decoded.guidance.severity, case["expected"]["severity"].as_str().unwrap(), "{name}");
             assert_eq!(decoded.guidance.bootable, case["expected"]["bootable"].as_bool().unwrap(), "{name}");
         }
+    }
+
+    #[test]
+    fn writes_transaction_state_atomically_and_durably() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("transaction.json");
+        let state: TransactionState = serde_json::from_value(serde_json::json!({
+            "status": "partitioning",
+            "phase": "storage",
+            "lifecycle": "partitioning",
+            "disk": "/dev/sda",
+        }))
+        .expect("transaction state");
+        write_request(TransactionWriteInput {
+            path: path.to_string_lossy().into_owned(),
+            state,
+        })
+        .expect("transaction state should be written");
+        let decoded = decode(&std::fs::read_to_string(path).expect("written state"))
+            .expect("written state should decode");
+        assert_eq!(decoded.state.status, "partitioning");
+        assert_eq!(decoded.state.disk, "/dev/sda");
+    }
+
+    #[test]
+    fn rejects_unsafe_transaction_paths() {
+        let state: TransactionState = serde_json::from_value(serde_json::json!({}))
+            .expect("default transaction state");
+        let error = write_request(TransactionWriteInput {
+            path: "../transaction.json".to_string(),
+            state,
+        })
+        .expect_err("relative traversal path must fail");
+        assert!(error.contains("absolute safe path"));
     }
 }

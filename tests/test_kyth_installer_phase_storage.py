@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import pathlib
 import sys
 import unittest
@@ -106,6 +107,36 @@ class StorageRoutingTests(unittest.TestCase):
 
 
 class BtrfsPreparationTests(unittest.TestCase):
+    def test_btrfs_layout_uses_typed_rust_operations_when_helper_is_installed(self):
+        context = InstallerContext()
+        with (
+            mock.patch.object(storage.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command") as run,
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda cmd: cmd),
+            mock.patch("kyth_installer.install._require_no_symlink"),
+            mock.patch("kyth_installer.install._safe_umount"),
+            mock.patch("kyth_installer.install.mount_filesystem"),
+            mock.patch("kyth_installer.install._run_cmd") as stream,
+        ):
+            storage._create_btrfs_subvolumes("/dev/sda3", mock.Mock(), mock.Mock(), context)
+
+        stream.assert_not_called()
+        operations = [
+            json.loads(call.kwargs["input"])["operation"]
+            for call in run.call_args_list
+            if "input" in call.kwargs
+        ]
+        self.assertEqual(
+            operations,
+            [
+                "format_filesystem",
+                "ensure_directory",
+                "btrfs_subvolume_create",
+                "btrfs_subvolume_create",
+                "btrfs_subvolume_set_default",
+            ],
+        )
+
     def test_btrfs_subvolumes_are_created_and_mount_is_released(self):
         context = InstallerContext()
         with (

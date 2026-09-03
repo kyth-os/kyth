@@ -63,12 +63,13 @@ def DiskLease(disk: str, log, *, exclusive: bool = True):
 
 @contextlib.contextmanager
 def PartitionTableGuard(disk: str, log, *, disk_service=None, should_restore=None):
-    """Back up GPT/MBR, fsync file+dir, yield, restore on exception.
+    """Back up GPT/MBR durably, yield, restore on exception.
 
-    Consolidates the duplicate `sgdisk --backup`/`--load-backup` + fsync
-    pattern from `plan._commit_new_kythos_partition` and
-    `partition_ops.Journal._save_snapshot`. Uses `disk_service` if given,
-    else lazy `DiskService`.
+    Consolidates the duplicate `sgdisk --backup`/`--load-backup` pattern from
+    `plan._commit_new_kythos_partition` and `partition_ops.Journal`.
+    The root-only Rust disk helper syncs the backup file and its parent
+    directory before returning. Uses `disk_service` if given, else lazy
+    `DiskService`.
 
     *should_restore*, when supplied, is called after a failure; return
     False to skip table restore (format/shrink of an existing filesystem
@@ -84,17 +85,6 @@ def PartitionTableGuard(disk: str, log, *, disk_service=None, should_restore=Non
         backup_path = str(Path(backup_dir) / "partition-table.backup")
         log(f"Backing up the partition table before changing it...")
         disk_service.backup_table(disk, backup_path)
-        # durability: fsync file + directory
-        try:
-            with open(backup_path, "rb") as bf:
-                os.fsync(bf.fileno())
-            dfd = os.open(backup_dir, os.O_DIRECTORY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-        except OSError as err:
-            log(f"Warning: could not fsync partition backup: {err}")
         try:
             yield backup_path
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path

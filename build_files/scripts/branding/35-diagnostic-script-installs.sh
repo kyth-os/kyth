@@ -4,10 +4,7 @@
 # the former Python entry point is retained only as source/test coverage.
  # kyth-resume-check is likewise supplied by the native Rust builder output.
 # Native Rust compatibility-named utilities are copied into /usr/bin by the
-# Dockerfile builder stage; the former Python entry points are not installed.
-install -m 0755 /ctx/kyth-controller-check /usr/bin/kyth-controller-check
-install -m 0755 /ctx/kyth-resume-check /usr/bin/kyth-resume-check
-install -m 0755 /ctx/kyth-nvidia-status /usr/bin/kyth-nvidia-status
+# Dockerfile builder stage; no Python diagnostic entry points are installed.
 install -m 0755 /ctx/kyth-creator-check /usr/bin/kyth-creator-check
 install -m 0644 /ctx/config/qualification-budgets.json /usr/share/kyth/qualification-budgets.json
 install -m 0755 /ctx/kyth-vm-acceptance-guest /usr/libexec/kyth-vm-acceptance-guest

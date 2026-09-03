@@ -5,6 +5,7 @@ Canonical after partition_ops 571 split; partition_ops.py re-exports for compat.
 from __future__ import annotations
 
 import logging
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -161,23 +162,7 @@ class Journal:
         self._backup_dir = tempfile.TemporaryDirectory(prefix="kyth-partition-")
         backup_path = Path(self._backup_dir.name) / "partition-table.backup"
         backup = str(backup_path)
-        # Use guard's backup+fsync logic without entering its restore context
-        # (restore is via _restore_snapshot); mimic guard's fsync
         self._disk_service.backup_table(self.disk, backup)
-        try:
-            with open(backup_path, "rb") as bf:
-                import os
-
-                os.fsync(bf.fileno())
-            dfd = os.open(self._backup_dir.name, os.O_DIRECTORY)
-            try:
-                import os as _os2
-
-                _os2.fsync(dfd)
-            finally:
-                os.close(dfd)
-        except OSError:
-            pass
         self._snapshot_saved = True
 
     def _restore_snapshot(self) -> None:
@@ -350,6 +335,10 @@ class Journal:
                 )
         table_type, primary_count, disk_size_bytes = self._initial_table_state(current_parts)
 
+        rust_errors = self._rust_validate(current_parts, table_type, disk_size_bytes)
+        if rust_errors is not None:
+            return rust_errors
+
         for op in self.ops:
             kind = op["kind"]
             p = op["params"]
@@ -424,6 +413,187 @@ class Journal:
         errors.extend(self._validate_not_in_use(current_parts))
 
         return errors
+
+    def _rust_validate(
+        self, current_parts: list[dict], table_type: str, disk_size_bytes: int,
+    ) -> list[str] | None:
+        """Use the Rust journal validator when the native helper is installed.
+
+        Development environments without the native helper retain the Python
+        validator as a compatibility fallback. Once the helper is installed,
+        a missing operation, malformed response, or execution failure refuses
+        the commit rather than silently switching validators.
+        """
+        if not shutil.which("kyth-installer-exec"):
+            return None
+        from .runner import run_command
+        from .system import _as_root
+
+        payload = {
+            "journal": {
+                "disk": self.disk,
+                "ops": self.ops,
+                "committed": self._committed,
+                "root_partition": self._root_partition,
+                "irreversible_completed": self.irreversible_completed,
+            },
+            "current_parts": current_parts,
+            "table_type": table_type,
+            "disk_size_bytes": max(0, disk_size_bytes),
+        }
+        try:
+            result = run_command(
+                _as_root(["kyth-installer-exec", "--operation", "journal-validate"]),
+                input=json.dumps(payload, separators=(",", ":")),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            response = json.loads(result.stdout or "{}")
+            errors = response.get("errors")
+            valid = response.get("valid")
+            if (
+                not isinstance(valid, bool)
+                or not isinstance(errors, list)
+                or not all(isinstance(error, str) for error in errors)
+                or valid != (not errors)
+            ):
+                raise RuntimeError("Rust journal validator returned an invalid response")
+            return errors
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, TypeError) as exc:
+            _logger.error("Rust journal validation failed; refusing partition commit: %s", exc)
+            return ["Rust journal validation failed; refusing to commit partition changes."]
+
+    def rust_validate_target(self, partition: str) -> str | None:
+        """Validate a staged partition target through the native boundary.
+
+        The compatibility parent-disk probe remains available only when the
+        helper is absent. Once installed, malformed output or a failed helper
+        invocation fails closed instead of allowing Python to silently resume
+        target validation.
+        """
+        if not shutil.which("kyth-installer-exec"):
+            return None
+        from .runner import run_command
+        from .system import _as_root
+
+        try:
+            result = run_command(
+                _as_root(["kyth-installer-exec", "--operation", "journal-target"]),
+                input=json.dumps(
+                    {
+                        "disk": self.disk,
+                        "partition": partition,
+                    },
+                    separators=(",", ":"),
+                ),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            response = json.loads(result.stdout or "{}")
+            valid = response.get("valid")
+            error = response.get("error")
+            if not isinstance(valid, bool) or (error is not None and not isinstance(error, str)):
+                raise RuntimeError("Rust journal target validator returned an invalid response")
+            if valid:
+                return None
+            return error or "Partition target validation failed."
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, TypeError) as exc:
+            _logger.error("Rust journal target validation failed: %s", exc)
+            return "Rust journal target validation failed; refusing to stage partition changes."
+
+    def _rust_commit(self, log, record=None) -> dict | None:
+        """Run the complete journal transaction in the native helper."""
+        if self._disk_service.dry_run or not shutil.which("kyth-installer-exec"):
+            return None
+        from .streaming import StreamingCommandRunner
+        from .system import _as_root
+        from .fsresize import validate_shrink_request
+
+        # Keep the last-moment power and encryption guard in the compatibility
+        # layer while Rust owns the actual filesystem and partition sequence.
+        # Run every guard before the first mutation so a later resize cannot
+        # discover that the machine was unplugged mid-transaction.
+        for operation in self.ops:
+            if operation.get("kind") != "resize":
+                continue
+            params = operation.get("params") or {}
+            partition = str(params.get("partition") or "")
+            current_parts = list_partitions(self.disk)
+            current = next(
+                (part for part in current_parts if part.get("name") == partition),
+                None,
+            )
+            if current is None:
+                raise RuntimeError(f"Resize: {partition} was not found on {self.disk}.")
+            validate_shrink_request(partition, str(current.get("fstype") or ""))
+
+        response: dict = {}
+
+        def consume(line: str) -> None:
+            stripped = line.strip()
+            try:
+                event = json.loads(stripped)
+            except (TypeError, ValueError):
+                if stripped:
+                    log(stripped)
+                return
+            if not isinstance(event, dict):
+                return
+            if event.get("event") == "step":
+                if record is not None:
+                    try:
+                        record(
+                            str(event.get("kind") or "partition"),
+                            str(event.get("status") or "started"),
+                            str(event.get("target") or self.disk),
+                        )
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+                        _logger.debug(
+                            "journal bookkeeping write failed for native step: %s",
+                            exc,
+                            exc_info=True,
+                        )
+            elif "ok" in event:
+                response.update(event)
+
+        command = _as_root(["kyth-installer-exec", "--operation", "journal-commit"])
+        runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
+        runner.run(
+            command,
+            0,
+            0,
+            consume,
+            lambda _pct: None,
+            stall_timeout=3600,
+            absolute_timeout=3600,
+            stdin_data=json.dumps(
+                {
+                    "journal": {
+                        "disk": self.disk,
+                        "ops": self.ops,
+                        "committed": self._committed,
+                        "root_partition": self._root_partition,
+                        "irreversible_completed": self.irreversible_completed,
+                    }
+                },
+                separators=(",", ":"),
+            ),
+        )
+        if not response or not isinstance(response.get("ok"), bool):
+            raise RuntimeError("Rust journal executor returned no valid response")
+        journal_data = response.get("journal")
+        if journal_data is not None:
+            if not isinstance(journal_data, dict) or not isinstance(journal_data.get("ops"), list):
+                raise RuntimeError("Rust journal executor returned malformed journal metadata")
+            self.ops = journal_data["ops"]
+            self._committed = bool(journal_data.get("committed"))
+            self._root_partition = journal_data.get("root_partition")
+            self.irreversible_completed = bool(journal_data.get("irreversible_completed"))
+        return response
 
     def _validate_create_op(self, p: dict, table_type: str, primary_count: int,
                             allocated: dict[str, tuple[int, int, str]],
@@ -628,6 +798,16 @@ class Journal:
         died, which is the only way a later recovery pass can tell a completed
         wipe from a half-written partition table.
         """
+        rust_response = self._rust_commit(log, record=record)
+        if rust_response is not None:
+            if not rust_response.get("ok"):
+                self._committed = False
+                self.irreversible_completed = bool(rust_response.get("irreversible"))
+                raise RuntimeError(
+                    str(rust_response.get("message") or "Rust journal commit failed.")
+                )
+            return str(rust_response.get("root_partition") or "")
+
         if not self._disk_service.dry_run:
             _require_parted()
         from .storage_guard import DiskLease
@@ -645,8 +825,8 @@ class Journal:
         from .storage_guard import PartitionTableGuard
 
         with DiskLease(self.disk, log, exclusive=True):
-            # Snapshot is now handled by PartitionTableGuard (backed up with fsync);
-            # keep _save_snapshot for rollback() compatibility but guard owns restore.
+            # Keep the journal snapshot for explicit rollback compatibility;
+            # the Rust disk helper owns backup-file and parent-directory sync.
             self._save_snapshot()
             with PartitionTableGuard(
                 self.disk, log, disk_service=self._disk_service,
@@ -710,5 +890,3 @@ class Journal:
         self._committed = False
         self._root_partition = None
         log("Partition table restored to previous state.")
-
-

@@ -91,6 +91,25 @@ pub fn load_wine_sync(path: impl AsRef<Path>) -> WineSyncConfig { parse(path).ma
 pub fn save_wine_sync(path: impl AsRef<Path>, config: &WineSyncConfig) -> std::io::Result<()> { crate::atomic_io::atomic_write_text(path, &format!("# Kyth wine sync — offline\nmode = {}\n", quote(&config.mode)), Some(0o600)) }
 pub fn wine_env_for_mode(mode: &str, ntsync_available: bool, futex2_available: bool) -> Option<String> { let selected = match mode { "off" => return None, "auto" if ntsync_available => "ntsync", "auto" if futex2_available => "fsync", "auto" => "esync", value => value }; let vars = match selected { "ntsync" => "WINEFSYNC=1\nNTSYNC=1\n", "fsync" => "WINEFSYNC=1\n", "esync" => "WINEESYNC=1\n", _ => "WINEFSYNC=1\n" }; Some(format!("# Kyth wine sync — generated {selected}\n{vars}")) }
 pub fn wine_sync_status(content: Option<&str>) -> &'static str { let Some(content) = content else { return "off"; }; if content.contains("NTSYNC") { "ntsync" } else if content.contains("WINEFSYNC") { "fsync" } else if content.contains("WINEESYNC") { "esync" } else { "unknown" } }
+pub fn probe_wine_sync() -> (bool, bool) {
+    let ntsync = Path::new("/dev/ntsync").exists() || Path::new("/sys/module/ntsync").exists();
+    let futex2 = std::fs::read_to_string("/proc/version").map(|value| value.contains("6.")).unwrap_or(false);
+    (ntsync, futex2)
+}
+pub fn generate_wine_env(config: &WineSyncConfig, destination: impl AsRef<Path>) -> std::io::Result<Option<PathBuf>> {
+    let destination = destination.as_ref();
+    let (ntsync, futex2) = probe_wine_sync();
+    let content = wine_env_for_mode(&config.mode, ntsync, futex2);
+    if let Some(content) = content {
+        crate::atomic_io::atomic_write_text(destination, &content, Some(0o644))?;
+        Ok(Some(destination.to_path_buf()))
+    } else {
+        match std::fs::remove_file(destination) {
+            Ok(()) | Err(_) => {}
+        }
+        Ok(None)
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MimallocConfig { pub enabled: bool, pub global: bool, pub per_game: bool }
@@ -98,6 +117,29 @@ impl Default for MimallocConfig { fn default() -> Self { Self { enabled: false, 
 pub fn load_mimalloc(path: impl AsRef<Path>) -> MimallocConfig { parse(path).map(|v| MimallocConfig { enabled: bool_value(v.get("enabled"), false), global: bool_value(v.get("global"), false), per_game: bool_value(v.get("per_game"), true) }).unwrap_or_default() }
 pub fn save_mimalloc(path: impl AsRef<Path>, config: &MimallocConfig) -> std::io::Result<()> { crate::atomic_io::atomic_write_text(path, &format!("# Kyth mimalloc — offline, per-game wrapper\nenabled = {}\nglobal = {}\nper_game = {}\n", config.enabled, config.global, config.per_game), Some(0o600)) }
 pub fn mimalloc_env(config: &MimallocConfig, library: &str) -> Option<String> { if !config.enabled || !config.global { return None; } Some(format!("# Kyth mimalloc — generated, global preload (opt-in)\nLD_PRELOAD={library}\nMIMALLOC_LARGE_OS_PAGES=1\n")) }
+pub fn find_mimalloc_library() -> String {
+    ["/usr/lib64/libmimalloc.so.2", "/usr/lib64/libmimalloc.so", "/usr/lib/libmimalloc.so"]
+        .iter()
+        .find(|path| Path::new(**path).is_file())
+        .unwrap_or(&"/usr/lib64/libmimalloc.so.2")
+        .to_string()
+}
+pub fn generate_mimalloc_env(config: &MimallocConfig, destination: impl AsRef<Path>) -> std::io::Result<Option<PathBuf>> {
+    let destination = destination.as_ref();
+    let content = mimalloc_env(config, &find_mimalloc_library());
+    if let Some(content) = content {
+        crate::atomic_io::atomic_write_text(destination, &content, Some(0o644))?;
+        Ok(Some(destination.to_path_buf()))
+    } else {
+        match std::fs::remove_file(destination) {
+            Ok(()) | Err(_) => {}
+        }
+        Ok(None)
+    }
+}
+pub fn mimalloc_status(config: &MimallocConfig, environment_exists: bool) -> &'static str {
+    if environment_exists { "global" } else if config.enabled { "per-game" } else { "off" }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SccacheConfig { pub enabled: bool, pub size: String }
@@ -105,6 +147,25 @@ impl Default for SccacheConfig { fn default() -> Self { Self { enabled: false, s
 pub fn load_sccache(path: impl AsRef<Path>) -> SccacheConfig { parse(path).map(|v| { let size = v.get("size").and_then(toml::Value::as_str).unwrap_or("10G"); SccacheConfig { enabled: bool_value(v.get("enabled"), false), size: matches!(size, "5G" | "10G" | "20G" | "50G").then_some(size).unwrap_or("10G").into() } }).unwrap_or_default() }
 pub fn save_sccache(path: impl AsRef<Path>, config: &SccacheConfig) -> std::io::Result<()> { crate::atomic_io::atomic_write_text(path, &format!("# Kyth sccache — offline\nenabled = {}\nsize = {}\n", config.enabled, quote(&config.size)), Some(0o600)) }
 pub fn sccache_env(config: &SccacheConfig) -> Option<String> { config.enabled.then(|| format!("# Kyth sccache — generated\nSCCACHE_DIR=/var/cache/sccache\nSCCACHE_CACHE_SIZE={}\n", config.size)) }
+pub fn sccache_service(config: &SccacheConfig) -> Option<String> {
+    config.enabled.then(|| format!("[Unit]\nDescription=Kyth sccache server — Rust/C cache\nAfter=network.target\n[Service]\nType=simple\nEnvironment=SCCACHE_DIR=/var/cache/sccache\nEnvironment=SCCACHE_CACHE_SIZE={}\nExecStart=/usr/bin/sccache --start-server\nExecStop=/usr/bin/sccache --stop-server\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n", config.size))
+}
+pub fn generate_sccache(config: &SccacheConfig, environment: impl AsRef<Path>, service: impl AsRef<Path>) -> std::io::Result<Option<PathBuf>> {
+    let environment = environment.as_ref();
+    let service = service.as_ref();
+    let (Some(environment_content), Some(service_content)) = (sccache_env(config), sccache_service(config)) else {
+        for path in [environment, service] {
+            match std::fs::remove_file(path) {
+                Ok(()) | Err(_) => {}
+            }
+        }
+        return Ok(None);
+    };
+    crate::atomic_io::atomic_write_text(environment, &environment_content, Some(0o644))?;
+    crate::atomic_io::atomic_write_text(service, &service_content, Some(0o644))?;
+    Ok(Some(environment.to_path_buf()))
+}
+pub fn sccache_status(environment: impl AsRef<Path>) -> &'static str { if environment.as_ref().is_file() { "enabled" } else { "off" } }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ShaderSizeConfig { pub mode: String, pub size: String }
@@ -113,6 +174,13 @@ pub fn load_shader_size(path: impl AsRef<Path>) -> ShaderSizeConfig { parse(path
 pub fn save_shader_size(path: impl AsRef<Path>, config: &ShaderSizeConfig) -> std::io::Result<()> { crate::atomic_io::atomic_write_text(path, &format!("# Kyth shader cache size — offline\nmode = {}\nsize = {}\n", quote(&config.mode), quote(&config.size)), Some(0o600)) }
 pub fn resolve_shader_size(config: &ShaderSizeConfig, vram_gb: u64) -> String { if config.mode == "manual" { config.size.clone() } else if vram_gb >= 8 { "4G".into() } else { "2G".into() } }
 pub fn shader_size_env(size: &str) -> String { format!("# Kyth shader cache size — generated\nMESA_SHADER_CACHE_MAX_SIZE={size}\n__GL_SHADER_DISK_CACHE_SIZE={size}\n") }
+pub fn generate_shader_size(config: &ShaderSizeConfig, vram_gb: u64, destination: impl AsRef<Path>) -> std::io::Result<PathBuf> {
+    let destination = destination.as_ref();
+    let size = resolve_shader_size(config, vram_gb);
+    crate::atomic_io::atomic_write_text(destination, &shader_size_env(&size), Some(0o644))?;
+    Ok(destination.to_path_buf())
+}
+pub fn shader_size_status(destination: impl AsRef<Path>) -> &'static str { if destination.as_ref().is_file() { "enabled" } else { "off" } }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BtrfsPerfConfig { pub profile: String, pub compress: String }

@@ -1,14 +1,17 @@
 """Storage preparation for install — Phase 2 verbatim from install.py."""
 from __future__ import annotations
 
+import json
 import pathlib
 import re
 import shutil
+import subprocess
 import tempfile
 import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from ..config import SKIP_FETCH_CHECK
 from ..context import InstallerContext, InstallPhase
 from ..plan import ResolvedInstallPlan
 from ..system import unmount_target_disk  # pylint: disable=unused-import
@@ -77,27 +80,73 @@ def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerConte
     _as_root = phase_dependency("_as_root")
     _require_no_symlink = phase_dependency("_require_no_symlink")
     _safe_umount = phase_dependency("_safe_umount")
+    ensure_directory = phase_dependency("ensure_directory")
+    mount_filesystem = phase_dependency("mount_filesystem")
     _run_cmd = phase_dependency("_run_cmd")
     log(f"Formatting {target_part} as btrfs ...")
-    _run_cmd(
-        ["mkfs.btrfs", "-f", "-L", "KythOS", target_part],
-        5, 10, log, progress,
-        publish=lambda event: _push(event, context),
-    )
+    helper = shutil.which("kyth-installer-exec")
+    if helper:
+        run_command(
+            _as_root(["kyth-installer-exec", "--operation", "disk"]),
+            input=json.dumps({
+                "operation": "format_filesystem",
+                "device": target_part,
+                "fs": "btrfs",
+                "label": "KythOS",
+            }, separators=(",", ":")),
+            text=True,
+            stdout=subprocess.DEVNULL,
+            check=True,
+            timeout=300,
+        )
+    else:
+        _run_cmd(
+            ["mkfs.btrfs", "-f", "-L", "KythOS", target_part],
+            5, 10, log, progress,
+            publish=lambda event: _push(event, context),
+        )
 
     log("Creating Btrfs subvolumes @ and @home ...")
     from ..config import STAGING_BTRFS_ROOT
     btrfs_temp_root = STAGING_BTRFS_ROOT  # noqa: S108 — _require_no_symlink guards this below
     _safe_umount(run_command, btrfs_temp_root)
     _require_no_symlink(btrfs_temp_root)
-    run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
+    ensure_directory(btrfs_temp_root, run=run_command, as_root=_as_root, check=True)
     context.register_mount(btrfs_temp_root)
-    run_command(_as_root(["mount", target_part, btrfs_temp_root]), check=True)
+    mount_filesystem(target_part, btrfs_temp_root, run=run_command, as_root=_as_root, check=True)
     try:
-        run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
-        run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@home"]), check=True)
+        for name in ("@", "@home"):
+            if helper:
+                run_command(
+                    _as_root(["kyth-installer-exec", "--operation", "disk"]),
+                    input=json.dumps({
+                        "operation": "btrfs_subvolume_create",
+                        "mountpoint": btrfs_temp_root,
+                        "name": name,
+                    }, separators=(",", ":")),
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    check=True,
+                    timeout=60,
+                )
+            else:
+                run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/{name}"]), check=True)
         log("Setting Btrfs default subvolume to @ ...")
-        run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
+        if helper:
+            run_command(
+                _as_root(["kyth-installer-exec", "--operation", "disk"]),
+                input=json.dumps({
+                    "operation": "btrfs_subvolume_set_default",
+                    "mountpoint": btrfs_temp_root,
+                    "name": "@",
+                }, separators=(",", ":")),
+                text=True,
+                stdout=subprocess.DEVNULL,
+                check=True,
+                timeout=60,
+            )
+        else:
+            run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
     finally:
         _safe_umount(run_command, btrfs_temp_root, check=True)
         context.release_mount(btrfs_temp_root)
@@ -112,8 +161,10 @@ def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerC
     """
     run_command = phase_dependency("run_command")
     _as_root = phase_dependency("_as_root")
+    mount_filesystem = phase_dependency("mount_filesystem")
+    ensure_directory = phase_dependency("ensure_directory")
     efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
-    run_command(_as_root(["mkdir", "-p", str(efi_mountpoint)]), check=True)
+    ensure_directory(str(efi_mountpoint), run=run_command, as_root=_as_root, check=True)
     context.register_mount(str(efi_mountpoint))
     try:
         result = run_command(
@@ -124,16 +175,13 @@ def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerC
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         current_efi_mnt = ""
     if current_efi_mnt:
-        run_command(
-            _as_root(["mount", "--bind", current_efi_mnt, str(efi_mountpoint)]),
-            check=True,
+        mount_filesystem(
+            efi_part, str(efi_mountpoint), bind_source=current_efi_mnt,
+            run=run_command, as_root=_as_root, check=True,
         )
         log(f"EFI bind-mounted from {current_efi_mnt}")
     else:
-        run_command(
-            _as_root(["mount", efi_part, str(efi_mountpoint)]),
-            check=True,
-        )
+        mount_filesystem(efi_part, str(efi_mountpoint), run=run_command, as_root=_as_root, check=True)
         log(f"EFI mounted from {efi_part}")
 
 
@@ -208,7 +256,7 @@ def _run_guarded_image_write(
     try:
         with _disk_image_hold(disk, log):
             write()
-    except BaseException as exc:
+    except BaseException as exc:  # noqa: BLE001 -- preserve cancellation/power-loss cleanup semantics
         caught = exc
     finally:
         _stop_power_watch(watch, stop_event)
@@ -232,20 +280,23 @@ def _prepare_partition_target_storage(
     _as_root = phase_dependency("_as_root")
     _require_no_symlink = phase_dependency("_require_no_symlink")
     _safe_umount = phase_dependency("_safe_umount")
+    mount_filesystem = phase_dependency("mount_filesystem")
+    ensure_directory = phase_dependency("ensure_directory")
+    unmount_filesystem = phase_dependency("unmount_filesystem")
     _run_cmd = phase_dependency("_run_cmd")
     _build_bootc_install_cmd = phase_dependency("_build_bootc_install_cmd")
     log(f"Target partition : {target_part}")
     log(f"EFI partition    : {efi_part or '(none detected)'}")
 
     _safe_umount(run_command, target_part)
-    run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
+    unmount_filesystem(alongside_mount, recursive=True, lazy=True, run=run_command, as_root=_as_root, check=False, capture_output=True)
     if efi_part:
         try:
             with tempfile.TemporaryDirectory() as td:
-                ro = run_command(_as_root(["mount", "-o", "ro", efi_part, td]), check=False, capture_output=True)
+                ro = mount_filesystem(efi_part, td, options=["ro"], run=run_command, as_root=_as_root, check=False, capture_output=True)
                 if ro.returncode == 0:
                     has_ms = pathlib.Path(td, "EFI", "Microsoft").exists() or pathlib.Path(td, "EFI", "microsoft").exists()
-                    run_command(_as_root(["umount", td]), check=False, capture_output=True)
+                    unmount_filesystem(td, run=run_command, as_root=_as_root, check=False, capture_output=True)
                     if has_ms:
                         log(f"ESP {efi_part} contains Windows bootloader — will not format, only reuse.")
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
@@ -253,9 +304,9 @@ def _prepare_partition_target_storage(
     _create_btrfs_subvolumes(target_part, log, progress, context)
 
     _require_no_symlink(alongside_mount)
-    run_command(_as_root(["mkdir", "-p", alongside_mount]), check=True)
+    ensure_directory(alongside_mount, run=run_command, as_root=_as_root, check=True)
     context.register_mount(alongside_mount)
-    run_command(_as_root(["mount", "-o", "subvol=@", target_part, alongside_mount]), check=True)
+    mount_filesystem(target_part, alongside_mount, options=["subvol=@"], run=run_command, as_root=_as_root, check=True)
     progress(11)
 
     if efi_part:
@@ -283,6 +334,15 @@ def _prepare_partition_target_storage(
             cancel_event=context.cancel_requested,
             io_stall_timeout=600,
             net_stall_timeout=600,
+            execution_request={
+                "subcommand": "to-filesystem",
+                "source_imgref": src_ref,
+                "target_imgref": tgt_ref,
+                "target": alongside_mount,
+                "skip_fetch_check": True,
+                "skip_finalize": True,
+                "root_subvolume": True,
+            },
         )
         _warn_if_efi_boot_entries_disappeared(efi_before, _snapshot_efi_boot_entries(log), log)
 
@@ -316,6 +376,14 @@ def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_
             cancel_event=context.cancel_requested,
             io_stall_timeout=600,
             net_stall_timeout=600,
+            execution_request={
+                "subcommand": "to-disk",
+                "source_imgref": src_ref,
+                "target_imgref": tgt_ref,
+                "target": disk,
+                "skip_fetch_check": SKIP_FETCH_CHECK,
+                "wipe": True,
+            },
         )
 
     with PartitionTableGuard(disk, log):

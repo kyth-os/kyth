@@ -14,12 +14,12 @@ from kyth_installer import fsresize  # noqa: E402
 
 class DryRunFallbackTests(unittest.TestCase):
     def test_generic_dryrun_error_falls_through_to_generic_message(self):
-        def fake_stream(argv, _log, *, error_factory=None, **_kwargs):
-            if "--no-action" in argv:
-                # no "too small" nor "immovable" -> hits line 80 generic
-                raise error_factory(1, ["unexpected ntfsresize output"], argv)
+        def fake_stream(payload, _log, *, error_factory=None, **_kwargs):
+            if payload["stage"] == "dry_run":
+                # no "too small" nor "immovable" -> hits generic branch
+                raise error_factory(1, ["unexpected ntfsresize output"], payload)
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "_stream", side_effect=fake_stream):
+             patch.object(fsresize, "_stream_typed", side_effect=fake_stream):
             with self.assertRaisesRegex(RuntimeError, "Boot Windows, shrink the volume"):
                 fsresize._shrink_ntfs("/dev/sda1", 100 * 1024**3, lambda _m: None)
 
@@ -46,11 +46,11 @@ class PreShrinkGuardTests(unittest.TestCase):
 
     def test_btrfs_rmdir_oserror_is_ignored(self):
         # lines 154-155: rmdir OSError swallowed
-        def fake_run(argv, **kwargs):
+        def fake_run(payload, **kwargs):
             return MagicMock(returncode=0)
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "run_command", side_effect=fake_run), \
-             patch.object(fsresize, "_stream", return_value=None), \
+             patch.object(fsresize, "_run_typed", side_effect=fake_run), \
+             patch.object(fsresize, "_stream_typed", return_value=None), \
              patch.object(fsresize.tempfile, "mkdtemp", return_value="/tmp/kyth-btrfs-rmdir-test"), \
              patch.object(fsresize.Path, "rmdir", side_effect=OSError("rmdir failed")):
             # should not raise despite rmdir failure

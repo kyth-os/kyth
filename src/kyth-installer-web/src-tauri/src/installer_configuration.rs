@@ -1,10 +1,16 @@
 //! Pure installed-system configuration planning.
 //!
 //! Passwords and account creation intentionally do not cross this model. The
-//! privileged Python service continues to own account databases and all file
-//! writes; this module describes only the non-secret configuration contract.
+//! privileged Python service continues to own account databases; this module
+//! validates and applies the non-secret configuration contract.
 
 use serde::{Deserialize, Serialize};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::Path;
+
+const MAX_FSTAB_LINE_BYTES: usize = 4096;
 
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct ConfigurationInput {
@@ -30,6 +36,12 @@ pub(crate) struct ConfigurationPlan {
     pub writes: Vec<ConfigWrite>,
     pub localtime_target: String,
     pub executor: &'static str,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct FstabAppendInput {
+    pub path: String,
+    pub line: String,
 }
 
 fn default_locale() -> String { "en_US.UTF-8".to_string() }
@@ -64,6 +76,23 @@ fn safe_root(value: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn safe_absolute_path(raw: &str, label: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty()
+        || value.len() > 4096
+        || !value.starts_with('/')
+        || value.contains("..")
+        || value.contains("//")
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
+        })
+    {
+        return Err(format!("{label} must be an absolute safe path."));
+    }
+    Ok(value.to_string())
+}
+
 pub(crate) fn build_plan(input: ConfigurationInput) -> Result<ConfigurationPlan, String> {
     let target_root = safe_root(&input.target_root)?;
     let hostname = safe_component(&input.hostname, "hostname", false)?;
@@ -85,8 +114,97 @@ pub(crate) fn build_plan(input: ConfigurationInput) -> Result<ConfigurationPlan,
             ConfigWrite { path: format!("{etc}/vconsole.conf"), content: format!("KEYMAP={keymap}\n"), mode: 0o644 },
         ],
         localtime_target: format!("/usr/share/zoneinfo/{timezone}"),
-        executor: "kyth-installerd",
+        executor: "kyth-installer-exec",
     })
+}
+
+pub(crate) fn apply_plan(plan: ConfigurationPlan) -> Result<(), String> {
+    for write in &plan.writes {
+        let mut file = OpenOptions::new();
+        file.write(true)
+            .create(true)
+            .truncate(true)
+            .mode(write.mode)
+            .custom_flags(libc::O_NOFOLLOW);
+        let mut file = file
+            .open(&write.path)
+            .map_err(|error| format!("could not open configuration file: {error}"))?;
+        file.write_all(write.content.as_bytes())
+            .map_err(|error| format!("could not write configuration file: {error}"))?;
+        file.flush()
+            .map_err(|error| format!("could not flush configuration file: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("could not sync configuration file: {error}"))?;
+        fs::set_permissions(&write.path, fs::Permissions::from_mode(write.mode))
+            .map_err(|error| format!("could not secure configuration file: {error}"))?;
+    }
+
+    let localtime = Path::new(&plan.target_root).join("etc/localtime");
+    if let Ok(metadata) = fs::symlink_metadata(&localtime) {
+        if metadata.is_dir() {
+            return Err("installed localtime path is a directory".to_string());
+        }
+        fs::remove_file(&localtime)
+            .map_err(|error| format!("could not replace installed localtime: {error}"))?;
+    }
+    std::os::unix::fs::symlink(&plan.localtime_target, &localtime)
+        .map_err(|error| format!("could not set installed timezone: {error}"))?;
+    Ok(())
+}
+
+fn safe_fstab_path(raw: &str) -> Result<String, String> {
+    let path = safe_root(raw)?;
+    if !path.ends_with("/etc/fstab") {
+        return Err("fstab path must point to an installed /etc/fstab".to_string());
+    }
+    Ok(path)
+}
+
+fn validate_fstab_line(line: &str) -> Result<(), String> {
+    if line.is_empty() || line.len() > MAX_FSTAB_LINE_BYTES || !line.ends_with('\n') {
+        return Err("fstab entry must be one bounded line".to_string());
+    }
+    let content = line.strip_suffix('\n').unwrap_or(line);
+    if content.bytes().any(|byte| byte.is_ascii_control()) {
+        return Err("fstab entry contains control characters".to_string());
+    }
+    let fields: Vec<&str> = line.split_whitespace().collect();
+    if fields.len() != 6 || !fields[0].starts_with("UUID=") {
+        return Err("fstab entry has an unsupported shape".to_string());
+    }
+    if fields[0].len() <= "UUID=".len()
+        || !fields[0]["UUID=".len()..].bytes().all(|byte| {
+            byte.is_ascii_hexdigit() || byte == b'-'
+        })
+        || (fields[1] != "none" && safe_absolute_path(fields[1], "fstab mount point").is_err())
+        || !fields[2].bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        || !fields[3].bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'=' | b',' | b':' | b'.' | b'_' | b'+' | b'@' | b'-'))
+        || fields[4] != "0"
+        || !matches!(fields[5], "0" | "2")
+    {
+        return Err("fstab entry contains unsupported values".to_string());
+    }
+    Ok(())
+}
+
+pub(crate) fn append_fstab(input: FstabAppendInput) -> Result<(), String> {
+    let path = safe_fstab_path(&input.path)?;
+    validate_fstab_line(&input.line)?;
+    let mut file = OpenOptions::new();
+    file.create(true)
+        .append(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .mode(0o644);
+    let mut file = file
+        .open(&path)
+        .map_err(|error| format!("could not open installed fstab: {error}"))?;
+    file.write_all(input.line.as_bytes())
+        .map_err(|error| format!("could not append installed fstab: {error}"))?;
+    file.flush()
+        .map_err(|error| format!("could not flush installed fstab: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("could not sync installed fstab: {error}"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -119,5 +237,43 @@ mod tests {
         assert!(build_plan(ConfigurationInput { target_root: "/mnt/../etc".to_string(), ..base.clone() }).is_err());
         assert!(build_plan(ConfigurationInput { hostname: "bad name".to_string(), ..base.clone() }).is_err());
         assert!(build_plan(ConfigurationInput { timezone: "../UTC".to_string(), ..base }).is_err());
+    }
+
+    #[test]
+    fn applies_non_secret_configuration_files_and_timezone_link() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let etc = directory.path().join("etc");
+        std::fs::create_dir(&etc).expect("etc directory");
+        let plan = build_plan(ConfigurationInput {
+            target_root: directory.path().to_string_lossy().into_owned(),
+            hostname: "kyth-box".to_string(),
+            timezone: "UTC".to_string(),
+            locale: "en_US.UTF-8".to_string(),
+            keymap: "us".to_string(),
+        })
+        .expect("configuration should validate");
+        apply_plan(plan).expect("configuration should apply");
+        assert_eq!(std::fs::read_to_string(etc.join("hostname")).unwrap(), "kyth-box\n");
+        assert_eq!(
+            std::fs::read_link(etc.join("localtime")).unwrap(),
+            Path::new("/usr/share/zoneinfo/UTC")
+        );
+    }
+
+    #[test]
+    fn validates_and_appends_one_safe_fstab_entry() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let etc = directory.path().join("etc");
+        std::fs::create_dir(&etc).expect("etc directory");
+        let path = etc.join("fstab");
+        append_fstab(FstabAppendInput {
+            path: path.to_string_lossy().into_owned(),
+            line: "UUID=ABCD-1234 /var/home btrfs subvol=@home,compress=zstd:1 0 0\n".into(),
+        }).expect("fstab entry should append");
+        assert_eq!(std::fs::read_to_string(path).unwrap(), "UUID=ABCD-1234 /var/home btrfs subvol=@home,compress=zstd:1 0 0\n");
+        assert!(append_fstab(FstabAppendInput {
+            path: etc.join("not-fstab").to_string_lossy().into_owned(),
+            line: "UUID=ABCD /data ext4 defaults 0 2\n".into(),
+        }).is_err());
     }
 }

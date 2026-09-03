@@ -49,8 +49,10 @@ class InstallerEntrypointTests(unittest.TestCase):
     def test_installer_socket_service_is_packaged_but_not_boot_enabled(self):
         unit = (ROOT / "build_files" / "kyth-installerd.service").read_text()
         build = (ROOT / "installer" / "build.sh").read_text()
-        self.assertIn("kyth-installerd = \"kyth_installer.daemon:main\"", (INSTALLER_ROOT / "pyproject.toml").read_text())
+        cargo = (ROOT / "src" / "kyth-installer-web" / "src-tauri" / "Cargo.toml").read_text()
+        self.assertIn('name = "kyth-installerd"', cargo)
         self.assertIn("kyth-installerd.service", build)
+        self.assertIn("/usr/bin/kyth-installerd", (ROOT / "installer" / "Containerfile").read_text())
         self.assertIn("ConditionPathExists=/run/kyth-installer/session-token", unit)
         self.assertIn("User=root", unit)
         self.assertIn("Group=root", unit)

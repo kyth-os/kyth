@@ -33,6 +33,7 @@ _ALLOWED_EXECUTABLES = frozenset({
     "false",
     "findmnt",
     "ip",
+    "kyth-installer-exec",
     "kyth-installerd",
     "ln",
     "lsblk",

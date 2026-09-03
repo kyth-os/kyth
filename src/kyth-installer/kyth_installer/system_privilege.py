@@ -77,7 +77,16 @@ def _safe_umount(run, path: str, *, check: bool = False) -> subprocess.Completed
     caller's own run_command reference is what actually executes, keeping
     existing `run_command` mocks/patches on the caller's module effective.
     """
-    return run(_as_root(["umount", "-l", path]), check=check, capture_output=True)
+    from .system_mount import unmount_filesystem
+
+    return unmount_filesystem(
+        path,
+        lazy=True,
+        run=run,
+        as_root=_as_root,
+        check=check,
+        capture_output=True,
+    )
 
 
 def _settle():
@@ -136,5 +145,4 @@ def format_install_error(exc: BaseException) -> str:
         detail = format_os_error(exc)
         return f"{exc.__class__.__name__}: {detail}"
     return str(exc) or exc.__class__.__name__
-
 

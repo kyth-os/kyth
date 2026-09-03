@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 
+import json
+
 from kyth_shared import get_rx_bytes
 
 from ..config import SKIP_FETCH_CHECK
@@ -48,6 +50,7 @@ def _run_cmd(
     cancel_event=None,
     io_stall_timeout: int | None = None,
     net_stall_timeout: int | None = None,
+    execution_request: dict[str, object] | None = None,
 ) -> None:
     # Import _as_root lazily so tests that patch `install._as_root` still apply
     try:
@@ -78,6 +81,16 @@ def _run_cmd(
         detail = "\n".join(recent_output[-10:]) or "No command output was captured."
         return RuntimeError(f"Command failed (exit {returncode}):\n  {' '.join(argv)}\n\n{detail}")
 
+    stdin_data = None
+    if execution_request is not None:
+        # Rust validates this typed operation and builds the final bootc argv.
+        # Image-write requests contain no credentials or other secrets.
+        cmd = ["kyth-installer-exec", "--operation", "stream"]
+        stdin_data = json.dumps(
+            {"kind": "bootc_install", "request": execution_request},
+            separators=(",", ":"),
+        )
+
     executor = PrivilegedExecutor(
         run_command=None,  # streaming does not use the scalar runner
         as_root=_as_root,
@@ -97,4 +110,5 @@ def _run_cmd(
         cancel_event=cancel_event,
         io_stall_timeout=io_stall_timeout,
         net_stall_timeout=net_stall_timeout,
+        stdin_data=stdin_data,
     )

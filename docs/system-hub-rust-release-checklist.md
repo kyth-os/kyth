@@ -5,19 +5,23 @@ System Hub the default launcher. The checklist is intentionally separate from
 the migration roadmap: a green Rust build does not by itself demonstrate
 runtime parity on an installed image.
 
-## Status snapshot (2026-09-02)
+## Status snapshot (2026-09-03)
 
 Current target: `testing` at `192ee5ba` with the Hub migration cutover changes;
 the local worktree also contains the P0 closed-action-allowlist fix.
 The prior pre-build gates are complete. The local shared-crate gate now passes
-493 Rust tests across 16 suites,
+501 Rust tests across 26 suites with the telemetry-writer feature (498 in the
+default feature set),
 including native telemetry, extended Guardian, firmware staging, watcher
 retry/lock coverage, the privileged socket policy, secret redaction, and SAML
 redirect validation. The native telemetry writer and privileged daemon release
 builds also pass.
-The native post-update, first-login app-status, Steam launcher-export, and
-KRunner desktop-entry utilities are included in the shared Rust build. No
-Python/Qt update notifier is installed or autostarted.
+The native post-update, first-login app-status, Steam launcher-export,
+KRunner desktop-entry, diagnostic, game-boost, and doctor utilities are
+included in the shared Rust build. No Python/Qt update notifier is installed
+or autostarted.
+The native `kyth-tunable-rs` dispatcher now owns all 94 tunable entries;
+the compatibility dispatcher remains only as a rollback fixture for older images.
 
 GitHub Actions Validation run
 [`33665906864`](https://github.com/kyth-os/kyth/actions/runs/33665906864)
@@ -119,9 +123,13 @@ Python authority for Hub-facing reads and actions:
 - [x] Remove Python JSON parsing from the probe, OS update, JetBrains Toolbox,
       LSFG-VK, and runtime perf-gate Just recipes; data-only extraction uses
       native commands or `jq`.
-- [ ] Port the remaining indirect Python-backed recipe executors, chiefly the
-      compatibility `kyth-tunable` dispatcher and non-Hub diagnostic/game
-      helpers.
+- [x] Port all 49 sysctl-backed and all 45 module-specific entries of the
+      indirect tunable dispatcher to
+      native `kyth-tunable-rs`; the installer derives native symlinks from the
+      Rust binary for all registry entries.
+- [x] Port the final module-specific tunable entry to native `kyth-tunable-rs`;
+      all 94 registry entries now resolve to the native dispatcher, while the
+      compatibility fixture remains available for rollback.
 - [x] Remove the obsolete Python/build fixtures for the native update watcher,
       telemetry writer, privileged socket boundary, network-share executor,
       and standalone VPN client.
@@ -184,7 +192,7 @@ Tauri shell. Run the focused unit-test gate explicitly when iterating with:
 Phase 6 source validation on 2026-09-02 also passed:
 
 ```text
-(cd src/kyth-shared-rs && cargo test --locked)       # 493 passed
+(cd src/kyth-shared-rs && cargo test --locked)       # 498 passed
 (cd src/kyth-hub-web/src-tauri && cargo test --locked) # 8 passed
 (cd src/kyth-hub-web && npm run test:contracts)      # pass
 (cd src/kyth-hub-web && npm run test:smoke)          # pass

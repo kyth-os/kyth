@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import glob
+import json
 import logging
 import os
 import shutil
@@ -11,7 +12,7 @@ from typing import Optional
 
 from .runner import run_command
 from .executor import ExecutorCommand, PrivilegedExecutor
-from .secure_boot import classify_import, plan_mok
+from .secure_boot import MokPlan, classify_import, plan_mok as _python_plan_mok
 from kyth_shared import accounts as _accounts
 
 # Canonical modules
@@ -24,9 +25,45 @@ from .system_privilege import (  # pylint: disable=unused-import  # noqa: F401
     format_os_error,
     require_root,  # pylint: disable=unused-import
 )
-from .system_mount import _lsblk_target_mounts, unmount_target_disk  # pylint: disable=unused-import  # noqa: F401
+from .system_mount import (  # pylint: disable=unused-import
+    ensure_directory,
+    _lsblk_target_mounts,
+    mount_filesystem,
+    unmount_filesystem,
+    unmount_target_disk,
+)  # noqa: F401
 
 _logger = logging.getLogger(__name__)
+
+
+def _plan_mok(**kwargs) -> MokPlan:
+    """Use the native decision model when the privileged helper is present."""
+    if not shutil.which("kyth-installer-exec"):
+        return _python_plan_mok(**kwargs)
+    result = run_command(
+        _as_root(["kyth-installer-exec", "--operation", "secure-boot-plan"]),
+        input=json.dumps(kwargs, separators=(",", ":")),
+        text=True,
+        capture_output=True,
+        check=True,
+        timeout=10,
+    )
+    try:
+        response = json.loads(result.stdout or "{}")
+        fields = {
+            "state": response["state"],
+            "action": response["action"],
+            "requires_password": response["requires_password"],
+            "requires_reboot_confirmation": response["requires_reboot_confirmation"],
+            "message": response["message"],
+        }
+        if not all(isinstance(value, str) for key, value in fields.items() if key in {"state", "action", "message"}):
+            raise ValueError("Secure Boot plan contained invalid text fields")
+        if not all(isinstance(fields[key], bool) for key in ("requires_password", "requires_reboot_confirmation")):
+            raise ValueError("Secure Boot plan contained invalid boolean fields")
+        return MokPlan(**fields)
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"native Secure Boot plan was invalid: {exc}") from exc
 
 def list_timezones() -> list[str]:
     try:
@@ -149,6 +186,7 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
     Returns one of: skipped, enrolled, pending, staged, failed.
     """
     force_stage = os.environ.get("KYTH_STAGE_MOK", "0").lower() in ("1", "true", "yes", "on")
+    plan_mok = _plan_mok
     executor = PrivilegedExecutor(run_command=run_command, as_root=_as_root)
 
     def run_mok(argv: list[str], description: str, **kwargs):

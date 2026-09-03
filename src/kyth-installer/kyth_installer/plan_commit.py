@@ -31,6 +31,7 @@ class CommitDependencies:
     disk_hold: Callable
     guard_factory: Callable
     disk_service_factory: Callable
+    resize_partition: Callable | None = None
 
 
 def _call_latest_partition(
@@ -240,7 +241,8 @@ def prepare_ntfs_resize_target(
     config: dict, log, *, normal_device_path, validate_target, required_tools,
     which, unmount_target_disk, partition_size, partition_number, block_size,
     partition_start, shrink_filesystem_guarded, run_command, as_root, settle,
-    commit_partition, marker_root: Path = Path("/run/kyth-installer"),
+    commit_partition, resize_partition=None,
+    marker_root: Path = Path("/run/kyth-installer"),
 ) -> tuple[str, str]:
     """Shrink a validated NTFS target and commit a partition in its freed tail."""
     try:
@@ -292,15 +294,19 @@ def prepare_ntfs_resize_target(
 
     def shrink_partition_boundary() -> None:
         log("Shrinking partition boundary...")
-        run_command(
-            as_root([
-                "parted", "---pretend-input-tty", disk, "unit", "B", "resizepart",
-                str(part_num), f"{new_end}B",
-            ]),
-            input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True,
-            timeout=120,
-        )
-        settle()
+        if resize_partition is None:
+            # Compatibility fallback for injected legacy test dependencies.
+            run_command(
+                as_root([
+                    "parted", "---pretend-input-tty", disk, "unit", "B", "resizepart",
+                    str(part_num), f"{new_end}B",
+                ]),
+                input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True,
+                timeout=120,
+            )
+            settle()
+        else:
+            resize_partition(disk, part_num, start, new_ntfs_size)
         actual_size = partition_size(partition)
         if abs(actual_size - new_ntfs_size) > sector:
             raise RuntimeError(

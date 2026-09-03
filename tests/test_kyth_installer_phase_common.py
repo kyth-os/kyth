@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 import tempfile
@@ -155,7 +156,7 @@ class PhaseCommonTests(unittest.TestCase):
 
     @mock.patch("kyth_installer.phases.common.write_transaction_state")
     def test_record_transaction_passes_context_and_status(self, write):
-        context = object()
+        context = InstallerContext()
         common._record_transaction(context, "started", message="installing")
         write.assert_called_once_with(
             common.TRANSACTION_FILE,
@@ -170,7 +171,7 @@ class PhaseCommonTests(unittest.TestCase):
     )
     def test_record_transaction_failure_is_logged_and_nonfatal(self, _write):
         log = mock.Mock()
-        common._record_transaction(object(), "failed", log=log)
+        common._record_transaction(InstallerContext(), "failed", log=log)
         self.assertIn("could not update installer transaction report", log.call_args.args[0])
 
     @mock.patch(
@@ -178,26 +179,31 @@ class PhaseCommonTests(unittest.TestCase):
         side_effect=OSError("read-only filesystem"),
     )
     def test_record_transaction_failure_without_logger_is_nonfatal(self, _write):
-        common._record_transaction(object(), "failed")
+        common._record_transaction(InstallerContext(), "failed")
 
-    @mock.patch("kyth_installer.phases.common.os.close")
-    @mock.patch("kyth_installer.phases.common.os.fsync")
-    @mock.patch("kyth_installer.phases.common.os.open", return_value=99)
     @mock.patch("kyth_installer.phases.common.write_transaction_state")
-    def test_record_transaction_success_fsyncs_parent_dir(self, write, mock_open, mock_fsync, mock_close):
-        context = object()
+    def test_record_transaction_success_uses_compatibility_writer(self, write):
+        context = InstallerContext()
         common._record_transaction(context, "started")
-        mock_open.assert_called_once_with(str(common.TRANSACTION_FILE.parent), mock.ANY)
-        mock_fsync.assert_called_once_with(99)
-        mock_close.assert_called_once_with(99)
+        write.assert_called_once()
 
-    @mock.patch("kyth_installer.phases.common.os.open", side_effect=OSError("no dir"))
+    @mock.patch("kyth_installer.phases.common.shutil.which", return_value="/usr/bin/kyth-installer-exec")
+    @mock.patch("kyth_installer.runner.run_command")
+    def test_record_transaction_uses_rust_writer_when_installed(self, run_command, _which):
+        common._record_transaction(InstallerContext(), "started")
+        run_command.assert_called_once()
+        command = run_command.call_args.args[0]
+        self.assertEqual(command[-3:], ["kyth-installer-exec", "--operation", "transaction-write"])
+        payload = json.loads(run_command.call_args.kwargs["input"])
+        self.assertEqual(payload["operation"], "transaction_write")
+        self.assertEqual(payload["state"]["status"], "started")
+
     @mock.patch("kyth_installer.phases.common.write_transaction_state")
-    def test_record_transaction_inner_os_error_is_suppressed(self, write, mock_open):
+    def test_record_transaction_writer_error_is_logged(self, write):
         log = mock.Mock()
-        common._record_transaction(object(), "started", log=log)
-        log.assert_not_called()
-        mock_open.assert_called_once()
+        write.side_effect = OSError("read-only filesystem")
+        common._record_transaction(InstallerContext(), "started", log=log)
+        self.assertIn("could not update installer transaction report", log.call_args.args[0])
 
     @mock.patch(
         "kyth_installer.phases.common.write_transaction_state",
@@ -205,7 +211,7 @@ class PhaseCommonTests(unittest.TestCase):
     )
     def test_record_transaction_generic_exception_is_logged(self, _write):
         log = mock.Mock()
-        common._record_transaction(object(), "failed", log=log)
+        common._record_transaction(InstallerContext(), "failed", log=log)
         self.assertIn("could not update installer transaction report", log.call_args.args[0])
 
     @mock.patch(
@@ -213,7 +219,7 @@ class PhaseCommonTests(unittest.TestCase):
         side_effect=RuntimeError("boom"),
     )
     def test_record_transaction_generic_exception_without_logger_is_nonfatal(self, _write):
-        common._record_transaction(object(), "failed")
+        common._record_transaction(InstallerContext(), "failed")
 
 
 class InstallRunEntryPointTests(unittest.TestCase):

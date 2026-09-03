@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -66,6 +67,36 @@ class InstallerBootcCommandCoverageTests(unittest.TestCase):
         self.assertIs(kwargs["cancel_event"], cancel)
         self.assertEqual(kwargs["io_stall_timeout"], 15)
         self.assertEqual(kwargs["net_stall_timeout"], 20)
+
+    @patch("kyth_installer.install._as_root", side_effect=lambda argv: ["root", *argv])
+    @patch.object(bootc_cmd, "get_rx_bytes", return_value=42)
+    @patch.object(bootc_cmd, "StreamingCommandRunner")
+    def test_typed_request_handoff_uses_rust_execution_helper(self, runner_type, _rx_bytes, _as_root):
+        runner = runner_type.return_value
+        request = {
+            "subcommand": "to-disk",
+            "source_imgref": "oci:/usr/share/kyth/image:latest",
+            "target_imgref": "ghcr.io/kyth-os/kyth:testing",
+            "target": "/dev/sda",
+            "skip_fetch_check": True,
+            "wipe": True,
+        }
+
+        bootc_cmd._run_cmd(
+            ["bootc", "install", "to-disk"],
+            5,
+            90,
+            MagicMock(),
+            MagicMock(),
+            execution_request=request,
+        )
+
+        args, kwargs = runner.run.call_args
+        self.assertEqual(args[0], ["root", "kyth-installer-exec", "--operation", "stream"])
+        self.assertEqual(
+            json.loads(kwargs["stdin_data"]),
+            {"kind": "bootc_install", "request": request},
+        )
 
     @patch("kyth_installer.install._as_root", side_effect=lambda argv: argv)
     @patch.object(bootc_cmd, "StreamingCommandRunner")

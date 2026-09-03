@@ -6,12 +6,21 @@
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/kyth/sched-arbiter.toml";
 pub const DEFAULT_FLAG_PATH: &str = "/run/kyth/sched-arbiter.json";
 
 const VALID_CHOICES: [&str; 4] = ["auto", "scx_rusty", "bore", "balanced"];
+
+pub fn config_path(path: Option<impl AsRef<Path>>) -> PathBuf {
+    if let Some(path) = path { return path.as_ref().to_path_buf(); }
+    if std::env::var("KYTH_TEST_MODE").ok().as_deref() == Some("1") {
+        if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") { return PathBuf::from(config).join("kyth/sched-arbiter.toml"); }
+    }
+    PathBuf::from(DEFAULT_CONFIG_PATH)
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArbiterConfig {
@@ -113,6 +122,21 @@ pub fn desired_state(config: &ArbiterConfig, scx_active: bool, bore_available: b
     }
 }
 
+/// Detect sched-ext using the same bounded service/process checks as the
+/// legacy arbiter. Callers decide how the result affects their mutation.
+pub fn detect_scx_active() -> bool {
+    for service in ["scx_loader.service", "scx.service"] {
+        let argv = vec!["systemctl".into(), "is-active".into(), "--quiet".into(), service.into()];
+        if let Ok(output) = crate::system::process::run_bounded(&argv, Duration::from_secs(2)) {
+            if output.status.success() { return true; }
+        }
+    }
+    let argv = vec!["pgrep".into(), "-x".into(), "scx_rusty".into()];
+    crate::system::process::run_bounded(&argv, Duration::from_secs(2))
+        .map(|output| output.status.success() && !output.stdout.is_empty())
+        .unwrap_or(false)
+}
+
 impl DesiredState {
     pub fn as_value(&self) -> Value {
         json!({
@@ -132,6 +156,23 @@ pub fn active_from_flag(value: &Value) -> String {
         .and_then(Value::as_str)
         .unwrap_or("unknown")
         .to_string()
+}
+
+pub fn flag_path(path: Option<impl AsRef<Path>>) -> PathBuf {
+    if let Some(path) = path { return path.as_ref().to_path_buf(); }
+    if std::env::var("KYTH_TEST_MODE").ok().as_deref() == Some("1") {
+        if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") { return PathBuf::from(runtime).join("sched-arbiter.json"); }
+        if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") { return PathBuf::from(config).join("kyth/sched-arbiter.json"); }
+    }
+    PathBuf::from(DEFAULT_FLAG_PATH)
+}
+
+pub fn save_config(path: impl AsRef<Path>, config: &ArbiterConfig) -> std::io::Result<()> {
+    crate::atomic_io::atomic_write_text(path, &config.to_toml(), Some(0o600))
+}
+
+pub fn write_flag(path: impl AsRef<Path>, state: &DesiredState) -> std::io::Result<()> {
+    crate::atomic_io::atomic_write_text(path, &serde_json::to_string_pretty(state).unwrap_or_else(|_| "{}".into()), Some(0o644))
 }
 
 fn toml_to_json(value: &toml::Value) -> Value {

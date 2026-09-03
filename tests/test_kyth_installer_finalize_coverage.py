@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pathlib
 import sys
 import tempfile
@@ -34,6 +35,26 @@ def _request(**changes) -> InstallRequest:
 
 
 class FstabFailureTests(unittest.TestCase):
+    def test_append_fstab_uses_typed_rust_writer_when_helper_is_installed(self):
+        log = mock.Mock()
+        with (
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command") as run,
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            result = finalize._append_fstab_line(
+                "/target/etc", "UUID=x /data ext4 defaults 0 2\n", log, "data"
+            )
+
+        self.assertTrue(result)
+        self.assertEqual(
+            run.call_args.args[0],
+            ["kyth-installer-exec", "--operation", "fstab-append"],
+        )
+        payload = json.loads(run.call_args.kwargs["input"])
+        self.assertEqual(payload["path"], "/target/etc/fstab")
+        self.assertEqual(payload["line"], "UUID=x /data ext4 defaults 0 2\n")
+
     def test_append_fstab_success(self):
         log = mock.Mock()
         with (

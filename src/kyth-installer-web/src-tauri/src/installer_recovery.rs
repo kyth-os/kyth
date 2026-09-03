@@ -5,6 +5,14 @@
 //! remain privileged Python operations.
 
 use serde::{Deserialize, Serialize};
+use std::fs::{self, OpenOptions};
+use std::io;
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::Path;
+
+const MAX_RECOVERY_PATH_BYTES: usize = 4096;
+const MAX_SUPPORT_FILE_BYTES: u64 = 16 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub(crate) struct RecoveryGuidance {
@@ -12,6 +20,21 @@ pub(crate) struct RecoveryGuidance {
     pub severity: String,
     pub message: String,
     pub bootable: bool,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub(crate) struct RecoveryExportInput {
+    pub usb_mount: String,
+    pub log_path: String,
+    pub transaction_path: String,
+    pub failure_summary_path: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub(crate) struct RecoveryExportResponse {
+    pub ok: bool,
+    pub dest: String,
+    pub copied: Vec<String>,
 }
 
 const GUIDANCE: &[(&str, &str, &str, bool)] = &[
@@ -45,6 +68,111 @@ pub(crate) fn rescue_guidance(status: Option<&str>) -> RecoveryGuidance {
     }
 }
 
+fn safe_absolute_path(raw: &str, label: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty()
+        || value.len() > MAX_RECOVERY_PATH_BYTES
+        || !value.starts_with('/')
+        || value.contains("..")
+        || value.contains("//")
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
+        })
+    {
+        return Err(format!("{label} must be an absolute safe path."));
+    }
+    Ok(value.to_string())
+}
+
+fn copy_support_file(source: &Path, destination: &Path) -> Result<bool, String> {
+    let metadata = match fs::symlink_metadata(source) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("could not inspect recovery file: {error}")),
+    };
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Ok(false);
+    }
+    if metadata.len() > MAX_SUPPORT_FILE_BYTES {
+        return Err(format!(
+            "recovery file {} is larger than the supported export limit",
+            source.display()
+        ));
+    }
+
+    let mut input = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(source)
+        .map_err(|error| format!("could not open recovery file: {error}"))?;
+    let mut output = OpenOptions::new();
+    output
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .mode(0o644);
+    let mut output = output
+        .open(destination)
+        .map_err(|error| format!("could not create recovery export: {error}"))?;
+    io::copy(&mut input, &mut output)
+        .map_err(|error| format!("could not copy recovery file: {error}"))?;
+    output
+        .flush()
+        .map_err(|error| format!("could not flush recovery export: {error}"))?;
+    output
+        .sync_all()
+        .map_err(|error| format!("could not sync recovery export: {error}"))?;
+    fs::set_permissions(destination, fs::Permissions::from_mode(0o644))
+        .map_err(|error| format!("could not secure recovery export: {error}"))?;
+    Ok(true)
+}
+
+pub(crate) fn export_logs(input: RecoveryExportInput) -> Result<RecoveryExportResponse, String> {
+    let mount = safe_absolute_path(&input.usb_mount, "USB mount")?;
+    let mount = fs::canonicalize(&mount)
+        .map_err(|error| format!("could not resolve USB mount: {error}"))?;
+    if !mount.is_dir() {
+        return Err("USB mount is not a directory".to_string());
+    }
+
+    let destination = mount.join("kyth-installer-logs");
+    if let Ok(metadata) = fs::symlink_metadata(&destination) {
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err("recovery export directory is not a safe directory".to_string());
+        }
+    }
+    fs::create_dir_all(&destination)
+        .map_err(|error| format!("could not create recovery export directory: {error}"))?;
+
+    let sources = [
+        ("log", safe_absolute_path(&input.log_path, "log path")?),
+        (
+            "transaction.json",
+            safe_absolute_path(&input.transaction_path, "transaction path")?,
+        ),
+        (
+            "failure.json",
+            safe_absolute_path(&input.failure_summary_path, "failure summary path")?,
+        ),
+    ];
+    let mut copied = Vec::new();
+    for (name, source) in sources {
+        if copy_support_file(Path::new(&source), &destination.join(name))? {
+            copied.push(name.to_string());
+        }
+    }
+    if copied.is_empty() {
+        return Err("No installer logs found to copy.".to_string());
+    }
+    Ok(RecoveryExportResponse {
+        ok: true,
+        dest: destination.to_string_lossy().into_owned(),
+        copied,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,5 +192,33 @@ mod tests {
         let unknown = rescue_guidance(Some("future_status"));
         assert!(!unknown.bootable);
         assert_eq!(unknown.severity, "unknown");
+    }
+
+    #[test]
+    fn recovery_export_rejects_unsafe_mount() {
+        assert!(export_logs(RecoveryExportInput {
+            usb_mount: "/tmp/../etc".to_string(),
+            log_path: "/run/kyth-installer/log".to_string(),
+            transaction_path: "/run/kyth-installer/transaction.json".to_string(),
+            failure_summary_path: "/run/kyth-installer/failure.json".to_string(),
+        }).is_err());
+    }
+
+    #[test]
+    fn recovery_export_skips_symlink_sources() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mount = directory.path().join("usb");
+        let sources = directory.path().join("sources");
+        fs::create_dir(&mount).expect("USB directory");
+        fs::create_dir(&sources).expect("source directory");
+        fs::write(sources.join("real-log"), "secret-safe-log").expect("source content");
+        std::os::unix::fs::symlink(sources.join("real-log"), sources.join("log"))
+            .expect("source symlink");
+        assert!(export_logs(RecoveryExportInput {
+            usb_mount: mount.to_string_lossy().into_owned(),
+            log_path: sources.join("log").to_string_lossy().into_owned(),
+            transaction_path: sources.join("transaction.json").to_string_lossy().into_owned(),
+            failure_summary_path: sources.join("failure.json").to_string_lossy().into_owned(),
+        }).is_err());
     }
 }

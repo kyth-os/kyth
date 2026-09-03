@@ -33,6 +33,7 @@ const SPECS: &[Spec] = &[
     Spec { config: "busy-poll.toml", drop_in: "99-kyth-busy-poll.conf", comment: "Kyth busy poll", payload: "net.core.busy_poll=50\n" },
     Spec { config: "busy-read.toml", drop_in: "99-kyth-busy-read.conf", comment: "Kyth busy read", payload: "net.core.busy_read=50\n" },
     Spec { config: "compaction.toml", drop_in: "99-kyth-compaction.conf", comment: "Kyth compaction", payload: "vm.compaction_proactiveness=0\n" },
+    Spec { config: "thp-collapse.toml", drop_in: "99-kyth-thp-collapse.conf", comment: "Kyth THP collapse", payload: "kernel.khugepaged_defrag=0\n" },
     Spec { config: "numa-balancing.toml", drop_in: "99-kyth-numa-balancing.conf", comment: "Kyth numa balancing", payload: "kernel.numa_balancing=0\n" },
     Spec { config: "psi-poll.toml", drop_in: "99-kyth-psi-poll.conf", comment: "Kyth PSI poll", payload: "vm.pressure_poll=500\n" },
     Spec { config: "tcp-ecn.toml", drop_in: "99-kyth-tcp-ecn.conf", comment: "Kyth tcp ecn", payload: "net.ipv4.tcp_ecn=1\n" },
@@ -70,7 +71,16 @@ fn spec(config: &str) -> &'static Spec {
 
 fn paths(spec: &Spec, path: Option<&Path>) -> (PathBuf, PathBuf) {
     let config = config_path(path, PathBuf::from("/etc/kyth").join(spec.config), spec.config);
-    (config, PathBuf::from("/etc/sysctl.d").join(spec.drop_in))
+    (config, default_drop_in(spec.drop_in))
+}
+
+fn default_drop_in(drop_in: &str) -> PathBuf {
+    if std::env::var("KYTH_TEST_MODE").ok().as_deref() == Some("1") {
+        if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
+            return PathBuf::from(config).join("kyth/sysctl.d").join(drop_in);
+        }
+    }
+    PathBuf::from("/etc/sysctl.d").join(drop_in)
 }
 
 /// Read a profile, treating malformed or unknown values as balanced.
@@ -110,7 +120,7 @@ pub fn generate(config: &str, path: Option<&Path>, destination: Option<&Path>, p
 
 pub fn status(config: &str, drop_in: Option<&Path>) -> Profile {
     let item = spec(config);
-    let default_drop_in = PathBuf::from("/etc/sysctl.d").join(item.drop_in);
+    let default_drop_in = default_drop_in(item.drop_in);
     super::tuning_profile::status_from_conf(drop_in.unwrap_or(&default_drop_in))
 }
 
@@ -161,6 +171,7 @@ profile_module!(load_swappiness, save_swappiness, generate_swappiness, swappines
 profile_module!(load_busy_poll, save_busy_poll, generate_busy_poll, busy_poll_status, "busy-poll.toml");
 profile_module!(load_busy_read, save_busy_read, generate_busy_read, busy_read_status, "busy-read.toml");
 profile_module!(load_compaction, save_compaction, generate_compaction, compaction_status, "compaction.toml");
+profile_module!(load_thp_collapse, save_thp_collapse, generate_thp_collapse, thp_collapse_status, "thp-collapse.toml");
 profile_module!(load_numa_balancing, save_numa_balancing, generate_numa_balancing, numa_balancing_status, "numa-balancing.toml");
 profile_module!(load_psi_poll, save_psi_poll, generate_psi_poll, psi_poll_status, "psi-poll.toml");
 profile_module!(load_tcp_ecn, save_tcp_ecn, generate_tcp_ecn, tcp_ecn_status, "tcp-ecn.toml");
@@ -222,6 +233,15 @@ mod tests {
         generate_swappiness(Some(&config), Some(&drop_in), Some(Profile::Balanced)).unwrap();
         assert!(!drop_in.exists());
         assert_eq!(load_swappiness(Some(&config)), Profile::Gaming);
+
+        let thp_config = directory.path().join("thp-collapse.toml");
+        let thp_drop_in = directory.path().join("99-kyth-thp-collapse.conf");
+        save("thp-collapse.toml", Some(&thp_config), Profile::Gaming).unwrap();
+        generate_thp_collapse(Some(&thp_config), Some(&thp_drop_in), None).unwrap();
+        assert_eq!(
+            fs::read_to_string(&thp_drop_in).unwrap(),
+            "# Kyth THP collapse gaming — generated\nkernel.khugepaged_defrag=0\n"
+        );
     }
 
     #[test]
