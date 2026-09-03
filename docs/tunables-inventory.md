@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 76 (all 49 sysctl wrappers plus 27 other-kind wrappers); 18 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 77 (all 49 sysctl wrappers plus 28 other-kind wrappers); 17 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -70,7 +70,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 35 | kyth-net-backlog | net_backlog | sysctl | `net.core.netdev_max_backlog=5000` — **dup network** | gaming.toml vs network (network has 5000 already?) |
 | 36 | kyth-net-tune | net_latency | sysctl | 9 keys — **all dup network** | network.toml (already migrated, wrapper is redundant) |
 | 37 | kyth-netdev-budget | netdev_budget | sysctl | `net.core.netdev_budget=600` | gaming.toml |
-| 38 | kyth-numa | numa_tune | other | numa | registry (other) |
+| 38 | kyth-numa | numa_tune | other | numa | native Rust dispatcher |
 | 39 | kyth-numa-balancing | numa_balancing | sysctl | `kernel.numa_balancing=0` | gaming.toml |
 | 40 | kyth-oom-gaming | oom_gaming | other | oom | registry (other) |
 | 41 | kyth-overcommit-memory | overcommit_memory | sysctl | `vm.overcommit_memory=1` | gaming.toml |

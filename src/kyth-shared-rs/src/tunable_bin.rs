@@ -14,6 +14,7 @@ use kyth_shared::system::{
     flatpak_prefetch,
     flatpak_trim,
     net_latency,
+    numa,
     overlay,
     gpu_power,
     podman_btrfs,
@@ -90,6 +91,7 @@ fn native_other(name: &str) -> bool {
             | "podman-overlay"
             | "podman-btrfs"
             | "gpu-power"
+            | "numa"
     )
 }
 
@@ -1070,6 +1072,47 @@ fn dispatch_gpu_power(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_numa(action: &str) -> ExitCode {
+    let config_path = numa::config_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = numa::load(&config_path);
+            println!("profile={} cpus={} effective_cpus={} kind=other", config.profile, config.cpus, numa::effective_cpus(&config, None));
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("numa", &[action.to_string()]) { return code; }
+            let mut config = numa::load(&config_path);
+            config.profile = "gaming".into();
+            if let Err(error) = numa::save(&config_path, &config) {
+                eprintln!("kyth-numa: {error}");
+                return ExitCode::from(1);
+            }
+            println!("numa gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("numa", &[action.to_string()]) { return code; }
+            let mut config = numa::load(&config_path);
+            config.profile = "balanced".into();
+            if let Err(error) = numa::save(&config_path, &config) {
+                eprintln!("kyth-numa: {error}");
+                return ExitCode::from(1);
+            }
+            println!("numa balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("numa", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-numa [gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1664,6 +1707,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "podman-overlay" => dispatch_podman_overlay(action),
             "podman-btrfs" => dispatch_podman_btrfs(action),
             "gpu-power" => dispatch_gpu_power(action),
+            "numa" => dispatch_numa(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1773,7 +1817,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 76);
+        assert_eq!(names.len(), 77);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1807,6 +1851,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "podman-overlay"));
         assert!(names.iter().any(|name| name == "podman-btrfs"));
         assert!(names.iter().any(|name| name == "gpu-power"));
+        assert!(names.iter().any(|name| name == "numa"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
