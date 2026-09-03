@@ -15,7 +15,9 @@
 if [[ ! -x /usr/bin/kyth-configure-session ]]; then
 	install -m 0755 /ctx/kyth-configure-session /usr/bin/kyth-configure-session
 fi
-install -m 0755 /ctx/kyth-greeter-compositor /usr/bin/kyth-greeter-compositor
+if [[ ! -x /usr/bin/kyth-greeter-compositor ]]; then
+	install -m 0755 /ctx/kyth-greeter-compositor /usr/bin/kyth-greeter-compositor
+fi
 
 write_config /usr/lib/systemd/system/plasmalogin.service.d/10-kyth-detect-session.conf <<'PLMDROPINEOF'
 [Service]
