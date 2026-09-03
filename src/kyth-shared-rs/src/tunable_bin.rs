@@ -19,6 +19,7 @@ use kyth_shared::system::{
     numa,
     overlay,
     perf_gate,
+    perf_audit,
     gpu_power,
     podman_btrfs,
     preference_presets,
@@ -105,6 +106,7 @@ fn native_other(name: &str) -> bool {
             | "work-cache"
             | "telemetry-opt"
             | "perf-gate"
+            | "gaming-audit"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1440,6 +1442,19 @@ fn dispatch_perf_gate(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_gaming_audit(action: &str) -> ExitCode {
+    match action {
+        "status" | "apply" | "gaming" | "balanced" => {
+            println!("{}", perf_audit::format_audit(&serde_json::json!({})));
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-gaming-audit [status|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2043,6 +2058,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "work-cache" => dispatch_work_cache(action),
             "telemetry-opt" => dispatch_telemetry_opt(action),
             "perf-gate" => dispatch_perf_gate(action),
+            "gaming-audit" => dispatch_gaming_audit(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2152,7 +2168,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 85);
+        assert_eq!(names.len(), 86);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2195,6 +2211,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "work-cache"));
         assert!(names.iter().any(|name| name == "telemetry-opt"));
         assert!(names.iter().any(|name| name == "perf-gate"));
+        assert!(names.iter().any(|name| name == "gaming-audit"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
