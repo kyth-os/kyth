@@ -14,6 +14,7 @@ use kyth_shared::system::{
     flatpak_prefetch,
     flatpak_trim,
     net_latency,
+    readahead,
     scheduler_arbiter,
     sysctl_profiles,
     tunable_registry,
@@ -76,6 +77,7 @@ fn native_other(name: &str) -> bool {
             | "distrobox-cache"
             | "flatpak-prefetch"
             | "flatpak-trim"
+            | "readahead"
     )
 }
 
@@ -542,6 +544,48 @@ fn dispatch_flatpak_trim(action: &str) -> ExitCode {
         }
         _ => {
             eprintln!("Usage: kyth-flatpak-trim [status|on|off|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_readahead(action: &str) -> ExitCode {
+    let config_path = readahead::config_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = readahead::load(&config_path);
+            let active = if config.enabled { "enabled" } else { "off" };
+            println!("enabled={} size_mb={} active={} kind=other", config.enabled, config.size_mb, active);
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("readahead", &[action.to_string()]) { return code; }
+            let mut config = readahead::load(&config_path);
+            config.enabled = true;
+            if let Err(error) = readahead::save(&config_path, &config) {
+                eprintln!("kyth-readahead: {error}");
+                return ExitCode::from(1);
+            }
+            println!("readahead gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" => {
+            if let Err(code) = ensure_root("readahead", &[action.to_string()]) { return code; }
+            let mut config = readahead::load(&config_path);
+            config.enabled = false;
+            if let Err(error) = readahead::save(&config_path, &config) {
+                eprintln!("kyth-readahead: {error}");
+                return ExitCode::from(1);
+            }
+            println!("readahead balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("readahead", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-readahead [status|gaming|balanced|apply]");
             ExitCode::from(1)
         }
     }
@@ -1131,6 +1175,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "distrobox-cache" => dispatch_distrobox_cache(action),
             "flatpak-prefetch" => dispatch_flatpak_prefetch(action),
             "flatpak-trim" => dispatch_flatpak_trim(action),
+            "readahead" => dispatch_readahead(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1240,7 +1285,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 66);
+        assert_eq!(names.len(), 67);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1264,6 +1309,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "distrobox-cache"));
         assert!(names.iter().any(|name| name == "flatpak-prefetch"));
         assert!(names.iter().any(|name| name == "flatpak-trim"));
+        assert!(names.iter().any(|name| name == "readahead"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
