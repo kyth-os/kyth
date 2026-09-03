@@ -20,6 +20,7 @@ mod installer_recovery;
 #[allow(dead_code)]
 mod installer_transaction;
 mod installer_configuration;
+mod installer_alongside;
 mod installer_probe;
 #[allow(dead_code)]
 mod installer_secure_boot;
@@ -75,6 +76,7 @@ fn operation_args_valid(args: &[String]) -> bool {
                 | "orchestration"
                 | "power-check"
                 | "uuid-probe"
+                | "alongside-home"
         )
 }
 
@@ -197,6 +199,13 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             .map_err(|error| format!("invalid UUID probe JSON: {error}"))?;
         let uuid = installer_probe::lookup_uuid(input)?;
         println!("{}", serde_json::json!({"uuid": uuid}));
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "alongside-home" {
+        let input = serde_json::from_slice::<installer_alongside::AlongsideHomeInput>(&input)
+            .map_err(|error| format!("invalid alongside-home JSON: {error}"))?;
+        let response = installer_alongside::apply(input)?;
+        println!("{}", serde_json::to_string(&response).map_err(|error| format!("could not encode alongside-home response: {error}"))?);
         return Ok(ExitCode::SUCCESS);
     }
     if args[1] == "fstab-append" {
@@ -374,6 +383,10 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "uuid-probe".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "alongside-home".into()
         ]));
     }
 

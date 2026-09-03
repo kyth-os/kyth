@@ -96,6 +96,23 @@ def _append_fstab_line(etc, fstab_line: str, log, description: str) -> bool:
 
 
 def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
+    if shutil.which("kyth-installer-exec"):
+        run_command = phase_dependency("run_command")
+        as_root = phase_dependency("_as_root")
+        try:
+            result = run_command(
+                as_root(["kyth-installer-exec", "--operation", "alongside-home"]),
+                input=json.dumps({"config_root": str(config_root), "target_device": str(target_part), "fstab_path": str(Path(etc, "fstab"))}, separators=(",", ":")),
+                capture_output=True, text=True, check=True, timeout=60,
+            )
+            response = json.loads(result.stdout or "{}")
+            if not response.get("fstab_written", False):
+                log("Warning: alongside @home mounted but fstab update failed")
+            else:
+                log("Fstab updated for @home subvolume")
+            return
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"native alongside @home configuration failed: {exc}") from exc
     configure_alongside_fstab(
         config_root, target_part, etc, log,
         uuid_lookup=_blkid_uuid, append_line=_append_fstab_line,
