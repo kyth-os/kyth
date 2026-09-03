@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 90 (all 49 sysctl wrappers plus 41 other-kind wrappers); 4 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 91 (all 49 sysctl wrappers plus 42 other-kind wrappers); 3 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -86,7 +86,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 51 | kyth-rmem-default | rmem_default | sysctl | `net.core.rmem_default=262144` | gaming.toml |
 | 52 | kyth-rmem-max | rmem_max | sysctl | `net.core.rmem_max=16777216` — **dup network** | gaming.toml vs network |
 | 53 | kyth-sccache | sccache_preset | other | sccache | native Rust dispatcher |
-| 54 | kyth-sched-arbiter | sched_arbiter | other | sched arbiter | registry (other) |
+| 54 | kyth-sched-arbiter | sched_arbiter | other | sched arbiter | native Rust dispatcher |
 | 55 | kyth-sched-autogroup | sched_autogroup | sysctl | `kernel.sched_autogroup_enabled=0` — **dup base** | gaming.toml |
 | 56 | kyth-sched-child | sched_child | sysctl | `kernel.sched_child_runs_first=0` | gaming.toml |
 | 57 | kyth-sched-latency | sched_latency | sysctl | 5 keys `kernel.sched_*` | gaming.toml |

@@ -113,6 +113,7 @@ fn native_other(name: &str) -> bool {
             | "fcitx-latency"
             | "boot-timeout"
             | "kargs-apply"
+            | "sched-arbiter"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1595,6 +1596,59 @@ fn dispatch_kargs_apply(action: &str) -> ExitCode {
     }
 }
 
+fn scheduler_bore_available() -> bool {
+    std::fs::read_to_string("/usr/share/kyth/kernel-flavor").ok().is_some_and(|flavor| matches!(flavor.trim().to_ascii_lowercase().as_str(), "cachy" | "cachyos"))
+}
+
+fn dispatch_sched_arbiter(action: &str) -> ExitCode {
+    let config_path = scheduler_arbiter::config_path(None::<&Path>);
+    let flag_path = scheduler_arbiter::flag_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = scheduler_arbiter::ArbiterConfig::load(config_path);
+            let active = std::fs::read_to_string(&flag_path).ok().and_then(|raw| serde_json::from_str(&raw).ok()).map(|value| scheduler_arbiter::active_from_flag(&value)).unwrap_or_else(|| config.chosen.clone());
+            println!("chosen={} active={} scx_active={} bore_available={} kind=other", config.chosen, active, scheduler_arbiter::detect_scx_active(), scheduler_bore_available());
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("sched-arbiter", &[action.to_string()]) { return code; }
+            let config = scheduler_arbiter::ArbiterConfig::normalized("auto", false, false);
+            let state = scheduler_arbiter::desired_state(&config, scheduler_arbiter::detect_scx_active(), scheduler_bore_available());
+            if let Err(error) = scheduler_arbiter::save_config(config_path, &config).and_then(|_| scheduler_arbiter::write_flag(&flag_path, &state)) {
+                eprintln!("kyth-sched-arbiter: {error}");
+                return ExitCode::from(1);
+            }
+            println!("sched-arbiter gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("sched-arbiter", &[action.to_string()]) { return code; }
+            let config = scheduler_arbiter::ArbiterConfig::normalized("balanced", false, false);
+            let state = scheduler_arbiter::desired_state(&config, false, false);
+            if let Err(error) = scheduler_arbiter::save_config(config_path, &config).and_then(|_| scheduler_arbiter::write_flag(&flag_path, &state)) {
+                eprintln!("kyth-sched-arbiter: {error}");
+                return ExitCode::from(1);
+            }
+            println!("sched-arbiter balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("sched-arbiter", &[action.to_string()]) { return code; }
+            let config = scheduler_arbiter::ArbiterConfig::load(config_path);
+            let state = scheduler_arbiter::desired_state(&config, scheduler_arbiter::detect_scx_active(), scheduler_bore_available());
+            if let Err(error) = scheduler_arbiter::write_flag(&flag_path, &state) {
+                eprintln!("kyth-sched-arbiter: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-sched-arbiter [gaming|balanced|off|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2203,6 +2257,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "fcitx-latency" => dispatch_fcitx_latency(action),
             "boot-timeout" => dispatch_boot_timeout(action),
             "kargs-apply" => dispatch_kargs_apply(action),
+            "sched-arbiter" => dispatch_sched_arbiter(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2312,7 +2367,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 90);
+        assert_eq!(names.len(), 91);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2360,6 +2415,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "fcitx-latency"));
         assert!(names.iter().any(|name| name == "boot-timeout"));
         assert!(names.iter().any(|name| name == "kargs-apply"));
+        assert!(names.iter().any(|name| name == "sched-arbiter"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
