@@ -124,6 +124,14 @@ path = "src/vm_acceptance_guest_bin.rs"
 
 [[bin]]
 name = "kyth-tunable"
+path = "src/tunable_readonly_bin.rs"
+
+[[bin]]
+name = "kyth-game-boost"
+path = "src/game_boost_bin.rs"
+
+[[bin]]
+name = "kyth-tunable-rs"
 path = "src/tunable_bin.rs"
 
 [dependencies]

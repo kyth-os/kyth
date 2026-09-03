@@ -7,24 +7,27 @@ set -euo pipefail
 
 # Install dispatcher
 install -Dm0755 /ctx/kyth-tunable /usr/bin/kyth-tunable
+install -Dm0755 /usr/bin/kyth-tunable-rs /usr/bin/kyth-tunable-rs
 
-# Create compat symlinks for every tunable in tunables.toml
-# Use Python to read the registry so the list stays single-source.
-mapfile -t tunables < <(python3 -c '
-import tomllib
-from pathlib import Path
-p=Path("/ctx/config/tunables.toml")
-if not p.is_file():
-    p=Path("build_files/config/tunables.toml")
-with p.open("rb") as f:
-    data=tomllib.load(f)
-for name in sorted(data.get("tunables", {})):
-    print(name)
-')
+# Create compat symlinks for every tunable in the native registry.
+mapfile -t tunables < <(/usr/bin/kyth-tunable-rs --list)
+mapfile -t native_tunables < <(/usr/bin/kyth-tunable-rs --list-native)
+declare -A native_lookup=()
+for t in "${native_tunables[@]}"; do
+    native_lookup["$t"]=1
+done
+
+# These profiles have complete native Rust load/save/generate/status parity.
+# Other entries continue through the compatibility dispatcher until their
+# module-specific Rust ports are complete.
 
 for t in "${tunables[@]}"; do
     # ln -sf preserves symlink semantics; cp without -a would dereference and duplicate the file
-    ln -sf kyth-tunable "/usr/bin/kyth-${t}"
+    if [[ ${native_lookup[$t]+yes} ]]; then
+        ln -sf kyth-tunable-rs "/usr/bin/kyth-${t}"
+    else
+        ln -sf kyth-tunable "/usr/bin/kyth-${t}"
+    fi
 done
 
-echo "tunable-dispatcher: installed kyth-tunable + ${#tunables[@]} symlinks"
+echo "tunable-dispatcher: installed kyth-tunable + ${#tunables[@]} symlinks (${#native_tunables[@]} native)"

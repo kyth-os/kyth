@@ -22,7 +22,7 @@ scope boundary is:
   that no Python service may remain in the runtime path, complete the optional
   service-port work in Phase 5 before Phase 7.
 
-## Current status — 2026-09-02
+## Current status — 2026-09-03
 
 The React/Tauri shell is the primary implementation and its code-level build,
 contract, SSR, Rust, and embedded-asset checks pass on the `testing` branch.
@@ -324,15 +324,19 @@ Code-level exit criteria are met: native tests cover secret redaction, bounded
 execution, and SAML URL rejection. Full Phase 6 exit still requires an
 installed-image drill on the promoted digest.
 
-Validation evidence (2026-09-02): 491 shared Rust tests and 6 Tauri tests pass;
+Validation evidence (2026-09-03): 501 shared Rust tests with the
+telemetry-writer feature (498 default) and 6 Tauri tests pass;
 the frontend command-contract test, Hub SSR smoke test, Tauri release build,
 frontend production build, `git diff --check`, and fast repository validation
 also pass. The installed-image security/rollback drill was not run.
 
 ### Phase 7 — Declare completion and monitor
 
-Status: code cleanup in progress (2026-09-02); direct Python-backed Just recipe
-parsing and the installed AI performance daemon are now native/non-Python.
+Status: code cleanup in progress (2026-09-03); direct Python-backed Just recipe
+parsing, the installed AI performance daemon, the listed diagnostic/game entry
+points, 49 sysctl-backed tunable entries, and 3 module-specific tunable entries
+are now native Rust/non-Python. The remaining 42 module-specific tunables still
+use an explicit compatibility fallback and are the next migration slice.
 
 - Publish the final parity matrix, VM qualification reports, and release
   notes.
@@ -347,10 +351,17 @@ parsing and the installed AI performance daemon are now native/non-Python.
 - [x] Remove Python JSON parsing from the probe, OS update, JetBrains Toolbox,
   LSFG-VK, and runtime perf-gate Just recipes (2026-09-02); use the native
   probe/perf-gate binaries or `jq` for data-only JSON extraction.
-- [ ] Port the remaining indirect recipe executors: the compatibility
-  `kyth-tunable` dispatcher and Python diagnostic helpers such as
-  `kyth-health-check`, `kyth-resume-check`, `kyth-nvidia-status`,
-  `kyth-controller-check`, and `kyth-game-boost`.
+- [x] Replace the installed Python `kyth-health-check`, `kyth-resume-check`,
+  `kyth-nvidia-status`, `kyth-controller-check`, `kyth-game-boost`, and
+  `kyth-doctor` entry points with bounded native Rust binaries (2026-09-03).
+- [x] Port the 49 sysctl-backed entries and 3 module-specific entries of the
+  indirect recipe executor to
+  native `kyth-tunable-rs`; package-time symlink selection is derived from the
+  Rust registry and the compatibility fallback remains for unsupported entries
+  (2026-09-03).
+- [ ] Port the remaining 42 module-specific tunable writers, remove the
+  compatibility dispatcher, and audit the remaining non-Hub compatibility
+  modules.
 - Audit the remaining non-Hub compatibility Python modules and unexposed
   Just recipes; remove or port them if the product requirement is upgraded
   from “all Hub entry points are Rust/Tauri” to “no Python may execute in any
@@ -381,7 +392,7 @@ paths.
 | P1 | Complete extended Guardian/model parity and update-watcher lock, firmware, retry, and session/network gates. | 5 (complete 2026-09-02; image acceptance waived) |
 | P1 | Reconcile any other Hub-facing Python authorities listed in `MIGRATION.md` before declaring strict mode complete. | 5 (complete 2026-09-02; native Rust authorities installed) |
 | P2 | Remove remaining compatibility service fixtures and stale support references after strict-mode cutover. | 7 (complete 2026-09-02; native helper entry points, dead fixtures, and stale VPN launch references removed) |
-| P2 | Port remaining indirect recipe executors (`kyth-tunable` and Python diagnostic/game helpers) and remove their compatibility modules. | 7 (in progress; direct recipe parsing and `kyth-ai-perfd` are complete 2026-09-02) |
+| P2 | Port remaining indirect recipe executors (`kyth-tunable`) and remove its compatibility module. | 7 (49 sysctl and 3 module-specific entries complete 2026-09-03; 42 fallback entries remain) |
 | P2 | Run a post-cutover observation window before deleting compatibility code. | 7 (waived/not started for YOLO cutover; installed-image acceptance was skipped) |
 
 ## Definition of done

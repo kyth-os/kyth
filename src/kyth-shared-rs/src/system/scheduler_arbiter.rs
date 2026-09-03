@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::path::Path;
+use std::time::Duration;
 
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/kyth/sched-arbiter.toml";
 pub const DEFAULT_FLAG_PATH: &str = "/run/kyth/sched-arbiter.json";
@@ -111,6 +112,21 @@ pub fn desired_state(config: &ArbiterConfig, scx_active: bool, bore_available: b
         gamemode_pin,
         allow_ananicy_pin,
     }
+}
+
+/// Detect sched-ext using the same bounded service/process checks as the
+/// legacy arbiter. Callers decide how the result affects their mutation.
+pub fn detect_scx_active() -> bool {
+    for service in ["scx_loader.service", "scx.service"] {
+        let argv = vec!["systemctl".into(), "is-active".into(), "--quiet".into(), service.into()];
+        if let Ok(output) = crate::system::process::run_bounded(&argv, Duration::from_secs(2)) {
+            if output.status.success() { return true; }
+        }
+    }
+    let argv = vec!["pgrep".into(), "-x".into(), "scx_rusty".into()];
+    crate::system::process::run_bounded(&argv, Duration::from_secs(2))
+        .map(|output| output.status.success() && !output.stdout.is_empty())
+        .unwrap_or(false)
 }
 
 impl DesiredState {

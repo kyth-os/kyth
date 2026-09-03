@@ -1,6 +1,6 @@
 //! Native read-only controller readiness report.
 use kyth_shared::system::controllers::detect_controllers;
-use kyth_shared::system::smoke_check::{Level, Report};
+use kyth_shared::system::smoke_check::Report;
 use std::path::Path;
 fn main() {
     let d = detect_controllers(); let mut r = Report::default();

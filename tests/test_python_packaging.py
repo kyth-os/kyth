@@ -118,6 +118,47 @@ class PythonPackagingTests(unittest.TestCase):
 
         self.assertEqual(sorted(set(offenders)), [])
 
+    def test_diagnostic_entry_points_are_native_rust_binaries(self):
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        cargo = (ROOT / "src/kyth-shared-rs/Cargo.toml").read_text()
+        entry_points = (
+            "kyth-health-check",
+            "kyth-resume-check",
+            "kyth-nvidia-status",
+            "kyth-controller-check",
+            "kyth-game-boost",
+            "kyth-doctor",
+        )
+        for entry_point in entry_points:
+            with self.subTest(entry_point=entry_point):
+                self.assertIn(f'name = "{entry_point}"', cargo)
+                self.assertIn(f"/build/{entry_point} /usr/bin/{entry_point}", dockerfile)
+                self.assertFalse((ROOT / "build_files" / entry_point).exists())
+
+    def test_tunable_dispatcher_uses_native_subset_before_static_sysconfig(self):
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        cargo = (ROOT / "src/kyth-shared-rs/Cargo.toml").read_text()
+        dispatcher = (
+            ROOT / "build_files/scripts/sysconfig/tunable/01-tunable-dispatcher.sh"
+        ).read_text()
+
+        self.assertIn('name = "kyth-tunable-rs"', cargo)
+        native_copy = dockerfile.index(
+            "COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable-rs /usr/bin/kyth-tunable-rs"
+        )
+        static_layer = dockerfile.index("bash /ctx/sysconfig-static.sh")
+        self.assertLess(native_copy, static_layer)
+        self.assertEqual(
+            dockerfile.count(
+                "COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable-rs /usr/bin/kyth-tunable-rs"
+            ),
+            1,
+        )
+        self.assertIn("--list-native", dispatcher)
+        self.assertNotIn("python3", dispatcher)
+        self.assertIn('ln -sf kyth-tunable-rs "/usr/bin/kyth-${t}"', dispatcher)
+        self.assertIn('ln -sf kyth-tunable "/usr/bin/kyth-${t}"', dispatcher)
+
     def test_shared_modules_use_the_command_runner(self):
         shared_root = ROOT / "build_files/kyth_shared/kyth_shared"
         direct_callers = []

@@ -104,6 +104,8 @@ pub mod distrobox_cache;
 pub mod quadlet;
 pub mod update_coordinator;
 pub mod zswap;
+pub mod bore;
+pub mod net_latency;
 pub mod telemetry_opt;
 pub mod preference_presets;
 pub mod service_preferences;

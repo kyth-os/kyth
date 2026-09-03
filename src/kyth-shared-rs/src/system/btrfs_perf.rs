@@ -12,6 +12,16 @@ pub const DEFAULT_VAR_DROP_IN: &str = "/etc/systemd/system/var.mount.d/99-kyth-b
 
 const VALID_COMPRESS: &[&str] = &["zstd:1", "zstd:3", "zstd", "lzo", "off"];
 
+pub fn config_path(path: Option<impl AsRef<Path>>) -> PathBuf {
+    if let Some(path) = path { return path.as_ref().to_path_buf(); }
+    if std::env::var("KYTH_TEST_MODE").ok().as_deref() == Some("1") {
+        if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
+            return PathBuf::from(config).join("kyth/btrfs-perf.toml");
+        }
+    }
+    PathBuf::from(DEFAULT_CONFIG)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BtrfsPerfConfig {
     pub profile: String,
