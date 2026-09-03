@@ -17,9 +17,9 @@ for t in "${native_tunables[@]}"; do
     native_lookup["$t"]=1
 done
 
-# These profiles have complete native Rust load/save/generate/status parity.
-# Other entries continue through the compatibility dispatcher until their
-# module-specific Rust ports are complete.
+# All current registry entries have native Rust dispatch parity. Keep the
+# compatibility branch for forward-compatible registry additions and rollback
+# to older images.
 
 for t in "${tunables[@]}"; do
     # ln -sf preserves symlink semantics; cp without -a would dereference and duplicate the file
