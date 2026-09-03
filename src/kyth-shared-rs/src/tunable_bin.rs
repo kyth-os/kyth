@@ -24,6 +24,7 @@ use kyth_shared::system::{
     readahead,
     scheduler_arbiter,
     shader_tmpfs,
+    telemetry_opt,
     work_cache,
     sysctl_profiles,
     tunable_registry,
@@ -101,6 +102,7 @@ fn native_other(name: &str) -> bool {
             | "shader-tmpfs"
             | "steam-deadzone"
             | "work-cache"
+            | "telemetry-opt"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1360,6 +1362,45 @@ fn dispatch_work_cache(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_telemetry_opt(action: &str) -> ExitCode {
+    let config_path = telemetry_opt::config_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = telemetry_opt::load(&config_path);
+            println!("enabled={} collectors={} effective={} kind=other", config.enabled, config.collectors.len(), telemetry_opt::effective_collectors(&config, &["cpu", "gpu", "memory", "disk", "network"]).len());
+            ExitCode::SUCCESS
+        }
+        "gaming" | "on" => {
+            if let Err(code) = ensure_root("telemetry-opt", &[action.to_string()]) { return code; }
+            let mut config = telemetry_opt::load(&config_path);
+            config.enabled = true;
+            if let Err(error) = telemetry_opt::save(&config_path, &config) {
+                eprintln!("kyth-telemetry-opt: {error}");
+                return ExitCode::from(1);
+            }
+            println!("telemetry-opt on");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("telemetry-opt", &[action.to_string()]) { return code; }
+            if let Err(error) = telemetry_opt::purge(&config_path) {
+                eprintln!("kyth-telemetry-opt: {error}");
+                return ExitCode::from(1);
+            }
+            println!("telemetry-opt off");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("telemetry-opt", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-telemetry-opt [gaming|balanced|on|off|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1961,6 +2002,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "hdr-store" => dispatch_hdr_store(action),
             "hdr-per-game" => dispatch_hdr_per_game(action),
             "work-cache" => dispatch_work_cache(action),
+            "telemetry-opt" => dispatch_telemetry_opt(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2070,7 +2112,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 83);
+        assert_eq!(names.len(), 84);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2111,6 +2153,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "hdr-store"));
         assert!(names.iter().any(|name| name == "hdr-per-game"));
         assert!(names.iter().any(|name| name == "work-cache"));
+        assert!(names.iter().any(|name| name == "telemetry-opt"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
