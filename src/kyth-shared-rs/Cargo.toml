@@ -118,6 +118,10 @@ path = "src/print_check_bin.rs"
 name = "kyth-windows-verify"
 path = "src/windows_verify_bin.rs"
 
+[[bin]]
+name = "kyth-tunable"
+path = "src/tunable_bin.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

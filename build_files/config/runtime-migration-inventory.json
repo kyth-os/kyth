@@ -4316,19 +4316,20 @@
     {
       "current_implementation": "shell",
       "cutover": "replace installed kyth-tunable entry point after parity gates",
-      "installed_implementation": "shell",
+      "installed_implementation": "rust",
       "name": "kyth-tunable",
-      "owner": "fixture::build_files/kyth-tunable",
+      "owner": "native::kyth-tunable",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tunable",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
+      "risk_tier": "read-only",
       "rollback": "restore previous installed kyth-tunable entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
