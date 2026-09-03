@@ -36,6 +36,27 @@ pub fn save(path: impl AsRef<Path>, config: &DistroboxCacheConfig) -> std::io::R
 
 pub fn status(service: impl AsRef<Path>) -> &'static str { if service.as_ref().is_file() { "enabled" } else { "off" } }
 
+pub fn render_tmpfiles() -> &'static str { "# Kyth distrobox cache — generated\nd /run/kyth-distrobox-cache 0755 1000 1000 -\n" }
+
+pub fn render_service(config: &DistroboxCacheConfig) -> String {
+    let config = normalize(config.clone());
+    format!("[Unit]\nDescription=Kyth distrobox cache — tmpfs for ccache/cargo\nAfter=local-fs.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/sh -c 'mkdir -p /run/kyth-distrobox-cache && mount -t tmpfs -o size={},mode=0755 tmpfs /run/kyth-distrobox-cache && mkdir -p /run/kyth-distrobox-cache/ccache /run/kyth-distrobox-cache/cargo && ccache --max-size={} 2>/dev/null || true'\nExecStop=/bin/sh -c 'umount /run/kyth-distrobox-cache 2>/dev/null || true'\n[Install]\nWantedBy=multi-user.target\n", config.size, config.ccache_size)
+}
+
+pub fn generate(config: &DistroboxCacheConfig, tmpfiles: impl AsRef<Path>, service: impl AsRef<Path>) -> std::io::Result<Option<PathBuf>> {
+    let tmpfiles = tmpfiles.as_ref();
+    let service = service.as_ref();
+    if !config.enabled {
+        for path in [tmpfiles, service] {
+            match std::fs::remove_file(path) { Ok(()) | Err(_) => {} }
+        }
+        return Ok(None);
+    }
+    crate::atomic_io::atomic_write_text(tmpfiles, render_tmpfiles(), Some(0o644))?;
+    crate::atomic_io::atomic_write_text(service, &render_service(config), Some(0o644))?;
+    Ok(Some(service.to_path_buf()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -9,7 +9,10 @@ use kyth_shared::system::{
     btrfs_autotune,
     btrfs_perf,
     bore,
+    distrobox_cache,
     extended_preferences::{self, ThpConfig},
+    flatpak_prefetch,
+    flatpak_trim,
     net_latency,
     scheduler_arbiter,
     sysctl_profiles,
@@ -70,6 +73,9 @@ fn native_other(name: &str) -> bool {
             | "shader-cache-size"
             | "wine-sync"
             | "kwin-latency"
+            | "distrobox-cache"
+            | "flatpak-prefetch"
+            | "flatpak-trim"
     )
 }
 
@@ -385,6 +391,160 @@ fn write_optional(path: &Path, content: Option<&str>) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn dispatch_distrobox_cache(action: &str) -> ExitCode {
+    let config_path = distrobox_cache::config_path(None::<&Path>);
+    let tmpfiles = generated_path("tmpfiles.d", "99-kyth-distrobox.conf", "/etc/tmpfiles.d/99-kyth-distrobox.conf");
+    let service = generated_path("systemd", "kyth-distrobox-cache.service", "/etc/systemd/system/kyth-distrobox-cache.service");
+    match action {
+        "status" => {
+            let config = distrobox_cache::load(&config_path);
+            println!("enabled={} size={} ccache_size={} active={} kind=other", config.enabled, config.size, config.ccache_size, distrobox_cache::status(&service));
+            ExitCode::SUCCESS
+        }
+        "on" | "gaming" => {
+            if let Err(code) = ensure_root("distrobox-cache", &[action.to_string()]) { return code; }
+            let mut config = distrobox_cache::load(&config_path);
+            config.enabled = true;
+            if let Err(error) = distrobox_cache::save(&config_path, &config)
+                .and_then(|_| distrobox_cache::generate(&config, &tmpfiles, &service).map(|_| ()))
+            {
+                eprintln!("kyth-distrobox-cache: {error}");
+                return ExitCode::from(1);
+            }
+            println!("distrobox cache on");
+            ExitCode::SUCCESS
+        }
+        "off" | "balanced" => {
+            if let Err(code) = ensure_root("distrobox-cache", &[action.to_string()]) { return code; }
+            let mut config = distrobox_cache::load(&config_path);
+            config.enabled = false;
+            if let Err(error) = distrobox_cache::save(&config_path, &config)
+                .and_then(|_| distrobox_cache::generate(&config, &tmpfiles, &service).map(|_| ()))
+            {
+                eprintln!("kyth-distrobox-cache: {error}");
+                return ExitCode::from(1);
+            }
+            println!("distrobox cache off");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("distrobox-cache", &[action.to_string()]) { return code; }
+            let config = distrobox_cache::load(&config_path);
+            if let Err(error) = distrobox_cache::generate(&config, &tmpfiles, &service) {
+                eprintln!("kyth-distrobox-cache: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-distrobox-cache [status|on|off|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
+    let config_path = flatpak_prefetch::config_path(None::<&Path>);
+    let service = generated_path("systemd", "flatpak-prefetch.service", "/etc/systemd/system/flatpak-prefetch.service");
+    let timer = generated_path("systemd", "flatpak-prefetch.timer", "/etc/systemd/system/flatpak-prefetch.timer");
+    match action {
+        "status" => {
+            let config = flatpak_prefetch::load(&config_path);
+            println!("enabled={} time={} active={} kind=other", config.enabled, config.time, flatpak_prefetch::status(&service));
+            ExitCode::SUCCESS
+        }
+        "on" | "gaming" => {
+            if let Err(code) = ensure_root("flatpak-prefetch", &[action.to_string()]) { return code; }
+            let mut config = flatpak_prefetch::load(&config_path);
+            config.enabled = true;
+            if let Err(error) = flatpak_prefetch::save(&config_path, &config)
+                .and_then(|_| flatpak_prefetch::generate(&config, &service, &timer).map(|_| ()))
+            {
+                eprintln!("kyth-flatpak-prefetch: {error}");
+                return ExitCode::from(1);
+            }
+            println!("flatpak prefetch on");
+            ExitCode::SUCCESS
+        }
+        "off" | "balanced" => {
+            if let Err(code) = ensure_root("flatpak-prefetch", &[action.to_string()]) { return code; }
+            let mut config = flatpak_prefetch::load(&config_path);
+            config.enabled = false;
+            if let Err(error) = flatpak_prefetch::save(&config_path, &config)
+                .and_then(|_| flatpak_prefetch::generate(&config, &service, &timer).map(|_| ()))
+            {
+                eprintln!("kyth-flatpak-prefetch: {error}");
+                return ExitCode::from(1);
+            }
+            println!("flatpak prefetch off");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("flatpak-prefetch", &[action.to_string()]) { return code; }
+            let config = flatpak_prefetch::load(&config_path);
+            if let Err(error) = flatpak_prefetch::generate(&config, &service, &timer) {
+                eprintln!("kyth-flatpak-prefetch: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-flatpak-prefetch [status|on|off|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_flatpak_trim(action: &str) -> ExitCode {
+    let config_path = flatpak_trim::config_path(None::<&Path>);
+    let service = generated_path("systemd", "kyth-flatpak-trim.service", "/etc/systemd/system/kyth-flatpak-trim.service");
+    let timer = generated_path("systemd", "kyth-flatpak-trim.timer", "/etc/systemd/system/kyth-flatpak-trim.timer");
+    match action {
+        "status" => {
+            let config = flatpak_trim::load(&config_path);
+            println!("enabled={} active={} kind=other", config.enabled, flatpak_trim::status(&service));
+            ExitCode::SUCCESS
+        }
+        "on" | "gaming" => {
+            if let Err(code) = ensure_root("flatpak-trim", &[action.to_string()]) { return code; }
+            let config = flatpak_trim::FlatpakTrimConfig { enabled: true };
+            if let Err(error) = flatpak_trim::save(&config_path, config)
+                .and_then(|_| flatpak_trim::generate(config, &service, &timer).map(|_| ()))
+            {
+                eprintln!("kyth-flatpak-trim: {error}");
+                return ExitCode::from(1);
+            }
+            println!("flatpak trim on");
+            ExitCode::SUCCESS
+        }
+        "off" | "balanced" => {
+            if let Err(code) = ensure_root("flatpak-trim", &[action.to_string()]) { return code; }
+            let config = flatpak_trim::FlatpakTrimConfig { enabled: false };
+            if let Err(error) = flatpak_trim::save(&config_path, config)
+                .and_then(|_| flatpak_trim::generate(config, &service, &timer).map(|_| ()))
+            {
+                eprintln!("kyth-flatpak-trim: {error}");
+                return ExitCode::from(1);
+            }
+            println!("flatpak trim off");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("flatpak-trim", &[action.to_string()]) { return code; }
+            let config = flatpak_trim::load(&config_path);
+            if let Err(error) = flatpak_trim::generate(config, &service, &timer) {
+                eprintln!("kyth-flatpak-trim: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-flatpak-trim [status|on|off|apply]");
+            ExitCode::from(1)
+        }
+    }
 }
 
 fn dispatch_mimalloc(action: &str) -> ExitCode {
@@ -968,6 +1128,9 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "shader-cache-size" => dispatch_shader_cache_size(action),
             "wine-sync" => dispatch_wine_sync(action),
             "kwin-latency" => dispatch_kwin_latency(action),
+            "distrobox-cache" => dispatch_distrobox_cache(action),
+            "flatpak-prefetch" => dispatch_flatpak_prefetch(action),
+            "flatpak-trim" => dispatch_flatpak_trim(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1077,7 +1240,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 63);
+        assert_eq!(names.len(), 66);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1098,6 +1261,9 @@ mod tests {
         assert!(names.iter().any(|name| name == "shader-cache-size"));
         assert!(names.iter().any(|name| name == "wine-sync"));
         assert!(names.iter().any(|name| name == "kwin-latency"));
+        assert!(names.iter().any(|name| name == "distrobox-cache"));
+        assert!(names.iter().any(|name| name == "flatpak-prefetch"));
+        assert!(names.iter().any(|name| name == "flatpak-trim"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }

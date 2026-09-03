@@ -34,6 +34,24 @@ pub fn save(path: impl AsRef<Path>, config: FlatpakTrimConfig) -> std::io::Resul
 
 pub fn status(service: impl AsRef<Path>) -> &'static str { if service.as_ref().is_file() { "enabled" } else { "off" } }
 
+pub fn render_service() -> &'static str { "[Unit]\nDescription=Kyth flatpak trim — remove unused runtimes\n[Service]\nType=oneshot\nExecStart=/usr/bin/flatpak uninstall --unused -y --noninteractive\nNice=19\nIOSchedulingClass=best-effort\nIOSchedulingPriority=7\n" }
+
+pub fn render_timer() -> &'static str { "[Unit]\nDescription=Kyth flatpak trim timer\n[Timer]\nOnCalendar=weekly\nPersistent=true\n[Install]\nWantedBy=timers.target\n" }
+
+pub fn generate(config: FlatpakTrimConfig, service: impl AsRef<Path>, timer: impl AsRef<Path>) -> std::io::Result<Option<PathBuf>> {
+    let service = service.as_ref();
+    let timer = timer.as_ref();
+    if !config.enabled {
+        for path in [service, timer] {
+            match std::fs::remove_file(path) { Ok(()) | Err(_) => {} }
+        }
+        return Ok(None);
+    }
+    crate::atomic_io::atomic_write_text(service, render_service(), Some(0o644))?;
+    crate::atomic_io::atomic_write_text(timer, render_timer(), Some(0o644))?;
+    Ok(Some(service.to_path_buf()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
