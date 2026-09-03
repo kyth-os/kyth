@@ -56,6 +56,27 @@ pub fn oom_path(path: Option<impl AsRef<Path>>) -> PathBuf { system_path("oom.to
 pub fn load_oom(path: impl AsRef<Path>) -> OomConfig { parse_root(path).map(|v| OomConfig { default_mem_pressure_limit: parse_string(v.get("default_mem_pressure_limit"), "50%"), gaming_preference: parse_string(v.get("gaming_preference"), "avoid") }).unwrap_or_default() }
 pub fn save_oom(path: impl AsRef<Path>, config: &OomConfig) -> std::io::Result<()> { crate::atomic_io::atomic_write_text(path, &format!("# Kyth OOMD tuned\ndefault_mem_pressure_limit = {}\ngaming_preference = {}\n", quote(&config.default_mem_pressure_limit), quote(&config.gaming_preference)), Some(0o600)) }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct OomGamingConfig { pub profile: String, pub limit: String }
+impl Default for OomGamingConfig { fn default() -> Self { Self { profile: "balanced".into(), limit: "50%".into() } } }
+pub fn oom_gaming_path(path: Option<impl AsRef<Path>>) -> PathBuf { system_path("oom-gaming.toml", path) }
+pub fn load_oom_gaming(path: impl AsRef<Path>) -> OomGamingConfig {
+    let Some(value) = parse_root(path) else { return OomGamingConfig::default(); };
+    let profile = parse_string(value.get("profile"), "balanced").to_ascii_lowercase();
+    let profile = matches!(profile.as_str(), "balanced" | "gaming").then_some(profile).unwrap_or_else(|| "balanced".into());
+    let default_limit = if profile == "gaming" { "75%" } else { "50%" };
+    let limit = parse_string(value.get("limit"), default_limit);
+    OomGamingConfig { profile, limit: if limit.ends_with('%') { limit } else { default_limit.into() } }
+}
+pub fn save_oom_gaming(path: impl AsRef<Path>, config: &OomGamingConfig) -> std::io::Result<()> { crate::atomic_io::atomic_write_text(path, &format!("# Kyth OOM gaming — offline\nprofile = {}\nlimit = {}\n", quote(&config.profile), quote(&config.limit)), Some(0o600)) }
+pub fn generate_oom_gaming(config: &OomGamingConfig, destination: impl AsRef<Path>) -> std::io::Result<Option<PathBuf>> {
+    let destination = destination.as_ref();
+    if config.profile != "gaming" { match std::fs::remove_file(destination) { Ok(()) | Err(_) => {} } return Ok(None); }
+    crate::atomic_io::atomic_write_text(destination, &format!("# Kyth OOM gaming — generated\n[Unit]\nManagedOOMMemoryPressureLimit={}\n", config.limit), Some(0o644))?;
+    Ok(Some(destination.to_path_buf()))
+}
+pub fn oom_gaming_status(destination: impl AsRef<Path>) -> &'static str { if destination.as_ref().is_file() { "gaming" } else { "balanced" } }
+
 pub fn etc_overlay_path(path: Option<impl AsRef<Path>>) -> PathBuf { system_path("etc-overlay.toml", path) }
 pub fn load_etc_overlay(path: impl AsRef<Path>) -> BTreeMap<String, String> {
     let Some(value) = parse_root(path) else { return BTreeMap::new(); };

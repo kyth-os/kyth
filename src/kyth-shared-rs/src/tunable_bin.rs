@@ -114,6 +114,7 @@ fn native_other(name: &str) -> bool {
             | "boot-timeout"
             | "kargs-apply"
             | "sched-arbiter"
+            | "oom-gaming"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1649,6 +1650,51 @@ fn dispatch_sched_arbiter(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_oom_gaming(action: &str) -> ExitCode {
+    let config_path = preference_presets::oom_gaming_path(None::<&Path>);
+    let destination = generated_path("systemd/gaming.slice.d", "99-kyth-oom.conf", "/etc/systemd/system/gaming.slice.d/99-kyth-oom.conf");
+    match action {
+        "status" => {
+            let config = preference_presets::load_oom_gaming(&config_path);
+            println!("profile={} limit={} active={} kind=other", config.profile, config.limit, preference_presets::oom_gaming_status(&destination));
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("oom-gaming", &[action.to_string()]) { return code; }
+            let config = preference_presets::OomGamingConfig { profile: "gaming".into(), limit: "75%".into() };
+            if let Err(error) = preference_presets::save_oom_gaming(&config_path, &config).and_then(|_| preference_presets::generate_oom_gaming(&config, &destination).map(|_| ())) {
+                eprintln!("kyth-oom-gaming: {error}");
+                return ExitCode::from(1);
+            }
+            println!("oom-gaming gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("oom-gaming", &[action.to_string()]) { return code; }
+            let config = preference_presets::OomGamingConfig::default();
+            if let Err(error) = preference_presets::save_oom_gaming(&config_path, &config).and_then(|_| preference_presets::generate_oom_gaming(&config, &destination).map(|_| ())) {
+                eprintln!("kyth-oom-gaming: {error}");
+                return ExitCode::from(1);
+            }
+            println!("oom-gaming balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("oom-gaming", &[action.to_string()]) { return code; }
+            let config = preference_presets::load_oom_gaming(&config_path);
+            if let Err(error) = preference_presets::generate_oom_gaming(&config, &destination) {
+                eprintln!("kyth-oom-gaming: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-oom-gaming [gaming|balanced|off|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2258,6 +2304,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "boot-timeout" => dispatch_boot_timeout(action),
             "kargs-apply" => dispatch_kargs_apply(action),
             "sched-arbiter" => dispatch_sched_arbiter(action),
+            "oom-gaming" => dispatch_oom_gaming(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2367,7 +2414,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 91);
+        assert_eq!(names.len(), 92);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2416,6 +2463,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "boot-timeout"));
         assert!(names.iter().any(|name| name == "kargs-apply"));
         assert!(names.iter().any(|name| name == "sched-arbiter"));
+        assert!(names.iter().any(|name| name == "oom-gaming"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }

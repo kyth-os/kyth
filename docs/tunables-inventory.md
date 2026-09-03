@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 91 (all 49 sysctl wrappers plus 42 other-kind wrappers); 3 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 92 (all 49 sysctl wrappers plus 43 other-kind wrappers); 2 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -72,7 +72,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 37 | kyth-netdev-budget | netdev_budget | sysctl | `net.core.netdev_budget=600` | gaming.toml |
 | 38 | kyth-numa | numa_tune | other | numa | native Rust dispatcher |
 | 39 | kyth-numa-balancing | numa_balancing | sysctl | `kernel.numa_balancing=0` | gaming.toml |
-| 40 | kyth-oom-gaming | oom_gaming | other | oom | registry (other) |
+| 40 | kyth-oom-gaming | oom_gaming | other | oom | native Rust dispatcher |
 | 41 | kyth-overcommit-memory | overcommit_memory | sysctl | `vm.overcommit_memory=1` | gaming.toml |
 | 42 | kyth-page-cluster | page_cluster | sysctl | `vm.page-cluster=0` — (base has 0) | gaming.toml (dup base `vm.page-cluster`) |
 | 43 | kyth-perf-cpu | perf_cpu | sysctl | `kernel.perf_cpu_time_max_percent=5` | gaming.toml |
