@@ -57,7 +57,7 @@ for — see `src/kyth-hub-web/src-tauri/src/main.rs`'s `probe_backend`,
 | `system::display`, `hdr` | KScreen output parsing, EDID HDR hints, and per-display HDR config | KScreen/KWin mutation remains guarded by existing action paths. |
 | `system::gaming_master` | Gaming profile normalization plus thermal/battery safety evaluation | Composed tuning application and snapshot/rollback remain outside Rust. |
 | `system::gaming_snapshot` | Pre-gaming Snapper/Btrfs fallback command planning and result evaluation | Snapshot creation and filesystem mutation remain caller-owned. |
-| `system::sysctl_profiles` and `kyth-tunable-rs` | Shared profile/config/drop-in behavior and the native dispatcher for 49 sysctl-backed plus 35 module-specific tuning modules | The native binary owns the bounded `sysctl --system` refresh, environment/service projections, and the zswap modprobe drop-in; the remaining 10 tunables still use the compatibility dispatcher until their module-specific writers are ported. |
+| `system::sysctl_profiles` and `kyth-tunable-rs` | Shared profile/config/drop-in behavior and the native dispatcher for 49 sysctl-backed plus 36 module-specific tuning modules | The native binary owns the bounded `sysctl --system` refresh, environment/service projections, and the zswap modprobe drop-in; the remaining 9 tunables still use the compatibility dispatcher until their module-specific writers are ported. |
 | `system::sysctl_compose` | Canonical base/gaming/network sysctl TOML loading, duplicate detection, deterministic rendering, and explicit tier-file writes | Legacy-file cleanup, sysctl application, and build CLI exit policy remain outside Rust. |
 | `system::hdr_store`, `hdr_per_game` | HDR preserve preference and native hdr-store dispatch plus native per-game peak/ITM config lookup | KWin/display mutation and driver probing remain outside the shared crate. |
 | `system::work_cache` | Work-cache config normalization, native dispatch, and reversible tmpfiles/systemd rendering | tmpfiles/systemd activation and bind mounts remain outside Rust. |
@@ -65,7 +65,7 @@ for — see `src/kyth-hub-web/src-tauri/src/main.rs`'s `probe_backend`,
 | `system::ananicy` | Ananicy profile normalization and explicit gaming rule rendering | Service activation and process scheduling remain outside Rust. |
 | `system::flatpak_trim` | Flatpak trim preference and service-presence status | Unit/timer generation and Flatpak execution remain service-owned. |
 | `system::quicksettings` | Brightness/tile preference normalization and persistence | D-Bus brightness application remains outside the shared crate. |
-| `system::perf_gate` | Performance gate config and recent JSONL p95 regression comparison | Benchmark execution and ledger writes remain outside Rust. |
+| `system::perf_gate` | Performance gate config, native dispatch, and recent JSONL p95 regression comparison | Benchmark execution and ledger writes remain outside Rust. |
 | `system::perf_audit` | Stable line-oriented performance-audit text projection and key ordering | Live tunable collection, probe-cache writes, and systemd queries remain Python-owned. |
 | `system::driver_config`, `gpu_power` | Graphics driver and GPU power preference normalization/persistence plus native gpu-power dispatch | Driver installation and `/sys` power-level writes remain outside Rust. |
 | `system::readahead` | Readahead preference normalization and native tunable-dispatcher status/profile persistence | Filesystem fadvise application remains outside the shared crate. |

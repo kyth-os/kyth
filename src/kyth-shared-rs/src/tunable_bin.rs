@@ -18,6 +18,7 @@ use kyth_shared::system::{
     net_latency,
     numa,
     overlay,
+    perf_gate,
     gpu_power,
     podman_btrfs,
     preference_presets,
@@ -103,6 +104,7 @@ fn native_other(name: &str) -> bool {
             | "steam-deadzone"
             | "work-cache"
             | "telemetry-opt"
+            | "perf-gate"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1401,6 +1403,43 @@ fn dispatch_telemetry_opt(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_perf_gate(action: &str) -> ExitCode {
+    let config_path = perf_gate::config_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = perf_gate::load(&config_path);
+            println!("enabled={} threshold={} kind=other", config.enabled, config.threshold);
+            ExitCode::SUCCESS
+        }
+        "gaming" | "on" => {
+            if let Err(code) = ensure_root("perf-gate", &[action.to_string()]) { return code; }
+            if let Err(error) = perf_gate::save(&config_path, perf_gate::PerfGateConfig { enabled: true, ..perf_gate::load(&config_path) }) {
+                eprintln!("kyth-perf-gate: {error}");
+                return ExitCode::from(1);
+            }
+            println!("perf-gate on");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("perf-gate", &[action.to_string()]) { return code; }
+            if let Err(error) = perf_gate::save(&config_path, perf_gate::PerfGateConfig { enabled: false, ..perf_gate::load(&config_path) }) {
+                eprintln!("kyth-perf-gate: {error}");
+                return ExitCode::from(1);
+            }
+            println!("perf-gate off");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("perf-gate", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-perf-gate [gaming|balanced|on|off|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2003,6 +2042,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "hdr-per-game" => dispatch_hdr_per_game(action),
             "work-cache" => dispatch_work_cache(action),
             "telemetry-opt" => dispatch_telemetry_opt(action),
+            "perf-gate" => dispatch_perf_gate(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2112,7 +2152,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 84);
+        assert_eq!(names.len(), 85);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2154,6 +2194,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "hdr-per-game"));
         assert!(names.iter().any(|name| name == "work-cache"));
         assert!(names.iter().any(|name| name == "telemetry-opt"));
+        assert!(names.iter().any(|name| name == "perf-gate"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
