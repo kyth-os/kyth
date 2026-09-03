@@ -10,6 +10,7 @@ partition_ops.py) must shrink the filesystem first through this module, then
 move the partition boundary after.
 """
 
+import json
 import shutil
 import subprocess
 import tempfile
@@ -26,6 +27,7 @@ NTFS_GUIDANCE = (
 )
 
 _runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
+_DISK_HELPER = ["kyth-installer-exec", "--operation", "disk"]
 
 
 def _stream(argv, log, *, stdin_data=None, timeout=1800, error_factory=None):
@@ -42,6 +44,28 @@ def _stream(argv, log, *, stdin_data=None, timeout=1800, error_factory=None):
     )
 
 
+def _stream_typed(payload, log, *, timeout=1800, error_factory=None):
+    """Stream one validated filesystem operation through the Rust helper."""
+    _stream(
+        _DISK_HELPER,
+        log,
+        stdin_data=json.dumps(payload, separators=(",", ":")),
+        timeout=timeout,
+        error_factory=error_factory,
+    )
+
+
+def _run_typed(payload, *, timeout, **kwargs):
+    """Run one validated filesystem operation through the Rust helper."""
+    return run_command(
+        _as_root(_DISK_HELPER),
+        input=json.dumps(payload, separators=(",", ":")),
+        text=True,
+        timeout=timeout,
+        **kwargs,
+    )
+
+
 def _require_tools(*tools: str) -> None:
     missing = [tool for tool in tools if shutil.which(tool) is None]
     if missing:
@@ -54,16 +78,18 @@ def _shrink_ntfs(partition: str, new_size_bytes: int, log) -> None:
     _require_tools("ntfsresize")
 
     log("Checking NTFS resize safety...")
-    _stream(
-        ["ntfsresize", "--check", partition], log, timeout=240,
+    _stream_typed(
+        {"operation": "filesystem_resize", "device": partition, "fs": "ntfs",
+         "new_size_bytes": new_size_bytes, "stage": "check"},
+        log, timeout=240,
         error_factory=lambda *_: RuntimeError(NTFS_GUIDANCE),
     )
-    _stream(
-        ["ntfsresize", "--info", partition], log, timeout=120,
+    _stream_typed(
+        {"operation": "filesystem_resize", "device": partition, "fs": "ntfs",
+         "new_size_bytes": new_size_bytes, "stage": "info"},
+        log, timeout=120,
         error_factory=lambda *_: RuntimeError(NTFS_GUIDANCE),
     )
-
-    size_arg = str(new_size_bytes)
 
     def _dry_run_error(_returncode, recent_output, _argv):
         out = "\n".join(recent_output).lower()
@@ -82,15 +108,18 @@ def _shrink_ntfs(partition: str, new_size_bytes: int, log) -> None:
             "there, then return to the installer.\nOutput:\n" + "\n".join(recent_output)
         )
 
-    _stream(
-        ["ntfsresize", "--no-action", "--size", size_arg, partition], log,
+    _stream_typed(
+        {"operation": "filesystem_resize", "device": partition, "fs": "ntfs",
+         "new_size_bytes": new_size_bytes, "stage": "dry_run"},
+        log,
         timeout=240, error_factory=_dry_run_error,
     )
 
     log("Shrinking NTFS filesystem...")
-    _stream(
-        ["ntfsresize", "--size", size_arg, partition], log,
-        stdin_data="y\n", timeout=1800,
+    _stream_typed(
+        {"operation": "filesystem_resize", "device": partition, "fs": "ntfs",
+         "new_size_bytes": new_size_bytes, "stage": "resize"},
+        log, timeout=1800,
         error_factory=lambda _rc, recent_output, _argv: RuntimeError(
             "NTFS filesystem resize failed before the partition boundary was "
             "changed. Output:\n" + "\n".join(recent_output)
@@ -108,9 +137,9 @@ def _shrink_ext(partition: str, new_size_bytes: int, log) -> None:
     # Only >=4 means "unsafe to proceed"; run via plain run_command (not
     # streamed) since e2fsck's own output is a short summary, not a
     # long-running progress stream like resize2fs below.
-    check = run_command(
-        _as_root(["e2fsck", "-f", "-y", partition]),
-        text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600,
+    check = _run_typed(
+        {"operation": "filesystem_check", "device": partition},
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600,
     )
     if check.returncode >= 4:
         raise RuntimeError(
@@ -120,9 +149,10 @@ def _shrink_ext(partition: str, new_size_bytes: int, log) -> None:
         )
 
     log("Shrinking ext filesystem...")
-    size_kib = max(1, new_size_bytes // 1024)
-    _stream(
-        ["resize2fs", partition, f"{size_kib}K"], log, timeout=1800,
+    _stream_typed(
+        {"operation": "filesystem_resize", "device": partition, "fs": "ext4",
+         "new_size_bytes": new_size_bytes, "stage": "resize"},
+        log, timeout=1800,
         error_factory=lambda _rc, recent_output, _argv: RuntimeError(
             "ext filesystem resize failed before the partition boundary was "
             "changed. Output:\n" + "\n".join(recent_output)
@@ -135,11 +165,16 @@ def _shrink_btrfs(partition: str, new_size_bytes: int, log) -> None:
     mount_point = tempfile.mkdtemp(prefix="kyth-btrfs-resize-")
     try:
         log(f"Mounting {partition} to shrink its Btrfs filesystem...")
-        run_command(_as_root(["mount", partition, mount_point]), check=True, timeout=30)
+        _run_typed(
+            {"operation": "mount_filesystem", "device": partition, "mountpoint": mount_point},
+            check=True, timeout=30,
+        )
         try:
             log("Shrinking Btrfs filesystem...")
-            _stream(
-                ["btrfs", "filesystem", "resize", str(new_size_bytes), mount_point], log,
+            _stream_typed(
+                {"operation": "filesystem_resize", "device": mount_point, "fs": "btrfs",
+                 "new_size_bytes": new_size_bytes, "stage": "resize"},
+                log,
                 timeout=1800,
                 error_factory=lambda _rc, recent_output, _argv: RuntimeError(
                     "Btrfs filesystem resize failed before the partition boundary "
@@ -147,7 +182,10 @@ def _shrink_btrfs(partition: str, new_size_bytes: int, log) -> None:
                 ),
             )
         finally:
-            run_command(_as_root(["umount", mount_point]), check=False, timeout=30)
+            _run_typed(
+                {"operation": "unmount_filesystem", "mountpoint": mount_point},
+                check=False, timeout=30,
+            )
     finally:
         try:
             Path(mount_point).rmdir()

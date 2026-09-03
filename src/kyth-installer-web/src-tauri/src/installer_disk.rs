@@ -56,6 +56,22 @@ pub(crate) enum DiskOperationInput {
         #[serde(default = "default_sector_size")]
         sector_size: u64,
     },
+    FilesystemCheck {
+        device: String,
+    },
+    FilesystemResize {
+        device: String,
+        fs: String,
+        new_size_bytes: u64,
+        stage: String,
+    },
+    MountFilesystem {
+        device: String,
+        mountpoint: String,
+    },
+    UnmountFilesystem {
+        mountpoint: String,
+    },
     SetPartitionFlag {
         disk: String,
         part_num: u32,
@@ -106,6 +122,10 @@ fn safe_absolute_path(raw: &str, label: &str) -> Result<String, String> {
         return Err(format!("{label} must be an absolute safe path."));
     }
     Ok(value.to_string())
+}
+
+fn safe_mountpoint(raw: &str) -> Result<String, String> {
+    safe_absolute_path(raw, "mount point")
 }
 
 fn safe_label(raw: String) -> Result<String, String> {
@@ -189,6 +209,87 @@ fn build_mkfs(device: String, fs: String, label: String) -> Result<DiskPlan, Str
         timeout_seconds: if fs == "btrfs" { 300 } else { 120 },
         needs_confirmation: false,
     })
+}
+
+fn build_filesystem_resize(
+    device: String,
+    fs: String,
+    new_size_bytes: u64,
+    stage: String,
+) -> Result<DiskPlan, String> {
+    let device = required_device(&device, "filesystem device")?;
+    if new_size_bytes == 0 {
+        return Err("filesystem resize size must be positive.".to_string());
+    }
+    let fs = normalized_name(&fs);
+    let stage = normalized_name(&stage);
+    match (fs.as_str(), stage.as_str()) {
+        ("ntfs" | "ntfs3", "check") => Ok(DiskPlan {
+            argv: vec![
+                "/usr/sbin/ntfsresize".to_string(),
+                "--check".to_string(),
+                device,
+            ],
+            timeout_seconds: 240,
+            needs_confirmation: false,
+        }),
+        ("ntfs" | "ntfs3", "info") => Ok(DiskPlan {
+            argv: vec![
+                "/usr/sbin/ntfsresize".to_string(),
+                "--info".to_string(),
+                device,
+            ],
+            timeout_seconds: 120,
+            needs_confirmation: false,
+        }),
+        ("ntfs" | "ntfs3", "dry_run") => Ok(DiskPlan {
+            argv: vec![
+                "/usr/sbin/ntfsresize".to_string(),
+                "--no-action".to_string(),
+                "--size".to_string(),
+                new_size_bytes.to_string(),
+                device,
+            ],
+            timeout_seconds: 240,
+            needs_confirmation: false,
+        }),
+        ("ntfs" | "ntfs3", "resize") => Ok(DiskPlan {
+            argv: vec![
+                "/usr/sbin/ntfsresize".to_string(),
+                "--size".to_string(),
+                new_size_bytes.to_string(),
+                device,
+            ],
+            timeout_seconds: 1800,
+            needs_confirmation: true,
+        }),
+        ("ext2" | "ext3" | "ext4", "resize") => {
+            let size_kib = std::cmp::max(1, new_size_bytes / 1024);
+            Ok(DiskPlan {
+                argv: vec![
+                    "/usr/sbin/resize2fs".to_string(),
+                    device,
+                    format!("{size_kib}K"),
+                ],
+                timeout_seconds: 1800,
+                needs_confirmation: false,
+            })
+        }
+        ("btrfs", "resize") => Ok(DiskPlan {
+            argv: vec![
+                "/usr/sbin/btrfs".to_string(),
+                "filesystem".to_string(),
+                "resize".to_string(),
+                new_size_bytes.to_string(),
+                device,
+            ],
+            timeout_seconds: 1800,
+            needs_confirmation: false,
+        }),
+        _ => Err(format!(
+            "unsupported filesystem resize operation: {fs}/{stage}"
+        )),
+    }
 }
 
 pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> {
@@ -304,6 +405,42 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
                 ],
                 120,
             )
+        }
+        DiskOperationInput::FilesystemCheck { device } => {
+            let device = required_device(&device, "filesystem device")?;
+            Ok(DiskPlan {
+                argv: vec![
+                    "/usr/sbin/e2fsck".to_string(),
+                    "-f".to_string(),
+                    "-y".to_string(),
+                    device,
+                ],
+                timeout_seconds: 600,
+                needs_confirmation: false,
+            })
+        }
+        DiskOperationInput::FilesystemResize {
+            device,
+            fs,
+            new_size_bytes,
+            stage,
+        } => build_filesystem_resize(device, fs, new_size_bytes, stage),
+        DiskOperationInput::MountFilesystem { device, mountpoint } => {
+            let device = required_device(&device, "filesystem device")?;
+            let mountpoint = safe_mountpoint(&mountpoint)?;
+            Ok(DiskPlan {
+                argv: vec!["/usr/sbin/mount".to_string(), device, mountpoint],
+                timeout_seconds: 30,
+                needs_confirmation: false,
+            })
+        }
+        DiskOperationInput::UnmountFilesystem { mountpoint } => {
+            let mountpoint = safe_mountpoint(&mountpoint)?;
+            Ok(DiskPlan {
+                argv: vec!["/usr/sbin/umount".to_string(), mountpoint],
+                timeout_seconds: 30,
+                needs_confirmation: false,
+            })
         }
         DiskOperationInput::SetPartitionFlag {
             disk,
@@ -506,6 +643,78 @@ mod tests {
             ]
         );
         assert!(plan.needs_confirmation);
+    }
+
+    #[test]
+    fn projects_filesystem_shrink_stages() {
+        let check = build_plan(DiskOperationInput::FilesystemCheck { device: device() })
+            .expect("filesystem check plan should validate");
+        assert_eq!(check.argv, ["/usr/sbin/e2fsck", "-f", "-y", "/dev/sda"]);
+
+        let ntfs = build_plan(DiskOperationInput::FilesystemResize {
+            device: device(),
+            fs: "ntfs".into(),
+            new_size_bytes: 10 * 1024 * 1024,
+            stage: "dry_run".into(),
+        })
+        .expect("NTFS dry-run plan should validate");
+        assert_eq!(
+            ntfs.argv,
+            [
+                "/usr/sbin/ntfsresize",
+                "--no-action",
+                "--size",
+                "10485760",
+                "/dev/sda",
+            ]
+        );
+        assert!(!ntfs.needs_confirmation);
+
+        let ext = build_plan(DiskOperationInput::FilesystemResize {
+            device: device(),
+            fs: "ext4".into(),
+            new_size_bytes: 10 * 1024 + 1,
+            stage: "resize".into(),
+        })
+        .expect("ext resize plan should validate");
+        assert_eq!(ext.argv, ["/usr/sbin/resize2fs", "/dev/sda", "10K"]);
+
+        let btrfs = build_plan(DiskOperationInput::FilesystemResize {
+            device: device(),
+            fs: "btrfs".into(),
+            new_size_bytes: 20 * 1024 * 1024,
+            stage: "resize".into(),
+        })
+        .expect("Btrfs resize plan should validate");
+        assert_eq!(
+            btrfs.argv,
+            [
+                "/usr/sbin/btrfs",
+                "filesystem",
+                "resize",
+                "20971520",
+                "/dev/sda",
+            ]
+        );
+    }
+
+    #[test]
+    fn projects_btrfs_mount_lifecycle() {
+        let mount = build_plan(DiskOperationInput::MountFilesystem {
+            device: device(),
+            mountpoint: "/tmp/kyth-resize".into(),
+        })
+        .expect("mount plan should validate");
+        assert_eq!(
+            mount.argv,
+            ["/usr/sbin/mount", "/dev/sda", "/tmp/kyth-resize"]
+        );
+
+        let unmount = build_plan(DiskOperationInput::UnmountFilesystem {
+            mountpoint: "/tmp/kyth-resize".into(),
+        })
+        .expect("unmount plan should validate");
+        assert_eq!(unmount.argv, ["/usr/sbin/umount", "/tmp/kyth-resize"]);
     }
 
     #[test]

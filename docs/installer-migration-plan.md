@@ -266,9 +266,12 @@ Port components only after behavioral parity and focused tests exist:
   while GPT backup/restore, table creation, partition create/delete/flag
   operations, and supported filesystem formatting now go through the
   root-only Rust `kyth-installer-exec` helper. Python still owns runtime
-  disk discovery, storage-dependent policy, filesystem shrinking, and journal
-  commit/rollback orchestration. Both manual-journal and guided NTFS
-  partition-boundary resize now use the same typed Rust operation, including
+  disk discovery, storage-dependent policy, and journal commit/rollback
+  orchestration. Filesystem-specific shrinking is now executed by the typed
+  Rust helper for NTFS, ext, and Btrfs; Python retains target validation,
+  pre-shrink safety guards, stage ordering, error guidance, mount lifecycle
+  orchestration, and journal orchestration. Both manual-journal and guided
+  NTFS partition-boundary resize use the same typed Rust operation, including
   its fixed interactive confirmation and cancellation-safe child handling.
 - **Done as a decoder/classifier:** transaction/recovery state and Rescue guidance; durable writes and recovery actions remain Python-owned.
 - **Done as a pure model:** streaming command output framing, bounded failure
