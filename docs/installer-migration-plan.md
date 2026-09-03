@@ -299,6 +299,10 @@ Port components only after behavioral parity and focused tests exist:
   phase orchestration, power monitoring, transaction reporting, and target
   configuration. The compatibility command builder remains until the full
   storage/configuration executor is ported.
+- **Non-secret target configuration now uses the typed Rust executor:**
+  hostname, locale, keyboard layout, and timezone-link writes are validated,
+  synced, and applied by `kyth-installer-exec`; Python retains account
+  creation and phase sequencing.
 - **Done as a pure decision model:** Rust and Python agree on Secure Boot/MOK
   states and import-result classification; `mokutil`, passwords, and firmware
   interactions remain Python-owned.

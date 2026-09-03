@@ -1,10 +1,14 @@
 //! Pure installed-system configuration planning.
 //!
 //! Passwords and account creation intentionally do not cross this model. The
-//! privileged Python service continues to own account databases and all file
-//! writes; this module describes only the non-secret configuration contract.
+//! privileged Python service continues to own account databases; this module
+//! validates and applies the non-secret configuration contract.
 
 use serde::{Deserialize, Serialize};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::Path;
 
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct ConfigurationInput {
@@ -85,8 +89,42 @@ pub(crate) fn build_plan(input: ConfigurationInput) -> Result<ConfigurationPlan,
             ConfigWrite { path: format!("{etc}/vconsole.conf"), content: format!("KEYMAP={keymap}\n"), mode: 0o644 },
         ],
         localtime_target: format!("/usr/share/zoneinfo/{timezone}"),
-        executor: "kyth-installerd",
+        executor: "kyth-installer-exec",
     })
+}
+
+pub(crate) fn apply_plan(plan: ConfigurationPlan) -> Result<(), String> {
+    for write in &plan.writes {
+        let mut file = OpenOptions::new();
+        file.write(true)
+            .create(true)
+            .truncate(true)
+            .mode(write.mode)
+            .custom_flags(libc::O_NOFOLLOW);
+        let mut file = file
+            .open(&write.path)
+            .map_err(|error| format!("could not open configuration file: {error}"))?;
+        file.write_all(write.content.as_bytes())
+            .map_err(|error| format!("could not write configuration file: {error}"))?;
+        file.flush()
+            .map_err(|error| format!("could not flush configuration file: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("could not sync configuration file: {error}"))?;
+        fs::set_permissions(&write.path, fs::Permissions::from_mode(write.mode))
+            .map_err(|error| format!("could not secure configuration file: {error}"))?;
+    }
+
+    let localtime = Path::new(&plan.target_root).join("etc/localtime");
+    if let Ok(metadata) = fs::symlink_metadata(&localtime) {
+        if metadata.is_dir() {
+            return Err("installed localtime path is a directory".to_string());
+        }
+        fs::remove_file(&localtime)
+            .map_err(|error| format!("could not replace installed localtime: {error}"))?;
+    }
+    std::os::unix::fs::symlink(&plan.localtime_target, &localtime)
+        .map_err(|error| format!("could not set installed timezone: {error}"))?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -119,5 +157,26 @@ mod tests {
         assert!(build_plan(ConfigurationInput { target_root: "/mnt/../etc".to_string(), ..base.clone() }).is_err());
         assert!(build_plan(ConfigurationInput { hostname: "bad name".to_string(), ..base.clone() }).is_err());
         assert!(build_plan(ConfigurationInput { timezone: "../UTC".to_string(), ..base }).is_err());
+    }
+
+    #[test]
+    fn applies_non_secret_configuration_files_and_timezone_link() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let etc = directory.path().join("etc");
+        std::fs::create_dir(&etc).expect("etc directory");
+        let plan = build_plan(ConfigurationInput {
+            target_root: directory.path().to_string_lossy().into_owned(),
+            hostname: "kyth-box".to_string(),
+            timezone: "UTC".to_string(),
+            locale: "en_US.UTF-8".to_string(),
+            keymap: "us".to_string(),
+        })
+        .expect("configuration should validate");
+        apply_plan(plan).expect("configuration should apply");
+        assert_eq!(std::fs::read_to_string(etc.join("hostname")).unwrap(), "kyth-box\n");
+        assert_eq!(
+            std::fs::read_link(etc.join("localtime")).unwrap(),
+            Path::new("/usr/share/zoneinfo/UTC")
+        );
     }
 }

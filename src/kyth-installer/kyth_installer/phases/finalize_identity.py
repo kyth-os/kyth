@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import subprocess
+import json
+import shutil
 from pathlib import Path
 
 from .compat import phase_dependency
@@ -12,6 +14,31 @@ from ..executor import ExecutorCommand, PrivilegedExecutor
 def configure_hostname_timezone(etc, state, log, *, format_error) -> None:
     run_command = phase_dependency("run_command")
     as_root = phase_dependency("_as_root")
+    if shutil.which("kyth-installer-exec"):
+        payload = {
+            "target_root": str(Path(etc).parent),
+            "hostname": state["hostname"],
+            "timezone": state["timezone"],
+            "locale": state.get("locale", "en_US.UTF-8"),
+            "keymap": state.get("keymap", "us"),
+        }
+        try:
+            run_command(
+                as_root(["kyth-installer-exec", "--operation", "configuration-write"]),
+                input=json.dumps(payload, separators=(",", ":")),
+                text=True,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE,
+                check=True,
+                timeout=30,
+            )
+        except OSError as exc:
+            raise OSError(format_error(exc, path=etc)) from exc
+        log(f"Hostname : {state['hostname']}")
+        log(f"Timezone : {state['timezone']}")
+        log(f"Locale   : {payload['locale']}")
+        log(f"Keyboard : {payload['keymap']}")
+        return
     executor = PrivilegedExecutor(run_command=run_command, as_root=as_root)
     hostname_path = str(Path(etc, "hostname"))
     try:

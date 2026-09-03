@@ -19,6 +19,7 @@ mod installer_storage;
 mod installer_recovery;
 #[allow(dead_code)]
 mod installer_transaction;
+mod installer_configuration;
 
 use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
@@ -49,7 +50,11 @@ fn operation_args_valid(args: &[String]) -> bool {
         && args[0] == "--operation"
         && matches!(
             args[1].as_str(),
-            "bootc-install" | "disk" | "journal-validate" | "transaction-write"
+            "bootc-install"
+                | "disk"
+                | "journal-validate"
+                | "transaction-write"
+                | "configuration-write"
         )
 }
 
@@ -72,6 +77,13 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         let input = serde_json::from_slice::<installer_transaction::TransactionWriteInput>(&input)
             .map_err(|error| format!("invalid transaction write JSON: {error}"))?;
         installer_transaction::write_request(input)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "configuration-write" {
+        let input = serde_json::from_slice::<installer_configuration::ConfigurationInput>(&input)
+            .map_err(|error| format!("invalid configuration JSON: {error}"))?;
+        let plan = installer_configuration::build_plan(input)?;
+        installer_configuration::apply_plan(plan)?;
         return Ok(ExitCode::SUCCESS);
     }
     let (argv, needs_confirmation, operation) = match args[1].as_str() {
@@ -186,6 +198,10 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "transaction-write".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "configuration-write".into()
         ]));
     }
 
