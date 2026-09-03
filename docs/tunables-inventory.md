@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 86 (all 49 sysctl wrappers plus 37 other-kind wrappers); 8 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 87 (all 49 sysctl wrappers plus 38 other-kind wrappers); 7 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -97,7 +97,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 62 | kyth-somaxconn | somaxconn | sysctl | `net.core.somaxconn=8192` | gaming.toml |
 | 63 | kyth-steam-deadzone | steam_deadzone | other | steam | native Rust dispatcher |
 | 64 | kyth-swappiness | swappiness | sysctl | `vm.swappiness=10` — **dup base** (base 180) | gaming.toml |
-| 65 | kyth-system-audit | system_audit | other | system audit | registry (other) |
+| 65 | kyth-system-audit | system_audit | other | system audit | native Rust dispatcher |
 | 66 | kyth-tcp-ecn | tcp_ecn | sysctl | `net.ipv4.tcp_ecn=1` — **dup network** | gaming.toml vs network |
 | 67 | kyth-tcp-fastopen | tcp_fastopen | sysctl | `net.ipv4.tcp_fastopen=3` — **dup network** | gaming.toml vs network |
 | 68 | kyth-tcp-fin-timeout | tcp_fin_timeout | sysctl | `net.ipv4.tcp_fin_timeout=30` | gaming.toml |

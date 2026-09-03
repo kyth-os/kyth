@@ -26,6 +26,7 @@ use kyth_shared::system::{
     readahead,
     scheduler_arbiter,
     shader_tmpfs,
+    system_audit,
     telemetry_opt,
     work_cache,
     sysctl_profiles,
@@ -107,6 +108,7 @@ fn native_other(name: &str) -> bool {
             | "telemetry-opt"
             | "perf-gate"
             | "gaming-audit"
+            | "system-audit"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1455,6 +1457,20 @@ fn dispatch_gaming_audit(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_system_audit(action: &str) -> ExitCode {
+    match action {
+        "status" | "apply" | "gaming" | "balanced" => {
+            let report = system_audit::summarize(&serde_json::json!({}), 0, None);
+            println!("{}", system_audit::format_audit(&report));
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-system-audit [status|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2059,6 +2075,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "telemetry-opt" => dispatch_telemetry_opt(action),
             "perf-gate" => dispatch_perf_gate(action),
             "gaming-audit" => dispatch_gaming_audit(action),
+            "system-audit" => dispatch_system_audit(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2168,7 +2185,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 86);
+        assert_eq!(names.len(), 87);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2212,6 +2229,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "telemetry-opt"));
         assert!(names.iter().any(|name| name == "perf-gate"));
         assert!(names.iter().any(|name| name == "gaming-audit"));
+        assert!(names.iter().any(|name| name == "system-audit"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
