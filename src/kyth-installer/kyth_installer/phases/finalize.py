@@ -120,6 +120,31 @@ def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
 
 
 def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -> None:
+    mounts = phase_dependency("_get_manual_mounts")(context)
+    if shutil.which("kyth-installer-exec"):
+        native_mounts = []
+        for mount in mounts:
+            uuid_out = _blkid_uuid(mount["partition"], log)
+            if uuid_out is not None:
+                native_mounts.append({**mount, "uuid": uuid_out})
+        run_command = phase_dependency("run_command")
+        as_root = phase_dependency("_as_root")
+        try:
+            result = run_command(
+                as_root(["kyth-installer-exec", "--operation", "manual-mounts"]),
+                input=json.dumps({
+                    "config_root": str(config_root),
+                    "fstab_path": str(Path(etc, "fstab")),
+                    "mounts": native_mounts,
+                }, separators=(",", ":")),
+                capture_output=True, text=True, check=True, timeout=120,
+            )
+            response = json.loads(result.stdout or "{}")
+            if response.get("skipped"):
+                log(f"Warning: {response['skipped']} manual mount(s) could not be mounted")
+            return
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"native manual mount configuration failed: {exc}") from exc
     configure_manual_mounts(
         config_root, etc, log, context,
         uuid_lookup=_blkid_uuid, append_line=_append_fstab_line,

@@ -22,6 +22,7 @@ mod installer_transaction;
 mod installer_configuration;
 mod installer_alongside;
 mod installer_probe;
+mod installer_manual;
 #[allow(dead_code)]
 mod installer_secure_boot;
 mod installer_orchestration;
@@ -77,6 +78,7 @@ fn operation_args_valid(args: &[String]) -> bool {
                 | "power-check"
                 | "uuid-probe"
                 | "alongside-home"
+                | "manual-mounts"
         )
 }
 
@@ -206,6 +208,14 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             .map_err(|error| format!("invalid alongside-home JSON: {error}"))?;
         let response = installer_alongside::apply(input)?;
         println!("{}", serde_json::to_string(&response).map_err(|error| format!("could not encode alongside-home response: {error}"))?);
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "manual-mounts" {
+        let input = serde_json::from_slice::<installer_manual::ManualMountsInput>(&input)
+            .map_err(|error| format!("invalid manual mounts JSON: {error}"))?;
+        let response = installer_manual::apply(input)?;
+        println!("{}", serde_json::to_string(&response)
+            .map_err(|error| format!("could not encode manual mounts response: {error}"))?);
         return Ok(ExitCode::SUCCESS);
     }
     if args[1] == "fstab-append" {
