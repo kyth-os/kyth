@@ -29,6 +29,7 @@ NATIVE_BINARIES = {
     "kyth-safe-upgrade", "kyth-bootc-guard", "kyth-finalize-staged", "kyth-btrfs-maint",
     "kyth-ai-perfd", "kyth-perf-gate-rs",
 }
+PACKAGED_NATIVE_LAUNCHERS = NATIVE_BINARIES | {"kyth-doctor"}
 NOT_PORTED = {"kyth-default-flatpaks", "kyth-flathub-setup", "kyth-local-bin-migrate", "rclone@", "scx_loader"}
 READ_ONLY_NAMES = {
     "kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check",
@@ -96,7 +97,11 @@ def entry(path: Path, *, surface: str, implementation: str | None = None, name: 
     if item_name in NOT_PORTED:
         status = "explicitly-not-ported"
         reason = "documented third-party or declarative build/runtime exception"
-    elif implementation == "rust" or (surface == "systemd-unit" and item_name in NATIVE_BINARIES):
+    elif (
+        implementation == "rust"
+        or (surface == "systemd-unit" and item_name in NATIVE_BINARIES)
+        or (surface == "launcher" and item_name in PACKAGED_NATIVE_LAUNCHERS)
+    ):
         status = "done-native"
         reason = "native Rust crate or installed unit is already declared/packaged"
     else:
@@ -109,6 +114,7 @@ def entry(path: Path, *, surface: str, implementation: str | None = None, name: 
         "name": item_name,
         "resolved_target": rel(path.resolve()) if path.exists() else None,
         "current_implementation": kind,
+        "installed_implementation": "rust" if status == "done-native" else kind,
         "status": status,
         "risk_tier": risk_for(item_name, kind, path),
         "priority": 0 if status != "queued" else 1,
@@ -154,7 +160,7 @@ def validate(document: dict, *, expected_paths: set[str] | None = None) -> list[
     if not isinstance(entries, list) or not entries:
         return ["entries must be a non-empty list"]
     seen: set[str] = set()
-    required = {"path", "surface", "resolved_target", "current_implementation", "status", "risk_tier", "priority", "owner", "parity_tests", "cutover", "rollback", "retirement"}
+    required = {"path", "surface", "resolved_target", "current_implementation", "installed_implementation", "status", "risk_tier", "priority", "owner", "parity_tests", "cutover", "rollback", "retirement"}
     for index, item in enumerate(entries):
         if not isinstance(item, dict):
             errors.append(f"entry {index} is not an object")
