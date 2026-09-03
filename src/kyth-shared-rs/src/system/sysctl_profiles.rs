@@ -119,6 +119,24 @@ pub fn known_profiles() -> impl Iterator<Item = (&'static str, &'static str)> {
     SPECS.iter().map(|item| (item.config, item.drop_in))
 }
 
+/// Resolve a tunable registry name to a profile-backed sysctl model.
+pub fn profile_config_for_tunable(name: &str) -> Option<&'static str> {
+    let config = format!("{name}.toml");
+    SPECS.iter().find(|item| item.config == config).map(|item| item.config)
+}
+
+pub fn load_tunable(name: &str, path: Option<&Path>) -> Option<Profile> {
+    profile_config_for_tunable(name).map(|config| load(config, path))
+}
+
+pub fn status_tunable(name: &str, drop_in: Option<&Path>) -> Option<Profile> {
+    profile_config_for_tunable(name).map(|config| status(config, drop_in))
+}
+
+pub fn generate_tunable(name: &str, path: Option<&Path>, destination: Option<&Path>, profile: Option<Profile>) -> Option<std::io::Result<Option<PathBuf>>> {
+    profile_config_for_tunable(name).map(|config| generate(config, path, destination, profile))
+}
+
 macro_rules! profile_module {
     ($load:ident, $save:ident, $generate:ident, $status:ident, $config:literal) => {
         pub fn $load(path: Option<&Path>) -> Profile { load($config, path) }
