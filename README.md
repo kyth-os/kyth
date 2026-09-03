@@ -4,7 +4,7 @@
 
 # KythOS
 
-**An opinionated Fedora Atomic desktop for gaming, work, and recovery.**
+**THE MAIN BRANCH IS CURRENTLY DEPRECATED - DO NOT USE. USE TESTING ONLY. WE ARE UNDER A HUGRE REFACTORING/TRANSITION AND ALL UPDATES ARE ONLY BEING PUBLISHED TO TESTING CURRENTLY**
 
 KythOS 44 · Based on Fedora Kinoite · KDE Plasma 6 · bootc · Atomic updates · Graphical installer
 
