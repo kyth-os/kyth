@@ -13,6 +13,7 @@ use kyth_shared::system::{
     extended_preferences::{self, ThpConfig},
     flatpak_prefetch,
     flatpak_trim,
+    hdr_store,
     net_latency,
     numa,
     overlay,
@@ -97,6 +98,7 @@ fn native_other(name: &str) -> bool {
             | "selinux-gaming"
             | "shader-tmpfs"
             | "steam-deadzone"
+            | "hdr-store"
     )
 }
 
@@ -1247,6 +1249,43 @@ fn dispatch_steam_deadzone(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_hdr_store(action: &str) -> ExitCode {
+    let config_path = hdr_store::config_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = hdr_store::load(&config_path);
+            println!("preserve={} kind=other", config.preserve);
+            ExitCode::SUCCESS
+        }
+        "gaming" | "on" => {
+            if let Err(code) = ensure_root("hdr-store", &[action.to_string()]) { return code; }
+            if let Err(error) = hdr_store::save(&config_path, hdr_store::HdrStoreConfig { preserve: true }) {
+                eprintln!("kyth-hdr-store: {error}");
+                return ExitCode::from(1);
+            }
+            println!("hdr-store on");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("hdr-store", &[action.to_string()]) { return code; }
+            if let Err(error) = hdr_store::save(&config_path, hdr_store::HdrStoreConfig { preserve: false }) {
+                eprintln!("kyth-hdr-store: {error}");
+                return ExitCode::from(1);
+            }
+            println!("hdr-store off");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("hdr-store", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-hdr-store [gaming|balanced|on|off|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1845,6 +1884,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "selinux-gaming" => dispatch_selinux_gaming(action),
             "shader-tmpfs" => dispatch_shader_tmpfs(action),
             "steam-deadzone" => dispatch_steam_deadzone(action),
+            "hdr-store" => dispatch_hdr_store(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1954,7 +1994,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 80);
+        assert_eq!(names.len(), 81);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1992,6 +2032,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "selinux-gaming"));
         assert!(names.iter().any(|name| name == "shader-tmpfs"));
         assert!(names.iter().any(|name| name == "steam-deadzone"));
+        assert!(names.iter().any(|name| name == "hdr-store"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
