@@ -69,6 +69,7 @@ fn native_other(name: &str) -> bool {
             | "sccache"
             | "shader-cache-size"
             | "wine-sync"
+            | "kwin-latency"
     )
 }
 
@@ -623,6 +624,48 @@ fn dispatch_wine_sync(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_kwin_latency(action: &str) -> ExitCode {
+    let config_path = module_config_path("kwin-latency.toml", "/etc/kyth/kwin-latency.toml");
+    let dropin = generated_path("xdg/kwinrc.d", "99-kyth-latency.conf", "/etc/xdg/kwinrc.d/99-kyth-latency.conf");
+    let environment = generated_path("environment.d", "99-kyth-kwin.conf", "/etc/environment.d/99-kyth-kwin.conf");
+    let write_config = |config: &kyth_shared::system::kwin_latency::KwinLatencyConfig| -> std::io::Result<()> {
+        kyth_shared::atomic_io::atomic_write_text(&config_path, &config.to_toml(), Some(0o600))?;
+        let rendered_dropin = config.render_dropin();
+        write_optional(&dropin, rendered_dropin.as_deref())?;
+        write_optional(&environment, config.render_environment())
+    };
+    match action {
+        "status" => {
+            let config = kyth_shared::system::kwin_latency::KwinLatencyConfig::load(&config_path);
+            println!("profile={} tearing={} active={} kind=other", config.profile, config.tearing, kyth_shared::system::kwin_latency::status(dropin.is_file()));
+            ExitCode::SUCCESS
+        }
+        "gaming" | "balanced" => {
+            if let Err(code) = ensure_root("kwin-latency", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::kwin_latency::KwinLatencyConfig::normalized(action, action == "gaming");
+            if let Err(error) = write_config(&config) {
+                eprintln!("kyth-kwin-latency: {error}");
+                return ExitCode::from(1);
+            }
+            println!("kwin-latency {action}");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("kwin-latency", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::kwin_latency::KwinLatencyConfig::load(&config_path);
+            if let Err(error) = write_config(&config) {
+                eprintln!("kyth-kwin-latency: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-kwin-latency [status|gaming|balanced|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_epp_ac(action: &str) -> ExitCode {
     let config_path = module_config_path("epp-ac.toml", "/etc/kyth/epp-ac.toml");
     let rule = generated_path("udev/rules.d", "61-kyth-epp-ac.rules", "/etc/udev/rules.d/61-kyth-epp-ac.rules");
@@ -924,6 +967,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "sccache" => dispatch_sccache(action),
             "shader-cache-size" => dispatch_shader_cache_size(action),
             "wine-sync" => dispatch_wine_sync(action),
+            "kwin-latency" => dispatch_kwin_latency(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1033,7 +1077,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 62);
+        assert_eq!(names.len(), 63);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1053,6 +1097,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "sccache"));
         assert!(names.iter().any(|name| name == "shader-cache-size"));
         assert!(names.iter().any(|name| name == "wine-sync"));
+        assert!(names.iter().any(|name| name == "kwin-latency"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
