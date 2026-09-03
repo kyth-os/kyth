@@ -54,7 +54,17 @@ fn native_bespoke(name: &str) -> bool {
 }
 
 fn native_other(name: &str) -> bool {
-    matches!(name, "ananicy" | "btrfs-autotune" | "btrfs-tune")
+    matches!(
+        name,
+        "ananicy"
+            | "btrfs-autotune"
+            | "btrfs-tune"
+            | "epp-ac"
+            | "gaming-cfs"
+            | "pcie"
+            | "pipewire-gaming"
+            | "psi-gaming"
+    )
 }
 
 fn native_implemented(name: &str) -> bool {
@@ -349,6 +359,225 @@ fn dispatch_btrfs_tune(action: &str) -> ExitCode {
     }
 }
 
+fn module_config_path(filename: &str, production: &str) -> PathBuf {
+    if test_mode() {
+        if let Some(config) = env::var_os("XDG_CONFIG_HOME") {
+            return PathBuf::from(config).join("kyth").join(filename);
+        }
+    }
+    PathBuf::from(production)
+}
+
+fn write_optional(path: &Path, content: Option<&str>) -> std::io::Result<()> {
+    if let Some(content) = content {
+        kyth_shared::atomic_io::atomic_write_text(path, content, Some(0o644))?;
+    } else {
+        match std::fs::remove_file(path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+fn dispatch_epp_ac(action: &str) -> ExitCode {
+    let config_path = module_config_path("epp-ac.toml", "/etc/kyth/epp-ac.toml");
+    let rule = generated_path("udev/rules.d", "61-kyth-epp-ac.rules", "/etc/udev/rules.d/61-kyth-epp-ac.rules");
+    match action {
+        "status" => {
+            let config = extended_preferences::load_epp_ac(&config_path);
+            println!("enabled={} active={} kind=other", config.enabled, if rule.is_file() { "enabled" } else { "off" });
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("epp-ac", &[action.to_string()]) { return code; }
+            let config = extended_preferences::EppAcConfig { enabled: true };
+            if let Err(error) = extended_preferences::save_epp_ac(&config_path, &config)
+                .and_then(|_| write_optional(&rule, extended_preferences::epp_ac_rule(&config)))
+            {
+                eprintln!("kyth-epp-ac: {error}");
+                return ExitCode::from(1);
+            }
+            println!("epp-ac gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" => {
+            if let Err(code) = ensure_root("epp-ac", &[action.to_string()]) { return code; }
+            let config = extended_preferences::EppAcConfig { enabled: false };
+            if let Err(error) = extended_preferences::save_epp_ac(&config_path, &config)
+                .and_then(|_| write_optional(&rule, None))
+            {
+                eprintln!("kyth-epp-ac: {error}");
+                return ExitCode::from(1);
+            }
+            println!("epp-ac balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("epp-ac", &[action.to_string()]) { return code; }
+            let config = extended_preferences::load_epp_ac(&config_path);
+            if let Err(error) = write_optional(&rule, extended_preferences::epp_ac_rule(&config)) {
+                eprintln!("kyth-epp-ac: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-epp-ac [status|gaming|balanced|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_gaming_cfs(action: &str) -> ExitCode {
+    let config_path = module_config_path("gaming-cfs.toml", "/etc/kyth/gaming-cfs.toml");
+    let dropin = generated_path("systemd/gaming.slice.d", "99-kyth-cfs.conf", "/etc/systemd/system/gaming.slice.d/99-kyth-cfs.conf");
+    match action {
+        "status" => {
+            let config = extended_preferences::load_gaming_cfs(&config_path);
+            println!("profile={} active={} kind=other", config.profile, if dropin.is_file() { "gaming" } else { "balanced" });
+            ExitCode::SUCCESS
+        }
+        "gaming" | "balanced" => {
+            if let Err(code) = ensure_root("gaming-cfs", &[action.to_string()]) { return code; }
+            let config = extended_preferences::GamingCfsConfig { profile: action.into() };
+            if let Err(error) = extended_preferences::save_gaming_cfs(&config_path, &config)
+                .and_then(|_| write_optional(&dropin, extended_preferences::gaming_cfs_dropin(&config)))
+            {
+                eprintln!("kyth-gaming-cfs: {error}");
+                return ExitCode::from(1);
+            }
+            println!("gaming-cfs {action}");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("gaming-cfs", &[action.to_string()]) { return code; }
+            let config = extended_preferences::load_gaming_cfs(&config_path);
+            if let Err(error) = write_optional(&dropin, extended_preferences::gaming_cfs_dropin(&config)) {
+                eprintln!("kyth-gaming-cfs: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-gaming-cfs [status|gaming|balanced|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_pcie(action: &str) -> ExitCode {
+    let config_path = module_config_path("pcie.toml", "/etc/kyth/pcie.toml");
+    let rule = generated_path("udev/rules.d", "61-kyth-pcie.rules", "/etc/udev/rules.d/61-kyth-pcie.rules");
+    match action {
+        "status" => {
+            let config = extended_preferences::load_pcie(&config_path);
+            println!("profile={} active={} kind=other", config.profile, if rule.is_file() { "gaming" } else { "balanced" });
+            ExitCode::SUCCESS
+        }
+        "gaming" | "balanced" => {
+            if let Err(code) = ensure_root("pcie", &[action.to_string()]) { return code; }
+            let config = extended_preferences::PcieConfig { profile: action.into() };
+            if let Err(error) = extended_preferences::save_pcie(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_pcie(&config, &rule).map(|_| ()))
+            {
+                eprintln!("kyth-pcie: {error}");
+                return ExitCode::from(1);
+            }
+            println!("pcie {action}");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("pcie", &[action.to_string()]) { return code; }
+            let config = extended_preferences::load_pcie(&config_path);
+            if let Err(error) = extended_preferences::generate_pcie(&config, &rule) {
+                eprintln!("kyth-pcie: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-pcie [status|gaming|balanced|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_pipewire_gaming(action: &str) -> ExitCode {
+    let config_path = module_config_path("pipewire-gaming.toml", "/etc/kyth/pipewire-gaming.toml");
+    let destination = generated_path("wireplumber/main.lua.d", "99-kyth-gaming.lua", "/etc/wireplumber/main.lua.d/99-kyth-gaming.lua");
+    match action {
+        "status" => {
+            let config = extended_preferences::load_pipewire_gaming(&config_path);
+            println!("profile={} active={} kind=other", config.profile, if destination.is_file() { "gaming" } else { "balanced" });
+            ExitCode::SUCCESS
+        }
+        "gaming" | "balanced" => {
+            if let Err(code) = ensure_root("pipewire-gaming", &[action.to_string()]) { return code; }
+            let config = extended_preferences::PipewireGamingConfig { profile: action.into(), quantum: 128 };
+            if let Err(error) = extended_preferences::save_pipewire_gaming(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_pipewire_gaming(&config, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-pipewire-gaming: {error}");
+                return ExitCode::from(1);
+            }
+            println!("pipewire-gaming {action}");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("pipewire-gaming", &[action.to_string()]) { return code; }
+            let config = extended_preferences::load_pipewire_gaming(&config_path);
+            if let Err(error) = extended_preferences::generate_pipewire_gaming(&config, &destination) {
+                eprintln!("kyth-pipewire-gaming: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-pipewire-gaming [status|gaming|balanced|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_psi_gaming(action: &str) -> ExitCode {
+    let config_path = module_config_path("psi.toml", "/etc/kyth/psi.toml");
+    let dropin = generated_path("systemd/gaming.slice.d", "99-kyth-psi.conf", "/etc/systemd/system/gaming.slice.d/99-kyth-psi.conf");
+    match action {
+        "status" => {
+            let config = extended_preferences::load_psi(&config_path);
+            println!("profile={} active={} kind=other", config.profile, if dropin.is_file() { "gaming" } else { "balanced" });
+            ExitCode::SUCCESS
+        }
+        "gaming" | "balanced" => {
+            if let Err(code) = ensure_root("psi-gaming", &[action.to_string()]) { return code; }
+            let config = extended_preferences::PsiConfig { profile: action.into() };
+            if let Err(error) = extended_preferences::save_psi(&config_path, &config)
+                .and_then(|_| extended_preferences::generate_psi(&config, &dropin).map(|_| ()))
+            {
+                eprintln!("kyth-psi-gaming: {error}");
+                return ExitCode::from(1);
+            }
+            println!("psi-gaming {action}");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("psi-gaming", &[action.to_string()]) { return code; }
+            let config = extended_preferences::load_psi(&config_path);
+            if let Err(error) = extended_preferences::generate_psi(&config, &dropin) {
+                eprintln!("kyth-psi-gaming: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-psi-gaming [status|gaming|balanced|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_thp_tune(action: &str) -> ExitCode {
     let config_path = if test_mode() {
         env::var_os("XDG_CONFIG_HOME")
@@ -443,6 +672,11 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "ananicy" => dispatch_ananicy(action),
             "btrfs-autotune" => dispatch_btrfs_autotune(action),
             "btrfs-tune" => dispatch_btrfs_tune(action),
+            "epp-ac" => dispatch_epp_ac(action),
+            "gaming-cfs" => dispatch_gaming_cfs(action),
+            "pcie" => dispatch_pcie(action),
+            "pipewire-gaming" => dispatch_pipewire_gaming(action),
+            "psi-gaming" => dispatch_psi_gaming(action),
             _ => ExitCode::from(2),
         };
     }
@@ -552,7 +786,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 52);
+        assert_eq!(names.len(), 57);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -562,6 +796,11 @@ mod tests {
         assert!(names.iter().any(|name| name == "ananicy"));
         assert!(names.iter().any(|name| name == "btrfs-autotune"));
         assert!(names.iter().any(|name| name == "btrfs-tune"));
+        assert!(names.iter().any(|name| name == "epp-ac"));
+        assert!(names.iter().any(|name| name == "gaming-cfs"));
+        assert!(names.iter().any(|name| name == "pcie"));
+        assert!(names.iter().any(|name| name == "pipewire-gaming"));
+        assert!(names.iter().any(|name| name == "psi-gaming"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }

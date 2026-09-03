@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 52 (all 49 sysctl wrappers plus 3 other-kind wrappers); 42 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 57 (all 49 sysctl wrappers plus 8 other-kind wrappers); 37 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -45,14 +45,14 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 10 | kyth-dirty-expire | dirty_expire | sysctl | `vm.dirty_expire_centisecs=100` — **dup base** | gaming.toml (dedup, base has 500) |
 | 11 | kyth-dirty-ratio | dirty_ratio | sysctl | `vm.dirty_ratio=5` / `vm.dirty_background_ratio=5` / `vm.dirty_writeback_centisecs=500` — last **dup base** | gaming.toml |
 | 12 | kyth-distrobox-cache | distrobox_cache | other | `/etc/kyth/distrobox-cache.toml` | registry (other) |
-| 13 | kyth-epp-ac | epp_ac | other | `/etc/kyth/epp-ac.toml` | registry (other) |
+| 13 | kyth-epp-ac | epp_ac | other | `/etc/kyth/epp-ac.toml` | native Rust dispatcher |
 | 14 | kyth-fcitx-latency | fcitx_latency | other | fcitx latency | registry (other) |
 | 15 | kyth-file-max | file_max | sysctl | `fs.file-max=2097152` | gaming.toml (base has 2097152? check) |
 | 16 | kyth-flatpak-prefetch | flatpak_prefetch | other | flatpak | registry (other) |
 | 17 | kyth-flatpak-trim | flatpak_trim | other | flatpak | registry (other) |
 | 18 | kyth-fscache | fscache_tune | other | `/var/cache/fscache` | registry (other) |
 | 19 | kyth-gaming-audit | perf_audit | other | gaming audit | registry (other) |
-| 20 | kyth-gaming-cfs | gaming_cfs | other | `/etc/kyth/gaming-cfs.toml` | registry (other) |
+| 20 | kyth-gaming-cfs | gaming_cfs | other | `/etc/kyth/gaming-cfs.toml` | native Rust dispatcher |
 | 21 | kyth-gaming-master | gaming_master | other | gaming-performance | registry (other) |
 | 22 | kyth-gpu-power | gpu_power | other | gpu power | registry (other) |
 | 23 | kyth-hdr-per-game | hdr_per_game | other | hdr per game | registry (other) |
@@ -77,10 +77,10 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 42 | kyth-page-cluster | page_cluster | sysctl | `vm.page-cluster=0` — (base has 0) | gaming.toml (dup base `vm.page-cluster`) |
 | 43 | kyth-perf-cpu | perf_cpu | sysctl | `kernel.perf_cpu_time_max_percent=5` | gaming.toml |
 | 44 | kyth-perf-gate | perf_gate | other | perf gate | registry (other) |
-| 45 | kyth-pipewire-gaming | pipewire_gaming | other | pipewire | registry (other) |
+| 45 | kyth-pipewire-gaming | pipewire_gaming | other | pipewire | native Rust dispatcher |
 | 46 | kyth-podman-btrfs | podman_btrfs | other | podman btrfs | registry (other) |
 | 47 | kyth-podman-overlay | overlay_tune | other | overlay | registry (other) |
-| 48 | kyth-psi-gaming | psi_gaming | other | psi | registry (other) |
+| 48 | kyth-psi-gaming | psi_gaming | other | psi | native Rust dispatcher |
 | 49 | kyth-psi-poll | psi_poll | sysctl | `vm.pressure_poll=500` | gaming.toml |
 | 50 | kyth-readahead | readahead_preset | other | readahead | registry (other) |
 | 51 | kyth-rmem-default | rmem_default | sysctl | `net.core.rmem_default=262144` | gaming.toml |
