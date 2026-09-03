@@ -1,0 +1,482 @@
+//! Typed, root-only execution plans for non-interactive disk operations.
+//!
+//! The Python installer may choose when an operation is needed, but it must
+//! not construct the argv for a destructive disk utility. Every accepted
+//! request maps to one fixed executable and one fixed argv shape.
+
+use serde::Deserialize;
+
+use crate::installer_plan::normalize_device_path;
+
+const MAX_LABEL_BYTES: usize = 128;
+const MAX_PATH_BYTES: usize = 4096;
+const DEFAULT_SECTOR_SIZE: u64 = 512;
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "operation", rename_all = "snake_case")]
+pub(crate) enum DiskOperationInput {
+    BackupTable {
+        disk: String,
+        backup_path: String,
+    },
+    RestoreTable {
+        disk: String,
+        backup_path: String,
+    },
+    CreateLabel {
+        disk: String,
+        table_type: String,
+    },
+    CreatePartition {
+        disk: String,
+        start: u64,
+        size: u64,
+        fs: String,
+        label: String,
+        #[serde(default = "default_sector_size")]
+        sector_size: u64,
+    },
+    CreateUnformattedPartition {
+        disk: String,
+        start: u64,
+        size: u64,
+        label: String,
+        #[serde(default = "default_sector_size")]
+        sector_size: u64,
+    },
+    DeletePartition {
+        disk: String,
+        part_num: u32,
+    },
+    SetPartitionFlag {
+        disk: String,
+        part_num: u32,
+        flag: String,
+        #[serde(default = "default_true")]
+        enabled: bool,
+    },
+    FormatFilesystem {
+        device: String,
+        fs: String,
+        label: String,
+    },
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct DiskPlan {
+    pub(crate) argv: Vec<String>,
+    pub(crate) timeout_seconds: u64,
+}
+
+fn default_sector_size() -> u64 {
+    DEFAULT_SECTOR_SIZE
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn required_device(raw: &str, label: &str) -> Result<String, String> {
+    let device = normalize_device_path(raw)
+        .filter(|value| value.len() > "/dev/".len() && !value.contains("//"))
+        .ok_or_else(|| format!("{label} must be a safe device path."))?;
+    Ok(device)
+}
+
+fn safe_absolute_path(raw: &str, label: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty()
+        || value.len() > MAX_PATH_BYTES
+        || !value.starts_with('/')
+        || value.contains("..")
+        || value.contains("//")
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
+        })
+    {
+        return Err(format!("{label} must be an absolute safe path."));
+    }
+    Ok(value.to_string())
+}
+
+fn safe_label(raw: String) -> Result<String, String> {
+    if raw.len() > MAX_LABEL_BYTES || raw.chars().any(char::is_control) {
+        return Err("partition label is empty or contains unsafe characters.".to_string());
+    }
+    Ok(raw)
+}
+
+fn normalized_name(raw: &str) -> String {
+    raw.trim().to_ascii_lowercase()
+}
+
+fn partition_end(start: u64, size: u64, sector_size: u64) -> Result<u64, String> {
+    if sector_size == 0 || !sector_size.is_power_of_two() || !(512..=4096).contains(&sector_size) {
+        return Err("partition sector size is unsupported.".to_string());
+    }
+    if start == 0 || size < sector_size {
+        return Err("partition start or size is invalid.".to_string());
+    }
+    if start % sector_size != 0 || size % sector_size != 0 {
+        return Err("partition geometry is not aligned to the device sector size.".to_string());
+    }
+    start
+        .checked_add(size - sector_size)
+        .ok_or_else(|| "partition geometry overflows.".to_string())
+}
+
+fn parted_device(
+    disk: String,
+    args: Vec<String>,
+    timeout_seconds: u64,
+) -> Result<DiskPlan, String> {
+    let disk = required_device(&disk, "disk")?;
+    Ok(DiskPlan {
+        argv: std::iter::once("/usr/sbin/parted".to_string())
+            .chain(std::iter::once("-s".to_string()))
+            .chain(std::iter::once(disk))
+            .chain(args)
+            .collect(),
+        timeout_seconds,
+    })
+}
+
+fn build_mkfs(device: String, fs: String, label: String) -> Result<DiskPlan, String> {
+    let device = required_device(&device, "filesystem device")?;
+    let fs = normalized_name(&fs);
+    let label = safe_label(label)?;
+    let (binary, mut args): (&str, Vec<String>) = match fs.as_str() {
+        "btrfs" => ("/usr/sbin/mkfs.btrfs", vec!["-f".to_string()]),
+        "ext4" => ("/usr/sbin/mkfs.ext4", vec!["-F".to_string()]),
+        "xfs" => ("/usr/sbin/mkfs.xfs", vec!["-f".to_string()]),
+        "fat32" => ("/usr/sbin/mkfs.fat", vec!["-F32".to_string()]),
+        "linux-swap" => ("/usr/sbin/mkswap", Vec::new()),
+        _ => return Err(format!("unsupported filesystem type: {fs}")),
+    };
+    if !label.is_empty() {
+        args.extend([if fs == "fat32" { "-n" } else { "-L" }.to_string(), label]);
+    }
+    args.push(device);
+    Ok(DiskPlan {
+        argv: std::iter::once(binary.to_string()).chain(args).collect(),
+        timeout_seconds: if fs == "btrfs" { 300 } else { 120 },
+    })
+}
+
+pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> {
+    match input {
+        DiskOperationInput::BackupTable { disk, backup_path } => Ok(DiskPlan {
+            argv: vec![
+                "/usr/sbin/sgdisk".to_string(),
+                "--backup".to_string(),
+                safe_absolute_path(&backup_path, "backup path")?,
+                required_device(&disk, "disk")?,
+            ],
+            timeout_seconds: 30,
+        }),
+        DiskOperationInput::RestoreTable { disk, backup_path } => Ok(DiskPlan {
+            argv: vec![
+                "/usr/sbin/sgdisk".to_string(),
+                "--load-backup".to_string(),
+                safe_absolute_path(&backup_path, "backup path")?,
+                required_device(&disk, "disk")?,
+            ],
+            timeout_seconds: 60,
+        }),
+        DiskOperationInput::CreateLabel { disk, table_type } => {
+            let table_type = normalized_name(&table_type);
+            if !matches!(table_type.as_str(), "gpt" | "msdos") {
+                return Err(format!("unsupported partition table type: {table_type}"));
+            }
+            parted_device(disk, vec!["mklabel".to_string(), table_type], 30)
+        }
+        DiskOperationInput::CreatePartition {
+            disk,
+            start,
+            size,
+            fs,
+            label,
+            sector_size,
+        } => {
+            let fs = normalized_name(&fs);
+            if !matches!(
+                fs.as_str(),
+                "btrfs" | "ext4" | "xfs" | "fat32" | "linux-swap"
+            ) {
+                return Err(format!("unsupported filesystem type: {fs}"));
+            }
+            let label = safe_label(label)?;
+            let end = partition_end(start, size, sector_size)?;
+            parted_device(
+                disk,
+                vec![
+                    "unit".to_string(),
+                    "B".to_string(),
+                    "mkpart".to_string(),
+                    if label.is_empty() {
+                        "partition".to_string()
+                    } else {
+                        label
+                    },
+                    fs,
+                    format!("{start}B"),
+                    format!("{end}B"),
+                ],
+                120,
+            )
+        }
+        DiskOperationInput::CreateUnformattedPartition {
+            disk,
+            start,
+            size,
+            label,
+            sector_size,
+        } => {
+            let end = partition_end(start, size, sector_size)?;
+            parted_device(
+                disk,
+                vec![
+                    "unit".to_string(),
+                    "B".to_string(),
+                    "mkpart".to_string(),
+                    safe_label(label)?,
+                    format!("{start}B"),
+                    format!("{end}B"),
+                ],
+                120,
+            )
+        }
+        DiskOperationInput::DeletePartition { disk, part_num } => {
+            if part_num == 0 {
+                return Err("partition number must be positive.".to_string());
+            }
+            parted_device(disk, vec!["rm".to_string(), part_num.to_string()], 60)
+        }
+        DiskOperationInput::SetPartitionFlag {
+            disk,
+            part_num,
+            flag,
+            enabled,
+        } => {
+            if part_num == 0 {
+                return Err("partition number must be positive.".to_string());
+            }
+            let flag = normalized_name(&flag);
+            if !matches!(flag.as_str(), "bios_grub" | "esp") {
+                return Err(format!("unsupported partition flag: {flag}"));
+            }
+            parted_device(
+                disk,
+                vec![
+                    "set".to_string(),
+                    part_num.to_string(),
+                    flag,
+                    if enabled { "on" } else { "off" }.to_string(),
+                ],
+                60,
+            )
+        }
+        DiskOperationInput::FormatFilesystem { device, fs, label } => build_mkfs(device, fs, label),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn device() -> String {
+        "/dev/sda".to_string()
+    }
+
+    #[test]
+    fn projects_fixed_partition_commands() {
+        let plan = build_plan(DiskOperationInput::CreatePartition {
+            disk: device(),
+            start: 1024 * 1024,
+            size: 1024 * 1024 * 1024,
+            fs: "btrfs".into(),
+            label: "KythOS".into(),
+            sector_size: 512,
+        })
+        .expect("partition plan should validate");
+        assert_eq!(
+            plan.argv,
+            [
+                "/usr/sbin/parted",
+                "-s",
+                "/dev/sda",
+                "unit",
+                "B",
+                "mkpart",
+                "KythOS",
+                "btrfs",
+                "1048576B",
+                "1074789888B",
+            ]
+        );
+    }
+
+    #[test]
+    fn projects_filesystem_commands_with_type_specific_labels() {
+        let plan = build_plan(DiskOperationInput::FormatFilesystem {
+            device: device(),
+            fs: "fat32".into(),
+            label: "EFI".into(),
+        })
+        .expect("filesystem plan should validate");
+        assert_eq!(
+            plan.argv,
+            ["/usr/sbin/mkfs.fat", "-F32", "-n", "EFI", "/dev/sda"]
+        );
+    }
+
+    #[test]
+    fn projects_table_and_flag_operations() {
+        let label = build_plan(DiskOperationInput::CreateLabel {
+            disk: device(),
+            table_type: "GPT".into(),
+        })
+        .expect("label plan should validate");
+        assert_eq!(
+            label.argv,
+            ["/usr/sbin/parted", "-s", "/dev/sda", "mklabel", "gpt"]
+        );
+
+        let bios = build_plan(DiskOperationInput::CreateUnformattedPartition {
+            disk: device(),
+            start: 1024 * 1024,
+            size: 1024 * 1024,
+            label: "biosboot".into(),
+            sector_size: 512,
+        })
+        .expect("unformatted partition plan should validate");
+        assert_eq!(
+            bios.argv,
+            [
+                "/usr/sbin/parted",
+                "-s",
+                "/dev/sda",
+                "unit",
+                "B",
+                "mkpart",
+                "biosboot",
+                "1048576B",
+                "2096640B",
+            ]
+        );
+
+        let delete = build_plan(DiskOperationInput::DeletePartition {
+            disk: device(),
+            part_num: 2,
+        })
+        .expect("delete plan should validate");
+        assert_eq!(
+            delete.argv,
+            ["/usr/sbin/parted", "-s", "/dev/sda", "rm", "2"]
+        );
+
+        let flag = build_plan(DiskOperationInput::SetPartitionFlag {
+            disk: device(),
+            part_num: 1,
+            flag: "esp".into(),
+            enabled: false,
+        })
+        .expect("flag plan should validate");
+        assert_eq!(
+            flag.argv,
+            [
+                "/usr/sbin/parted",
+                "-s",
+                "/dev/sda",
+                "set",
+                "1",
+                "esp",
+                "off"
+            ]
+        );
+    }
+
+    #[test]
+    fn projects_backup_and_restore_operations() {
+        let backup = build_plan(DiskOperationInput::BackupTable {
+            disk: device(),
+            backup_path: "/tmp/table.backup".into(),
+        })
+        .expect("backup plan should validate");
+        assert_eq!(
+            backup.argv,
+            [
+                "/usr/sbin/sgdisk",
+                "--backup",
+                "/tmp/table.backup",
+                "/dev/sda"
+            ]
+        );
+
+        let restore = build_plan(DiskOperationInput::RestoreTable {
+            disk: device(),
+            backup_path: "/tmp/table.backup".into(),
+        })
+        .expect("restore plan should validate");
+        assert_eq!(
+            restore.argv,
+            [
+                "/usr/sbin/sgdisk",
+                "--load-backup",
+                "/tmp/table.backup",
+                "/dev/sda",
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_paths_and_values() {
+        let cases = [
+            DiskOperationInput::CreateLabel {
+                disk: "../../etc".into(),
+                table_type: "gpt".into(),
+            },
+            DiskOperationInput::BackupTable {
+                disk: device(),
+                backup_path: "/tmp/../etc/x".into(),
+            },
+            DiskOperationInput::CreateLabel {
+                disk: device(),
+                table_type: "bsd".into(),
+            },
+            DiskOperationInput::SetPartitionFlag {
+                disk: device(),
+                part_num: 1,
+                flag: "boot".into(),
+                enabled: true,
+            },
+            DiskOperationInput::FormatFilesystem {
+                device: device(),
+                fs: "zfs".into(),
+                label: String::new(),
+            },
+        ];
+        for input in cases {
+            assert!(build_plan(input).is_err());
+        }
+    }
+
+    #[test]
+    fn rejects_geometry_overflow_and_bad_sector_sizes() {
+        for (start, size, sector_size) in [
+            (u64::MAX, 512, 512),
+            (1024, 511, 512),
+            (1024, 1024, 1000),
+            (1025, 1024, 512),
+        ] {
+            let input = DiskOperationInput::CreateUnformattedPartition {
+                disk: device(),
+                start,
+                size,
+                label: "biosboot".into(),
+                sector_size,
+            };
+            assert!(build_plan(input).is_err());
+        }
+    }
+}

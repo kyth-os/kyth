@@ -1752,12 +1752,48 @@ class InstallerDiskServiceTests(unittest.TestCase):
     def test_partition_table_restore_is_checked(self):
         from kyth_installer.services.disk_service import DiskService
         svc = DiskService()
-        with patch.object(svc, "execute") as execute, \
-             patch("kyth_installer.services.disk_service.shutil.which", return_value="/usr/bin/sgdisk"), \
-             patch.object(svc, "settle"):
+        with patch.object(svc, "execute") as execute, patch.object(svc, "settle"):
             svc.restore_table("/dev/sda", "/tmp/table.backup")
 
         self.assertTrue(execute.call_args.kwargs["check"])
+        self.assertEqual(
+            json.loads(execute.call_args.kwargs["input"]),
+            {
+                "operation": "restore_table",
+                "disk": "/dev/sda",
+                "backup_path": "/tmp/table.backup",
+            },
+        )
+
+    def test_live_disk_operations_use_typed_rust_payloads(self):
+        from kyth_installer.services.disk_service import DiskService
+
+        svc = DiskService()
+        with patch.object(svc, "execute") as execute, \
+             patch.object(svc, "settle"), \
+             patch("kyth_installer.disk._block_size_bytes", return_value=512), \
+             patch("kyth_installer.partition_ops._require_mkfs"):
+            svc.create_label("/dev/sda", "gpt")
+            svc.create_partition("/dev/sda", 1024 * 1024, 1024 * 1024, "btrfs", "ROOT")
+            svc.create_unformatted_partition("/dev/sda", 2 * 1024 * 1024, 1024 * 1024, "biosboot")
+            svc.delete_partition("/dev/sda", 1)
+            svc.set_partition_flag("/dev/sda", 1, "esp")
+            svc.format_filesystem("/dev/sda1", "ext4", "DATA")
+
+        payloads = [json.loads(call.kwargs["input"]) for call in execute.call_args_list]
+        self.assertEqual(
+            [payload["operation"] for payload in payloads],
+            [
+                "create_label",
+                "create_partition",
+                "create_unformatted_partition",
+                "delete_partition",
+                "set_partition_flag",
+                "format_filesystem",
+            ],
+        )
+        self.assertEqual(payloads[1]["sector_size"], 512)
+        self.assertEqual(payloads[-1]["device"], "/dev/sda1")
 
     def test_live_image_installs_partition_backup_tool(self):
         build_script = (ROOT / "installer/build.sh").read_text()
