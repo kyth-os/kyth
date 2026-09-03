@@ -260,14 +260,18 @@ Port components only after behavioral parity and focused tests exist:
   (native Rust daemon; Python server-side validation remains authoritative).
   Shared parity cases live in
   `src/kyth-installer-web/src-tauri/testdata/installer_plan_cases.json`.
-- **Done as a parser:** disk and partition discovery from explicit `lsblk` snapshots; runtime probing and protected-disk policy remain Python-owned.
+- **Done as a runtime query:** the root-owned Rust daemon now performs fixed,
+  read-only `lsblk`, `findmnt`, and `blockdev` probes for disk inventory,
+  partition inventory, and free-space regions. The Rust parser applies the
+  protected-disk policy before returning API-compatible records; Python keeps
+  authoritative validation immediately before destructive operations.
 - **Done as metadata/validation plus a typed execution boundary:** the
   partition journal model, serialization, and safety checks remain covered,
   while GPT backup/restore, table creation, partition create/delete/flag
   operations, and supported filesystem formatting now go through the
-  root-only Rust `kyth-installer-exec` helper. Python still owns runtime
-  disk discovery, storage-dependent policy, and journal commit/rollback
-  orchestration. Filesystem-specific shrinking is now executed by the typed
+  root-only Rust `kyth-installer-exec` helper. Python still owns target
+  validation and journal commit/rollback orchestration. Filesystem-specific
+  shrinking is now executed by the typed
   Rust helper for NTFS, ext, and Btrfs; Python retains target validation,
   pre-shrink safety guards, stage ordering, error guidance, mount lifecycle
   orchestration, and journal orchestration. Both manual-journal and guided

@@ -17,6 +17,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::installer_storage;
 use super::installer_plan::{build_plan, InstallerPlanInput};
 
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
@@ -198,6 +199,171 @@ fn bad_start_request(stream: &mut UnixStream, message: &str) {
     let _ = stream.write_all(response.as_bytes());
 }
 
+fn json_response(stream: &mut UnixStream, status: &str, value: &serde_json::Value) {
+    let body = value.to_string();
+    let response = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    );
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn add_display_sizes(value: &mut serde_json::Value) {
+    let Some(items) = value.as_array_mut() else {
+        return;
+    };
+    for item in items {
+        let Some(object) = item.as_object_mut() else {
+            continue;
+        };
+        let Some(size) = object
+            .get("size_bytes")
+            .and_then(serde_json::Value::as_u64)
+        else {
+            continue;
+        };
+        object.insert(
+            "size".to_string(),
+            serde_json::json!(kyth_shared::transfer::human_bytes(size as f64)),
+        );
+    }
+}
+
+fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|error| format!("could not run {program}: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "{program} failed with exit code {}: {}",
+            output.status.code().unwrap_or(1),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    String::from_utf8(output.stdout)
+        .map_err(|_| format!("{program} returned non-UTF-8 output"))
+}
+
+fn findmnt_sources(path: &str, recursive: bool) -> Result<Vec<String>, String> {
+    let mut args = Vec::with_capacity(5);
+    if recursive {
+        args.push("-R");
+    }
+    args.extend(["-n", "-o", "SOURCE", path]);
+    let output = Command::new("/usr/bin/findmnt")
+        .args(args)
+        .output()
+        .map_err(|error| format!("could not run findmnt: {error}"))?;
+    // findmnt uses exit code 1 for a path with no matching mount. That is a
+    // normal result for optional live-media paths, unlike a probe failure.
+    if !output.status.success() && output.status.code() != Some(1) {
+        return Err(format!(
+            "findmnt failed with exit code {}: {}",
+            output.status.code().unwrap_or(1),
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    Ok(String::from_utf8(output.stdout)
+        .map_err(|_| "findmnt returned non-UTF-8 output".to_string())?
+        .lines()
+        .map(str::trim)
+        .filter(|source| source.starts_with("/dev/"))
+        .map(str::to_string)
+        .collect())
+}
+
+fn storage_lsblk_args(disk: Option<&str>) -> Vec<String> {
+    let mut args = vec![
+        "--json".to_string(),
+        "--bytes".to_string(),
+        "--paths".to_string(),
+        "--output".to_string(),
+        "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO,MODEL,TRAN,ROTA,RM,PTTYPE,PKNAME".to_string(),
+    ];
+    if let Some(disk) = disk {
+        args.push(disk.to_string());
+    }
+    args
+}
+
+fn read_only_storage_route(method: &str, target: &str) -> Result<Option<serde_json::Value>, String> {
+    if method != "GET" {
+        return Ok(None);
+    }
+    let path = target.split('?').next().unwrap_or(target);
+    match path {
+        "/api/disks" => {
+            let disk_snapshot = command_output(
+                "/usr/bin/lsblk",
+                &storage_lsblk_args(None).iter().map(String::as_str).collect::<Vec<_>>(),
+            )?;
+            let ancestry_snapshot = command_output(
+                "/usr/bin/lsblk",
+                &["--json", "--bytes", "--paths", "--output", "NAME,PKNAME,TYPE"],
+            )?;
+            let mut protected_sources = Vec::new();
+            for mount in [
+                "/", "/boot", "/boot/efi", "/sysroot", "/run/initramfs/live", "/run/initramfs/iso",
+            ] {
+                protected_sources.extend(findmnt_sources(mount, false)?);
+            }
+            protected_sources.extend(findmnt_sources("/run/initramfs", true)?);
+            protected_sources.extend(findmnt_sources("/run/media", true)?);
+            let current_source = findmnt_sources("/", false)?.into_iter().next();
+            let records = installer_storage::runtime_disks_from_snapshots(
+                &disk_snapshot,
+                &ancestry_snapshot,
+                &protected_sources,
+                current_source.as_deref(),
+            )?;
+            let mut value = serde_json::to_value(records)
+                .map_err(|error| format!("could not serialize disk inventory: {error}"))?;
+            add_display_sizes(&mut value);
+            Ok(Some(value))
+        }
+        "/api/partitions" => {
+            let Some(disk) = query_value(target, "disk") else {
+                return Ok(Some(serde_json::json!([])));
+            };
+            let disk = super::installer_plan::normalize_device_path(disk)
+                .ok_or_else(|| "invalid disk query path".to_string())?;
+            let args = storage_lsblk_args(Some(&disk));
+            let snapshot = command_output("/usr/bin/lsblk", &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+            let mut value = serde_json::to_value(installer_storage::parse_partitions(&snapshot)?)
+                .map_err(|error| format!("could not serialize partition inventory: {error}"))?;
+            add_display_sizes(&mut value);
+            Ok(Some(value))
+        }
+        "/api/free-space" => {
+            let Some(disk) = query_value(target, "disk") else {
+                return Ok(Some(serde_json::json!([])));
+            };
+            let disk = super::installer_plan::normalize_device_path(disk)
+                .ok_or_else(|| "invalid disk query path".to_string())?;
+            let args = storage_lsblk_args(Some(&disk));
+            let snapshot = command_output("/usr/bin/lsblk", &args.iter().map(String::as_str).collect::<Vec<_>>())?;
+            let sector = command_output("/usr/bin/blockdev", &["--getss", &disk])?
+                .trim()
+                .parse::<u64>()
+                .map_err(|_| "blockdev returned an invalid sector size".to_string())?;
+            let mut value = serde_json::to_value(installer_storage::free_regions(&snapshot, &disk, sector)?)
+                .map_err(|error| format!("could not serialize free-space inventory: {error}"))?;
+            add_display_sizes(&mut value);
+            Ok(Some(value))
+        }
+        _ => Ok(None),
+    }
+}
+
+fn query_value<'a>(target: &'a str, name: &str) -> Option<&'a str> {
+    target
+        .split_once('?')?
+        .1
+        .split('&')
+        .find_map(|part| part.strip_prefix(&format!("{name}=")))
+}
+
 fn rebuild_request(request: &[u8], body: &[u8]) -> Result<Vec<u8>, String> {
     let end = header_end(request)?;
     let headers = std::str::from_utf8(&request[..end - 4])
@@ -273,6 +439,18 @@ fn handle(mut client: UnixStream, backend_path: &Path, token: &str, expected_uid
     let request = read_request(&mut client)?;
     let (method, target, headers) = request_parts(&request)?;
     if !route_allowed(method, target) || header_value(headers, "X-Kyth-Session-Token") != Some(token) { forbidden(&mut client); return Ok(()); }
+    match read_only_storage_route(method, target) {
+        Ok(Some(value)) => {
+            json_response(&mut client, "200 OK", &value);
+            return Ok(());
+        }
+        Err(error) if method == "GET" && matches!(target.split('?').next().unwrap_or(target), "/api/disks" | "/api/partitions" | "/api/free-space") => {
+            json_response(&mut client, "503 Service Unavailable", &serde_json::json!({"error": error}));
+            return Ok(());
+        }
+        Ok(None) => {}
+        Err(error) => return Err(error),
+    }
     let request = match normalize_start_request(&request) {
         Ok(request) => request,
         Err(error) => {

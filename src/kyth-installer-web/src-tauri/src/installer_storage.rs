@@ -1,15 +1,17 @@
 //! Read-only `lsblk --json --bytes` snapshot parsing for installer discovery.
 //!
-//! The parser accepts an explicit snapshot rather than spawning a command or
-//! touching devices. Runtime probing and protected-disk policy remain outside
-//! this first port; the Python service remains authoritative until parity is
-//! complete.
+//! The parser accepts explicit snapshots so the safety policy is testable
+//! without touching devices. The root-owned daemon supplies those snapshots
+//! through fixed, read-only probes and serializes the same API records that
+//! the compatibility service historically returned.
 
 use serde::{Deserialize, Serialize};
 
 const EFI_PART_GUID: &str = "c12a7328-f81f-11d2-ba4b-00a0c93ec93b";
 const MIN_KYTHOS_BYTES: u64 = 32 * 1024 * 1024 * 1024;
 const NTFS_MIN_BYTES: u64 = (64 + 32) * 1024 * 1024 * 1024;
+const BIOS_BOOT_GUID: &str = "21686148-6449-6e6f-744e-656564454649";
+const GPT_RESERVE_BYTES: u64 = 1024 * 1024;
 
 #[derive(Debug, Deserialize)]
 struct LsblkSnapshot {
@@ -23,6 +25,7 @@ struct LsblkDevice {
     size: Option<u64>,
     #[serde(rename = "type")]
     device_type: Option<String>,
+    pkname: Option<String>,
     fstype: Option<String>,
     parttype: Option<String>,
     label: Option<String>,
@@ -66,6 +69,13 @@ pub(crate) struct PartitionRecord {
     pub read_only: bool,
     pub alongside_candidate: bool,
     pub ntfs_resize_candidate: bool,
+}
+
+#[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub(crate) struct FreeRegionRecord {
+    pub start_bytes: u64,
+    pub end_bytes: u64,
+    pub size_bytes: u64,
 }
 
 fn normalize_device_path(raw: &str) -> Option<String> {
@@ -113,17 +123,165 @@ fn parse_snapshot(input: &str) -> Result<LsblkSnapshot, String> {
     serde_json::from_str(input).map_err(|error| format!("invalid lsblk snapshot: {error}"))
 }
 
+fn device_ancestry(input: &str) -> Result<std::collections::HashMap<String, (String, Option<String>)>, String> {
+    let snapshot = parse_snapshot(input)?;
+    let mut devices = std::collections::HashMap::new();
+    fn walk(
+        entries: &[LsblkDevice],
+        devices: &mut std::collections::HashMap<String, (String, Option<String>)>,
+    ) {
+        for entry in entries {
+            if let Some(name) = entry.name.as_deref().and_then(normalize_device_path) {
+                let parent = entry
+                    .pkname
+                    .as_deref()
+                    .and_then(normalize_device_path);
+                let _ = devices.insert(
+                    name,
+                    (entry.device_type.clone().unwrap_or_default(), parent),
+                );
+            }
+            walk(&entry.children, devices);
+        }
+    }
+    walk(&snapshot.blockdevices, &mut devices);
+    Ok(devices)
+}
+
+/// Resolve a mount source to its physical disk using an ancestry snapshot.
+pub(crate) fn parent_disk_in_snapshot(input: &str, source: &str) -> Result<Option<String>, String> {
+    let devices = device_ancestry(input)?;
+    let mut current = normalize_device_path(source);
+    let mut seen = std::collections::HashSet::new();
+    while let Some(device) = current {
+        if !seen.insert(device.clone()) {
+            return Ok(None);
+        }
+        let Some((device_type, parent)) = devices.get(&device) else {
+            return Ok(None);
+        };
+        if device_type == "disk" {
+            return Ok(Some(device));
+        }
+        current = parent.clone();
+    }
+    Ok(None)
+}
+
+/// Build the runtime disk inventory from separate device and ancestry probes.
+pub(crate) fn runtime_disks_from_snapshots(
+    disk_snapshot: &str,
+    ancestry_snapshot: &str,
+    protected_sources: &[String],
+    current_source: Option<&str>,
+) -> Result<Vec<DiskRecord>, String> {
+    let mut protected = std::collections::HashSet::new();
+    for source in protected_sources {
+        if let Some(disk) = parent_disk_in_snapshot(ancestry_snapshot, source)? {
+            protected.insert(disk);
+        }
+    }
+    let current_disk = current_source
+        .map(|source| parent_disk_in_snapshot(ancestry_snapshot, source))
+        .transpose()?
+        .flatten();
+    parse_disks(
+        disk_snapshot,
+        &protected.into_iter().collect::<Vec<_>>(),
+        current_disk.as_deref(),
+    )
+}
+
+fn disk_metadata(input: &str, disk: &str) -> Result<(u64, bool), String> {
+    let snapshot = parse_snapshot(input)?;
+    let target = normalize_device_path(disk)
+        .ok_or_else(|| "invalid disk path for storage query".to_string())?;
+    snapshot
+        .blockdevices
+        .iter()
+        .find_map(|entry| {
+            let name = entry.name.as_deref().and_then(normalize_device_path)?;
+            (name == target && entry.device_type.as_deref() == Some("disk")).then(|| {
+                (
+                    entry.size.unwrap_or(0),
+                    entry.pttype.as_deref().unwrap_or_default().eq_ignore_ascii_case("gpt"),
+                )
+            })
+        })
+        .ok_or_else(|| "storage query did not return the selected disk".to_string())
+}
+
+/// Calculate free regions using the same reserved-boundary and BIOS-boot
+/// minimums as the Python compatibility query.
+pub(crate) fn free_regions(
+    disk_snapshot: &str,
+    disk: &str,
+    sector_size: u64,
+) -> Result<Vec<FreeRegionRecord>, String> {
+    if !sector_size.is_power_of_two() || !(512..=4096).contains(&sector_size) {
+        return Err("storage query returned an unsupported sector size".to_string());
+    }
+    let (disk_size, is_gpt) = disk_metadata(disk_snapshot, disk)?;
+    if disk_size <= GPT_RESERVE_BYTES.saturating_mul(2) {
+        return Ok(Vec::new());
+    }
+    let partitions = parse_partitions(disk_snapshot)?;
+    let has_bios_boot = partitions
+        .iter()
+        .any(|part| part.parttype.eq_ignore_ascii_case(BIOS_BOOT_GUID));
+    let required = MIN_KYTHOS_BYTES
+        + if is_gpt && !has_bios_boot { GPT_RESERVE_BYTES } else { 0 };
+    let mut spans = Vec::new();
+    for partition in partitions {
+        if partition.size_bytes == 0
+            || partition.start_bytes > disk_size
+            || partition.size_bytes > disk_size.saturating_sub(partition.start_bytes)
+        {
+            return Ok(Vec::new());
+        }
+        let start = (partition.start_bytes / sector_size) * sector_size;
+        let size = (partition.size_bytes / sector_size) * sector_size;
+        if size == 0 || start > disk_size.saturating_sub(size) {
+            return Ok(Vec::new());
+        }
+        spans.push((start, start + size));
+    }
+    spans.sort_unstable();
+    let usable_end = disk_size - GPT_RESERVE_BYTES;
+    let mut cursor = GPT_RESERVE_BYTES;
+    let mut regions = Vec::new();
+    for (start, end) in spans {
+        if start > cursor {
+            append_region(&mut regions, cursor, start, sector_size, required);
+        }
+        cursor = cursor.max(end);
+    }
+    if cursor < usable_end {
+        append_region(&mut regions, cursor, usable_end, sector_size, required);
+    }
+    Ok(regions)
+}
+
+fn append_region(
+    regions: &mut Vec<FreeRegionRecord>,
+    start: u64,
+    end: u64,
+    sector_size: u64,
+    required: u64,
+) {
+    let aligned_start = start.div_ceil(sector_size) * sector_size;
+    let aligned_end = (end / sector_size) * sector_size;
+    if aligned_end > aligned_start && aligned_end - aligned_start >= required {
+        regions.push(FreeRegionRecord {
+            start_bytes: aligned_start,
+            end_bytes: aligned_end,
+            size_bytes: aligned_end - aligned_start,
+        });
+    }
+}
+
 /// Parse safe, writable whole-disk records from an explicit lsblk snapshot.
 ///
-/// Not yet called by either binary: both `main.rs` and `native_main.rs`
-/// currently trust already-filtered `DiskRecord`/`PartitionRecord` JSON
-/// returned by the Python installer service (see `typed_disks` in
-/// `native_main.rs`) rather than parsing raw `lsblk` output themselves. This
-/// is the staged Rust-side replacement — exercised by the tests below — for
-/// when the native binary takes over that parsing; wiring it in is its own
-/// installer-risk change (CLAUDE.md), not incidental cleanup, so it stays
-/// `#[allow(dead_code)]` until that happens.
-#[allow(dead_code)]
 pub(crate) fn parse_disks(
     input: &str,
     protected: &[String],
@@ -161,8 +319,6 @@ pub(crate) fn parse_disks(
 
 /// Parse partition records, including descendant mounts, from an lsblk tree.
 ///
-/// Same staged status as `parse_disks` above — not called in production yet.
-#[allow(dead_code)]
 pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, String> {
     let snapshot = parse_snapshot(input)?;
     let mut partitions = Vec::new();
@@ -254,5 +410,40 @@ mod tests {
     fn rejects_malformed_snapshot() {
         let error = parse_partitions("not-json").expect_err("malformed JSON must fail closed");
         assert!(error.contains("invalid lsblk snapshot"));
+    }
+
+    #[test]
+    fn runtime_inventory_resolves_protected_and_current_disks() {
+        let ancestry = r#"{"blockdevices":[
+            {"name":"/dev/sda","type":"disk"},
+            {"name":"/dev/sda1","type":"part","pkname":"/dev/sda"},
+            {"name":"/dev/sdb","type":"disk"},
+            {"name":"/dev/sdb1","type":"part","pkname":"/dev/sdb"}
+        ]}"#;
+        let disks = runtime_disks_from_snapshots(
+            SNAPSHOT,
+            ancestry,
+            &["/dev/sdb1".to_string()],
+            Some("/dev/sda1"),
+        )
+        .expect("runtime snapshots should parse");
+        assert_eq!(disks.len(), 1);
+        assert_eq!(disks[0].name, "/dev/sda");
+        assert!(disks[0].current);
+        assert_eq!(parent_disk_in_snapshot(ancestry, "/dev/sdb1").unwrap().as_deref(), Some("/dev/sdb"));
+    }
+
+    #[test]
+    fn free_regions_retain_aligned_space_and_minimum() {
+        let disk_size = 100 * 1024 * 1024 * 1024_u64;
+        let snapshot = format!(
+            r#"{{"blockdevices":[{{"name":"/dev/sda","size":{disk_size},"type":"disk","pttype":"gpt","children":[{{"name":"/dev/sda1","size":{},"type":"part","start":2048,"parttype":"x"}}]}}]}}"#,
+            32 * 1024 * 1024 * 1024_u64
+        );
+        let regions = free_regions(&snapshot, "/dev/sda", 512).expect("free space should parse");
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].start_bytes % 512, 0);
+        assert_eq!(regions[0].end_bytes, disk_size - GPT_RESERVE_BYTES);
+        assert!(regions[0].size_bytes >= MIN_KYTHOS_BYTES + GPT_RESERVE_BYTES);
     }
 }
