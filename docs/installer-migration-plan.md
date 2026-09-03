@@ -310,6 +310,19 @@ Port components only after behavioral parity and focused tests exist:
   supplies the decision to the privileged flow; `mokutil`, passwords, and
   firmware interactions remain Python-owned.
 
+### Saved non-acceptance refactoring backlog
+
+The following work is intentionally saved in priority order. Acceptance,
+live-image, VM, and hardware validation work is tracked separately below and
+is excluded from this backlog.
+
+1. Move remaining storage and configuration execution into Rust.
+2. Move streaming process lifecycle and cancellation ownership into Rust.
+3. Move recovery-action orchestration into Rust.
+4. Port installer account creation while preserving secret-handling boundaries.
+5. Port Secure Boot/MOK execution, not only decision routing.
+6. Remove the remaining Python compatibility paths after parity is established.
+
 ### Phase 5 — VM destructive-path acceptance
 
 - Validate wipe, alongside/resize, free-space, and manual modes in disposable VMs.
