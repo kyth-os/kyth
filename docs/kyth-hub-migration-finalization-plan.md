@@ -244,6 +244,9 @@ Model investigation is bounded and optional: without a valid local model and
 VPN/SAML, the privileged socket daemon, and network-share execution are
 Rust-owned at their action boundaries; the former standalone Python/Qt VPN and
 root-boundary fixtures were removed in P2.
+The retained `src/kyth-welcome` service package is source-only compatibility
+material and is not installed in the supported image; its active privilege
+boundary is the native Rust service and Tauri command layer.
 
 - [x] Port the live probe collector and cache writer behind `kyth-probe.service`
   to the shared Rust crate, with bounded commands, atomic writes, and null-on-
@@ -416,6 +419,6 @@ The migration is final only when all of the following are true:
   destructive confirmations, secrets, updates, rollback, and representative
   actions pass installed-image acceptance.
 - Transitional service exceptions, if any, are documented with owners and
-  retirement dates; strict mode has no unresolved Python authority.
+  retirement dates; strict mode has no unresolved installed Python authority.
 - CI runs build, contract, Rust unit, security, and installed-image acceptance
   gates for the release commit.

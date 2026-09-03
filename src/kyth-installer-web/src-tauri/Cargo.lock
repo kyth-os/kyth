@@ -3634,6 +3634,7 @@ name = "kyth-installer-shell"
 version = "0.1.0"
 dependencies = [
  "kyth-shared",
+ "libc",
  "serde",
  "serde_json",
  "slint",
@@ -3641,6 +3642,7 @@ dependencies = [
  "tauri",
  "tauri-build",
  "tauri-plugin-single-instance",
+ "tempfile",
 ]
 
 [[package]]

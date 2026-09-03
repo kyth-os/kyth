@@ -1,4 +1,4 @@
-"""Root-owned Unix-socket service for the installer transport."""
+"""Compatibility Unix-socket backend for the native installer transport."""
 
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ def _read_session_token(path: Path) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="KythOS installer Unix-socket service")
-    parser.add_argument("--socket-path", required=True)
+    parser.add_argument("--socket-path")
     parser.add_argument("--session-token-file", required=True)
     parser.add_argument("--socket-group", default="")
     parser.add_argument("--peer-uid", type=int)
@@ -36,6 +36,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if os.geteuid() != 0:
         parser.error("kyth-installerd must run as root")
+    if not args.socket_path:
+        parser.error("--socket-path is required")
     token_path = Path(args.session_token_file)
     token = _read_session_token(token_path)
     # Handler imported this value into its module namespace for the legacy

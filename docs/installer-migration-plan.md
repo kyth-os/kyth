@@ -5,8 +5,8 @@
 
 ## Context
 
-The installer already has a web frontend, but it is served by a root-owned Python
-HTTP server and displayed in Chromium. The backend owns disk discovery,
+The installer already has a web frontend, but its compatibility backend is
+Python and is displayed through a native client. The backend owns disk discovery,
 partitioning, filesystem resize, bootc deployment, Secure Boot setup, progress,
 cancellation, transaction recovery, and rescue mode.
 
@@ -169,8 +169,9 @@ Before replacing Chromium in the image:
 ## Open decisions
 
 - Whether the Unix-socket service initially wraps Python directly or uses a
-  small Rust transport adapter. **Decided:** wrap the existing Python backend
-  directly for Phase 3; a Rust transport adapter remains a later optimization.
+  small Rust transport adapter. **Decided:** the native Rust daemon owns the
+  Unix socket and proxies to the Python backend on a private local socket until the
+  destructive backend parity ports are complete.
 - Whether Calamares remains an optional build path or is retired after the
   custom installer reaches parity.
 - Whether the first React milestone preserves SSE or moves directly to socket
@@ -186,10 +187,10 @@ Before replacing Chromium in the image:
 ## Review findings (2026-08-31)
 
 The code-level migration is complete for the current Rust/Slint production
-client and Python privileged-service boundary. The remaining release work is
-live-media and disposable-VM validation. The Python service remains authoritative
-for destructive execution until future Rust backend ports independently achieve
-behavioral parity.
+client and native Rust Unix-socket boundary. The Python backend remains
+authoritative for destructive execution until future Rust backend ports
+independently achieve behavioral parity. The remaining release work is
+live-media and disposable-VM validation.
 
 ## Prepared continuation
 
@@ -233,12 +234,14 @@ Do not start selective installer logic ports merely because a Rust shell exists.
 
 ### Phase 3 — Unix-socket privileged service
 
-- **Done:** Add a root-owned service entrypoint and activate the socket transport in the installer launcher.
+- **Done:** Add a root-owned native Rust service entrypoint and activate the socket transport in the installer launcher.
 - **Done:** Replace loopback HTTP access with a root-owned Unix-socket service in the live-image configuration; development keeps the loopback fallback.
 - **Done:** Use socket ownership/permissions and peer credentials, retaining the per-run session token as defense in depth.
 - Validate the activated service and Tauri client in a built live ISO before removing the compatibility fallback.
 - Preserve the frozen logical API, SSE/event semantics, validation, journal, and recovery behavior.
-- **Decided:** the first service wraps Python directly; a Rust transport adapter is deferred until the backend parity work in Phase 4.
+- **Done:** The Rust service validates the token, configured socket peer,
+  request size, route allowlist, and loopback backend boundary before
+  proxying to Python.
 
 ### Phase 4 — Selective Rust migration
 

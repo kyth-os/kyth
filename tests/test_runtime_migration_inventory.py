@@ -56,3 +56,10 @@ def test_inventory_distinguishes_native_install_from_retained_tunable_fixture():
     assert tunable["installed_implementation"] == "rust"
     assert tunable["status"] == "done-native"
     assert tunable["owner"] == "native::kyth-tunable-rs"
+
+def test_uninstalled_legacy_hub_privilege_fixture_is_not_an_active_authority():
+    entries = json.loads(INVENTORY.read_text(encoding="utf-8"))["entries"]
+    privileged = next(item for item in entries if item["path"] == "src/kyth-welcome/kyth_welcome/services/privileged.py")
+    assert privileged["status"] == "explicitly-not-ported"
+    assert privileged["installed_implementation"] == "not-installed"
+    assert privileged["owner"].startswith("fixture::")

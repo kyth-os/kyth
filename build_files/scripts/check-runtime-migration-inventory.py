@@ -19,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 INVENTORY = ROOT / "build_files/config/runtime-migration-inventory.json"
 TUNABLE_REGISTRY = ROOT / "build_files/config/tunables.toml"
+LEGACY_HUB_FIXTURE_ROOT = ROOT / "src/kyth-welcome"
 SCHEMA_VERSION = 1
 STATUSES = {"done-native", "queued", "explicitly-not-ported"}
 RISK = {"read-only", "user-session-writer", "privileged-writer", "daemon", "destructive", "build-time"}
@@ -31,7 +32,7 @@ NATIVE_BINARIES = {
     "kyth-safe-upgrade", "kyth-bootc-guard", "kyth-finalize-staged", "kyth-btrfs-maint",
     "kyth-ai-perfd", "kyth-perf-gate-rs",
 }
-NATIVE_BINARIES = NATIVE_BINARIES | {"kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check", "kyth-nvidia-status", "kyth-controller-check", "kyth-creator-check", "kyth-exe-compat", "kyth-snapshot-timeline", "kyth-print-check", "kyth-windows-verify", "kyth-tunable"}
+NATIVE_BINARIES = NATIVE_BINARIES | {"kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check", "kyth-nvidia-status", "kyth-controller-check", "kyth-creator-check", "kyth-exe-compat", "kyth-snapshot-timeline", "kyth-print-check", "kyth-windows-verify", "kyth-tunable", "kyth-installerd"}
 PACKAGED_NATIVE_LAUNCHERS = NATIVE_BINARIES
 NATIVE_TUNABLE_DISPATCHER = "kyth-tunable-rs"
 NOT_PORTED = {"kyth-default-flatpaks", "kyth-flathub-setup", "kyth-local-bin-migrate", "rclone@", "scx_loader"}
@@ -102,9 +103,16 @@ def native_tunable_names() -> set[str]:
     }
 
 
+def is_uninstalled_fixture(path: Path, surface: str) -> bool:
+    """Identify source retained for compatibility but absent from the image."""
+    return surface == "python-runtime" and path.is_relative_to(LEGACY_HUB_FIXTURE_ROOT)
+
+
 def risk_for(name: str, kind: str, path: Path) -> str:
     if "/scripts/" in f"/{rel(path)}" or path.parts[:2] == ("build_files", "scripts"):
         return "build-time"
+    if name == "daemon" and rel(path).startswith("src/kyth-installer/"):
+        return "destructive"
     if name in READ_ONLY_NAMES or name in NATIVE_BINARIES and name not in {"kyth-network-share"}:
         return "read-only"
     if name in WRITER_NAMES:
@@ -122,7 +130,11 @@ def entry(path: Path, *, surface: str, implementation: str | None = None, name: 
     item_name = name or name_for(path)
     kind = implementation or launcher_kind(path)
     native_tunable = surface == "launcher" and item_name in native_tunable_names()
-    if item_name in NOT_PORTED:
+    fixture_only = is_uninstalled_fixture(path, surface)
+    if fixture_only:
+        status = "explicitly-not-ported"
+        reason = "legacy Hub service fixture is not installed; supported runtime is Rust/Tauri"
+    elif item_name in NOT_PORTED:
         status = "explicitly-not-ported"
         reason = "documented third-party or declarative build/runtime exception"
     elif (
@@ -136,7 +148,7 @@ def entry(path: Path, *, surface: str, implementation: str | None = None, name: 
     else:
         status = "queued"
         reason = None
-    if status == "queued":
+    if status == "queued" or fixture_only:
         owner = f"fixture::{rel(path)}"
     elif native_tunable:
         owner = f"native::{NATIVE_TUNABLE_DISPATCHER}"
@@ -148,7 +160,7 @@ def entry(path: Path, *, surface: str, implementation: str | None = None, name: 
         "name": item_name,
         "resolved_target": rel(path.resolve()) if path.exists() else None,
         "current_implementation": kind,
-        "installed_implementation": "rust" if status == "done-native" else kind,
+        "installed_implementation": "rust" if status == "done-native" else "not-installed" if fixture_only else kind,
         "status": status,
         "risk_tier": risk_for(item_name, kind, path),
         "priority": 0 if status != "queued" else 1,
