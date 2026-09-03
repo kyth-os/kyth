@@ -20,6 +20,7 @@ mod installer_recovery;
 #[allow(dead_code)]
 mod installer_transaction;
 mod installer_configuration;
+mod installer_probe;
 #[allow(dead_code)]
 mod installer_secure_boot;
 mod installer_orchestration;
@@ -73,6 +74,7 @@ fn operation_args_valid(args: &[String]) -> bool {
                 | "secure-boot-plan"
                 | "orchestration"
                 | "power-check"
+                | "uuid-probe"
         )
 }
 
@@ -188,6 +190,13 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             .map_err(|error| format!("invalid configuration JSON: {error}"))?;
         let plan = installer_configuration::build_plan(input)?;
         installer_configuration::apply_plan(plan)?;
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "uuid-probe" {
+        let input = serde_json::from_slice::<installer_probe::UuidInput>(&input)
+            .map_err(|error| format!("invalid UUID probe JSON: {error}"))?;
+        let uuid = installer_probe::lookup_uuid(input)?;
+        println!("{}", serde_json::json!({"uuid": uuid}));
         return Ok(ExitCode::SUCCESS);
     }
     if args[1] == "fstab-append" {
@@ -361,6 +370,10 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "power-check".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "uuid-probe".into()
         ]));
     }
 

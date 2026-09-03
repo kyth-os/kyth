@@ -37,6 +37,17 @@ def _blkid_uuid(part: str, log, *, timeout: float = 5) -> str | None:
     reimplementing it slightly differently."""
     run_command = phase_dependency("run_command")
     try:
+        if shutil.which("kyth-installer-exec"):
+            result = run_command(
+                _as_root(["kyth-installer-exec", "--operation", "uuid-probe"]),
+                input=json.dumps({"device": part}, separators=(",", ":")),
+                capture_output=True, text=True, check=True, timeout=timeout,
+            )
+            uuid_out = json.loads(result.stdout).get("uuid", "").strip()
+            if not uuid_out:
+                log(f"Warning: native UUID probe returned no UUID for {part}")
+                return None
+            return uuid_out
         result = run_command(
             ["blkid", "-s", "UUID", "-o", "value", part],
             capture_output=True, text=True, check=True, timeout=timeout,
