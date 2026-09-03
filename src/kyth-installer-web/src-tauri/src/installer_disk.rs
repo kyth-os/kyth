@@ -48,6 +48,14 @@ pub(crate) enum DiskOperationInput {
         disk: String,
         part_num: u32,
     },
+    ResizePartition {
+        disk: String,
+        part_num: u32,
+        start: u64,
+        new_size: u64,
+        #[serde(default = "default_sector_size")]
+        sector_size: u64,
+    },
     SetPartitionFlag {
         disk: String,
         part_num: u32,
@@ -66,6 +74,7 @@ pub(crate) enum DiskOperationInput {
 pub(crate) struct DiskPlan {
     pub(crate) argv: Vec<String>,
     pub(crate) timeout_seconds: u64,
+    pub(crate) needs_confirmation: bool,
 }
 
 fn default_sector_size() -> u64 {
@@ -138,6 +147,24 @@ fn parted_device(
             .chain(args)
             .collect(),
         timeout_seconds,
+        needs_confirmation: false,
+    })
+}
+
+fn interactive_parted_device(
+    disk: String,
+    args: Vec<String>,
+    timeout_seconds: u64,
+) -> Result<DiskPlan, String> {
+    let disk = required_device(&disk, "disk")?;
+    Ok(DiskPlan {
+        argv: std::iter::once("/usr/sbin/parted".to_string())
+            .chain(std::iter::once("---pretend-input-tty".to_string()))
+            .chain(std::iter::once(disk))
+            .chain(args)
+            .collect(),
+        timeout_seconds,
+        needs_confirmation: true,
     })
 }
 
@@ -160,6 +187,7 @@ fn build_mkfs(device: String, fs: String, label: String) -> Result<DiskPlan, Str
     Ok(DiskPlan {
         argv: std::iter::once(binary.to_string()).chain(args).collect(),
         timeout_seconds: if fs == "btrfs" { 300 } else { 120 },
+        needs_confirmation: false,
     })
 }
 
@@ -173,6 +201,7 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
                 required_device(&disk, "disk")?,
             ],
             timeout_seconds: 30,
+            needs_confirmation: false,
         }),
         DiskOperationInput::RestoreTable { disk, backup_path } => Ok(DiskPlan {
             argv: vec![
@@ -182,6 +211,7 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
                 required_device(&disk, "disk")?,
             ],
             timeout_seconds: 60,
+            needs_confirmation: false,
         }),
         DiskOperationInput::CreateLabel { disk, table_type } => {
             let table_type = normalized_name(&table_type);
@@ -251,6 +281,29 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
                 return Err("partition number must be positive.".to_string());
             }
             parted_device(disk, vec!["rm".to_string(), part_num.to_string()], 60)
+        }
+        DiskOperationInput::ResizePartition {
+            disk,
+            part_num,
+            start,
+            new_size,
+            sector_size,
+        } => {
+            if part_num == 0 {
+                return Err("partition number must be positive.".to_string());
+            }
+            let end = partition_end(start, new_size, sector_size)?;
+            interactive_parted_device(
+                disk,
+                vec![
+                    "unit".to_string(),
+                    "B".to_string(),
+                    "resizepart".to_string(),
+                    part_num.to_string(),
+                    format!("{end}B"),
+                ],
+                120,
+            )
         }
         DiskOperationInput::SetPartitionFlag {
             disk,
@@ -427,6 +480,32 @@ mod tests {
                 "/dev/sda",
             ]
         );
+    }
+
+    #[test]
+    fn projects_interactive_resize_with_fixed_confirmation() {
+        let plan = build_plan(DiskOperationInput::ResizePartition {
+            disk: device(),
+            part_num: 3,
+            start: 128 * 1024 * 1024,
+            new_size: 64 * 1024 * 1024,
+            sector_size: 512,
+        })
+        .expect("resize plan should validate");
+        assert_eq!(
+            plan.argv,
+            [
+                "/usr/sbin/parted",
+                "---pretend-input-tty",
+                "/dev/sda",
+                "unit",
+                "B",
+                "resizepart",
+                "3",
+                "201326080B",
+            ]
+        );
+        assert!(plan.needs_confirmation);
     }
 
     #[test]

@@ -94,6 +94,7 @@ def _commit_dependencies() -> _plan_commit.CommitDependencies:
         disk_hold=disk_hold,
         guard_factory=PartitionTableGuard,
         disk_service_factory=DiskService,
+        resize_partition=DiskService().resize_partition,
     )
 
 _as_request = _request_as_request
@@ -302,6 +303,7 @@ def _prepare_ntfs_resize_target(
         run_command=run_command,
         as_root=_as_root,
         settle=_settle,
+        resize_partition=DiskService().resize_partition,
         commit_partition=_commit_new_kythos_partition,
         marker_root=marker_root,
     )

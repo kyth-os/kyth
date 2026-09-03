@@ -12,9 +12,9 @@ mod installer_disk;
 #[allow(dead_code)]
 mod installer_plan;
 
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 
 const MAX_OPERATION_BYTES: usize = 64 * 1024;
 
@@ -51,18 +51,18 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     }
 
     let input = read_operation_bytes()?;
-    let (argv, operation) = match args[1].as_str() {
+    let (argv, needs_confirmation, operation) = match args[1].as_str() {
         "bootc-install" => {
             let input = serde_json::from_slice::<installer_bootc::BootcInstallInput>(&input)
                 .map_err(|error| format!("invalid bootc install operation JSON: {error}"))?;
             let plan = installer_bootc::build_plan(input)?;
-            (plan.argv, "bootc install")
+            (plan.argv, false, "bootc install")
         }
         "disk" => {
             let input = serde_json::from_slice::<installer_disk::DiskOperationInput>(&input)
                 .map_err(|error| format!("invalid disk operation JSON: {error}"))?;
             let plan = installer_disk::build_plan(input)?;
-            (plan.argv, "disk operation")
+            (plan.argv, plan.needs_confirmation, "disk operation")
         }
         _ => unreachable!("operation_args_valid checked the operation"),
     };
@@ -75,6 +75,38 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     // All executable paths come from the fixed Rust operation plan.
     let mut command = Command::new(executable);
     command.args(&argv[1..]);
+    if needs_confirmation {
+        command.stdin(Stdio::piped());
+        // Ensure a helper cancellation cannot leave an interactive child
+        // running after the parent process has gone away.
+        let mut child = unsafe {
+            command
+                .pre_exec(|| {
+                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
+                        return Err(io::Error::last_os_error());
+                    }
+                    Ok(())
+                })
+                .spawn()
+        }
+        .map_err(|error| format!("could not spawn {operation}: {error}"))?;
+        if let Some(mut stdin) = child.stdin.take() {
+            if let Err(error) = stdin.write_all(b"Yes\n") {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!("could not confirm {operation}: {error}"));
+            }
+        }
+        let status = child
+            .wait()
+            .map_err(|error| format!("could not wait for {operation}: {error}"))?;
+        return Ok(ExitCode::from(
+            status
+                .code()
+                .and_then(|code| u8::try_from(code).ok())
+                .unwrap_or(1),
+        ));
+    }
     // exec(2) is deliberate: the Python streaming caller continues to own
     // the same PID, so terminate/kill cancellation cannot orphan bootc.
     let error = command.exec();

@@ -617,11 +617,9 @@ class InstallerPlanTests(unittest.TestCase):
         import tempfile
         partition = "/dev/nvme0n1p3"
         commands = []
-        run_kwargs = []
 
         def fake_run(cmd, **kwargs):
             commands.append(cmd)
-            run_kwargs.append(kwargs)
             return self.plan.subprocess.CompletedProcess(cmd, 0, stdout="ok")
 
         # _latest_partition_on_disk (defined in disk.py) calls disk's own
@@ -639,11 +637,13 @@ class InstallerPlanTests(unittest.TestCase):
             existing,
             existing + [{"name": "/dev/nvme0n1p4"}],
         ])
+        mock_disk_service_cls = MagicMock()
+        mock_disk_service = mock_disk_service_cls.return_value
 
         with patch.object(self.plan.shutil, "which", return_value="/usr/bin/tool"), \
              patch.object(self.plan, "unmount_target_disk") as mock_unmount, \
              patch.object(self.plan, "shrink_filesystem") as mock_shrink, \
-             patch.object(self.plan, "DiskService"), \
+             patch.object(self.plan, "DiskService", mock_disk_service_cls), \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
              patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 192 * 1024**3]), \
              patch.object(self.plan, "_partition_number", return_value=3), \
@@ -673,19 +673,9 @@ class InstallerPlanTests(unittest.TestCase):
         # boundary moves, and with the right target size.
         mock_shrink.assert_called_once_with(partition, "ntfs", 192 * 1024**3, unittest.mock.ANY)
         flattened = [" ".join(cmd) for cmd in commands]
-        # parted >= 3.3 exits 1 on a script-mode (-s) shrink because it cannot
-        # ask its "can cause data loss" question; the shrink must run with
-        # ---pretend-input-tty and "Yes" on stdin instead.
-        shrink_calls = [
-            (cmd, kwargs)
-            for cmd, kwargs in zip(flattened, run_kwargs, strict=True)
-            if "resizepart 3" in cmd
-        ]
-        self.assertEqual(len(shrink_calls), 1)
-        shrink_cmd, shrink_kwargs = shrink_calls[0]
-        self.assertIn("parted ---pretend-input-tty /dev/nvme0n1 unit B resizepart 3", shrink_cmd)
-        self.assertNotIn(" -s ", shrink_cmd)
-        self.assertEqual(shrink_kwargs.get("input"), "Yes\n")
+        mock_disk_service.resize_partition.assert_called_once_with(
+            "/dev/nvme0n1", 3, 128 * 1024**3, 192 * 1024**3,
+        )
         self.assertTrue(any("mkpart KythOS btrfs" in cmd and "100%" not in cmd for cmd in flattened))
         self.assertTrue(any("mkfs.btrfs -f -L KythOS /dev/nvme0n1p4" in cmd for cmd in flattened))
 
@@ -1772,12 +1762,14 @@ class InstallerDiskServiceTests(unittest.TestCase):
         with patch.object(svc, "execute") as execute, \
              patch.object(svc, "settle"), \
              patch("kyth_installer.disk._block_size_bytes", return_value=512), \
+             patch("kyth_installer.services.disk_service.shutil.which", return_value="/usr/sbin/parted"), \
              patch("kyth_installer.partition_ops._require_mkfs"):
             svc.create_label("/dev/sda", "gpt")
             svc.create_partition("/dev/sda", 1024 * 1024, 1024 * 1024, "btrfs", "ROOT")
             svc.create_unformatted_partition("/dev/sda", 2 * 1024 * 1024, 1024 * 1024, "biosboot")
             svc.delete_partition("/dev/sda", 1)
             svc.set_partition_flag("/dev/sda", 1, "esp")
+            svc.resize_partition("/dev/sda", 2, 2 * 1024 * 1024, 1024 * 1024)
             svc.format_filesystem("/dev/sda1", "ext4", "DATA")
 
         payloads = [json.loads(call.kwargs["input"]) for call in execute.call_args_list]
@@ -1789,6 +1781,7 @@ class InstallerDiskServiceTests(unittest.TestCase):
                 "create_unformatted_partition",
                 "delete_partition",
                 "set_partition_flag",
+                "resize_partition",
                 "format_filesystem",
             ],
         )

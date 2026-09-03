@@ -163,12 +163,22 @@ class DiskService:
             raise RuntimeError("parted is required for partition operations.")
         from ..disk import _block_size_bytes
         sector = 512 if self.dry_run else _block_size_bytes(disk)
-        new_end = start + new_size - sector
-        self.execute(
-            _as_root(["parted", "---pretend-input-tty", disk,
-                      "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
-            input="Yes\n", text=True, check=True, timeout=120,
-        )
+        if self.dry_run:
+            new_end = start + new_size - sector
+            self.execute(
+                _as_root(["parted", "---pretend-input-tty", disk,
+                          "unit", "B", "resizepart", str(part_num), f"{new_end}B"]),
+                input="Yes\n", text=True, check=True, timeout=120,
+            )
+        else:
+            self._typed_operation(
+                {
+                    "operation": "resize_partition", "disk": disk,
+                    "part_num": part_num, "start": start, "new_size": new_size,
+                    "sector_size": sector,
+                },
+                timeout=120,
+            )
         self.settle()
 
     def format_filesystem(self, device: str, fs: str, label: str) -> None:
