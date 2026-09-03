@@ -36,10 +36,7 @@ fn decode_operation(input: &[u8]) -> Result<BootcInstallInput, String> {
 }
 
 fn operation_args_valid(args: &[String]) -> bool {
-    args == [
-        "--operation".to_string(),
-        "bootc-install".to_string(),
-    ]
+    args == ["--operation".to_string(), "bootc-install".to_string()]
 }
 
 fn run(args: &[String]) -> Result<ExitCode, String> {
@@ -79,9 +76,15 @@ mod tests {
 
     #[test]
     fn only_typed_bootc_operation_is_accepted() {
-        assert!(!operation_args_valid(&["--operation".into(), "other".into()]));
+        assert!(!operation_args_valid(&[
+            "--operation".into(),
+            "other".into()
+        ]));
         assert!(!operation_args_valid(&["--operation".into()]));
-        assert!(operation_args_valid(&["--operation".into(), "bootc-install".into()]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "bootc-install".into()
+        ]));
     }
 
     #[test]
