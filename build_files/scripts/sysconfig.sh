@@ -34,9 +34,8 @@ if [[ -f /ctx/kyth-shader-preheat ]]; then
 	install -Dm0755 /ctx/kyth-shader-preheat /usr/bin/kyth-shader-preheat
 fi
 
-if [[ -f /ctx/kyth-health-check ]]; then
-	install -Dm0755 /ctx/kyth-health-check /usr/bin/kyth-health-check
-fi
+# kyth-health-check is the native Rust binary copied from the hub-web-builder;
+# retain the Python launcher in the source tree for parity only.
 
 # Repair accounts/groups that may be missing after layering package changes.
 if [[ -x /usr/libexec/kyth-fix-system-accounts ]]; then

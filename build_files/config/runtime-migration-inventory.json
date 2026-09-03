@@ -1850,19 +1850,20 @@
     {
       "current_implementation": "python",
       "cutover": "replace installed kyth-health-check entry point after parity gates",
-      "installed_implementation": "python",
+      "installed_implementation": "rust",
       "name": "kyth-health-check",
-      "owner": "fixture::build_files/kyth-health-check",
+      "owner": "native::kyth-health-check",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-health-check",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-health-check",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "read-only",
       "rollback": "restore previous installed kyth-health-check entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
