@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 87 (all 49 sysctl wrappers plus 38 other-kind wrappers); 7 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 88 (all 49 sysctl wrappers plus 39 other-kind wrappers); 6 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -46,7 +46,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 11 | kyth-dirty-ratio | dirty_ratio | sysctl | `vm.dirty_ratio=5` / `vm.dirty_background_ratio=5` / `vm.dirty_writeback_centisecs=500` — last **dup base** | gaming.toml |
 | 12 | kyth-distrobox-cache | distrobox_cache | other | `/etc/kyth/distrobox-cache.toml` | native Rust dispatcher |
 | 13 | kyth-epp-ac | epp_ac | other | `/etc/kyth/epp-ac.toml` | native Rust dispatcher |
-| 14 | kyth-fcitx-latency | fcitx_latency | other | fcitx latency | registry (other) |
+| 14 | kyth-fcitx-latency | fcitx_latency | other | fcitx latency | native Rust dispatcher |
 | 15 | kyth-file-max | file_max | sysctl | `fs.file-max=2097152` | gaming.toml (base has 2097152? check) |
 | 16 | kyth-flatpak-prefetch | flatpak_prefetch | other | flatpak | native Rust dispatcher |
 | 17 | kyth-flatpak-trim | flatpak_trim | other | flatpak | native Rust dispatcher |

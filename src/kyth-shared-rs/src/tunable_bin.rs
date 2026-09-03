@@ -109,6 +109,7 @@ fn native_other(name: &str) -> bool {
             | "perf-gate"
             | "gaming-audit"
             | "system-audit"
+            | "fcitx-latency"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1471,6 +1472,45 @@ fn dispatch_system_audit(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_fcitx_latency(action: &str) -> ExitCode {
+    let config_path = extended_preferences::fcitx_latency_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = extended_preferences::load_fcitx_latency(&config_path);
+            println!("profile={} latency_ms={} kind=other", config.profile, config.latency_ms);
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("fcitx-latency", &[action.to_string()]) { return code; }
+            let config = extended_preferences::FcitxLatencyConfig { profile: "gaming".into(), latency_ms: 10 };
+            if let Err(error) = extended_preferences::save_fcitx_latency(&config_path, &config) {
+                eprintln!("kyth-fcitx-latency: {error}");
+                return ExitCode::from(1);
+            }
+            println!("fcitx-latency gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("fcitx-latency", &[action.to_string()]) { return code; }
+            let config = extended_preferences::FcitxLatencyConfig::default();
+            if let Err(error) = extended_preferences::save_fcitx_latency(&config_path, &config) {
+                eprintln!("kyth-fcitx-latency: {error}");
+                return ExitCode::from(1);
+            }
+            println!("fcitx-latency balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("fcitx-latency", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-fcitx-latency [gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2076,6 +2116,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "perf-gate" => dispatch_perf_gate(action),
             "gaming-audit" => dispatch_gaming_audit(action),
             "system-audit" => dispatch_system_audit(action),
+            "fcitx-latency" => dispatch_fcitx_latency(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2185,7 +2226,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 87);
+        assert_eq!(names.len(), 88);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2230,6 +2271,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "perf-gate"));
         assert!(names.iter().any(|name| name == "gaming-audit"));
         assert!(names.iter().any(|name| name == "system-audit"));
+        assert!(names.iter().any(|name| name == "fcitx-latency"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
