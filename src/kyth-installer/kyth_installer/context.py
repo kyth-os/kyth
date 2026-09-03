@@ -191,6 +191,7 @@ class InstallerContext:
     cleanup_mounts: list[str] = field(default_factory=list)
     mount_registry: MountRegistry = field(default_factory=MountRegistry)
     transaction_id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    transaction_status: str = ""
     assurance_checks: list[dict[str, str]] = field(default_factory=list)
     # Destructive partition steps, appended as they start and again as they
     # finish. This is the only record of how far a wipe got if the machine
@@ -205,11 +206,24 @@ class InstallerContext:
         with self.state_lock:
             if lifecycle == self.lifecycle:
                 return
+            from .orchestration import decision
+
+            native = decision(
+                "transition",
+                lifecycle=self.lifecycle.value,
+                phase=self.phase.value,
+                target=lifecycle.value,
+            )
             allowed = _LIFECYCLE_TRANSITIONS[self.lifecycle]
-            if lifecycle not in allowed:
+            if native is None and lifecycle not in allowed:
                 raise RuntimeError(
                     f"Invalid installer lifecycle transition: {self.lifecycle.value} -> {lifecycle.value}"
                 )
+            if native is not None and (
+                native.get("accepted") is not True
+                or native.get("lifecycle") != lifecycle.value
+            ):
+                raise RuntimeError("native installer lifecycle transition was not accepted")
             self.lifecycle = lifecycle
 
     def replace_state(self, state: InstallationState) -> None:
@@ -220,6 +234,7 @@ class InstallerContext:
             if self.lifecycle in (InstallLifecycle.DONE, InstallLifecycle.FAILED):
                 self.lifecycle = InstallLifecycle.IDLE
                 self.transaction_id = uuid.uuid4().hex
+                self.transaction_status = ""
                 self.assurance_checks.clear()
                 self.partition_steps.clear()
             self.request = request
@@ -256,6 +271,19 @@ class InstallerContext:
                 raise RuntimeError(
                     f"Installer phase cannot move backwards: {self.phase.value} -> {phase.value}"
                 )
+            from .orchestration import decision
+
+            native = decision(
+                "phase",
+                lifecycle=self.lifecycle.value,
+                phase=self.phase.value,
+                target=phase.value,
+            )
+            if native is not None and (
+                native.get("accepted") is not True
+                or native.get("phase") != phase.value
+            ):
+                raise RuntimeError("native installer phase transition was not accepted")
             self.phase = phase
             # Publish phase as first-class SSE event (R-05) — keep pct for bar, phase for label
             try:

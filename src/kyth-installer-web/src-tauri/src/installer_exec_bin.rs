@@ -1,11 +1,11 @@
 //! Rust-owned execution handoff for destructive installer image writes.
 //!
-//! The compatibility Python service still owns phase orchestration and
-//! recovery.  It invokes this helper only with a typed bootc operation on
-//! stdin. The helper validates and projects the request with the same Rust
+//! The compatibility Python service still owns phase-specific filesystem work
+//! and recovery storage. It invokes this helper with typed operations on
+//! stdin. The helper validates and projects each request with the same Rust
 //! plans used by the native clients, then replaces itself with the selected
-//! utility so the
-//! caller's cancellation and timeout signals still target the real command.
+//! utility for streaming operations so the caller's cancellation and timeout
+//! signals still target the real command.
 
 mod installer_bootc;
 mod installer_disk;
@@ -22,6 +22,7 @@ mod installer_transaction;
 mod installer_configuration;
 #[allow(dead_code)]
 mod installer_secure_boot;
+mod installer_orchestration;
 
 use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
@@ -60,6 +61,8 @@ fn operation_args_valid(args: &[String]) -> bool {
                 | "transaction-write"
                 | "configuration-write"
                 | "secure-boot-plan"
+                | "orchestration"
+                | "power-check"
         )
 }
 
@@ -116,6 +119,25 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             "{}",
             serde_json::to_string(&plan)
                 .map_err(|error| format!("could not encode Secure Boot plan: {error}"))?
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "orchestration" {
+        let input = serde_json::from_slice::<installer_orchestration::OrchestrationInput>(&input)
+            .map_err(|error| format!("invalid orchestration JSON: {error}"))?;
+        let response = installer_orchestration::apply(input)?;
+        println!(
+            "{}",
+            serde_json::to_string(&response)
+                .map_err(|error| format!("could not encode orchestration response: {error}"))?
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "power-check" {
+        println!(
+            "{}",
+            serde_json::to_string(&installer_orchestration::power_check())
+                .map_err(|error| format!("could not encode power response: {error}"))?
         );
         return Ok(ExitCode::SUCCESS);
     }
@@ -247,6 +269,14 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "secure-boot-plan".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "orchestration".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "power-check".into()
         ]));
     }
 

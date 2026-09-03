@@ -125,6 +125,13 @@ prepare → storage → image → configure → secure_boot → complete
 
 Every phase entry publishes a `phase` event. Progress events and phase events are independent: clients should not infer phase from a progress number, and should render the most recent phase label separately from the progress bar.
 
+Lifecycle transitions, phase-order validation, cancellation decisions, durable
+transaction-status ordering, and the live power-supply probe are owned by the
+typed Rust `kyth-installer-exec` orchestration operations. The Python service
+is a compatibility adapter for phase-specific work: it uses the legacy local
+implementation only when the native helper is absent, and treats malformed or
+rejected native responses as failures.
+
 Cancellation sets a flag and publishes a log message. The worker stops at its next safe point. Once destructive storage/image/configuration/secure-boot work has begun, the error explicitly warns that disk changes may already have started; cancellation is never an implicit rollback.
 
 ## 5. Disk transaction and recovery

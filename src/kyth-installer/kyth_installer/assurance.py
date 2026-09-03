@@ -23,6 +23,18 @@ class AssuranceCheck:
 
 def _battery_check(power_root: Path = Path("/sys/class/power_supply")) -> AssuranceCheck:
     """Block destructive work when a laptop is critically low and unplugged."""
+    if Path(power_root) == Path("/sys/class/power_supply"):
+        from .orchestration import power_check
+
+        native = power_check()
+        if native is not None:
+            status = native.get("status")
+            detail = native.get("detail")
+            if status not in {"pass", "fail"} or not isinstance(detail, str) or not detail:
+                raise RuntimeError("native installer power response was malformed")
+            if status == "fail":
+                raise RuntimeError(detail)
+            return AssuranceCheck("power", "pass", detail)
     if not power_root.is_dir():
         return AssuranceCheck("power", "pass", "No battery power constraint detected")
     batteries = []

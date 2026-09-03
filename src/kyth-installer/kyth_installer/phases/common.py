@@ -93,6 +93,27 @@ def _record_transaction(
     message: str = "",
     log=None,
 ) -> None:
+    # Rust owns the durable status ordering. The compatibility writer remains
+    # only as a storage fallback when the native helper is not installed.
+    try:
+        from ..orchestration import decision
+
+        native = decision(
+            "transaction",
+            lifecycle=context.lifecycle.value,
+            phase=context.phase.value,
+            status=getattr(context, "transaction_status", ""),
+            next_status=status,
+        )
+        if native is not None and (
+            native.get("accepted") is not True or native.get("status") != status
+        ):
+            raise RuntimeError("native installer transaction transition was not accepted")
+        context.transaction_status = status
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+        if log is not None:
+            log(f"Warning: could not validate installer transaction transition: {exc}")
+        return
     try:
         payload = transaction_state_payload(context=context, status=status, message=message)
         if shutil.which("kyth-installer-exec"):
