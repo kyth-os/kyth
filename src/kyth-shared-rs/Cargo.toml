@@ -119,6 +119,10 @@ name = "kyth-windows-verify"
 path = "src/windows_verify_bin.rs"
 
 [[bin]]
+name = "kyth-vm-acceptance-guest"
+path = "src/vm_acceptance_guest_bin.rs"
+
+[[bin]]
 name = "kyth-tunable"
 path = "src/tunable_bin.rs"
 

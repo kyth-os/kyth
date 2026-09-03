@@ -286,6 +286,15 @@ class RunSmokeCheckTests(unittest.TestCase):
 
 
 class MainEntrypointTests(unittest.TestCase):
+    def test_native_read_report_is_packaged_separately_from_run_executor(self):
+        cargo = (ROOT / "src/kyth-shared-rs/Cargo.toml").read_text(encoding="utf-8")
+        docker = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        branding = (ROOT / "build_files/scripts/branding/35-diagnostic-script-installs.sh").read_text(encoding="utf-8")
+        self.assertIn('name = "kyth-vm-acceptance-guest"', cargo)
+        self.assertIn("/build/kyth-vm-acceptance-guest /usr/bin/kyth-vm-acceptance-guest", docker)
+        self.assertIn("/ctx/kyth-vm-acceptance-guest /usr/libexec/kyth-vm-acceptance-guest", branding)
+        self.assertIn("ExecStart=/usr/libexec/kyth-vm-acceptance-guest run", UNIT.read_text(encoding="utf-8"))
+
     def test_enabled_command_reflects_fw_cfg_state(self):
         with mock.patch("kyth_shared.vm_acceptance.enabled", return_value=True):
             self.assertEqual(vm_acceptance.main(["enabled"]), 0)
