@@ -15,6 +15,10 @@ mod installer_journal;
 mod installer_plan;
 #[allow(dead_code)]
 mod installer_storage;
+#[allow(dead_code)]
+mod installer_recovery;
+#[allow(dead_code)]
+mod installer_transaction;
 
 use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
@@ -43,7 +47,10 @@ fn decode_operation_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
 fn operation_args_valid(args: &[String]) -> bool {
     args.len() == 2
         && args[0] == "--operation"
-        && matches!(args[1].as_str(), "bootc-install" | "disk" | "journal-validate")
+        && matches!(
+            args[1].as_str(),
+            "bootc-install" | "disk" | "journal-validate" | "transaction-write"
+        )
 }
 
 fn run(args: &[String]) -> Result<ExitCode, String> {
@@ -59,6 +66,12 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         let input = serde_json::from_slice::<installer_journal::JournalValidationInput>(&input)
             .map_err(|error| format!("invalid journal validation JSON: {error}"))?;
         println!("{}", installer_journal::validate_request(input));
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "transaction-write" {
+        let input = serde_json::from_slice::<installer_transaction::TransactionWriteInput>(&input)
+            .map_err(|error| format!("invalid transaction write JSON: {error}"))?;
+        installer_transaction::write_request(input)?;
         return Ok(ExitCode::SUCCESS);
     }
     let (argv, needs_confirmation, operation) = match args[1].as_str() {
@@ -169,6 +182,10 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "journal-validate".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "transaction-write".into()
         ]));
     }
 

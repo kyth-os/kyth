@@ -279,7 +279,11 @@ Port components only after behavioral parity and focused tests exist:
   orchestration, and journal orchestration. Both manual-journal and guided
   NTFS partition-boundary resize use the same typed Rust operation, including
   its fixed interactive confirmation and cancellation-safe child handling.
-- **Done as a decoder/classifier:** transaction/recovery state and Rescue guidance; durable writes and recovery actions remain Python-owned.
+- **Done as a typed state and persistence boundary:** Rust owns transaction
+  state encoding, atomic replacement, file/directory fsync, and Rescue
+  classification when the native helper is installed. Python retains the
+  compatibility writer and recovery-action orchestration until the live-image
+  parity gate.
 - **Done as a pure model:** streaming command output framing, bounded failure
   tails, independent I/O/network/absolute timeout decisions, and cooperative
   cancellation; shared Rust/Python fixtures cover framing and failure tails,

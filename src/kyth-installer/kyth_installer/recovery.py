@@ -77,16 +77,15 @@ def write_failure_summary(
     _atomic_write_json(path, payload)
 
 
-def write_transaction_state(
-    path: Path,
+def transaction_state_payload(
     *,
     context: InstallerContext,
     status: str,
     message: str = "",
-) -> None:
-    """Persist the non-secret transaction state for recovery and support."""
+) -> dict:
+    """Build the support-safe transaction record without writing it."""
     plan = context.plan
-    payload = {
+    return {
         "schema_version": 1,
         "transaction_id": context.transaction_id,
         "updated_at": datetime.now(timezone.utc).isoformat(),
@@ -108,6 +107,17 @@ def write_transaction_state(
         "partition_steps": list(context.partition_steps),
         "message": message,
     }
+
+
+def write_transaction_state(
+    path: Path,
+    *,
+    context: InstallerContext,
+    status: str,
+    message: str = "",
+) -> None:
+    """Persist the non-secret transaction state for recovery and support."""
+    payload = transaction_state_payload(context=context, status=status, message=message)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     if path.parent.is_symlink() or not path.parent.is_dir():
         raise RuntimeError(f"Unsafe transaction report directory: {path.parent}")

@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import threading
 import os
+import json
+import shutil
 
 from ..config import TRANSACTION_FILE
 from ..context import InstallerContext
-from ..recovery import write_transaction_state
+from ..recovery import transaction_state_payload, write_transaction_state
+from ..system import _as_root
 
 
 def _push(event: dict, context: InstallerContext) -> None:
@@ -91,22 +94,33 @@ def _record_transaction(
     log=None,
 ) -> None:
     try:
-        write_transaction_state(
-            TRANSACTION_FILE,
-            context=context,
-            status=status,
-            message=message,
-        )
-        # write_transaction_state already fsyncs file + parent via _atomic_write_json,
-        # but ensure parent dir is durable even if future impl changes.
-        try:
-            dfd = os.open(str(TRANSACTION_FILE.parent), os.O_DIRECTORY)
-            try:
-                os.fsync(dfd)
-            finally:
-                os.close(dfd)
-        except (OSError, ValueError):
-            pass
+        payload = transaction_state_payload(context=context, status=status, message=message)
+        if shutil.which("kyth-installer-exec"):
+            from ..runner import run_command
+
+            run_command(
+                _as_root(["kyth-installer-exec", "--operation", "transaction-write"]),
+                input=json.dumps(
+                    {
+                        "operation": "transaction_write",
+                        "path": str(TRANSACTION_FILE),
+                        "state": payload,
+                    },
+                    separators=(",", ":"),
+                ),
+                text=True,
+                check=True,
+                timeout=30,
+                stdout=os.devnull,
+                stderr=os.devnull,
+            )
+        else:
+            write_transaction_state(
+                TRANSACTION_FILE,
+                context=context,
+                status=status,
+                message=message,
+            )
     except (OSError, ValueError) as exc:
         if log is not None:
             log(f"Warning: could not update installer transaction report: {exc}")
