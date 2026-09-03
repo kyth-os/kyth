@@ -3621,19 +3621,20 @@
     {
       "current_implementation": "python",
       "cutover": "replace installed kyth-set-resolution entry point after parity gates",
-      "installed_implementation": "python",
+      "installed_implementation": "rust",
       "name": "kyth-set-resolution",
-      "owner": "fixture::build_files/kyth-set-resolution",
+      "owner": "native::kyth-set-resolution",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-set-resolution",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-set-resolution",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
+      "risk_tier": "read-only",
       "rollback": "restore previous installed kyth-set-resolution entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {

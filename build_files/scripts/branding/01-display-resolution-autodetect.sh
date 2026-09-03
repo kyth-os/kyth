@@ -13,7 +13,9 @@ Hidden=false
 NoDisplay=true
 RESEOF
 
-install -m 0755 /ctx/kyth-set-resolution /usr/bin/kyth-set-resolution
+if [[ ! -x /usr/bin/kyth-set-resolution ]]; then
+	install -m 0755 /ctx/kyth-set-resolution /usr/bin/kyth-set-resolution
+fi
 
 write_kyth_os_release() {
 	local target=$1
