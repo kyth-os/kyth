@@ -21,6 +21,7 @@ use kyth_shared::system::{
     preference_presets,
     readahead,
     scheduler_arbiter,
+    shader_tmpfs,
     sysctl_profiles,
     tunable_registry,
     tuning_profile::Profile,
@@ -94,6 +95,7 @@ fn native_other(name: &str) -> bool {
             | "gpu-power"
             | "numa"
             | "selinux-gaming"
+            | "shader-tmpfs"
     )
 }
 
@@ -1154,6 +1156,57 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
+    let config_path = shader_tmpfs::config_path(None::<&Path>);
+    let tmpfiles = generated_path("tmpfiles.d", "99-kyth-shader.conf", "/etc/tmpfiles.d/99-kyth-shader.conf");
+    let service = generated_path("systemd", "kyth-shader-tmpfs.service", "/etc/systemd/system/kyth-shader-tmpfs.service");
+    match action {
+        "status" => {
+            let config = shader_tmpfs::load(&config_path);
+            println!("enabled={} size={} active={} kind=other", config.enabled, config.size, if service.is_file() { "enabled" } else { "off" });
+            ExitCode::SUCCESS
+        }
+        "gaming" | "on" => {
+            if let Err(code) = ensure_root("shader-tmpfs", &[action.to_string()]) { return code; }
+            let mut config = shader_tmpfs::load(&config_path);
+            config.enabled = true;
+            if let Err(error) = shader_tmpfs::save(&config_path, &config)
+                .and_then(|_| shader_tmpfs::generate(&config, &tmpfiles, &service).map(|_| ()))
+            {
+                eprintln!("kyth-shader-tmpfs: {error}");
+                return ExitCode::from(1);
+            }
+            println!("shader-tmpfs on");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("shader-tmpfs", &[action.to_string()]) { return code; }
+            let config = shader_tmpfs::ShaderTmpfsConfig::default();
+            if let Err(error) = shader_tmpfs::save(&config_path, &config)
+                .and_then(|_| shader_tmpfs::generate(&config, &tmpfiles, &service).map(|_| ()))
+            {
+                eprintln!("kyth-shader-tmpfs: {error}");
+                return ExitCode::from(1);
+            }
+            println!("shader-tmpfs off");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("shader-tmpfs", &[action.to_string()]) { return code; }
+            let config = shader_tmpfs::load(&config_path);
+            if let Err(error) = shader_tmpfs::generate(&config, &tmpfiles, &service) {
+                eprintln!("kyth-shader-tmpfs: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-shader-tmpfs [gaming|balanced|on|off|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1750,6 +1803,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "gpu-power" => dispatch_gpu_power(action),
             "numa" => dispatch_numa(action),
             "selinux-gaming" => dispatch_selinux_gaming(action),
+            "shader-tmpfs" => dispatch_shader_tmpfs(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1859,7 +1913,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 78);
+        assert_eq!(names.len(), 79);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1895,6 +1949,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "gpu-power"));
         assert!(names.iter().any(|name| name == "numa"));
         assert!(names.iter().any(|name| name == "selinux-gaming"));
+        assert!(names.iter().any(|name| name == "shader-tmpfs"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }

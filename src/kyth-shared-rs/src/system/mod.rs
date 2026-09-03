@@ -92,6 +92,7 @@ pub mod readahead;
 pub mod btrfs_autotune;
 pub mod overlay;
 pub mod podman_btrfs;
+pub mod shader_tmpfs;
 pub mod io_tune;
 pub mod office;
 pub mod privacy;
