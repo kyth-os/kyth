@@ -5,9 +5,10 @@
 # Preserves symlinks via ln -sf (not cp without -a, which would dereference).
 set -euo pipefail
 
-# Install dispatcher
+# Install dispatcher (bash compat entrypoint).
+# NOTE: /usr/bin/kyth-tunable-rs is already placed by the Dockerfile COPY from
+# hub-web-builder before this layer runs; do not reinstall it here.
 install -Dm0755 /ctx/kyth-tunable /usr/bin/kyth-tunable
-install -Dm0755 /usr/bin/kyth-tunable-rs /usr/bin/kyth-tunable-rs
 
 # Create compat symlinks for every tunable in the native registry.
 mapfile -t tunables < <(/usr/bin/kyth-tunable-rs --list)
