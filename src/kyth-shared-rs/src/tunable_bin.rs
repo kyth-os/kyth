@@ -15,6 +15,7 @@ use kyth_shared::system::{
     flatpak_trim,
     net_latency,
     overlay,
+    gpu_power,
     podman_btrfs,
     readahead,
     scheduler_arbiter,
@@ -88,6 +89,7 @@ fn native_other(name: &str) -> bool {
             | "io-tune"
             | "podman-overlay"
             | "podman-btrfs"
+            | "gpu-power"
     )
 }
 
@@ -1028,6 +1030,46 @@ fn dispatch_podman_btrfs(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_gpu_power(action: &str) -> ExitCode {
+    let config_path = gpu_power::config_path(None::<&Path>);
+    match action {
+        "status" => {
+            let config = gpu_power::load(&config_path);
+            println!("profile={} dpm={} active={} kind=other", config.profile, config.dpm, gpu_power::status(&config_path));
+            ExitCode::SUCCESS
+        }
+        "gaming" | "high" => {
+            if let Err(code) = ensure_root("gpu-power", &[action.to_string()]) { return code; }
+            let config = gpu_power::GpuPowerConfig { profile: "kyth".into(), dpm: "high".into() };
+            if let Err(error) = gpu_power::save(&config_path, &config) {
+                eprintln!("kyth-gpu-power: {error}");
+                return ExitCode::from(1);
+            }
+            println!("gpu-power gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "auto" | "low" => {
+            if let Err(code) = ensure_root("gpu-power", &[action.to_string()]) { return code; }
+            let dpm = if action == "low" { "low" } else { "auto" };
+            let config = gpu_power::GpuPowerConfig { profile: "balanced".into(), dpm: dpm.into() };
+            if let Err(error) = gpu_power::save(&config_path, &config) {
+                eprintln!("kyth-gpu-power: {error}");
+                return ExitCode::from(1);
+            }
+            println!("gpu-power balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("gpu-power", &[action.to_string()]) { return code; }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-gpu-power [gaming|balanced|auto|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1621,6 +1663,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "io-tune" => dispatch_io_tune(action),
             "podman-overlay" => dispatch_podman_overlay(action),
             "podman-btrfs" => dispatch_podman_btrfs(action),
+            "gpu-power" => dispatch_gpu_power(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1730,7 +1773,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 75);
+        assert_eq!(names.len(), 76);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1763,6 +1806,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "io-tune"));
         assert!(names.iter().any(|name| name == "podman-overlay"));
         assert!(names.iter().any(|name| name == "podman-btrfs"));
+        assert!(names.iter().any(|name| name == "gpu-power"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
