@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -210,6 +211,23 @@ class StreamTests(unittest.TestCase):
         with patch.object(fsresize, "_as_root", side_effect=lambda cmd: cmd):
             fsresize._stream(["echo", "hello from resize"], logs.append, timeout=5)
         self.assertIn("hello from resize", logs)
+
+    def test_typed_stream_wraps_request_for_rust_process_lifecycle(self):
+        payload = {
+            "operation": "filesystem_resize",
+            "device": "/dev/sda1",
+            "fs": "ntfs",
+            "new_size_bytes": 10 * 1024**3,
+            "stage": "resize",
+        }
+        with patch.object(fsresize, "_stream") as stream:
+            fsresize._stream_typed(payload, lambda _message: None)
+
+        self.assertEqual(stream.call_args.args[0], fsresize._STREAM_HELPER)
+        self.assertEqual(
+            json.loads(stream.call_args.kwargs["stdin_data"]),
+            {"kind": "disk", "request": payload},
+        )
 
     def test_stream_pipes_input_to_the_process(self):
         logs = []

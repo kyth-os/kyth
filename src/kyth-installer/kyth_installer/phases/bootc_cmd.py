@@ -85,8 +85,11 @@ def _run_cmd(
     if execution_request is not None:
         # Rust validates this typed operation and builds the final bootc argv.
         # Image-write requests contain no credentials or other secrets.
-        cmd = ["kyth-installer-exec", "--operation", "bootc-install"]
-        stdin_data = json.dumps(execution_request, separators=(",", ":"))
+        cmd = ["kyth-installer-exec", "--operation", "stream"]
+        stdin_data = json.dumps(
+            {"kind": "bootc_install", "request": execution_request},
+            separators=(",", ":"),
+        )
 
     executor = PrivilegedExecutor(
         run_command=None,  # streaming does not use the scalar runner

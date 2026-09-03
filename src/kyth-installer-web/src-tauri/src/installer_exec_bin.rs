@@ -3,9 +3,9 @@
 //! The compatibility Python service still owns phase-specific filesystem work
 //! and recovery storage. It invokes this helper with typed operations on
 //! stdin. The helper validates and projects each request with the same Rust
-//! plans used by the native clients, then replaces itself with the selected
-//! utility for streaming operations so the caller's cancellation and timeout
-//! signals still target the real command.
+//! plans used by the native clients. Scalar operations use exec handoff;
+//! streaming operations are spawned and waited by this helper so parent-death
+//! cancellation cannot orphan a long-running utility.
 
 mod installer_bootc;
 mod installer_disk;
@@ -26,9 +26,16 @@ mod installer_orchestration;
 
 use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
-use std::process::{Command, ExitCode, Stdio};
+use std::process::{Command, ExitCode, ExitStatus, Stdio};
 
 const MAX_OPERATION_BYTES: usize = 64 * 1024;
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "kind", content = "request", rename_all = "snake_case")]
+enum StreamingOperationInput {
+    BootcInstall(installer_bootc::BootcInstallInput),
+    Disk(installer_disk::DiskOperationInput),
+}
 
 fn read_operation_bytes() -> Result<Vec<u8>, String> {
     let mut input = Vec::new();
@@ -61,10 +68,66 @@ fn operation_args_valid(args: &[String]) -> bool {
                 | "transaction-write"
                 | "configuration-write"
                 | "fstab-append"
+                | "stream"
                 | "secure-boot-plan"
                 | "orchestration"
                 | "power-check"
         )
+}
+
+fn parent_death_signal() -> io::Result<()> {
+    let parent_pid = unsafe { libc::getppid() };
+    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if unsafe { libc::getppid() } != parent_pid {
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "installer parent exited during child setup",
+        ));
+    }
+    Ok(())
+}
+
+fn exit_code(status: ExitStatus) -> ExitCode {
+    ExitCode::from(
+        status
+            .code()
+            .and_then(|code| u8::try_from(code).ok())
+            .unwrap_or(1),
+    )
+}
+
+fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
+    let operation = serde_json::from_slice::<StreamingOperationInput>(input)
+        .map_err(|error| format!("invalid streaming operation JSON: {error}"))?;
+    let (argv, description) = match operation {
+        StreamingOperationInput::BootcInstall(input) => {
+            (installer_bootc::build_plan(input)?.argv, "bootc image installation")
+        }
+        StreamingOperationInput::Disk(input) => {
+            if !matches!(&input, installer_disk::DiskOperationInput::FilesystemResize { .. }) {
+                return Err("streaming disk operation must be a filesystem resize".to_string());
+            }
+            let plan = installer_disk::build_plan(input)?;
+            (plan.argv, "filesystem resize")
+        }
+    };
+    let executable = argv
+        .first()
+        .ok_or_else(|| format!("{description} plan was empty"))?;
+    let mut command = Command::new(executable);
+    command
+        .args(&argv[1..])
+        .stdin(Stdio::inherit())
+        .stdout(Stdio::inherit())
+        .stderr(Stdio::inherit());
+    let mut child = unsafe { command.pre_exec(parent_death_signal).spawn() }
+        .map_err(|error| format!("could not spawn {description}: {error}"))?;
+    let status = child
+        .wait()
+        .map_err(|error| format!("could not wait for {description}: {error}"))?;
+    Ok(exit_code(status))
 }
 
 fn run(args: &[String]) -> Result<ExitCode, String> {
@@ -76,6 +139,9 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     }
 
     let input = read_operation_bytes()?;
+    if args[1] == "stream" {
+        return run_stream(&input);
+    }
     if args[1] == "journal-validate" {
         let input = serde_json::from_slice::<installer_journal::JournalValidationInput>(&input)
             .map_err(|error| format!("invalid journal validation JSON: {error}"))?;
@@ -193,16 +259,7 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         command.stdin(Stdio::piped());
         // Ensure a helper cancellation cannot leave an interactive child
         // running after the parent process has gone away.
-        let mut child = unsafe {
-            command
-                .pre_exec(|| {
-                    if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) != 0 {
-                        return Err(io::Error::last_os_error());
-                    }
-                    Ok(())
-                })
-                .spawn()
-        }
+        let mut child = unsafe { command.pre_exec(parent_death_signal).spawn() }
         .map_err(|error| format!("could not spawn {operation}: {error}"))?;
         if let Some(mut stdin) = child.stdin.take() {
             if let Err(error) = stdin.write_all(b"Yes\n") {
@@ -214,16 +271,12 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         let status = child
             .wait()
             .map_err(|error| format!("could not wait for {operation}: {error}"))?;
-        return Ok(ExitCode::from(
-            status
-                .code()
-                .and_then(|code| u8::try_from(code).ok())
-                .unwrap_or(1),
-        ));
+        return Ok(exit_code(status));
     }
-    // exec(2) is deliberate: the Python streaming caller continues to own
-    // the same PID, so terminate/kill cancellation cannot orphan bootc.
-    let error = command.exec();
+    // exec(2) keeps the historical scalar-operation behavior. Streaming
+    // operations use run_stream(), which owns a child and applies the same
+    // parent-death cancellation signal before waiting for it.
+    let error = unsafe { command.pre_exec(parent_death_signal).exec() };
     Err(format!("could not execute {operation}: {error}"))
 }
 
@@ -275,6 +328,10 @@ mod tests {
         ]));
         assert!(operation_args_valid(&[
             "--operation".into(),
+            "stream".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
             "fstab-append".into()
         ]));
         assert!(operation_args_valid(&[
@@ -298,5 +355,20 @@ mod tests {
         assert!(serde_json::from_slice::<installer_bootc::BootcInstallInput>(
             br#"{"subcommand":"to-disk","source_imgref":"oci:/image","target_imgref":"kyth:latest","target":"/dev/sda","wipe":true}"#,
         ).is_ok());
+    }
+
+    #[test]
+    fn streaming_rejects_non_streamable_disk_operations_before_spawn() {
+        let request = serde_json::json!({
+            "kind": "disk",
+            "request": {
+                "operation": "format_filesystem",
+                "device": "/dev/sda3",
+                "fs": "btrfs",
+                "label": "KythOS"
+            }
+        });
+        let input = serde_json::to_vec(&request).expect("stream request should serialize");
+        assert!(run_stream(&input).is_err());
     }
 }

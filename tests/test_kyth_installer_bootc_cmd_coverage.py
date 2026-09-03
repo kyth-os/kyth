@@ -92,8 +92,11 @@ class InstallerBootcCommandCoverageTests(unittest.TestCase):
         )
 
         args, kwargs = runner.run.call_args
-        self.assertEqual(args[0], ["root", "kyth-installer-exec", "--operation", "bootc-install"])
-        self.assertEqual(json.loads(kwargs["stdin_data"]), request)
+        self.assertEqual(args[0], ["root", "kyth-installer-exec", "--operation", "stream"])
+        self.assertEqual(
+            json.loads(kwargs["stdin_data"]),
+            {"kind": "bootc_install", "request": request},
+        )
 
     @patch("kyth_installer.install._as_root", side_effect=lambda argv: argv)
     @patch.object(bootc_cmd, "StreamingCommandRunner")

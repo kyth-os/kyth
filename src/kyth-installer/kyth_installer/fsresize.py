@@ -28,6 +28,7 @@ NTFS_GUIDANCE = (
 
 _runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
 _DISK_HELPER = ["kyth-installer-exec", "--operation", "disk"]
+_STREAM_HELPER = ["kyth-installer-exec", "--operation", "stream"]
 
 
 def _stream(argv, log, *, stdin_data=None, timeout=1800, error_factory=None):
@@ -47,9 +48,12 @@ def _stream(argv, log, *, stdin_data=None, timeout=1800, error_factory=None):
 def _stream_typed(payload, log, *, timeout=1800, error_factory=None):
     """Stream one validated filesystem operation through the Rust helper."""
     _stream(
-        _DISK_HELPER,
+        _STREAM_HELPER,
         log,
-        stdin_data=json.dumps(payload, separators=(",", ":")),
+        stdin_data=json.dumps(
+            {"kind": "disk", "request": payload},
+            separators=(",", ":"),
+        ),
         timeout=timeout,
         error_factory=error_factory,
     )

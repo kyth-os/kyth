@@ -311,6 +311,11 @@ Port components only after behavioral parity and focused tests exist:
   append-only `/etc/fstab` updates all cross the root-only helper. Python keeps
   phase orchestration, read-only UUID/EFI probes, and the compatibility fallback
   until live-media parity is proven.
+- **First streaming lifecycle slice now runs in Rust:** typed bootc image writes
+  and filesystem-resize streams are validated, spawned, waited, and protected
+  with parent-death cancellation by `kyth-installer-exec`. Python still owns
+  output framing, progress/network telemetry, timeout policy, and the user
+  cancellation request until the native stream protocol replaces that adapter.
 - **Done as a typed decision boundary:** Rust and Python agree on Secure
   Boot/MOK states and import-result classification, and the installed helper
   supplies the decision to the privileged flow; `mokutil`, passwords, and
