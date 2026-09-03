@@ -82,6 +82,10 @@ path = "src/doctor_bin.rs"
 name = "kyth-health-check"
 path = "src/health_check_bin.rs"
 
+[[bin]]
+name = "kyth-smoke-check"
+path = "src/smoke_check_bin.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

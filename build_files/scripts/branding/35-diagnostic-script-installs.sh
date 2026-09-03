@@ -1,6 +1,7 @@
 # shellcheck shell=bash
 # ── Read-only diagnostic/health-check scripts ──────────────────────────────────
-# kyth-smoke-check is installed as a kyth-shared console entry point.
+# kyth-smoke-check is the native Rust binary copied from the hub-web-builder;
+# the former Python entry point is retained only as source/test coverage.
 # Native Rust compatibility-named utilities are copied into /usr/bin by the
 # Dockerfile builder stage; the former Python entry points are not installed.
 install -m 0755 /ctx/kyth-controller-check /usr/bin/kyth-controller-check
