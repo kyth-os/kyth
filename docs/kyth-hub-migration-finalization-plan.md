@@ -334,9 +334,9 @@ also pass. The installed-image security/rollback drill was not run.
 
 Status: code cleanup in progress (2026-09-03); direct Python-backed Just recipe
 parsing, the installed AI performance daemon, the listed diagnostic/game entry
-points, 49 sysctl-backed tunable entries, and 44 module-specific tunable entries
-are now native Rust/non-Python. The remaining module-specific tunable still
-use an explicit compatibility fallback and are the next migration slice.
+points, 49 sysctl-backed tunable entries, and all 45 module-specific tunable
+entries are now native Rust/non-Python. The compatibility dispatcher remains
+only as a rollback fixture for older images.
 
 - Publish the final parity matrix, VM qualification reports, and release
   notes.
@@ -354,10 +354,10 @@ use an explicit compatibility fallback and are the next migration slice.
 - [x] Replace the installed Python `kyth-health-check`, `kyth-resume-check`,
   `kyth-nvidia-status`, `kyth-controller-check`, `kyth-game-boost`, and
   `kyth-doctor` entry points with bounded native Rust binaries (2026-09-03).
-- [x] Port the 49 sysctl-backed entries and 44 module-specific entries of the
+- [x] Port all 49 sysctl-backed and all 45 module-specific entries of the
       indirect recipe executor to
       native `kyth-tunable-rs`; package-time symlink selection is derived from the
-      Rust registry and the compatibility fallback remains for unsupported entries
+      Rust registry and every registry entry selects the native dispatcher
       (2026-09-03).
 - [x] Port `mimalloc`, `mimalloc-run`, `sccache`, `shader-cache-size`, and
       `wine-sync` module-specific writers to native `kyth-tunable-rs`
@@ -367,9 +367,9 @@ use an explicit compatibility fallback and are the next migration slice.
 - [x] Port `distrobox-cache`, `flatpak-prefetch`, `flatpak-trim`, `readahead`, and `trim-tune` writers to
       native `kyth-tunable-rs` (2026-09-03); generated unit/timer files remain
       reversible and service activation stays caller-owned.
-- [ ] Port the remaining module-specific tunable writer, remove the
-      compatibility dispatcher, and audit the remaining non-Hub compatibility
-      modules.
+- [x] Port the final module-specific tunable writer to native Rust and make all
+      94 registry entries resolve to `kyth-tunable-rs`; retain the compatibility
+      dispatcher only as a rollback fixture for older images.
 - Audit the remaining non-Hub compatibility Python modules and unexposed
   Just recipes; remove or port them if the product requirement is upgraded
   from “all Hub entry points are Rust/Tauri” to “no Python may execute in any
@@ -400,7 +400,7 @@ paths.
 | P1 | Complete extended Guardian/model parity and update-watcher lock, firmware, retry, and session/network gates. | 5 (complete 2026-09-02; image acceptance waived) |
 | P1 | Reconcile any other Hub-facing Python authorities listed in `MIGRATION.md` before declaring strict mode complete. | 5 (complete 2026-09-02; native Rust authorities installed) |
 | P2 | Remove remaining compatibility service fixtures and stale support references after strict-mode cutover. | 7 (complete 2026-09-02; native helper entry points, dead fixtures, and stale VPN launch references removed) |
-| P2 | Port remaining indirect recipe executors (`kyth-tunable`) and remove its compatibility module. | 7 (49 sysctl and 44 module-specific entries complete 2026-09-03; 1 fallback entry remains) |
+| P2 | Port remaining indirect recipe executors (`kyth-tunable`) and remove its compatibility module. | 7 (all 49 sysctl and all 45 module-specific entries complete 2026-09-03; compatibility retained only as a rollback fixture) |
 | P2 | Run a post-cutover observation window before deleting compatibility code. | 7 (waived/not started for YOLO cutover; installed-image acceptance was skipped) |
 
 ## Definition of done

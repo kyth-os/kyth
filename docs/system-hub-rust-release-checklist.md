@@ -20,8 +20,8 @@ The native post-update, first-login app-status, Steam launcher-export,
 KRunner desktop-entry, diagnostic, game-boost, and doctor utilities are
 included in the shared Rust build. No Python/Qt update notifier is installed
 or autostarted.
-The native `kyth-tunable-rs` dispatcher now owns 93 of the 94 tunable entries;
-the remaining entry continues through the explicit compatibility fallback.
+The native `kyth-tunable-rs` dispatcher now owns all 94 tunable entries;
+the compatibility dispatcher remains only as a rollback fixture for older images.
 
 GitHub Actions Validation run
 [`33665906864`](https://github.com/kyth-os/kyth/actions/runs/33665906864)
@@ -123,12 +123,13 @@ Python authority for Hub-facing reads and actions:
 - [x] Remove Python JSON parsing from the probe, OS update, JetBrains Toolbox,
       LSFG-VK, and runtime perf-gate Just recipes; data-only extraction uses
       native commands or `jq`.
-- [x] Port the 49 sysctl-backed entries and 44 module-specific entries of the
+- [x] Port all 49 sysctl-backed and all 45 module-specific entries of the
       indirect tunable dispatcher to
       native `kyth-tunable-rs`; the installer derives native symlinks from the
-      Rust binary and keeps unsupported entries on the compatibility fallback.
-- [ ] Port the remaining tunable entry whose writer is module-specific,
-      then remove the compatibility dispatcher after parity coverage.
+      Rust binary for all registry entries.
+- [x] Port the final module-specific tunable entry to native `kyth-tunable-rs`;
+      all 94 registry entries now resolve to the native dispatcher, while the
+      compatibility fixture remains available for rollback.
 - [x] Remove the obsolete Python/build fixtures for the native update watcher,
       telemetry writer, privileged socket boundary, network-share executor,
       and standalone VPN client.

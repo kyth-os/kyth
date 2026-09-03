@@ -1,8 +1,8 @@
 //! Native dispatcher for migrated tunable profiles.
 //!
-//! The registry still contains non-native entries whose bespoke Rust ports are
-//! not complete. The native binary owns the migrated sysctl and module-specific
-//! profiles while the compatibility dispatcher remains the fallback for the rest.
+//! The native binary owns the registry's sysctl and module-specific profiles.
+//! The compatibility dispatcher remains available as a rollback fixture for
+//! older images, but no registered tunable depends on it at runtime.
 
 use kyth_shared::system::{
     ananicy,
@@ -31,6 +31,7 @@ use kyth_shared::system::{
     system_audit,
     telemetry_opt,
     work_cache,
+    windows_verify,
     sysctl_profiles,
     tunable_registry,
     tuning_profile::Profile,
@@ -117,6 +118,7 @@ fn native_other(name: &str) -> bool {
             | "kargs-apply"
             | "sched-arbiter"
             | "oom-gaming"
+            | "windows-verify"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1758,6 +1760,30 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_windows_verify(args: &[String]) -> ExitCode {
+    let json = args == ["--json"];
+    if args.is_empty() || json {
+        let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/root"));
+        let report = windows_verify::verify(&home, Path::new("/var/home").exists());
+        if json {
+            println!("{}", serde_json::to_string_pretty(&report).expect("verification report serializes"));
+        } else {
+            for (name, value) in [
+                ("bookmarks", &report.bookmarks), ("drives", &report.drives),
+                ("files", &report.files), ("onedrive", &report.onedrive),
+                ("pwa", &report.pwa), ("parity", &report.parity),
+            ] { println!("{name}: {value}"); }
+        }
+        return if report.parity == "ok" { ExitCode::SUCCESS } else { ExitCode::from(1) };
+    }
+    if args == ["status"] {
+        println!("profile=balanced active=unknown kind=other");
+        return ExitCode::SUCCESS;
+    }
+    eprintln!("Usage: kyth-windows-verify [--json] (or kyth-tunable-rs windows-verify status)");
+    ExitCode::from(2)
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -2369,6 +2395,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "sched-arbiter" => dispatch_sched_arbiter(action),
             "oom-gaming" => dispatch_oom_gaming(action),
             "gaming-master" => dispatch_gaming_master(action),
+            "windows-verify" => dispatch_windows_verify(args),
             _ => ExitCode::from(2),
         };
     }
@@ -2478,7 +2505,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 93);
+        assert_eq!(names.len(), 94);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2529,6 +2556,6 @@ mod tests {
         assert!(names.iter().any(|name| name == "sched-arbiter"));
         assert!(names.iter().any(|name| name == "oom-gaming"));
         assert!(names.iter().any(|name| name == "gaming-master"));
-        assert!(!names.iter().any(|name| name == "windows-verify"));
+        assert!(names.iter().any(|name| name == "windows-verify"));
     }
 }
