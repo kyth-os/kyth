@@ -68,9 +68,17 @@ pub(crate) enum DiskOperationInput {
     MountFilesystem {
         device: String,
         mountpoint: String,
+        #[serde(default)]
+        options: Vec<String>,
+        #[serde(default)]
+        bind: bool,
     },
     UnmountFilesystem {
         mountpoint: String,
+        #[serde(default)]
+        recursive: bool,
+        #[serde(default)]
+        lazy: bool,
     },
     SetPartitionFlag {
         disk: String,
@@ -153,6 +161,27 @@ fn safe_absolute_path(raw: &str, label: &str) -> Result<String, String> {
 
 fn safe_mountpoint(raw: &str) -> Result<String, String> {
     safe_absolute_path(raw, "mount point")
+}
+
+fn safe_mount_options(options: &[String]) -> Result<Vec<String>, String> {
+    if options.len() > 8 {
+        return Err("mount options are too numerous".to_string());
+    }
+    options
+        .iter()
+        .map(|option| {
+            if option.is_empty()
+                || option.len() > 128
+                || !option.bytes().all(|byte| {
+                    byte.is_ascii_alphanumeric()
+                        || matches!(byte, b'=' | b':' | b'.' | b'_' | b'+' | b'@' | b'-')
+                })
+            {
+                return Err("mount options contain unsupported characters".to_string());
+            }
+            Ok(option.clone())
+        })
+        .collect()
 }
 
 fn safe_label(raw: String) -> Result<String, String> {
@@ -452,19 +481,48 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             new_size_bytes,
             stage,
         } => build_filesystem_resize(device, fs, new_size_bytes, stage),
-        DiskOperationInput::MountFilesystem { device, mountpoint } => {
-            let device = required_device(&device, "filesystem device")?;
+        DiskOperationInput::MountFilesystem {
+            device,
+            mountpoint,
+            options,
+            bind,
+        } => {
+            let device = if bind {
+                safe_absolute_path(&device, "mount source")?
+            } else {
+                required_device(&device, "filesystem device")?
+            };
             let mountpoint = safe_mountpoint(&mountpoint)?;
+            let options = safe_mount_options(&options)?;
+            let mut argv = vec!["/usr/sbin/mount".to_string()];
+            if bind {
+                argv.push("--bind".to_string());
+            } else if !options.is_empty() {
+                argv.extend(["-o".to_string(), options.join(",")]);
+            }
+            argv.extend([device, mountpoint]);
             Ok(DiskPlan {
-                argv: vec!["/usr/sbin/mount".to_string(), device, mountpoint],
+                argv,
                 timeout_seconds: 30,
                 needs_confirmation: false,
             })
         }
-        DiskOperationInput::UnmountFilesystem { mountpoint } => {
+        DiskOperationInput::UnmountFilesystem {
+            mountpoint,
+            recursive,
+            lazy,
+        } => {
             let mountpoint = safe_mountpoint(&mountpoint)?;
+            let mut argv = vec!["/usr/sbin/umount".to_string()];
+            if recursive {
+                argv.push("-R".to_string());
+            }
+            if lazy {
+                argv.push("-l".to_string());
+            }
+            argv.push(mountpoint);
             Ok(DiskPlan {
-                argv: vec!["/usr/sbin/umount".to_string(), mountpoint],
+                argv,
                 timeout_seconds: 30,
                 needs_confirmation: false,
             })
@@ -746,6 +804,8 @@ mod tests {
         let mount = build_plan(DiskOperationInput::MountFilesystem {
             device: device(),
             mountpoint: "/tmp/kyth-resize".into(),
+            options: vec![],
+            bind: false,
         })
         .expect("mount plan should validate");
         assert_eq!(
@@ -753,11 +813,59 @@ mod tests {
             ["/usr/sbin/mount", "/dev/sda", "/tmp/kyth-resize"]
         );
 
+        let subvolume = build_plan(DiskOperationInput::MountFilesystem {
+            device: device(),
+            mountpoint: "/tmp/kyth-target".into(),
+            options: vec!["subvol=@".into(), "ro".into()],
+            bind: false,
+        })
+        .expect("mount options should validate");
+        assert_eq!(
+            subvolume.argv,
+            [
+                "/usr/sbin/mount",
+                "-o",
+                "subvol=@,ro",
+                "/dev/sda",
+                "/tmp/kyth-target"
+            ]
+        );
+
+        let bind = build_plan(DiskOperationInput::MountFilesystem {
+            device: "/boot/efi".into(),
+            mountpoint: "/tmp/kyth-target/boot/efi".into(),
+            options: vec![],
+            bind: true,
+        })
+        .expect("bind mount should validate");
+        assert_eq!(
+            bind.argv,
+            [
+                "/usr/sbin/mount",
+                "--bind",
+                "/boot/efi",
+                "/tmp/kyth-target/boot/efi"
+            ]
+        );
+
         let unmount = build_plan(DiskOperationInput::UnmountFilesystem {
             mountpoint: "/tmp/kyth-resize".into(),
+            recursive: false,
+            lazy: false,
         })
         .expect("unmount plan should validate");
         assert_eq!(unmount.argv, ["/usr/sbin/umount", "/tmp/kyth-resize"]);
+
+        let recursive = build_plan(DiskOperationInput::UnmountFilesystem {
+            mountpoint: "/tmp/kyth-resize".into(),
+            recursive: true,
+            lazy: true,
+        })
+        .expect("recursive unmount should validate");
+        assert_eq!(
+            recursive.argv,
+            ["/usr/sbin/umount", "-R", "-l", "/tmp/kyth-resize"]
+        );
     }
 
     #[test]

@@ -288,9 +288,11 @@ Port components only after behavioral parity and focused tests exist:
   tails, independent I/O/network/absolute timeout decisions, and cooperative
   cancellation; shared Rust/Python fixtures cover framing and failure tails,
   while process execution and privilege boundaries remain Python-owned.
-- **Done as a pure state model:** mount registration, release, LIFO cleanup
-  ordering, and cleanup-state clearing; mount/unmount syscalls remain
-  Python-owned behind the privileged service.
+- **Done as a state model and typed executor:** mount registration, release,
+  LIFO cleanup ordering, cleanup-state clearing, filesystem mounts,
+  subvolume options, bind mounts, and recursive/lazy unmounts now use the
+  root-only Rust disk helper when installed. Python retains the fixed-argv
+  compatibility fallback and phase orchestration.
 - **Bootc image-write handoff complete at the process boundary:** the typed
   bootc operation is validated and projected by Rust, then
   `kyth-installer-exec` pins and `exec`s `/usr/bin/bootc`. Python still owns

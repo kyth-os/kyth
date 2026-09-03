@@ -35,6 +35,7 @@ def _run_install_worker(
     run_command = phase_dependency("run_command")
     _as_root = phase_dependency("_as_root")
     _safe_umount = phase_dependency("_safe_umount")
+    mount_filesystem = phase_dependency("mount_filesystem")
     _require_no_symlink = phase_dependency("_require_no_symlink")
     require_root = phase_dependency("require_root")
     _try_stage_mok_enrollment = phase_dependency("_try_stage_mok_enrollment")
@@ -68,7 +69,7 @@ def _run_install_worker(
             # Detach any stale mount left by a previously crashed install attempt.
             _safe_umount(run_command, config_root)
             context.register_mount(config_root)
-            run_command(_as_root(["mount", root_part, config_root]), check=True)
+            mount_filesystem(root_part, config_root, run=run_command, as_root=_as_root, check=True)
 
         progress(93)
 

@@ -51,7 +51,12 @@ def _atomic_write_json(path: Path, payload: dict) -> None:
 def cleanup_registered_mounts(context: InstallerContext, *, run: RunCommand) -> None:
     """Unmount every mount owned by this attempt, deepest/most-recent first."""
     for mountpoint in reversed(context.cleanup_mounts.copy()):
-        run(_as_root(["umount", "-Rl", mountpoint]), check=False, capture_output=True)
+        from .system import unmount_filesystem
+
+        unmount_filesystem(
+            mountpoint, recursive=True, lazy=True,
+            run=run, as_root=_as_root, check=False, capture_output=True,
+        )
         context.release_mount(mountpoint)
 
 

@@ -24,7 +24,12 @@ from .system_privilege import (  # pylint: disable=unused-import  # noqa: F401
     format_os_error,
     require_root,  # pylint: disable=unused-import
 )
-from .system_mount import _lsblk_target_mounts, unmount_target_disk  # pylint: disable=unused-import  # noqa: F401
+from .system_mount import (  # pylint: disable=unused-import
+    _lsblk_target_mounts,
+    mount_filesystem,
+    unmount_filesystem,
+    unmount_target_disk,
+)  # noqa: F401
 
 _logger = logging.getLogger(__name__)
 

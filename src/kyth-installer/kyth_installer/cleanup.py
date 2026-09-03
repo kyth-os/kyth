@@ -7,7 +7,7 @@ from typing import Any
 
 from .context import InstallationState
 from .runner import run_command
-from .system import _as_root
+from .system import _as_root, unmount_filesystem
 
 RunCommand = Callable[..., Any]
 
@@ -22,10 +22,10 @@ def unmount_configuration(
     run(_as_root(["sync"]), check=False)
     if alongside_mount:
         target_home = Path(alongside_mount) / "ostree/deploy/default/var/home"
-        run(_as_root(["umount", "-Rl", str(target_home)]), check=False, capture_output=True)
-        run(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
+        unmount_filesystem(str(target_home), recursive=True, lazy=True, run=run, as_root=_as_root, check=False, capture_output=True)
+        unmount_filesystem(alongside_mount, recursive=True, lazy=True, run=run, as_root=_as_root, check=False, capture_output=True)
     else:
-        run(_as_root(["umount", config_root]), check=False)
+        unmount_filesystem(config_root, run=run, as_root=_as_root, check=False)
 
 
 def clear_secrets_and_orphan_mount(
@@ -38,4 +38,4 @@ def clear_secrets_and_orphan_mount(
     state["password_hash"] = ""  # nosec B105 # nosemgrep -- clearing, not a hardcoded secret
     state["mok_password"] = ""  # nosec B105 # nosemgrep -- clearing, not a hardcoded secret
     if alongside_mount:
-        run(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
+        unmount_filesystem(alongside_mount, recursive=True, lazy=True, run=run, as_root=_as_root, check=False, capture_output=True)

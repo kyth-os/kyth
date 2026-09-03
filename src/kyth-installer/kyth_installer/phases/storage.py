@@ -78,6 +78,7 @@ def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerConte
     _as_root = phase_dependency("_as_root")
     _require_no_symlink = phase_dependency("_require_no_symlink")
     _safe_umount = phase_dependency("_safe_umount")
+    mount_filesystem = phase_dependency("mount_filesystem")
     _run_cmd = phase_dependency("_run_cmd")
     log(f"Formatting {target_part} as btrfs ...")
     _run_cmd(
@@ -93,7 +94,7 @@ def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerConte
     _require_no_symlink(btrfs_temp_root)
     run_command(_as_root(["mkdir", "-p", btrfs_temp_root]), check=True)
     context.register_mount(btrfs_temp_root)
-    run_command(_as_root(["mount", target_part, btrfs_temp_root]), check=True)
+    mount_filesystem(target_part, btrfs_temp_root, run=run_command, as_root=_as_root, check=True)
     try:
         run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@"]), check=True)
         run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/@home"]), check=True)
@@ -113,6 +114,7 @@ def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerC
     """
     run_command = phase_dependency("run_command")
     _as_root = phase_dependency("_as_root")
+    mount_filesystem = phase_dependency("mount_filesystem")
     efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
     run_command(_as_root(["mkdir", "-p", str(efi_mountpoint)]), check=True)
     context.register_mount(str(efi_mountpoint))
@@ -125,16 +127,13 @@ def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerC
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         current_efi_mnt = ""
     if current_efi_mnt:
-        run_command(
-            _as_root(["mount", "--bind", current_efi_mnt, str(efi_mountpoint)]),
-            check=True,
+        mount_filesystem(
+            efi_part, str(efi_mountpoint), bind_source=current_efi_mnt,
+            run=run_command, as_root=_as_root, check=True,
         )
         log(f"EFI bind-mounted from {current_efi_mnt}")
     else:
-        run_command(
-            _as_root(["mount", efi_part, str(efi_mountpoint)]),
-            check=True,
-        )
+        mount_filesystem(efi_part, str(efi_mountpoint), run=run_command, as_root=_as_root, check=True)
         log(f"EFI mounted from {efi_part}")
 
 
@@ -209,7 +208,7 @@ def _run_guarded_image_write(
     try:
         with _disk_image_hold(disk, log):
             write()
-    except BaseException as exc:
+    except BaseException as exc:  # noqa: BLE001 -- preserve cancellation/power-loss cleanup semantics
         caught = exc
     finally:
         _stop_power_watch(watch, stop_event)
@@ -233,20 +232,22 @@ def _prepare_partition_target_storage(
     _as_root = phase_dependency("_as_root")
     _require_no_symlink = phase_dependency("_require_no_symlink")
     _safe_umount = phase_dependency("_safe_umount")
+    mount_filesystem = phase_dependency("mount_filesystem")
+    unmount_filesystem = phase_dependency("unmount_filesystem")
     _run_cmd = phase_dependency("_run_cmd")
     _build_bootc_install_cmd = phase_dependency("_build_bootc_install_cmd")
     log(f"Target partition : {target_part}")
     log(f"EFI partition    : {efi_part or '(none detected)'}")
 
     _safe_umount(run_command, target_part)
-    run_command(_as_root(["umount", "-Rl", alongside_mount]), check=False, capture_output=True)
+    unmount_filesystem(alongside_mount, recursive=True, lazy=True, run=run_command, as_root=_as_root, check=False, capture_output=True)
     if efi_part:
         try:
             with tempfile.TemporaryDirectory() as td:
-                ro = run_command(_as_root(["mount", "-o", "ro", efi_part, td]), check=False, capture_output=True)
+                ro = mount_filesystem(efi_part, td, options=["ro"], run=run_command, as_root=_as_root, check=False, capture_output=True)
                 if ro.returncode == 0:
                     has_ms = pathlib.Path(td, "EFI", "Microsoft").exists() or pathlib.Path(td, "EFI", "microsoft").exists()
-                    run_command(_as_root(["umount", td]), check=False, capture_output=True)
+                    unmount_filesystem(td, run=run_command, as_root=_as_root, check=False, capture_output=True)
                     if has_ms:
                         log(f"ESP {efi_part} contains Windows bootloader — will not format, only reuse.")
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
@@ -256,7 +257,7 @@ def _prepare_partition_target_storage(
     _require_no_symlink(alongside_mount)
     run_command(_as_root(["mkdir", "-p", alongside_mount]), check=True)
     context.register_mount(alongside_mount)
-    run_command(_as_root(["mount", "-o", "subvol=@", target_part, alongside_mount]), check=True)
+    mount_filesystem(target_part, alongside_mount, options=["subvol=@"], run=run_command, as_root=_as_root, check=True)
     progress(11)
 
     if efi_part:
