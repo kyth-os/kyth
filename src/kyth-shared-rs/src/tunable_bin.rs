@@ -14,6 +14,7 @@ use kyth_shared::system::{
     flatpak_prefetch,
     flatpak_trim,
     net_latency,
+    overlay,
     readahead,
     scheduler_arbiter,
     sysctl_profiles,
@@ -84,6 +85,7 @@ fn native_other(name: &str) -> bool {
             | "fscache"
             | "journal-tune"
             | "io-tune"
+            | "podman-overlay"
     )
 }
 
@@ -901,6 +903,69 @@ fn dispatch_io_tune(action: &str) -> ExitCode {
     }
 }
 
+fn podman_on_btrfs() -> bool {
+    std::fs::read_to_string("/proc/mounts").ok().is_some_and(|mounts| mounts.lines().any(|line| line.split_whitespace().nth(2) == Some("btrfs")))
+}
+
+fn dispatch_podman_overlay(action: &str) -> ExitCode {
+    let config_path = overlay::config_path(None::<&Path>);
+    let destination = generated_path("containers/storage.conf.d", "99-kyth-overlay.conf", "/etc/containers/storage.conf.d/99-kyth-overlay.conf");
+    let on_btrfs = podman_on_btrfs();
+    match action {
+        "status" => {
+            let config = overlay::load(&config_path);
+            println!("metacopy={} resolved={} active={} kind=other", config.as_str(), overlay::resolve(config, on_btrfs).as_str(), if destination.is_file() { "on" } else { "off" });
+            ExitCode::SUCCESS
+        }
+        "on" | "gaming" => {
+            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) { return code; }
+            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::On)
+                .and_then(|_| overlay::generate(overlay::Metacopy::On, on_btrfs, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-podman-overlay: {error}");
+                return ExitCode::from(1);
+            }
+            println!("podman-overlay on");
+            ExitCode::SUCCESS
+        }
+        "off" => {
+            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) { return code; }
+            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::Off)
+                .and_then(|_| overlay::generate(overlay::Metacopy::Off, on_btrfs, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-podman-overlay: {error}");
+                return ExitCode::from(1);
+            }
+            println!("podman-overlay off");
+            ExitCode::SUCCESS
+        }
+        "auto" | "balanced" => {
+            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) { return code; }
+            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::Auto)
+                .and_then(|_| overlay::generate(overlay::Metacopy::Auto, on_btrfs, &destination).map(|_| ()))
+            {
+                eprintln!("kyth-podman-overlay: {error}");
+                return ExitCode::from(1);
+            }
+            println!("podman-overlay auto");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) { return code; }
+            let config = overlay::load(&config_path);
+            if let Err(error) = overlay::generate(config, on_btrfs, &destination) {
+                eprintln!("kyth-podman-overlay: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-podman-overlay [on|off|auto|gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1492,6 +1557,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "fscache" => dispatch_fscache(action),
             "journal-tune" => dispatch_journal_tune(action),
             "io-tune" => dispatch_io_tune(action),
+            "podman-overlay" => dispatch_podman_overlay(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1601,7 +1667,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 73);
+        assert_eq!(names.len(), 74);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1632,6 +1698,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "fscache"));
         assert!(names.iter().any(|name| name == "journal-tune"));
         assert!(names.iter().any(|name| name == "io-tune"));
+        assert!(names.iter().any(|name| name == "podman-overlay"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }
