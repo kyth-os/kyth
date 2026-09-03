@@ -3603,19 +3603,20 @@
     {
       "current_implementation": "python",
       "cutover": "replace installed kyth-set-kickoff-icon entry point after parity gates",
-      "installed_implementation": "python",
+      "installed_implementation": "rust",
       "name": "kyth-set-kickoff-icon",
-      "owner": "fixture::build_files/kyth-set-kickoff-icon",
+      "owner": "native::kyth-set-kickoff-icon",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-set-kickoff-icon",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-set-kickoff-icon",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
+      "risk_tier": "read-only",
       "rollback": "restore previous installed kyth-set-kickoff-icon entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {

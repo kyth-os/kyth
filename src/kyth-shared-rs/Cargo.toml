@@ -134,6 +134,10 @@ path = "src/configure_session_bin.rs"
 name = "kyth-set-resolution"
 path = "src/set_resolution_bin.rs"
 
+[[bin]]
+name = "kyth-set-kickoff-icon"
+path = "src/set_kickoff_icon_bin.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

@@ -5,7 +5,9 @@
 # case the theme lookup is overridden by a previously cached value. It also
 # disables Plasma's newly-installed app badges so KythOS launchers land in
 # their categories without green dots or "New!" labels.
-install -m 0755 /ctx/kyth-set-kickoff-icon /usr/bin/kyth-set-kickoff-icon
+if [[ ! -x /usr/bin/kyth-set-kickoff-icon ]]; then
+	install -m 0755 /ctx/kyth-set-kickoff-icon /usr/bin/kyth-set-kickoff-icon
+fi
 
 write_config /etc/skel/.config/autostart/kyth-set-kickoff-icon.desktop <<'AUTOSTARTEOF'
 [Desktop Entry]
