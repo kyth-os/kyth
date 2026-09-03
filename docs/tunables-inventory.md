@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 82 (all 49 sysctl wrappers plus 33 other-kind wrappers); 12 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 83 (all 49 sysctl wrappers plus 34 other-kind wrappers); 11 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -124,7 +124,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 89 | kyth-wine-sync | wine_sync | other | wine sync | native Rust dispatcher |
 | 90 | kyth-wmem-default | wmem_default | sysctl | `net.core.wmem_default=262144` | gaming.toml |
 | 91 | kyth-wmem-max | wmem_max | sysctl | `net.core.wmem_max=16777216` — **dup network** | gaming.toml vs network |
-| 92 | kyth-work-cache | work_cache | other | work cache | registry (other) |
+| 92 | kyth-work-cache | work_cache | other | work cache | native Rust dispatcher |
 | 93 | kyth-zswap | zswap_preset | sysctl | `vm.zswap_*` (modprobe not sysctl) — actually `options zswap` | registry (other, not sysctl.d) |
 | 94 | kyth-zswap (duplicate row handling) | — | — | — | — |
 

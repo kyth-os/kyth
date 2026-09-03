@@ -24,6 +24,7 @@ use kyth_shared::system::{
     readahead,
     scheduler_arbiter,
     shader_tmpfs,
+    work_cache,
     sysctl_profiles,
     tunable_registry,
     tuning_profile::Profile,
@@ -99,6 +100,7 @@ fn native_other(name: &str) -> bool {
             | "selinux-gaming"
             | "shader-tmpfs"
             | "steam-deadzone"
+            | "work-cache"
             | "hdr-store"
             | "hdr-per-game"
     )
@@ -1307,6 +1309,57 @@ fn dispatch_hdr_per_game(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_work_cache(action: &str) -> ExitCode {
+    let config_path = work_cache::config_path(None::<&Path>);
+    let tmpfiles = generated_path("tmpfiles.d", "99-kyth-work-cache.conf", "/etc/tmpfiles.d/99-kyth-work-cache.conf");
+    let service = generated_path("systemd", "kyth-work-cache.service", "/etc/systemd/system/kyth-work-cache.service");
+    match action {
+        "status" => {
+            let config = work_cache::load(&config_path);
+            println!("enabled={} size={} active={} kind=other", config.enabled, config.size, work_cache::status(&service));
+            ExitCode::SUCCESS
+        }
+        "gaming" | "on" => {
+            if let Err(code) = ensure_root("work-cache", &[action.to_string()]) { return code; }
+            let mut config = work_cache::load(&config_path);
+            config.enabled = true;
+            if let Err(error) = work_cache::save(&config_path, &config)
+                .and_then(|_| work_cache::generate(&config, &tmpfiles, &service).map(|_| ()))
+            {
+                eprintln!("kyth-work-cache: {error}");
+                return ExitCode::from(1);
+            }
+            println!("work-cache on");
+            ExitCode::SUCCESS
+        }
+        "balanced" | "off" => {
+            if let Err(code) = ensure_root("work-cache", &[action.to_string()]) { return code; }
+            let config = work_cache::WorkCacheConfig::default();
+            if let Err(error) = work_cache::save(&config_path, &config)
+                .and_then(|_| work_cache::generate(&config, &tmpfiles, &service).map(|_| ()))
+            {
+                eprintln!("kyth-work-cache: {error}");
+                return ExitCode::from(1);
+            }
+            println!("work-cache off");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("work-cache", &[action.to_string()]) { return code; }
+            let config = work_cache::load(&config_path);
+            if let Err(error) = work_cache::generate(&config, &tmpfiles, &service) {
+                eprintln!("kyth-work-cache: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-work-cache [gaming|balanced|on|off|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1907,6 +1960,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "steam-deadzone" => dispatch_steam_deadzone(action),
             "hdr-store" => dispatch_hdr_store(action),
             "hdr-per-game" => dispatch_hdr_per_game(action),
+            "work-cache" => dispatch_work_cache(action),
             _ => ExitCode::from(2),
         };
     }
@@ -2016,7 +2070,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 82);
+        assert_eq!(names.len(), 83);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2056,6 +2110,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "steam-deadzone"));
         assert!(names.iter().any(|name| name == "hdr-store"));
         assert!(names.iter().any(|name| name == "hdr-per-game"));
+        assert!(names.iter().any(|name| name == "work-cache"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }

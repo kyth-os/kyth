@@ -42,6 +42,19 @@ pub fn save(path: impl AsRef<Path>, config: &WorkCacheConfig) -> std::io::Result
     crate::atomic_io::atomic_write_text(path, &text, Some(0o600))
 }
 
+pub fn generate(config: &WorkCacheConfig, tmpfiles: impl AsRef<Path>, service: impl AsRef<Path>) -> std::io::Result<Option<PathBuf>> {
+    let tmpfiles = tmpfiles.as_ref();
+    let service = service.as_ref();
+    if !config.enabled {
+        for path in [tmpfiles, service] { match std::fs::remove_file(path) { Ok(()) | Err(_) => {} } }
+        return Ok(None);
+    }
+    crate::atomic_io::atomic_write_text(tmpfiles, "# Kyth work cache — generated\nd /run/kyth-work-cache 0755 1000 1000 -\n", Some(0o644))?;
+    let content = format!("[Unit]\nDescription=Kyth work cache — Code/cargo tmpfs\nAfter=local-fs.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/sh -c 'mkdir -p /run/kyth-work-cache && mount -t tmpfs -o size={},mode=0755 tmpfs /run/kyth-work-cache && mkdir -p /run/kyth-work-cache/vscode /run/kyth-work-cache/cargo'\nExecStop=/bin/sh -c 'umount /run/kyth-work-cache 2>/dev/null || true'\n[Install]\nWantedBy=multi-user.target\n", config.size);
+    crate::atomic_io::atomic_write_text(service, &content, Some(0o644))?;
+    Ok(Some(service.to_path_buf()))
+}
+
 pub fn status(service: impl AsRef<Path>) -> &'static str { if service.as_ref().is_file() { "enabled" } else { "off" } }
 
 #[cfg(test)]
