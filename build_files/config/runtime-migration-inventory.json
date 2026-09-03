@@ -1352,19 +1352,20 @@
     {
       "current_implementation": "python",
       "cutover": "replace installed kyth-exe-compat entry point after parity gates",
-      "installed_implementation": "python",
+      "installed_implementation": "rust",
       "name": "kyth-exe-compat",
-      "owner": "fixture::build_files/kyth-exe-compat",
+      "owner": "native::kyth-exe-compat",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-exe-compat",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-exe-compat",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "read-only",
       "rollback": "restore previous installed kyth-exe-compat entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
