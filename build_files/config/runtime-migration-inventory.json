@@ -317,37 +317,39 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-aio-max entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-aio-max",
-      "owner": "fixture::build_files/kyth-aio-max",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-aio-max",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-aio-max entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-ananicy entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-ananicy",
-      "owner": "fixture::build_files/kyth-ananicy",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-ananicy",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-ananicy entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -752,19 +754,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-boot-timeout entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-boot-timeout",
-      "owner": "fixture::build_files/kyth-boot-timeout",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-boot-timeout",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-boot-timeout entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -807,19 +810,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-bore entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-bore",
-      "owner": "fixture::build_files/kyth-bore",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-bore",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-bore entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -846,19 +850,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-btrfs-autotune entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-btrfs-autotune",
-      "owner": "fixture::build_files/kyth-btrfs-autotune",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-btrfs-autotune",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-btrfs-autotune entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -883,55 +888,58 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-btrfs-tune entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-btrfs-tune",
-      "owner": "fixture::build_files/kyth-btrfs-tune",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-btrfs-tune",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-btrfs-tune entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-busy-poll entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-busy-poll",
-      "owner": "fixture::build_files/kyth-busy-poll",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-busy-poll",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-busy-poll entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-busy-read entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-busy-read",
-      "owner": "fixture::build_files/kyth-busy-read",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-busy-read",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-busy-read entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -955,19 +963,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-compaction entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-compaction",
-      "owner": "fixture::build_files/kyth-compaction",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-compaction",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-compaction entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -986,25 +995,6 @@
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-configure-session entry point",
       "status": "queued",
-      "surface": "launcher"
-    },
-    {
-      "current_implementation": "python",
-      "cutover": "replace installed kyth-controller-check entry point after parity gates",
-      "installed_implementation": "rust",
-      "name": "kyth-controller-check",
-      "owner": "native::kyth-controller-check",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-controller-check",
-      "priority": 0,
-      "reason": "native Rust crate or installed unit is already declared/packaged",
-      "resolved_target": "build_files/kyth-controller-check",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "read-only",
-      "rollback": "restore previous installed kyth-controller-check entry point",
-      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -1088,55 +1078,58 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-dirty-expire entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-dirty-expire",
-      "owner": "fixture::build_files/kyth-dirty-expire",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-dirty-expire",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-dirty-expire entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-dirty-ratio entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-dirty-ratio",
-      "owner": "fixture::build_files/kyth-dirty-ratio",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-dirty-ratio",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-dirty-ratio entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-distrobox-cache entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-distrobox-cache",
-      "owner": "fixture::build_files/kyth-distrobox-cache",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-distrobox-cache",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-distrobox-cache entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -1155,25 +1148,6 @@
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-distrobox-root-launch entry point",
       "status": "queued",
-      "surface": "launcher"
-    },
-    {
-      "current_implementation": "python",
-      "cutover": "replace installed kyth-doctor entry point after parity gates",
-      "installed_implementation": "rust",
-      "name": "kyth-doctor",
-      "owner": "native::kyth-doctor",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-doctor",
-      "priority": 0,
-      "reason": "native Rust crate or installed unit is already declared/packaged",
-      "resolved_target": "build_files/kyth-doctor",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "read-only",
-      "rollback": "restore previous installed kyth-doctor entry point",
-      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -1334,19 +1308,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-epp-ac entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-epp-ac",
-      "owner": "fixture::build_files/kyth-epp-ac",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-epp-ac",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-epp-ac entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -1407,37 +1382,39 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-fcitx-latency entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-fcitx-latency",
-      "owner": "fixture::build_files/kyth-fcitx-latency",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-fcitx-latency",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-fcitx-latency entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-file-max entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-file-max",
-      "owner": "fixture::build_files/kyth-file-max",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-file-max",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-file-max entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -1466,55 +1443,58 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-flatpak-prefetch entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-flatpak-prefetch",
-      "owner": "fixture::build_files/kyth-flatpak-prefetch",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-flatpak-prefetch",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-flatpak-prefetch entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-flatpak-trim entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-flatpak-trim",
-      "owner": "fixture::build_files/kyth-flatpak-trim",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-flatpak-trim",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-flatpak-trim entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-fscache entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-fscache",
-      "owner": "fixture::build_files/kyth-fscache",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-fscache",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-fscache entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -1532,24 +1512,6 @@
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-full-update entry point",
-      "status": "queued",
-      "surface": "launcher"
-    },
-    {
-      "current_implementation": "python",
-      "cutover": "replace installed kyth-game-boost entry point after parity gates",
-      "installed_implementation": "python",
-      "name": "kyth-game-boost",
-      "owner": "fixture::build_files/kyth-game-boost",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-game-boost",
-      "priority": 1,
-      "resolved_target": "build_files/kyth-game-boost",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "daemon",
-      "rollback": "restore previous installed kyth-game-boost entry point",
       "status": "queued",
       "surface": "launcher"
     },
@@ -1592,73 +1554,77 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-gaming-audit entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-gaming-audit",
-      "owner": "fixture::build_files/kyth-gaming-audit",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-gaming-audit",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-gaming-audit entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-gaming-cfs entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-gaming-cfs",
-      "owner": "fixture::build_files/kyth-gaming-cfs",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-gaming-cfs",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-gaming-cfs entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-gaming-master entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-gaming-master",
-      "owner": "fixture::build_files/kyth-gaming-master",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-gaming-master",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-gaming-master entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-gpu-power entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-gpu-power",
-      "owner": "fixture::build_files/kyth-gpu-power",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-gpu-power",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-gpu-power entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -1817,55 +1783,38 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-hdr-per-game entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-hdr-per-game",
-      "owner": "fixture::build_files/kyth-hdr-per-game",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-hdr-per-game",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-hdr-per-game entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-hdr-store entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-hdr-store",
-      "owner": "fixture::build_files/kyth-hdr-store",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-hdr-store",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-hdr-store entry point",
-      "status": "queued",
-      "surface": "launcher"
-    },
-    {
-      "current_implementation": "python",
-      "cutover": "replace installed kyth-health-check entry point after parity gates",
-      "installed_implementation": "rust",
-      "name": "kyth-health-check",
-      "owner": "native::kyth-health-check",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-health-check",
-      "priority": 0,
-      "reason": "native Rust crate or installed unit is already declared/packaged",
-      "resolved_target": "build_files/kyth-health-check",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "read-only",
-      "rollback": "restore previous installed kyth-health-check entry point",
       "status": "done-native",
       "surface": "launcher"
     },
@@ -1929,19 +1878,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-inotify-watches entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-inotify-watches",
-      "owner": "fixture::build_files/kyth-inotify-watches",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-inotify-watches",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-inotify-watches entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -2004,37 +1954,39 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-io-tune entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-io-tune",
-      "owner": "fixture::build_files/kyth-io-tune",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-io-tune",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-io-tune entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-irq-tune entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-irq-tune",
-      "owner": "fixture::build_files/kyth-irq-tune",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-irq-tune",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-irq-tune entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -2058,19 +2010,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-journal-tune entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-journal-tune",
-      "owner": "fixture::build_files/kyth-journal-tune",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-journal-tune",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-journal-tune entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -2094,19 +2047,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-kargs-apply entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-kargs-apply",
-      "owner": "fixture::build_files/kyth-kargs-apply",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-kargs-apply",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-kargs-apply entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -2130,19 +2084,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-kwin-latency entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-kwin-latency",
-      "owner": "fixture::build_files/kyth-kwin-latency",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-kwin-latency",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-kwin-latency entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -2207,73 +2162,77 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-max-map-count entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-max-map-count",
-      "owner": "fixture::build_files/kyth-max-map-count",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-max-map-count",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-max-map-count entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-mimalloc entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-mimalloc",
-      "owner": "fixture::build_files/kyth-mimalloc",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-mimalloc",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-mimalloc entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-mimalloc-run entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-mimalloc-run",
-      "owner": "fixture::build_files/kyth-mimalloc-run",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-mimalloc-run",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-mimalloc-run entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-min-free-kbytes entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-min-free-kbytes",
-      "owner": "fixture::build_files/kyth-min-free-kbytes",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-min-free-kbytes",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-min-free-kbytes entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -2373,55 +2332,58 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-net-backlog entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-net-backlog",
-      "owner": "fixture::build_files/kyth-net-backlog",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-net-backlog",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-net-backlog entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-net-tune entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-net-tune",
-      "owner": "fixture::build_files/kyth-net-tune",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-net-tune",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-net-tune entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-netdev-budget entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-netdev-budget",
-      "owner": "fixture::build_files/kyth-netdev-budget",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-netdev-budget",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-netdev-budget entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -2445,55 +2407,38 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-numa entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-numa",
-      "owner": "fixture::build_files/kyth-numa",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-numa",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-numa entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-numa-balancing entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-numa-balancing",
-      "owner": "fixture::build_files/kyth-numa-balancing",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-numa-balancing",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-numa-balancing entry point",
-      "status": "queued",
-      "surface": "launcher"
-    },
-    {
-      "current_implementation": "python",
-      "cutover": "replace installed kyth-nvidia-status entry point after parity gates",
-      "installed_implementation": "rust",
-      "name": "kyth-nvidia-status",
-      "owner": "native::kyth-nvidia-status",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-nvidia-status",
-      "priority": 0,
-      "reason": "native Rust crate or installed unit is already declared/packaged",
-      "resolved_target": "build_files/kyth-nvidia-status",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "read-only",
-      "rollback": "restore previous installed kyth-nvidia-status entry point",
       "status": "done-native",
       "surface": "launcher"
     },
@@ -2518,109 +2463,115 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-oom-gaming entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-oom-gaming",
-      "owner": "fixture::build_files/kyth-oom-gaming",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-oom-gaming",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-oom-gaming entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-overcommit-memory entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-overcommit-memory",
-      "owner": "fixture::build_files/kyth-overcommit-memory",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-overcommit-memory",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-overcommit-memory entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-page-cluster entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-page-cluster",
-      "owner": "fixture::build_files/kyth-page-cluster",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-page-cluster",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-page-cluster entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-pcie entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-pcie",
-      "owner": "fixture::build_files/kyth-pcie",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-pcie",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-pcie entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-perf-cpu entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-perf-cpu",
-      "owner": "fixture::build_files/kyth-perf-cpu",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-perf-cpu",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-perf-cpu entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "shell",
       "cutover": "replace installed kyth-perf-gate entry point after parity gates",
-      "installed_implementation": "shell",
+      "installed_implementation": "rust",
       "name": "kyth-perf-gate",
-      "owner": "fixture::build_files/kyth-perf-gate",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-perf-gate",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-perf-gate",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-perf-gate entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -2662,55 +2613,58 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-pipewire-gaming entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-pipewire-gaming",
-      "owner": "fixture::build_files/kyth-pipewire-gaming",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-pipewire-gaming",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-pipewire-gaming entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-podman-btrfs entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-podman-btrfs",
-      "owner": "fixture::build_files/kyth-podman-btrfs",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-podman-btrfs",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-podman-btrfs entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-podman-overlay entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-podman-overlay",
-      "owner": "fixture::build_files/kyth-podman-overlay",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-podman-overlay",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-podman-overlay entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -2955,37 +2909,39 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-psi-gaming entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-psi-gaming",
-      "owner": "fixture::build_files/kyth-psi-gaming",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-psi-gaming",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-psi-gaming entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-psi-poll entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-psi-poll",
-      "owner": "fixture::build_files/kyth-psi-poll",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-psi-poll",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-psi-poll entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3009,19 +2965,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-readahead entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-readahead",
-      "owner": "fixture::build_files/kyth-readahead",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-readahead",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-readahead entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3133,25 +3090,6 @@
       "surface": "launcher"
     },
     {
-      "current_implementation": "python",
-      "cutover": "replace installed kyth-resume-check entry point after parity gates",
-      "installed_implementation": "rust",
-      "name": "kyth-resume-check",
-      "owner": "native::kyth-resume-check",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-resume-check",
-      "priority": 0,
-      "reason": "native Rust crate or installed unit is already declared/packaged",
-      "resolved_target": "build_files/kyth-resume-check",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "read-only",
-      "rollback": "restore previous installed kyth-resume-check entry point",
-      "status": "done-native",
-      "surface": "launcher"
-    },
-    {
       "current_implementation": "shell",
       "cutover": "replace installed kyth-retry-hardware-setup entry point after parity gates",
       "installed_implementation": "shell",
@@ -3193,37 +3131,39 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-rmem-default entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-rmem-default",
-      "owner": "fixture::build_files/kyth-rmem-default",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-rmem-default",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-rmem-default entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-rmem-max entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-rmem-max",
-      "owner": "fixture::build_files/kyth-rmem-max",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-rmem-max",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-rmem-max entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3247,19 +3187,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-sccache entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-sccache",
-      "owner": "fixture::build_files/kyth-sccache",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-sccache",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-sccache entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3283,19 +3224,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-sched-arbiter entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-sched-arbiter",
-      "owner": "fixture::build_files/kyth-sched-arbiter",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-sched-arbiter",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "daemon",
       "rollback": "restore previous installed kyth-sched-arbiter entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3322,73 +3264,77 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-sched-autogroup entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-sched-autogroup",
-      "owner": "fixture::build_files/kyth-sched-autogroup",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-sched-autogroup",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-sched-autogroup entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-sched-child entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-sched-child",
-      "owner": "fixture::build_files/kyth-sched-child",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-sched-child",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-sched-child entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-sched-latency entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-sched-latency",
-      "owner": "fixture::build_files/kyth-sched-latency",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-sched-latency",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-sched-latency entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-sched-nr-migrate entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-sched-nr-migrate",
-      "owner": "fixture::build_files/kyth-sched-nr-migrate",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-sched-nr-migrate",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-sched-nr-migrate entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3429,24 +3375,6 @@
       "rollback": "restore previous installed kyth-sched entry point",
       "status": "queued",
       "surface": "systemd-unit"
-    },
-    {
-      "current_implementation": "data",
-      "cutover": "replace installed kyth-scripts entry point after parity gates",
-      "installed_implementation": "data",
-      "name": "kyth-scripts",
-      "owner": "fixture::build_files/kyth-scripts",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-scripts",
-      "priority": 1,
-      "resolved_target": "build_files/kyth-scripts",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "build-time",
-      "rollback": "restore previous installed kyth-scripts entry point",
-      "status": "queued",
-      "surface": "launcher"
     },
     {
       "current_implementation": "data",
@@ -3548,19 +3476,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-selinux-gaming entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-selinux-gaming",
-      "owner": "fixture::build_files/kyth-selinux-gaming",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-selinux-gaming",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-selinux-gaming entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3692,19 +3621,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-shader-cache-size entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-shader-cache-size",
-      "owner": "fixture::build_files/kyth-shader-cache-size",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-shader-cache-size",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-shader-cache-size entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3746,19 +3676,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-shader-tmpfs entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-shader-tmpfs",
-      "owner": "fixture::build_files/kyth-shader-tmpfs",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-shader-tmpfs",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-shader-tmpfs entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3820,37 +3751,39 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-somaxconn entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-somaxconn",
-      "owner": "fixture::build_files/kyth-somaxconn",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-somaxconn",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-somaxconn entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-steam-deadzone entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-steam-deadzone",
-      "owner": "fixture::build_files/kyth-steam-deadzone",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-steam-deadzone",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-steam-deadzone entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -3934,289 +3867,305 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-swappiness entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-swappiness",
-      "owner": "fixture::build_files/kyth-swappiness",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-swappiness",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-swappiness entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-system-audit entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-system-audit",
-      "owner": "fixture::build_files/kyth-system-audit",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-system-audit",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-system-audit entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-ecn entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-ecn",
-      "owner": "fixture::build_files/kyth-tcp-ecn",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-ecn",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-ecn entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-fastopen entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-fastopen",
-      "owner": "fixture::build_files/kyth-tcp-fastopen",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-fastopen",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-fastopen entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-fin-timeout entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-fin-timeout",
-      "owner": "fixture::build_files/kyth-tcp-fin-timeout",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-fin-timeout",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-fin-timeout entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-keepalive entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-keepalive",
-      "owner": "fixture::build_files/kyth-tcp-keepalive",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-keepalive",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-keepalive entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-mtu-probing entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-mtu-probing",
-      "owner": "fixture::build_files/kyth-tcp-mtu-probing",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-mtu-probing",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-mtu-probing entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-no-metrics-save entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-no-metrics-save",
-      "owner": "fixture::build_files/kyth-tcp-no-metrics-save",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-no-metrics-save",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-no-metrics-save entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-notsent entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-notsent",
-      "owner": "fixture::build_files/kyth-tcp-notsent",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-notsent",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-notsent entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-orphan-retries entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-orphan-retries",
-      "owner": "fixture::build_files/kyth-tcp-orphan-retries",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-orphan-retries",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-orphan-retries entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-retries1 entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-retries1",
-      "owner": "fixture::build_files/kyth-tcp-retries1",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-retries1",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-retries1 entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-retries2 entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-retries2",
-      "owner": "fixture::build_files/kyth-tcp-retries2",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-retries2",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-retries2 entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-sack entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-sack",
-      "owner": "fixture::build_files/kyth-tcp-sack",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-sack",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-sack entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-slow-start entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-slow-start",
-      "owner": "fixture::build_files/kyth-tcp-slow-start",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-slow-start",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-slow-start entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-timestamps entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-timestamps",
-      "owner": "fixture::build_files/kyth-tcp-timestamps",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-timestamps",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-timestamps entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-tcp-window-scaling entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-tcp-window-scaling",
-      "owner": "fixture::build_files/kyth-tcp-window-scaling",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-tcp-window-scaling",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-tcp-window-scaling entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -4244,73 +4193,77 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-telemetry-opt entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-telemetry-opt",
-      "owner": "fixture::build_files/kyth-telemetry-opt",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-telemetry-opt",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-telemetry-opt entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-thp-collapse entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-thp-collapse",
-      "owner": "fixture::build_files/kyth-thp-collapse",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-thp-collapse",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-thp-collapse entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-thp-tune entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-thp-tune",
-      "owner": "fixture::build_files/kyth-thp-tune",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-thp-tune",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-thp-tune entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-trim-tune entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-trim-tune",
-      "owner": "fixture::build_files/kyth-trim-tune",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-trim-tune",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-trim-tune entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -4335,19 +4288,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-uksmd entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-uksmd",
-      "owner": "fixture::build_files/kyth-uksmd",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-uksmd",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-uksmd entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -4413,19 +4367,20 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-vfs-cache entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-vfs-cache",
-      "owner": "fixture::build_files/kyth-vfs-cache",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-vfs-cache",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-vfs-cache entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -4471,37 +4426,39 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-vm-stat entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-vm-stat",
-      "owner": "fixture::build_files/kyth-vm-stat",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-vm-stat",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-vm-stat entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-vm-watermark entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-vm-watermark",
-      "owner": "fixture::build_files/kyth-vm-watermark",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-vm-watermark",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-vm-watermark entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
@@ -4653,7 +4610,7 @@
       "cutover": "replace installed kyth-windows-verify entry point after parity gates",
       "installed_implementation": "rust",
       "name": "kyth-windows-verify",
-      "owner": "native::kyth-windows-verify",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
@@ -4670,91 +4627,96 @@
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-wine-sync entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-wine-sync",
-      "owner": "fixture::build_files/kyth-wine-sync",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-wine-sync",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-wine-sync entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-wmem-default entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-wmem-default",
-      "owner": "fixture::build_files/kyth-wmem-default",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-wmem-default",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-wmem-default entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-wmem-max entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-wmem-max",
-      "owner": "fixture::build_files/kyth-wmem-max",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-wmem-max",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-wmem-max entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-work-cache entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-work-cache",
-      "owner": "fixture::build_files/kyth-work-cache",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-work-cache",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-work-cache entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-zswap entry point after parity gates",
-      "installed_implementation": "alias",
+      "installed_implementation": "rust",
       "name": "kyth-zswap",
-      "owner": "fixture::build_files/kyth-zswap",
+      "owner": "native::kyth-tunable-rs",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/kyth-zswap",
-      "priority": 1,
+      "priority": 0,
+      "reason": "native Rust crate or installed unit is already declared/packaged",
       "resolved_target": "build_files/kyth-tunable",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-zswap entry point",
-      "status": "queued",
+      "status": "done-native",
       "surface": "launcher"
     },
     {

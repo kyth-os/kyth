@@ -49,9 +49,10 @@ def test_inventory_preserves_actual_unit_execstart():
     assert unit["exec_start"] == ["/usr/bin/kyth-vscode-wallet"]
 
 
-def test_inventory_distinguishes_native_install_from_retained_fixture():
+def test_inventory_distinguishes_native_install_from_retained_tunable_fixture():
     entries = json.loads(INVENTORY.read_text(encoding="utf-8"))["entries"]
-    doctor = next(item for item in entries if item["path"] == "build_files/kyth-doctor")
-    assert doctor["current_implementation"] == "python"
-    assert doctor["installed_implementation"] == "rust"
-    assert doctor["status"] == "done-native"
+    tunable = next(item for item in entries if item["path"] == "build_files/kyth-swappiness")
+    assert tunable["current_implementation"] == "alias"
+    assert tunable["installed_implementation"] == "rust"
+    assert tunable["status"] == "done-native"
+    assert tunable["owner"] == "native::kyth-tunable-rs"

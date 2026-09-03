@@ -12,11 +12,13 @@ import argparse
 import json
 import re
 import sys
+import tomllib
 from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[2]
 INVENTORY = ROOT / "build_files/config/runtime-migration-inventory.json"
+TUNABLE_REGISTRY = ROOT / "build_files/config/tunables.toml"
 SCHEMA_VERSION = 1
 STATUSES = {"done-native", "queued", "explicitly-not-ported"}
 RISK = {"read-only", "user-session-writer", "privileged-writer", "daemon", "destructive", "build-time"}
@@ -31,6 +33,7 @@ NATIVE_BINARIES = {
 }
 NATIVE_BINARIES = NATIVE_BINARIES | {"kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check", "kyth-nvidia-status", "kyth-controller-check", "kyth-creator-check", "kyth-exe-compat", "kyth-snapshot-timeline", "kyth-print-check", "kyth-windows-verify", "kyth-tunable"}
 PACKAGED_NATIVE_LAUNCHERS = NATIVE_BINARIES
+NATIVE_TUNABLE_DISPATCHER = "kyth-tunable-rs"
 NOT_PORTED = {"kyth-default-flatpaks", "kyth-flathub-setup", "kyth-local-bin-migrate", "rclone@", "scx_loader"}
 READ_ONLY_NAMES = {
     "kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check",
@@ -76,6 +79,29 @@ def name_for(path: Path) -> str:
     return path.name.removesuffix(".service").removesuffix(".timer").removesuffix(".path")
 
 
+def native_tunable_names() -> set[str]:
+    """Return wrapper names currently owned by the native tunable dispatcher.
+
+    The old wrapper files remain in the checkout as rollback fixtures, so
+    source discovery cannot infer their installed owner from the shebang.
+    Keep the ownership decision tied to the same declarative registry used by
+    the package-time symlink installer.
+    """
+    try:
+        with TUNABLE_REGISTRY.open("rb") as handle:
+            data = tomllib.load(handle)
+    except (OSError, tomllib.TOMLDecodeError):
+        return set()
+    tunables = data.get("tunables", {})
+    if not isinstance(tunables, dict):
+        return set()
+    return {
+        str(spec.get("wrapper", f"kyth-{name}"))
+        for name, spec in tunables.items()
+        if isinstance(spec, dict)
+    }
+
+
 def risk_for(name: str, kind: str, path: Path) -> str:
     if "/scripts/" in f"/{rel(path)}" or path.parts[:2] == ("build_files", "scripts"):
         return "build-time"
@@ -95,6 +121,7 @@ def risk_for(name: str, kind: str, path: Path) -> str:
 def entry(path: Path, *, surface: str, implementation: str | None = None, name: str | None = None) -> dict:
     item_name = name or name_for(path)
     kind = implementation or launcher_kind(path)
+    native_tunable = surface == "launcher" and item_name in native_tunable_names()
     if item_name in NOT_PORTED:
         status = "explicitly-not-ported"
         reason = "documented third-party or declarative build/runtime exception"
@@ -102,13 +129,19 @@ def entry(path: Path, *, surface: str, implementation: str | None = None, name: 
         implementation == "rust"
         or (surface == "systemd-unit" and item_name in NATIVE_BINARIES)
         or (surface == "launcher" and item_name in PACKAGED_NATIVE_LAUNCHERS)
+        or native_tunable
     ):
         status = "done-native"
         reason = "native Rust crate or installed unit is already declared/packaged"
     else:
         status = "queued"
         reason = None
-    owner = f"fixture::{rel(path)}" if status == "queued" else f"native::{item_name}"
+    if status == "queued":
+        owner = f"fixture::{rel(path)}"
+    elif native_tunable:
+        owner = f"native::{NATIVE_TUNABLE_DISPATCHER}"
+    else:
+        owner = f"native::{item_name}"
     return {
         "path": rel(path),
         "surface": surface,
@@ -131,7 +164,10 @@ def entry(path: Path, *, surface: str, implementation: str | None = None, name: 
 def discover() -> list[dict]:
     items: list[dict] = []
     for path in sorted(ROOT.glob("build_files/kyth-*")):
-        if path.suffix not in UNIT_SUFFIXES:
+        # Ignore generated/ignored directories (for example a stray
+        # __pycache__ directory named after a removed launcher). Keep
+        # symlinks in discovery so broken aliases are reported by validation.
+        if (path.is_file() or path.is_symlink()) and path.suffix not in UNIT_SUFFIXES:
             items.append(entry(path, surface="launcher"))
     for path in sorted((ROOT / "build_files").rglob("*")):
         if path.is_file() and path.suffix in UNIT_SUFFIXES:
