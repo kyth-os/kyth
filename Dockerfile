@@ -311,7 +311,6 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-windows-verify /usr/bin/kyt
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-vm-acceptance-guest /usr/bin/kyth-vm-acceptance-guest
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable /usr/bin/kyth-tunable
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-game-boost /usr/bin/kyth-game-boost
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable-rs /usr/bin/kyth-tunable-rs
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0
 RUN --mount=type=bind,source=build_files,target=/ctx \
