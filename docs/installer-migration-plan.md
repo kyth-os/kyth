@@ -245,20 +245,21 @@ Do not start selective installer logic ports merely because a Rust shell exists.
 
 ### Phase 4 — Selective Rust migration
 
-The first slice is now implemented: the Tauri shell performs pure request
-normalization and install-plan projection before calling the privileged Python
-service. The service remains authoritative and repeats all storage-dependent
-checks before any mutation. Shared Rust/Python parity fixtures now cover all
-five modes and representative rejection branches.
+The first slice is now implemented: the native Rust transport daemon performs
+pure request normalization and install-plan projection before calling the
+privileged Python service. The service remains authoritative and repeats all
+storage-dependent checks before any mutation. Shared Rust/Python parity
+fixtures now cover all five modes and representative rejection branches.
 The Rust shell also parses explicit `lsblk` snapshots into typed disk and
 partition records; the same fixture is exercised through the Python discovery
 functions to pin safety-relevant output.
 
 Port components only after behavioral parity and focused tests exist:
 
-- **Done as a preflight:** request and install-plan normalization (Rust shell;
-  Python server-side validation remains authoritative). Shared parity cases
-  live in `src/kyth-installer-web/src-tauri/testdata/installer_plan_cases.json`.
+- **Done as a transport preflight:** request and install-plan normalization
+  (native Rust daemon; Python server-side validation remains authoritative).
+  Shared parity cases live in
+  `src/kyth-installer-web/src-tauri/testdata/installer_plan_cases.json`.
 - **Done as a parser:** disk and partition discovery from explicit `lsblk` snapshots; runtime probing and protected-disk policy remain Python-owned.
 - **Done as metadata/validation:** partition journal model, serialization, and safety checks; disk mutation remains Python-owned.
 - **Done as a decoder/classifier:** transaction/recovery state and Rescue guidance; durable writes and recovery actions remain Python-owned.

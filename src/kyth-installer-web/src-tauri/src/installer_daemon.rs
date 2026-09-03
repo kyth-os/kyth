@@ -17,6 +17,8 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use super::installer_plan::{build_plan, InstallerPlanInput};
+
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
 const BACKEND_SOCKET_SUFFIX: &str = ".backend";
 
@@ -137,13 +139,28 @@ fn header_value<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
 }
 
 fn request_parts(request: &[u8]) -> Result<(&str, &str, &str), String> {
-    let header_end = request.windows(4).position(|window| window == b"\r\n\r\n").ok_or_else(|| "installer request has no complete headers".to_string())?;
+    let header_end = header_end(request)?;
     let headers = std::str::from_utf8(&request[..header_end]).map_err(|_| "installer request headers are not UTF-8".to_string())?;
     let mut line = headers.lines().next().unwrap_or_default().split_whitespace();
     let method = line.next().unwrap_or_default();
     let target = line.next().unwrap_or_default();
-    if line.next().is_some() || method.is_empty() || target.is_empty() { return Err("installer request line is invalid".to_string()); }
+    let version = line.next().unwrap_or_default();
+    if line.next().is_some()
+        || method.is_empty()
+        || target.is_empty()
+        || !matches!(version, "HTTP/1.0" | "HTTP/1.1")
+    {
+        return Err("installer request line is invalid".to_string());
+    }
     Ok((method, target, headers))
+}
+
+fn header_end(request: &[u8]) -> Result<usize, String> {
+    request
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|position| position + 4)
+        .ok_or_else(|| "installer request has no complete headers".to_string())
 }
 
 fn read_request(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
@@ -172,6 +189,83 @@ fn forbidden(stream: &mut UnixStream) {
     let _ = stream.write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 }
 
+fn bad_start_request(stream: &mut UnixStream, message: &str) {
+    let body = serde_json::json!({"started": false, "message": message}).to_string();
+    let response = format!(
+        "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(), body
+    );
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn rebuild_request(request: &[u8], body: &[u8]) -> Result<Vec<u8>, String> {
+    let end = header_end(request)?;
+    let headers = std::str::from_utf8(&request[..end - 4])
+        .map_err(|_| "installer request headers are not UTF-8".to_string())?;
+    let retained = headers
+        .lines()
+        .filter(|line| {
+            line.split_once(':')
+                .map(|(name, _)| !name.trim().eq_ignore_ascii_case("Content-Length"))
+                .unwrap_or(true)
+        })
+        .collect::<Vec<_>>()
+        .join("\r\n");
+    let mut rebuilt = format!("{retained}\r\nContent-Length: {}\r\n\r\n", body.len()).into_bytes();
+    rebuilt.extend_from_slice(body);
+    Ok(rebuilt)
+}
+
+/// Normalize only the pure storage portion of an authenticated start request.
+///
+/// The Python service still repeats live discovery, current-disk policy, user
+/// acknowledgements, locale checks, and every destructive safety check. This
+/// boundary owns the request shape and canonical device/region projection so
+/// malformed paths and impossible guided-plan values never reach that worker.
+fn normalize_start_request(request: &[u8]) -> Result<Vec<u8>, String> {
+    let (method, target, _headers) = request_parts(request)?;
+    let path = target.split('?').next().unwrap_or(target);
+    if method != "POST" || path != "/api/start" {
+        return Ok(request.to_vec());
+    }
+
+    let end = header_end(request)?;
+    let mut value: serde_json::Value = serde_json::from_slice(&request[end..])
+        .map_err(|error| format!("Invalid installer request JSON: {error}"))?;
+    let input: InstallerPlanInput = serde_json::from_value(value.clone())
+        .map_err(|error| format!("Invalid installer plan: {error}"))?;
+    let plan = build_plan(input)?;
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "Installer start request must be a JSON object.".to_string())?;
+
+    object.insert("disk".to_string(), serde_json::json!(plan.disk));
+    object.insert("install_mode".to_string(), serde_json::json!(plan.mode));
+    object.insert(
+        "target_partition".to_string(),
+        serde_json::json!(plan.target_partition.unwrap_or_default()),
+    );
+    object.insert(
+        "resize_partition".to_string(),
+        serde_json::json!(plan.resize_partition.unwrap_or_default()),
+    );
+    object.insert(
+        "resize_gib".to_string(),
+        serde_json::json!(plan.resize_bytes / (1024 * 1024 * 1024)),
+    );
+    object.insert(
+        "free_region_start".to_string(),
+        serde_json::json!(plan.free_region_start.unwrap_or_default()),
+    );
+    object.insert(
+        "free_region_end".to_string(),
+        serde_json::json!(plan.free_region_end.unwrap_or_default()),
+    );
+    let body = serde_json::to_vec(&value)
+        .map_err(|error| format!("Could not serialize normalized installer request: {error}"))?;
+    rebuild_request(request, &body)
+}
+
 fn handle(mut client: UnixStream, backend_path: &Path, token: &str, expected_uid: Option<u32>) -> Result<(), String> {
     if let Some(expected_uid) = expected_uid {
         if peer_uid(&client)? != expected_uid { forbidden(&mut client); return Ok(()); }
@@ -179,6 +273,16 @@ fn handle(mut client: UnixStream, backend_path: &Path, token: &str, expected_uid
     let request = read_request(&mut client)?;
     let (method, target, headers) = request_parts(&request)?;
     if !route_allowed(method, target) || header_value(headers, "X-Kyth-Session-Token") != Some(token) { forbidden(&mut client); return Ok(()); }
+    let request = match normalize_start_request(&request) {
+        Ok(request) => request,
+        Err(error) => {
+            if method == "POST" && target.split('?').next().unwrap_or(target) == "/api/start" {
+                bad_start_request(&mut client, &error);
+                return Ok(());
+            }
+            return Err(error);
+        }
+    };
     let mut backend = UnixStream::connect(backend_path).map_err(|error| format!("could not connect to installer compatibility backend: {error}"))?;
     backend.write_all(&request).map_err(|error| format!("could not forward installer request: {error}"))?;
     io::copy(&mut backend, &mut client).map_err(|error| format!("could not forward installer response: {error}"))?;
@@ -238,7 +342,8 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{options, read_session_token, route_allowed};
+    use super::{normalize_start_request, options, read_session_token, route_allowed};
+    use serde_json::Value;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use tempfile::tempdir;
@@ -268,5 +373,42 @@ mod tests {
         fs::write(&path, "A".repeat(43)).unwrap();
         fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
         assert!(read_session_token(&path).is_err());
+    }
+
+    fn start_request(body: &str) -> Vec<u8> {
+        format!(
+            "POST /api/start HTTP/1.1\r\nHost: installer\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(), body
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn normalizes_start_request_before_forwarding() {
+        let request = start_request(
+            r#"{"disk":" sda ","install_mode":" Wipe ","resize_gib":0,"free_region_start":0,"free_region_end":0,"username":"alice","password":"secret"}"#,
+        );
+        let normalized = normalize_start_request(&request).expect("start request should normalize");
+        let end = normalized.windows(4).position(|window| window == b"\r\n\r\n").unwrap() + 4;
+        let body: Value = serde_json::from_slice(&normalized[end..]).expect("normalized body is JSON");
+        assert_eq!(body["disk"], "/dev/sda");
+        assert_eq!(body["install_mode"], "wipe");
+        assert_eq!(body["target_partition"], "");
+        assert_eq!(body["resize_partition"], "");
+        assert_eq!(body["resize_gib"], 0);
+        assert!(String::from_utf8_lossy(&normalized).contains(&format!("Content-Length: {}", normalized.len() - end)));
+    }
+
+    #[test]
+    fn rejects_invalid_start_plan_before_forwarding() {
+        let request = start_request(r#"{"disk":"../../etc/passwd","install_mode":"wipe"}"#);
+        let error = normalize_start_request(&request).expect_err("unsafe disk must fail closed");
+        assert!(error.contains("target disk"), "{error}");
+    }
+
+    #[test]
+    fn leaves_other_routes_byte_for_byte_unchanged() {
+        let request = b"GET /api/disks HTTP/1.1\r\nHost: installer\r\nContent-Length: 0\r\n\r\n";
+        assert_eq!(normalize_start_request(request).unwrap(), request);
     }
 }

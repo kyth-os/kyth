@@ -1,3 +1,4 @@
+mod installer_plan;
 mod installer_daemon;
 
 fn main() -> std::process::ExitCode {
