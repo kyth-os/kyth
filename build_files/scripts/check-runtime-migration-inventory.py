@@ -29,7 +29,7 @@ NATIVE_BINARIES = {
     "kyth-safe-upgrade", "kyth-bootc-guard", "kyth-finalize-staged", "kyth-btrfs-maint",
     "kyth-ai-perfd", "kyth-perf-gate-rs",
 }
-NATIVE_BINARIES = NATIVE_BINARIES | {"kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check", "kyth-nvidia-status", "kyth-controller-check", "kyth-creator-check", "kyth-exe-compat", "kyth-snapshot-timeline", "kyth-print-check", "kyth-windows-verify", "kyth-tunable"}
+NATIVE_BINARIES = NATIVE_BINARIES | {"kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check", "kyth-nvidia-status", "kyth-controller-check", "kyth-creator-check", "kyth-exe-compat", "kyth-snapshot-timeline", "kyth-print-check", "kyth-windows-verify", "kyth-tunable", "kyth-configure-session"}
 PACKAGED_NATIVE_LAUNCHERS = NATIVE_BINARIES
 NOT_PORTED = {"kyth-default-flatpaks", "kyth-flathub-setup", "kyth-local-bin-migrate", "rclone@", "scx_loader"}
 READ_ONLY_NAMES = {

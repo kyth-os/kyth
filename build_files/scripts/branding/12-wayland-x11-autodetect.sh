@@ -9,7 +9,12 @@
 # The helper fail-opens: a write error logs a warning and returns 0 so
 # ExecStartPre cannot block the greeter — 10-kyth.conf still provides the
 # Wayland default in that case.
-install -m 0755 /ctx/kyth-configure-session /usr/bin/kyth-configure-session
+# The native binary is copied from the hub-web-builder stage. Keep the Python
+# launcher as a source fixture for tests and rollback, but never overwrite the
+# native installed owner during image assembly.
+if [[ ! -x /usr/bin/kyth-configure-session ]]; then
+	install -m 0755 /ctx/kyth-configure-session /usr/bin/kyth-configure-session
+fi
 install -m 0755 /ctx/kyth-greeter-compositor /usr/bin/kyth-greeter-compositor
 
 write_config /usr/lib/systemd/system/plasmalogin.service.d/10-kyth-detect-session.conf <<'PLMDROPINEOF'
