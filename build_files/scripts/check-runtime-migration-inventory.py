@@ -29,7 +29,7 @@ NATIVE_BINARIES = {
     "kyth-safe-upgrade", "kyth-bootc-guard", "kyth-finalize-staged", "kyth-btrfs-maint",
     "kyth-ai-perfd", "kyth-perf-gate-rs",
 }
-NATIVE_BINARIES = NATIVE_BINARIES | {"kyth-doctor", "kyth-health-check", "kyth-smoke-check"}
+NATIVE_BINARIES = NATIVE_BINARIES | {"kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check"}
 PACKAGED_NATIVE_LAUNCHERS = NATIVE_BINARIES
 NOT_PORTED = {"kyth-default-flatpaks", "kyth-flathub-setup", "kyth-local-bin-migrate", "rclone@", "scx_loader"}
 READ_ONLY_NAMES = {
