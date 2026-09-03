@@ -16,7 +16,12 @@ BUILD_FILES = ROOT / "build_files"
 
 def _all_build_text() -> str:
     parts = []
-    build_sources = [ROOT / "Dockerfile", *BUILD_FILES.rglob("*")]
+    build_sources = [
+        ROOT / "Dockerfile",
+        ROOT / "installer" / "Containerfile",
+        ROOT / "installer" / "build.sh",
+        *BUILD_FILES.rglob("*"),
+    ]
     for path in build_sources:
         if path.is_file() and path.suffix in {"", ".sh", ".py"}:
             try:
@@ -48,6 +53,17 @@ class ShippedCommandContracts(unittest.TestCase):
         cls.source_names.update(
             re.findall(r"(?:/build|/usr/bin)/(kyth-[A-Za-z0-9-]+)", dockerfile)
         )
+        # Rust-built commands do not have a source file in build_files. Treat
+        # declared Cargo binaries as staged source names; the build-text
+        # assertion below still requires the image assembly to install them.
+        for manifest in ROOT.glob("src/**/Cargo.toml"):
+            cls.source_names.update(
+                re.findall(
+                    r'^name\s*=\s*"(kyth-[A-Za-z0-9-]+)"',
+                    manifest.read_text(encoding="utf-8"),
+                    re.MULTILINE,
+                )
+            )
 
     def _assert_kyth_target_is_staged(self, target: str, source: Path) -> None:
         name = Path(target).name
