@@ -86,11 +86,38 @@ pub(crate) enum DiskOperationInput {
     },
 }
 
+impl DiskOperationInput {
+    pub(crate) fn backup_path(&self) -> Option<&str> {
+        match self {
+            Self::BackupTable { backup_path, .. } => Some(backup_path),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) struct DiskPlan {
     pub(crate) argv: Vec<String>,
     pub(crate) timeout_seconds: u64,
     pub(crate) needs_confirmation: bool,
+}
+
+/// Make a completed partition-table backup durable before the caller can
+/// mutate the disk. This belongs next to the root-only backup operation so a
+/// compatibility caller cannot accidentally persist an unsynced snapshot.
+pub(crate) fn sync_backup(path: &str) -> Result<(), String> {
+    let file = std::fs::File::open(path)
+        .map_err(|error| format!("could not open partition backup for syncing: {error}"))?;
+    file.sync_all()
+        .map_err(|error| format!("could not sync partition backup: {error}"))?;
+    let parent = std::path::Path::new(path)
+        .parent()
+        .ok_or_else(|| "partition backup has no parent directory".to_string())?;
+    let directory = std::fs::File::open(parent)
+        .map_err(|error| format!("could not open partition backup directory: {error}"))?;
+    directory
+        .sync_all()
+        .map_err(|error| format!("could not sync partition backup directory: {error}"))
 }
 
 fn default_sector_size() -> u64 {
@@ -617,6 +644,22 @@ mod tests {
                 "/dev/sda",
             ]
         );
+    }
+
+    #[test]
+    fn syncs_backup_file_and_parent_directory() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("table.backup");
+        std::fs::write(&path, b"partition table").expect("backup file");
+        sync_backup(path.to_str().expect("UTF-8 temporary path"))
+            .expect("backup and directory should sync");
+    }
+
+    #[test]
+    fn rejects_missing_backup_when_syncing() {
+        let error = sync_backup("/tmp/kyth-missing-partition-backup")
+            .expect_err("missing backup must fail closed");
+        assert!(error.contains("open partition backup"));
     }
 
     #[test]

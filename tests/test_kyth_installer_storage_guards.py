@@ -163,13 +163,14 @@ class PartitionTableGuardTests(unittest.TestCase):
                 raise ValueError("original failure")
         self.assertTrue(any("restore failed" in call.args[0] for call in log.call_args_list))
 
-    def test_fsync_failure_warns_but_guard_remains_usable(self):
+    def test_backup_service_owns_snapshot_durability(self):
         service = self._service()
         log = mock.Mock()
-        with mock.patch("kyth_installer.storage_guard.os.fsync", side_effect=OSError("no sync")):
+        with mock.patch("kyth_installer.storage_guard.os.fsync") as fsync:
             with PartitionTableGuard("/dev/sda", log, disk_service=service):
                 pass
-        self.assertTrue(any("could not fsync" in call.args[0] for call in log.call_args_list))
+        service.backup_table.assert_called_once()
+        fsync.assert_not_called()
 
     def test_backup_failure_prevents_guarded_operation(self):
         service = mock.Mock()

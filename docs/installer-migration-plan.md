@@ -270,7 +270,9 @@ Port components only after behavioral parity and focused tests exist:
   while GPT backup/restore, table creation, partition create/delete/flag
   operations, and supported filesystem formatting now go through the
   root-only Rust `kyth-installer-exec` helper. Python still owns target
-  validation and journal commit/rollback orchestration. Filesystem-specific
+  validation and journal commit/rollback orchestration. The helper also
+  synchronizes completed partition-table backups and their parent directory
+  before they can be used as recovery snapshots. Filesystem-specific
   shrinking is now executed by the typed
   Rust helper for NTFS, ext, and Btrfs; Python retains target validation,
   pre-shrink safety guards, stage ordering, error guidance, mount lifecycle

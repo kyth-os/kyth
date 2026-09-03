@@ -10,7 +10,11 @@
 mod installer_bootc;
 mod installer_disk;
 #[allow(dead_code)]
+mod installer_journal;
+#[allow(dead_code)]
 mod installer_plan;
+#[allow(dead_code)]
+mod installer_storage;
 
 use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
@@ -39,7 +43,7 @@ fn decode_operation_bytes(input: &[u8]) -> Result<Vec<u8>, String> {
 fn operation_args_valid(args: &[String]) -> bool {
     args.len() == 2
         && args[0] == "--operation"
-        && matches!(args[1].as_str(), "bootc-install" | "disk")
+        && matches!(args[1].as_str(), "bootc-install" | "disk" | "journal-validate")
 }
 
 fn run(args: &[String]) -> Result<ExitCode, String> {
@@ -51,6 +55,12 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     }
 
     let input = read_operation_bytes()?;
+    if args[1] == "journal-validate" {
+        let input = serde_json::from_slice::<installer_journal::JournalValidationInput>(&input)
+            .map_err(|error| format!("invalid journal validation JSON: {error}"))?;
+        println!("{}", installer_journal::validate_request(input));
+        return Ok(ExitCode::SUCCESS);
+    }
     let (argv, needs_confirmation, operation) = match args[1].as_str() {
         "bootc-install" => {
             let input = serde_json::from_slice::<installer_bootc::BootcInstallInput>(&input)
@@ -61,7 +71,24 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         "disk" => {
             let input = serde_json::from_slice::<installer_disk::DiskOperationInput>(&input)
                 .map_err(|error| format!("invalid disk operation JSON: {error}"))?;
+            let backup_path = input.backup_path().map(str::to_owned);
             let plan = installer_disk::build_plan(input)?;
+            if let Some(backup_path) = backup_path {
+                let mut command = Command::new(&plan.argv[0]);
+                command.args(&plan.argv[1..]);
+                let status = command
+                    .status()
+                    .map_err(|error| format!("could not execute disk operation: {error}"))?;
+                if status.success() {
+                    installer_disk::sync_backup(&backup_path)?;
+                }
+                return Ok(ExitCode::from(
+                    status
+                        .code()
+                        .and_then(|code| u8::try_from(code).ok())
+                        .unwrap_or(1),
+                ));
+            }
             (plan.argv, plan.needs_confirmation, "disk operation")
         }
         _ => unreachable!("operation_args_valid checked the operation"),
@@ -139,6 +166,10 @@ mod tests {
             "bootc-install".into()
         ]));
         assert!(operation_args_valid(&["--operation".into(), "disk".into()]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "journal-validate".into()
+        ]));
     }
 
     #[test]

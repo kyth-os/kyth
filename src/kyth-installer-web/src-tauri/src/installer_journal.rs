@@ -1,8 +1,8 @@
 //! Immutable metadata model for staged partition operations.
 //!
-//! This is the first journal port. It owns no disk handles and performs no
-//! partition work; the Python journal remains authoritative until operation
-//! validation and recovery behavior have equivalent coverage.
+//! This module owns the pure journal model and validation contract. It owns no
+//! disk handles and performs no partition work; the Python journal still
+//! controls lifecycle and operation execution.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -25,6 +25,27 @@ pub(crate) struct PartitionJournal {
     pub committed: bool,
     pub root_partition: Option<String>,
     pub irreversible_completed: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct JournalValidationInput {
+    pub journal: PartitionJournal,
+    pub current_parts: Vec<PartitionRecord>,
+    pub table_type: String,
+    pub disk_size_bytes: u64,
+}
+
+pub(crate) fn validate_request(input: JournalValidationInput) -> serde_json::Value {
+    let errors = validate(
+        &input.journal,
+        &input.current_parts,
+        &input.table_type,
+        input.disk_size_bytes,
+    );
+    serde_json::json!({
+        "valid": errors.is_empty(),
+        "errors": errors,
+    })
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -494,6 +515,36 @@ mod tests {
         let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
         assert!(journal.mark_committed(Some("../../etc/passwd")).is_err());
         assert!(!journal.committed);
+    }
+
+    #[test]
+    fn validation_request_returns_bounded_json_contract() {
+        let input = JournalValidationInput {
+            journal: PartitionJournal {
+                disk: "/dev/sda".to_string(),
+                ops: vec![PartitionOperation {
+                    kind: "create".to_string(),
+                    params: json!({
+                        "start_bytes": 2 * 1024 * 1024,
+                        "size_bytes": 64 * 1024 * 1024 * 1024_u64,
+                        "fs_type": "btrfs",
+                        "mountpoint": "/",
+                    }),
+                    index: 0,
+                }],
+                committed: false,
+                root_partition: None,
+                irreversible_completed: false,
+            },
+            current_parts: Vec::new(),
+            table_type: "gpt".to_string(),
+            disk_size_bytes: 128 * 1024 * 1024 * 1024,
+        };
+        let response = validate_request(input);
+        assert_eq!(response["valid"], true);
+        assert_eq!(response["errors"], json!([]));
+        let encoded = serde_json::to_vec(&response).expect("validation response serializes");
+        assert!(encoded.len() < 64 * 1024);
     }
 
     #[test]

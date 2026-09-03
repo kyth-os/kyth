@@ -5,6 +5,7 @@ Canonical after partition_ops 571 split; partition_ops.py re-exports for compat.
 from __future__ import annotations
 
 import logging
+import json
 import shutil
 import tempfile
 from pathlib import Path
@@ -161,23 +162,7 @@ class Journal:
         self._backup_dir = tempfile.TemporaryDirectory(prefix="kyth-partition-")
         backup_path = Path(self._backup_dir.name) / "partition-table.backup"
         backup = str(backup_path)
-        # Use guard's backup+fsync logic without entering its restore context
-        # (restore is via _restore_snapshot); mimic guard's fsync
         self._disk_service.backup_table(self.disk, backup)
-        try:
-            with open(backup_path, "rb") as bf:
-                import os
-
-                os.fsync(bf.fileno())
-            dfd = os.open(self._backup_dir.name, os.O_DIRECTORY)
-            try:
-                import os as _os2
-
-                _os2.fsync(dfd)
-            finally:
-                os.close(dfd)
-        except OSError:
-            pass
         self._snapshot_saved = True
 
     def _restore_snapshot(self) -> None:
@@ -350,6 +335,10 @@ class Journal:
                 )
         table_type, primary_count, disk_size_bytes = self._initial_table_state(current_parts)
 
+        rust_errors = self._rust_validate(current_parts, table_type, disk_size_bytes)
+        if rust_errors is not None:
+            return rust_errors
+
         for op in self.ops:
             kind = op["kind"]
             p = op["params"]
@@ -424,6 +413,57 @@ class Journal:
         errors.extend(self._validate_not_in_use(current_parts))
 
         return errors
+
+    def _rust_validate(
+        self, current_parts: list[dict], table_type: str, disk_size_bytes: int,
+    ) -> list[str] | None:
+        """Use the Rust journal validator when the native helper is installed.
+
+        Development environments without the native helper retain the Python
+        validator as a compatibility fallback. Once the helper is installed,
+        a missing operation, malformed response, or execution failure refuses
+        the commit rather than silently switching validators.
+        """
+        if not shutil.which("kyth-installer-exec"):
+            return None
+        from .runner import run_command
+        from .system import _as_root
+
+        payload = {
+            "journal": {
+                "disk": self.disk,
+                "ops": self.ops,
+                "committed": self._committed,
+                "root_partition": self._root_partition,
+                "irreversible_completed": self.irreversible_completed,
+            },
+            "current_parts": current_parts,
+            "table_type": table_type,
+            "disk_size_bytes": disk_size_bytes,
+        }
+        try:
+            result = run_command(
+                _as_root(["kyth-installer-exec", "--operation", "journal-validate"]),
+                input=json.dumps(payload, separators=(",", ":")),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            response = json.loads(result.stdout or "{}")
+            errors = response.get("errors")
+            valid = response.get("valid")
+            if (
+                not isinstance(valid, bool)
+                or not isinstance(errors, list)
+                or not all(isinstance(error, str) for error in errors)
+                or valid != (not errors)
+            ):
+                raise RuntimeError("Rust journal validator returned an invalid response")
+            return errors
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, TypeError) as exc:
+            _logger.error("Rust journal validation failed; refusing partition commit: %s", exc)
+            return ["Rust journal validation failed; refusing to commit partition changes."]
 
     def _validate_create_op(self, p: dict, table_type: str, primary_count: int,
                             allocated: dict[str, tuple[int, int, str]],
@@ -645,8 +685,8 @@ class Journal:
         from .storage_guard import PartitionTableGuard
 
         with DiskLease(self.disk, log, exclusive=True):
-            # Snapshot is now handled by PartitionTableGuard (backed up with fsync);
-            # keep _save_snapshot for rollback() compatibility but guard owns restore.
+            # Keep the journal snapshot for explicit rollback compatibility;
+            # the Rust disk helper owns backup-file and parent-directory sync.
             self._save_snapshot()
             with PartitionTableGuard(
                 self.disk, log, disk_service=self._disk_service,
@@ -710,5 +750,3 @@ class Journal:
         self._committed = False
         self._root_partition = None
         log("Partition table restored to previous state.")
-
-
