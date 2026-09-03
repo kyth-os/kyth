@@ -78,6 +78,7 @@ fn native_other(name: &str) -> bool {
             | "flatpak-prefetch"
             | "flatpak-trim"
             | "readahead"
+            | "trim-tune"
     )
 }
 
@@ -586,6 +587,57 @@ fn dispatch_readahead(action: &str) -> ExitCode {
         }
         _ => {
             eprintln!("Usage: kyth-readahead [status|gaming|balanced|apply]");
+            ExitCode::from(1)
+        }
+    }
+}
+
+fn dispatch_trim_tune(action: &str) -> ExitCode {
+    let config_path = kyth_shared::system::runtime_preferences::trim_path(None::<&Path>);
+    let marker = generated_path("run", "kyth-trim-profile", "/run/kyth-trim-profile");
+    match action {
+        "status" => {
+            let config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
+            println!("profile={} weekly={} active={} kind=other", config.profile, config.weekly, kyth_shared::system::runtime_preferences::trim_status(&marker));
+            ExitCode::SUCCESS
+        }
+        "gaming" => {
+            if let Err(code) = ensure_root("trim-tune", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
+            config.profile = "kyth".into();
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_trim(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker).map(|_| ()))
+            {
+                eprintln!("kyth-trim-tune: {error}");
+                return ExitCode::from(1);
+            }
+            println!("trim-tune gaming");
+            ExitCode::SUCCESS
+        }
+        "balanced" => {
+            if let Err(code) = ensure_root("trim-tune", &[action.to_string()]) { return code; }
+            let mut config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
+            config.profile = "balanced".into();
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_trim(&config_path, &config)
+                .and_then(|_| kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker).map(|_| ()))
+            {
+                eprintln!("kyth-trim-tune: {error}");
+                return ExitCode::from(1);
+            }
+            println!("trim-tune balanced");
+            ExitCode::SUCCESS
+        }
+        "apply" => {
+            if let Err(code) = ensure_root("trim-tune", &[action.to_string()]) { return code; }
+            let config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
+            if let Err(error) = kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker) {
+                eprintln!("kyth-trim-tune: {error}");
+                return ExitCode::from(1);
+            }
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-trim-tune [status|gaming|balanced|apply]");
             ExitCode::from(1)
         }
     }
@@ -1176,6 +1228,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "flatpak-prefetch" => dispatch_flatpak_prefetch(action),
             "flatpak-trim" => dispatch_flatpak_trim(action),
             "readahead" => dispatch_readahead(action),
+            "trim-tune" => dispatch_trim_tune(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1285,7 +1338,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 67);
+        assert_eq!(names.len(), 68);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -1310,6 +1363,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "flatpak-prefetch"));
         assert!(names.iter().any(|name| name == "flatpak-trim"));
         assert!(names.iter().any(|name| name == "readahead"));
+        assert!(names.iter().any(|name| name == "trim-tune"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }

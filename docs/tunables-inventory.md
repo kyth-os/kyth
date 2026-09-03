@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 67 (all 49 sysctl wrappers plus 18 other-kind wrappers); 27 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 68 (all 49 sysctl wrappers plus 19 other-kind wrappers); 26 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -115,7 +115,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 80 | kyth-telemetry-opt | telemetry_opt | other | telemetry | registry (other) |
 | 81 | kyth-thp-collapse | thp_collapse | sysctl | `kernel.khugepaged_defrag=0` | gaming.toml |
 | 82 | kyth-thp-tune | thp_tune | sysctl | 4 keys including `vm.compaction_proactiveness` — **dup base** | gaming.toml |
-| 83 | kyth-trim-tune | trim_preset | other | trim | registry (other) |
+| 83 | kyth-trim-tune | trim_preset | other | trim | native Rust dispatcher |
 | 84 | kyth-uksmd | uksmd_preset | other | uksmd | registry (other) |
 | 85 | kyth-vfs-cache | vfs_cache_pressure | sysctl | `vm.vfs_cache_pressure=50` — **dup base** | gaming.toml |
 | 86 | kyth-vm-stat | vm_stat | sysctl | `vm.stat_interval=10` — **dup base** | gaming.toml |
