@@ -13,6 +13,7 @@ use kyth_shared::system::{
     extended_preferences::{self, ThpConfig},
     flatpak_prefetch,
     flatpak_trim,
+    hdr_per_game,
     hdr_store,
     net_latency,
     numa,
@@ -99,6 +100,7 @@ fn native_other(name: &str) -> bool {
             | "shader-tmpfs"
             | "steam-deadzone"
             | "hdr-store"
+            | "hdr-per-game"
     )
 }
 
@@ -1286,6 +1288,25 @@ fn dispatch_hdr_store(action: &str) -> ExitCode {
     }
 }
 
+fn dispatch_hdr_per_game(action: &str) -> ExitCode {
+    let config_path = hdr_per_game::config_path(None::<&Path>);
+    match action {
+        "status" => {
+            let games = hdr_per_game::load(&config_path);
+            println!("games={} kind=other", games.len());
+            ExitCode::SUCCESS
+        }
+        "gaming" | "balanced" | "apply" => {
+            println!("hdr-per-game {action}");
+            ExitCode::SUCCESS
+        }
+        _ => {
+            eprintln!("Usage: kyth-hdr-per-game [gaming|balanced|apply|status]");
+            ExitCode::from(1)
+        }
+    }
+}
+
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
     let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
@@ -1885,6 +1906,7 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "shader-tmpfs" => dispatch_shader_tmpfs(action),
             "steam-deadzone" => dispatch_steam_deadzone(action),
             "hdr-store" => dispatch_hdr_store(action),
+            "hdr-per-game" => dispatch_hdr_per_game(action),
             _ => ExitCode::from(2),
         };
     }
@@ -1994,7 +2016,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 81);
+        assert_eq!(names.len(), 82);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));
@@ -2033,6 +2055,7 @@ mod tests {
         assert!(names.iter().any(|name| name == "shader-tmpfs"));
         assert!(names.iter().any(|name| name == "steam-deadzone"));
         assert!(names.iter().any(|name| name == "hdr-store"));
+        assert!(names.iter().any(|name| name == "hdr-per-game"));
         assert!(!names.iter().any(|name| name == "gaming-master"));
     }
 }

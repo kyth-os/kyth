@@ -1,12 +1,18 @@
 //! Per-game HDR peak configuration.
 
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GameHdr {
     pub peak_nits: i64,
     pub itm: bool,
+}
+
+pub fn config_path(path: Option<impl AsRef<Path>>) -> PathBuf {
+    if let Some(path) = path { return path.as_ref().to_path_buf(); }
+    if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") { return PathBuf::from(config).join("kyth/hdr-per-game.toml"); }
+    PathBuf::from(std::env::var_os("HOME").unwrap_or_else(|| ".".into())).join(".config/kyth/hdr-per-game.toml")
 }
 
 impl Default for GameHdr {

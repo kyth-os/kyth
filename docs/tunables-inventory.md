@@ -7,7 +7,7 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 - **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
 - **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 81 (all 49 sysctl wrappers plus 32 other-kind wrappers); 13 other-kind wrappers remain on the compatibility dispatcher.
+- **Native Rust dispatcher**: 82 (all 49 sysctl wrappers plus 33 other-kind wrappers); 12 other-kind wrappers remain on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -55,7 +55,7 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 20 | kyth-gaming-cfs | gaming_cfs | other | `/etc/kyth/gaming-cfs.toml` | native Rust dispatcher |
 | 21 | kyth-gaming-master | gaming_master | other | gaming-performance | registry (other) |
 | 22 | kyth-gpu-power | gpu_power | other | gpu power | native Rust dispatcher |
-| 23 | kyth-hdr-per-game | hdr_per_game | other | hdr per game | registry (other) |
+| 23 | kyth-hdr-per-game | hdr_per_game | other | hdr per game | native Rust dispatcher |
 | 24 | kyth-hdr-store | hdr_store | other | hdr store | native Rust dispatcher |
 | 25 | kyth-inotify-watches | inotify_watches | sysctl | `fs.inotify.max_user_watches=1048576` — **dup base** | gaming.toml |
 | 26 | kyth-io-tune | io_tune | other | `/etc/kyth/io.toml` | native Rust dispatcher |
