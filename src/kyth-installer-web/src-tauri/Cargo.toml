@@ -17,6 +17,10 @@ path = "src/native_main.rs"
 name = "kyth-installerd"
 path = "src/installer_daemon_bin.rs"
 
+[[bin]]
+name = "kyth-installer-exec"
+path = "src/installer_exec_bin.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 slint-build = "1.16.0"

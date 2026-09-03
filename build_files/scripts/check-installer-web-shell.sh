@@ -39,6 +39,7 @@ echo "== kyth-installer-web/src-tauri: cargo build =="
 (cd "$installer_web/src-tauri" && cargo build --locked)
 (cd "$installer_web/src-tauri" && cargo build --locked --bin kyth-installer-native)
 (cd "$installer_web/src-tauri" && cargo build --locked --bin kyth-installerd)
+(cd "$installer_web/src-tauri" && cargo build --locked --bin kyth-installer-exec)
 
 native_bin="$installer_web/src-tauri/target/debug/kyth-installer-native"
 if [[ ! -x "$native_bin" ]]; then
@@ -53,6 +54,13 @@ if [[ ! -x "$daemon_bin" ]]; then
     exit 1
 fi
 echo "   native installer daemon linked at $daemon_bin"
+
+exec_bin="$installer_web/src-tauri/target/debug/kyth-installer-exec"
+if [[ ! -x "$exec_bin" ]]; then
+    echo "FAIL: native installer execution helper was not produced." >&2
+    exit 1
+fi
+echo "   native installer execution helper linked at $exec_bin"
 
 echo "== kyth-installer-shell: assert the frontend is embedded =="
 # Same tauri-codegen dev-vs-production trap as the Hub shell: a build missing

@@ -270,9 +270,11 @@ Port components only after behavioral parity and focused tests exist:
 - **Done as a pure state model:** mount registration, release, LIFO cleanup
   ordering, and cleanup-state clearing; mount/unmount syscalls remain
   Python-owned behind the privileged service.
-- **Done as an operation plan:** bootc install argv and non-secret installed
-  configuration are validated and projected by Rust; the privileged Python
-  service remains the executor and repeats live-state checks.
+- **Bootc image-write handoff in progress:** the typed bootc operation is now
+  validated and projected by Rust, then `kyth-installer-exec` pins and `exec`s
+  `/usr/bin/bootc`; Python still owns phase orchestration, power monitoring,
+  transaction reporting, and target configuration. The compatibility command
+  builder remains until the full storage/configuration executor is ported.
 - **Done as a pure decision model:** Rust and Python agree on Secure Boot/MOK
   states and import-result classification; `mokutil`, passwords, and firmware
   interactions remain Python-owned.

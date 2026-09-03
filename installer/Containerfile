@@ -42,9 +42,11 @@ WORKDIR /build/kyth-installer-web/src-tauri
 RUN cargo build --release --locked && \
     cargo build --release --locked --bin kyth-installer-native && \
     cargo build --release --locked --bin kyth-installerd && \
+    cargo build --release --locked --bin kyth-installer-exec && \
     cp target/release/kyth-installer-shell /build/kyth-installer-shell && \
     cp target/release/kyth-installer-native /build/kyth-installer-native && \
-    cp target/release/kyth-installerd /build/kyth-installerd
+    cp target/release/kyth-installerd /build/kyth-installerd && \
+    cp target/release/kyth-installer-exec /build/kyth-installer-exec
 
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
@@ -54,6 +56,7 @@ ARG SOURCE_TAG=latest
 COPY --from=installer-web-builder /build/kyth-installer-shell /usr/bin/kyth-installer-shell
 COPY --from=installer-web-builder /build/kyth-installer-native /usr/bin/kyth-installer-native
 COPY --from=installer-web-builder /build/kyth-installerd /usr/bin/kyth-installerd
+COPY --from=installer-web-builder /build/kyth-installer-exec /usr/bin/kyth-installer-exec
 
 # Replace inherited repo files with a minimal known-good set. Keep [updates]
 # enabled so live-only packages (notably Chromium, the installer's kiosk

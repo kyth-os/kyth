@@ -9,6 +9,7 @@ import threading
 from collections.abc import Callable
 from pathlib import Path
 
+from ..config import SKIP_FETCH_CHECK
 from ..context import InstallerContext, InstallPhase
 from ..plan import ResolvedInstallPlan
 from ..system import unmount_target_disk  # pylint: disable=unused-import
@@ -283,6 +284,15 @@ def _prepare_partition_target_storage(
             cancel_event=context.cancel_requested,
             io_stall_timeout=600,
             net_stall_timeout=600,
+            execution_request={
+                "subcommand": "to-filesystem",
+                "source_imgref": src_ref,
+                "target_imgref": tgt_ref,
+                "target": alongside_mount,
+                "skip_fetch_check": True,
+                "skip_finalize": True,
+                "root_subvolume": True,
+            },
         )
         _warn_if_efi_boot_entries_disappeared(efi_before, _snapshot_efi_boot_entries(log), log)
 
@@ -316,6 +326,14 @@ def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_
             cancel_event=context.cancel_requested,
             io_stall_timeout=600,
             net_stall_timeout=600,
+            execution_request={
+                "subcommand": "to-disk",
+                "source_imgref": src_ref,
+                "target_imgref": tgt_ref,
+                "target": disk,
+                "skip_fetch_check": SKIP_FETCH_CHECK,
+                "wipe": True,
+            },
         )
 
     with PartitionTableGuard(disk, log):
