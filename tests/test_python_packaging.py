@@ -158,6 +158,10 @@ class PythonPackagingTests(unittest.TestCase):
         self.assertNotIn("python3", dispatcher)
         self.assertIn('ln -sf kyth-tunable-rs "/usr/bin/kyth-${t}"', dispatcher)
         self.assertIn('ln -sf kyth-tunable "/usr/bin/kyth-${t}"', dispatcher)
+        self.assertLess(
+            dockerfile.index("bash /ctx/scripts/branding.sh"),
+            dockerfile.index("bash /ctx/scripts/sysconfig/tunable/01-tunable-dispatcher.sh"),
+        )
 
     def test_shared_modules_use_the_command_runner(self):
         shared_root = ROOT / "build_files/kyth_shared/kyth_shared"

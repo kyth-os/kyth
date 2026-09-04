@@ -5,37 +5,14 @@
 //! older images, but no registered tunable depends on it at runtime.
 
 use kyth_shared::system::{
-    ananicy,
-    btrfs_autotune,
-    btrfs_perf,
-    bore,
-    distrobox_cache,
+    ananicy, bore, btrfs_autotune, btrfs_perf, distrobox_cache,
     extended_preferences::{self, ThpConfig},
-    gaming_master,
-    flatpak_prefetch,
-    flatpak_trim,
-    gaming_kargs,
-    hdr_per_game,
-    hdr_store,
-    net_latency,
-    numa,
-    overlay,
-    perf_gate,
-    perf_audit,
-    gpu_power,
-    podman_btrfs,
-    preference_presets,
-    readahead,
-    scheduler_arbiter,
-    shader_tmpfs,
-    system_audit,
-    telemetry_opt,
-    work_cache,
-    windows_verify,
-    sysctl_profiles,
+    flatpak_prefetch, flatpak_trim, gaming_kargs, gaming_master, gpu_power, hdr_per_game,
+    hdr_store, net_latency, numa, overlay, perf_audit, perf_gate, podman_btrfs, preference_presets,
+    readahead, scheduler_arbiter, shader_tmpfs, sysctl_profiles, system_audit, telemetry_opt,
     tunable_registry,
     tuning_profile::Profile,
-    zswap,
+    windows_verify, work_cache, zswap,
 };
 use std::env;
 use std::path::{Path, PathBuf};
@@ -45,7 +22,11 @@ use std::time::Duration;
 fn invoked_name() -> String {
     env::args()
         .next()
-        .and_then(|path| Path::new(&path).file_name().map(|name| name.to_string_lossy().into_owned()))
+        .and_then(|path| {
+            Path::new(&path)
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
         .unwrap_or_default()
 }
 
@@ -56,7 +37,10 @@ fn resolve_name(argv0: &str, args: &[String]) -> Result<(String, Vec<String>), S
         };
         return Ok((name.clone(), args[1..].to_vec()));
     }
-    Ok((argv0.strip_prefix("kyth-").unwrap_or(argv0).to_string(), args.to_vec()))
+    Ok((
+        argv0.strip_prefix("kyth-").unwrap_or(argv0).to_string(),
+        args.to_vec(),
+    ))
 }
 
 fn test_mode() -> bool {
@@ -163,7 +147,10 @@ fn ensure_root(name: &str, args: &[String]) -> Result<(), ExitCode> {
 fn generated_path(test_subdirectory: &str, filename: &str, production: &str) -> PathBuf {
     if test_mode() {
         if let Some(config) = env::var_os("XDG_CONFIG_HOME") {
-            return PathBuf::from(config).join("kyth").join(test_subdirectory).join(filename);
+            return PathBuf::from(config)
+                .join("kyth")
+                .join(test_subdirectory)
+                .join(filename);
         }
     }
     PathBuf::from(production)
@@ -171,8 +158,16 @@ fn generated_path(test_subdirectory: &str, filename: &str, production: &str) -> 
 
 fn dispatch_zswap(action: &str) -> ExitCode {
     let config_path = zswap::config_path(None::<&Path>);
-    let sysctl_path = generated_path("sysctl.d", "99-kyth-zswap.conf", "/etc/sysctl.d/99-kyth-zswap.conf");
-    let modprobe_path = generated_path("modprobe.d", "99-kyth-zswap.conf", "/etc/modprobe.d/99-kyth-zswap.conf");
+    let sysctl_path = generated_path(
+        "sysctl.d",
+        "99-kyth-zswap.conf",
+        "/etc/sysctl.d/99-kyth-zswap.conf",
+    );
+    let modprobe_path = generated_path(
+        "modprobe.d",
+        "99-kyth-zswap.conf",
+        "/etc/modprobe.d/99-kyth-zswap.conf",
+    );
     match action {
         "status" => {
             let config = zswap::load(&config_path);
@@ -185,7 +180,12 @@ fn dispatch_zswap(action: &str) -> ExitCode {
                 return code;
             }
             let mut config = zswap::load(&config_path);
-            config.profile = if action == "gaming" { "kyth" } else { "balanced" }.into();
+            config.profile = if action == "gaming" {
+                "kyth"
+            } else {
+                "balanced"
+            }
+            .into();
             if let Err(error) = zswap::save(&config_path, &config)
                 .and_then(|_| zswap::generate(&config, &sysctl_path, &modprobe_path).map(|_| ()))
             {
@@ -217,17 +217,32 @@ fn dispatch_zswap(action: &str) -> ExitCode {
 
 fn dispatch_bore(action: &str) -> ExitCode {
     let config_path = bore::config_path(None::<&Path>);
-    let drop_in = generated_path("sysctl.d", "99-kyth-bore.conf", "/etc/sysctl.d/99-kyth-bore.conf");
+    let drop_in = generated_path(
+        "sysctl.d",
+        "99-kyth-bore.conf",
+        "/etc/sysctl.d/99-kyth-bore.conf",
+    );
     match action {
         "status" => {
             let config = bore::load(&config_path);
-            println!("profile={} active={} kind=sysctl", config.profile, bore::status(&drop_in));
+            println!(
+                "profile={} active={} kind=sysctl",
+                config.profile,
+                bore::status(&drop_in)
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("bore", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("bore", &[action.to_string()]) {
+                return code;
+            }
             let mut config = bore::load(&config_path);
-            config.profile = if action == "gaming" { "gaming" } else { "balanced" }.into();
+            config.profile = if action == "gaming" {
+                "gaming"
+            } else {
+                "balanced"
+            }
+            .into();
             let scx_active = !test_mode() && scheduler_arbiter::detect_scx_active();
             if let Err(error) = bore::save(&config_path, &config)
                 .and_then(|_| bore::generate(&config, &drop_in, scx_active).map(|_| ()))
@@ -240,7 +255,9 @@ fn dispatch_bore(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("bore", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("bore", &[action.to_string()]) {
+                return code;
+            }
             let config = bore::load(&config_path);
             let scx_active = !test_mode() && scheduler_arbiter::detect_scx_active();
             if let Err(error) = bore::generate(&config, &drop_in, scx_active) {
@@ -259,15 +276,25 @@ fn dispatch_bore(action: &str) -> ExitCode {
 
 fn dispatch_net_tune(action: &str) -> ExitCode {
     let config_path = net_latency::config_path(None::<&Path>);
-    let drop_in = generated_path("sysctl.d", "99-kyth-net-latency.conf", "/etc/sysctl.d/99-kyth-net-latency.conf");
+    let drop_in = generated_path(
+        "sysctl.d",
+        "99-kyth-net-latency.conf",
+        "/etc/sysctl.d/99-kyth-net-latency.conf",
+    );
     match action {
         "status" => {
             let config = net_latency::load(&config_path);
-            println!("profile={} active={} kind=sysctl", if config.enabled { "gaming" } else { "balanced" }, net_latency::status(&drop_in));
+            println!(
+                "profile={} active={} kind=sysctl",
+                if config.enabled { "gaming" } else { "balanced" },
+                net_latency::status(&drop_in)
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("net-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("net-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = net_latency::load(&config_path);
             config.enabled = action == "gaming";
             if let Err(error) = net_latency::save(&config_path, &config)
@@ -281,7 +308,9 @@ fn dispatch_net_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("net-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("net-tune", &[action.to_string()]) {
+                return code;
+            }
             let config = net_latency::load(&config_path);
             if let Err(error) = net_latency::generate(&config, &drop_in) {
                 eprintln!("kyth-net-tune: {error}");
@@ -299,17 +328,32 @@ fn dispatch_net_tune(action: &str) -> ExitCode {
 
 fn dispatch_ananicy(action: &str) -> ExitCode {
     let config_path = ananicy::config_path(None::<&Path>);
-    let rule = generated_path("ananicy.d", "99-kyth-gaming.conf", "/etc/ananicy.d/99-kyth-gaming.conf");
+    let rule = generated_path(
+        "ananicy.d",
+        "99-kyth-gaming.conf",
+        "/etc/ananicy.d/99-kyth-gaming.conf",
+    );
     match action {
         "status" => {
             let config = ananicy::load(&config_path);
-            println!("profile={} active={} kind=other", config.profile, ananicy::status(&rule));
+            println!(
+                "profile={} active={} kind=other",
+                config.profile,
+                ananicy::status(&rule)
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("ananicy", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("ananicy", &[action.to_string()]) {
+                return code;
+            }
             let mut config = ananicy::load(&config_path);
-            config.profile = if action == "gaming" { "kyth" } else { "balanced" }.into();
+            config.profile = if action == "gaming" {
+                "kyth"
+            } else {
+                "balanced"
+            }
+            .into();
             if let Err(error) = ananicy::save(&config_path, &config)
                 .and_then(|_| ananicy::generate(&config, &rule).map(|_| ()))
             {
@@ -320,7 +364,9 @@ fn dispatch_ananicy(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("ananicy", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("ananicy", &[action.to_string()]) {
+                return code;
+            }
             let config = ananicy::load(&config_path);
             if let Err(error) = ananicy::generate(&config, &rule) {
                 eprintln!("kyth-ananicy: {error}");
@@ -337,15 +383,25 @@ fn dispatch_ananicy(action: &str) -> ExitCode {
 
 fn dispatch_btrfs_autotune(action: &str) -> ExitCode {
     let config_path = btrfs_autotune::config_path(None::<&Path>);
-    let script = generated_path("libexec", "kyth-btrfs-autotune", "/usr/libexec/kyth-btrfs-autotune");
+    let script = generated_path(
+        "libexec",
+        "kyth-btrfs-autotune",
+        "/usr/libexec/kyth-btrfs-autotune",
+    );
     match action {
         "status" => {
             let config = btrfs_autotune::load(&config_path);
-            println!("enabled={} active={} kind=other", config.enabled, btrfs_autotune::status(&script));
+            println!(
+                "enabled={} active={} kind=other",
+                config.enabled,
+                btrfs_autotune::status(&script)
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("btrfs-autotune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("btrfs-autotune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = btrfs_autotune::load(&config_path);
             config.enabled = action == "gaming";
             if let Err(error) = btrfs_autotune::save(&config_path, config)
@@ -358,7 +414,9 @@ fn dispatch_btrfs_autotune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("btrfs-autotune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("btrfs-autotune", &[action.to_string()]) {
+                return code;
+            }
             let config = btrfs_autotune::load(&config_path);
             if let Err(error) = btrfs_autotune::generate(config, &script) {
                 eprintln!("kyth-btrfs-autotune: {error}");
@@ -384,13 +442,24 @@ fn dispatch_btrfs_tune(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = btrfs_perf::load(&config_path);
-            println!("profile={} active={} kind=other", config.profile, btrfs_perf::status(&root_dropin));
+            println!(
+                "profile={} active={} kind=other",
+                config.profile,
+                btrfs_perf::status(&root_dropin)
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("btrfs-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("btrfs-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = btrfs_perf::load(&config_path);
-            config.profile = if action == "gaming" { "kyth" } else { "balanced" }.into();
+            config.profile = if action == "gaming" {
+                "kyth"
+            } else {
+                "balanced"
+            }
+            .into();
             if let Err(error) = btrfs_perf::save(&config_path, &config)
                 .and_then(|_| btrfs_perf::generate(&config, generate_destination).map(|_| ()))
             {
@@ -401,7 +470,9 @@ fn dispatch_btrfs_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("btrfs-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("btrfs-tune", &[action.to_string()]) {
+                return code;
+            }
             let config = btrfs_perf::load(&config_path);
             if let Err(error) = btrfs_perf::generate(&config, generate_destination) {
                 eprintln!("kyth-btrfs-tune: {error}");
@@ -440,16 +511,32 @@ fn write_optional(path: &Path, content: Option<&str>) -> std::io::Result<()> {
 
 fn dispatch_distrobox_cache(action: &str) -> ExitCode {
     let config_path = distrobox_cache::config_path(None::<&Path>);
-    let tmpfiles = generated_path("tmpfiles.d", "99-kyth-distrobox.conf", "/etc/tmpfiles.d/99-kyth-distrobox.conf");
-    let service = generated_path("systemd", "kyth-distrobox-cache.service", "/etc/systemd/system/kyth-distrobox-cache.service");
+    let tmpfiles = generated_path(
+        "tmpfiles.d",
+        "99-kyth-distrobox.conf",
+        "/etc/tmpfiles.d/99-kyth-distrobox.conf",
+    );
+    let service = generated_path(
+        "systemd",
+        "kyth-distrobox-cache.service",
+        "/etc/systemd/system/kyth-distrobox-cache.service",
+    );
     match action {
         "status" => {
             let config = distrobox_cache::load(&config_path);
-            println!("enabled={} size={} ccache_size={} active={} kind=other", config.enabled, config.size, config.ccache_size, distrobox_cache::status(&service));
+            println!(
+                "enabled={} size={} ccache_size={} active={} kind=other",
+                config.enabled,
+                config.size,
+                config.ccache_size,
+                distrobox_cache::status(&service)
+            );
             ExitCode::SUCCESS
         }
         "on" | "gaming" => {
-            if let Err(code) = ensure_root("distrobox-cache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("distrobox-cache", &[action.to_string()]) {
+                return code;
+            }
             let mut config = distrobox_cache::load(&config_path);
             config.enabled = true;
             if let Err(error) = distrobox_cache::save(&config_path, &config)
@@ -462,7 +549,9 @@ fn dispatch_distrobox_cache(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "off" | "balanced" => {
-            if let Err(code) = ensure_root("distrobox-cache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("distrobox-cache", &[action.to_string()]) {
+                return code;
+            }
             let mut config = distrobox_cache::load(&config_path);
             config.enabled = false;
             if let Err(error) = distrobox_cache::save(&config_path, &config)
@@ -475,7 +564,9 @@ fn dispatch_distrobox_cache(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("distrobox-cache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("distrobox-cache", &[action.to_string()]) {
+                return code;
+            }
             let config = distrobox_cache::load(&config_path);
             if let Err(error) = distrobox_cache::generate(&config, &tmpfiles, &service) {
                 eprintln!("kyth-distrobox-cache: {error}");
@@ -492,16 +583,31 @@ fn dispatch_distrobox_cache(action: &str) -> ExitCode {
 
 fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
     let config_path = flatpak_prefetch::config_path(None::<&Path>);
-    let service = generated_path("systemd", "flatpak-prefetch.service", "/etc/systemd/system/flatpak-prefetch.service");
-    let timer = generated_path("systemd", "flatpak-prefetch.timer", "/etc/systemd/system/flatpak-prefetch.timer");
+    let service = generated_path(
+        "systemd",
+        "flatpak-prefetch.service",
+        "/etc/systemd/system/flatpak-prefetch.service",
+    );
+    let timer = generated_path(
+        "systemd",
+        "flatpak-prefetch.timer",
+        "/etc/systemd/system/flatpak-prefetch.timer",
+    );
     match action {
         "status" => {
             let config = flatpak_prefetch::load(&config_path);
-            println!("enabled={} time={} active={} kind=other", config.enabled, config.time, flatpak_prefetch::status(&service));
+            println!(
+                "enabled={} time={} active={} kind=other",
+                config.enabled,
+                config.time,
+                flatpak_prefetch::status(&service)
+            );
             ExitCode::SUCCESS
         }
         "on" | "gaming" => {
-            if let Err(code) = ensure_root("flatpak-prefetch", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("flatpak-prefetch", &[action.to_string()]) {
+                return code;
+            }
             let mut config = flatpak_prefetch::load(&config_path);
             config.enabled = true;
             if let Err(error) = flatpak_prefetch::save(&config_path, &config)
@@ -514,7 +620,9 @@ fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "off" | "balanced" => {
-            if let Err(code) = ensure_root("flatpak-prefetch", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("flatpak-prefetch", &[action.to_string()]) {
+                return code;
+            }
             let mut config = flatpak_prefetch::load(&config_path);
             config.enabled = false;
             if let Err(error) = flatpak_prefetch::save(&config_path, &config)
@@ -527,7 +635,9 @@ fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("flatpak-prefetch", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("flatpak-prefetch", &[action.to_string()]) {
+                return code;
+            }
             let config = flatpak_prefetch::load(&config_path);
             if let Err(error) = flatpak_prefetch::generate(&config, &service, &timer) {
                 eprintln!("kyth-flatpak-prefetch: {error}");
@@ -544,16 +654,30 @@ fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
 
 fn dispatch_flatpak_trim(action: &str) -> ExitCode {
     let config_path = flatpak_trim::config_path(None::<&Path>);
-    let service = generated_path("systemd", "kyth-flatpak-trim.service", "/etc/systemd/system/kyth-flatpak-trim.service");
-    let timer = generated_path("systemd", "kyth-flatpak-trim.timer", "/etc/systemd/system/kyth-flatpak-trim.timer");
+    let service = generated_path(
+        "systemd",
+        "kyth-flatpak-trim.service",
+        "/etc/systemd/system/kyth-flatpak-trim.service",
+    );
+    let timer = generated_path(
+        "systemd",
+        "kyth-flatpak-trim.timer",
+        "/etc/systemd/system/kyth-flatpak-trim.timer",
+    );
     match action {
         "status" => {
             let config = flatpak_trim::load(&config_path);
-            println!("enabled={} active={} kind=other", config.enabled, flatpak_trim::status(&service));
+            println!(
+                "enabled={} active={} kind=other",
+                config.enabled,
+                flatpak_trim::status(&service)
+            );
             ExitCode::SUCCESS
         }
         "on" | "gaming" => {
-            if let Err(code) = ensure_root("flatpak-trim", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("flatpak-trim", &[action.to_string()]) {
+                return code;
+            }
             let config = flatpak_trim::FlatpakTrimConfig { enabled: true };
             if let Err(error) = flatpak_trim::save(&config_path, config)
                 .and_then(|_| flatpak_trim::generate(config, &service, &timer).map(|_| ()))
@@ -565,7 +689,9 @@ fn dispatch_flatpak_trim(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "off" | "balanced" => {
-            if let Err(code) = ensure_root("flatpak-trim", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("flatpak-trim", &[action.to_string()]) {
+                return code;
+            }
             let config = flatpak_trim::FlatpakTrimConfig { enabled: false };
             if let Err(error) = flatpak_trim::save(&config_path, config)
                 .and_then(|_| flatpak_trim::generate(config, &service, &timer).map(|_| ()))
@@ -577,7 +703,9 @@ fn dispatch_flatpak_trim(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("flatpak-trim", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("flatpak-trim", &[action.to_string()]) {
+                return code;
+            }
             let config = flatpak_trim::load(&config_path);
             if let Err(error) = flatpak_trim::generate(config, &service, &timer) {
                 eprintln!("kyth-flatpak-trim: {error}");
@@ -598,11 +726,16 @@ fn dispatch_readahead(action: &str) -> ExitCode {
         "status" => {
             let config = readahead::load(&config_path);
             let active = if config.enabled { "enabled" } else { "off" };
-            println!("enabled={} size_mb={} active={} kind=other", config.enabled, config.size_mb, active);
+            println!(
+                "enabled={} size_mb={} active={} kind=other",
+                config.enabled, config.size_mb, active
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("readahead", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("readahead", &[action.to_string()]) {
+                return code;
+            }
             let mut config = readahead::load(&config_path);
             config.enabled = true;
             if let Err(error) = readahead::save(&config_path, &config) {
@@ -613,7 +746,9 @@ fn dispatch_readahead(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" => {
-            if let Err(code) = ensure_root("readahead", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("readahead", &[action.to_string()]) {
+                return code;
+            }
             let mut config = readahead::load(&config_path);
             config.enabled = false;
             if let Err(error) = readahead::save(&config_path, &config) {
@@ -624,7 +759,9 @@ fn dispatch_readahead(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("readahead", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("readahead", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -640,16 +777,28 @@ fn dispatch_trim_tune(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
-            println!("profile={} weekly={} active={} kind=other", config.profile, config.weekly, kyth_shared::system::runtime_preferences::trim_status(&marker));
+            println!(
+                "profile={} weekly={} active={} kind=other",
+                config.profile,
+                config.weekly,
+                kyth_shared::system::runtime_preferences::trim_status(&marker)
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("trim-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("trim-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
             config.profile = "kyth".into();
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_trim(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker).map(|_| ()))
-            {
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_trim(
+                &config_path,
+                &config,
+            )
+            .and_then(|_| {
+                kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker)
+                    .map(|_| ())
+            }) {
                 eprintln!("kyth-trim-tune: {error}");
                 return ExitCode::from(1);
             }
@@ -657,12 +806,19 @@ fn dispatch_trim_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" => {
-            if let Err(code) = ensure_root("trim-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("trim-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
             config.profile = "balanced".into();
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_trim(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker).map(|_| ()))
-            {
+            if let Err(error) = kyth_shared::system::runtime_preferences::save_trim(
+                &config_path,
+                &config,
+            )
+            .and_then(|_| {
+                kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker)
+                    .map(|_| ())
+            }) {
                 eprintln!("kyth-trim-tune: {error}");
                 return ExitCode::from(1);
             }
@@ -670,9 +826,13 @@ fn dispatch_trim_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("trim-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("trim-tune", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
-            if let Err(error) = kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker) {
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker)
+            {
                 eprintln!("kyth-trim-tune: {error}");
                 return ExitCode::from(1);
             }
@@ -691,15 +851,34 @@ fn dispatch_uksmd(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
-            println!("enabled={} max_cpu_percent={} suggested={} active={} kind=other", config.enabled, config.max_cpu_percent, kyth_shared::system::runtime_preferences::uksmd_suggested("/proc/meminfo"), if destination.is_file() { "enabled" } else { "off" });
+            println!(
+                "enabled={} max_cpu_percent={} suggested={} active={} kind=other",
+                config.enabled,
+                config.max_cpu_percent,
+                kyth_shared::system::runtime_preferences::uksmd_suggested("/proc/meminfo"),
+                if destination.is_file() {
+                    "enabled"
+                } else {
+                    "off"
+                }
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("uksmd", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("uksmd", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
             config.enabled = true;
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_uksmd(&config, &destination).map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::generate_uksmd(
+                            &config,
+                            &destination,
+                        )
+                        .map(|_| ())
+                    })
             {
                 eprintln!("kyth-uksmd: {error}");
                 return ExitCode::from(1);
@@ -708,11 +887,20 @@ fn dispatch_uksmd(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" => {
-            if let Err(code) = ensure_root("uksmd", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("uksmd", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
             config.enabled = false;
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_uksmd(&config, &destination).map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::generate_uksmd(
+                            &config,
+                            &destination,
+                        )
+                        .map(|_| ())
+                    })
             {
                 eprintln!("kyth-uksmd: {error}");
                 return ExitCode::from(1);
@@ -721,9 +909,13 @@ fn dispatch_uksmd(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("uksmd", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("uksmd", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
-            if let Err(error) = kyth_shared::system::runtime_preferences::generate_uksmd(&config, &destination) {
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::generate_uksmd(&config, &destination)
+            {
                 eprintln!("kyth-uksmd: {error}");
                 return ExitCode::from(1);
             }
@@ -738,19 +930,35 @@ fn dispatch_uksmd(action: &str) -> ExitCode {
 
 fn dispatch_irq_tune(action: &str) -> ExitCode {
     let config_path = kyth_shared::system::runtime_preferences::irq_path(None::<&Path>);
-    let dropin = generated_path("systemd/irqbalance.service.d", "99-kyth-irq.conf", "/etc/systemd/system/irqbalance.service.d/99-kyth-irq.conf");
+    let dropin = generated_path(
+        "systemd/irqbalance.service.d",
+        "99-kyth-irq.conf",
+        "/etc/systemd/system/irqbalance.service.d/99-kyth-irq.conf",
+    );
     match action {
         "status" => {
             let config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
-            println!("profile={} isolated_cpus={} active={} kind=other", config.profile, config.isolated_cpus, kyth_shared::system::runtime_preferences::irq_status(&dropin));
+            println!(
+                "profile={} isolated_cpus={} active={} kind=other",
+                config.profile,
+                config.isolated_cpus,
+                kyth_shared::system::runtime_preferences::irq_status(&dropin)
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("irq-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("irq-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
             config.profile = "kyth".into();
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_irq(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "").map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::save_irq(&config_path, &config).and_then(
+                    |_| {
+                        kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "")
+                            .map(|_| ())
+                    },
+                )
             {
                 eprintln!("kyth-irq-tune: {error}");
                 return ExitCode::from(1);
@@ -759,11 +967,18 @@ fn dispatch_irq_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" => {
-            if let Err(code) = ensure_root("irq-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("irq-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
             config.profile = "balanced".into();
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_irq(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "").map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::save_irq(&config_path, &config).and_then(
+                    |_| {
+                        kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "")
+                            .map(|_| ())
+                    },
+                )
             {
                 eprintln!("kyth-irq-tune: {error}");
                 return ExitCode::from(1);
@@ -772,9 +987,13 @@ fn dispatch_irq_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("irq-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("irq-tune", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
-            if let Err(error) = kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "") {
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "")
+            {
                 eprintln!("kyth-irq-tune: {error}");
                 return ExitCode::from(1);
             }
@@ -789,18 +1008,39 @@ fn dispatch_irq_tune(action: &str) -> ExitCode {
 
 fn dispatch_fscache(action: &str) -> ExitCode {
     let config_path = kyth_shared::system::runtime_preferences::fscache_path(None::<&Path>);
-    let destination = generated_path("cachefilesd.conf.d", "99-kyth-fscache.conf", "/etc/cachefilesd.conf.d/99-kyth-fscache.conf");
+    let destination = generated_path(
+        "cachefilesd.conf.d",
+        "99-kyth-fscache.conf",
+        "/etc/cachefilesd.conf.d/99-kyth-fscache.conf",
+    );
     match action {
         "status" => {
             let config = kyth_shared::system::runtime_preferences::load_fscache(&config_path);
-            println!("enabled={} active={} kind=other", config.enabled, if destination.is_file() { "enabled" } else { "off" });
+            println!(
+                "enabled={} active={} kind=other",
+                config.enabled,
+                if destination.is_file() {
+                    "enabled"
+                } else {
+                    "off"
+                }
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("fscache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("fscache", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::runtime_preferences::FscacheConfig { enabled: true };
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_fscache(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_fscache(&config, &destination).map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::save_fscache(&config_path, &config)
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::generate_fscache(
+                            &config,
+                            &destination,
+                        )
+                        .map(|_| ())
+                    })
             {
                 eprintln!("kyth-fscache: {error}");
                 return ExitCode::from(1);
@@ -809,10 +1049,19 @@ fn dispatch_fscache(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" => {
-            if let Err(code) = ensure_root("fscache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("fscache", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::runtime_preferences::FscacheConfig { enabled: false };
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_fscache(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_fscache(&config, &destination).map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::save_fscache(&config_path, &config)
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::generate_fscache(
+                            &config,
+                            &destination,
+                        )
+                        .map(|_| ())
+                    })
             {
                 eprintln!("kyth-fscache: {error}");
                 return ExitCode::from(1);
@@ -821,9 +1070,13 @@ fn dispatch_fscache(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("fscache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("fscache", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::runtime_preferences::load_fscache(&config_path);
-            if let Err(error) = kyth_shared::system::runtime_preferences::generate_fscache(&config, &destination) {
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::generate_fscache(&config, &destination)
+            {
                 eprintln!("kyth-fscache: {error}");
                 return ExitCode::from(1);
             }
@@ -838,19 +1091,42 @@ fn dispatch_fscache(action: &str) -> ExitCode {
 
 fn dispatch_journal_tune(action: &str) -> ExitCode {
     let config_path = kyth_shared::system::runtime_preferences::journal_path(None::<&Path>);
-    let destination = generated_path("systemd/journald.conf.d", "99-kyth-perf.conf", "/etc/systemd/journald.conf.d/99-kyth-perf.conf");
+    let destination = generated_path(
+        "systemd/journald.conf.d",
+        "99-kyth-perf.conf",
+        "/etc/systemd/journald.conf.d/99-kyth-perf.conf",
+    );
     match action {
         "status" => {
             let config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
-            println!("perf={} system_max_use={} runtime_max_use={} active={} kind=other", config.perf, config.system_max_use, config.runtime_max_use, if destination.is_file() { "kyth" } else { "balanced" });
+            println!(
+                "perf={} system_max_use={} runtime_max_use={} active={} kind=other",
+                config.perf,
+                config.system_max_use,
+                config.runtime_max_use,
+                if destination.is_file() {
+                    "kyth"
+                } else {
+                    "balanced"
+                }
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("journal-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("journal-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
             config.perf = true;
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_journal(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_journal(&config, &destination).map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::save_journal(&config_path, &config)
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::generate_journal(
+                            &config,
+                            &destination,
+                        )
+                        .map(|_| ())
+                    })
             {
                 eprintln!("kyth-journal-tune: {error}");
                 return ExitCode::from(1);
@@ -859,11 +1135,20 @@ fn dispatch_journal_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" => {
-            if let Err(code) = ensure_root("journal-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("journal-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
             config.perf = false;
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_journal(&config_path, &config)
-                .and_then(|_| kyth_shared::system::runtime_preferences::generate_journal(&config, &destination).map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::save_journal(&config_path, &config)
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::generate_journal(
+                            &config,
+                            &destination,
+                        )
+                        .map(|_| ())
+                    })
             {
                 eprintln!("kyth-journal-tune: {error}");
                 return ExitCode::from(1);
@@ -872,9 +1157,13 @@ fn dispatch_journal_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("journal-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("journal-tune", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
-            if let Err(error) = kyth_shared::system::runtime_preferences::generate_journal(&config, &destination) {
+            if let Err(error) =
+                kyth_shared::system::runtime_preferences::generate_journal(&config, &destination)
+            {
                 eprintln!("kyth-journal-tune: {error}");
                 return ExitCode::from(1);
             }
@@ -889,19 +1178,32 @@ fn dispatch_journal_tune(action: &str) -> ExitCode {
 
 fn dispatch_io_tune(action: &str) -> ExitCode {
     let config_path = kyth_shared::system::io_tune::config_path(None::<&Path>);
-    let destination = generated_path("udev/rules.d", "61-kyth-io-tune.rules", "/etc/udev/rules.d/61-kyth-io-tune.rules");
+    let destination = generated_path(
+        "udev/rules.d",
+        "61-kyth-io-tune.rules",
+        "/etc/udev/rules.d/61-kyth-io-tune.rules",
+    );
     match action {
         "status" => {
             let config = kyth_shared::system::io_tune::load(&config_path);
-            println!("profile={} read_ahead_kb={} active={} kind=other", config.profile, config.read_ahead_kb, kyth_shared::system::io_tune::status(&destination));
+            println!(
+                "profile={} read_ahead_kb={} active={} kind=other",
+                config.profile,
+                config.read_ahead_kb,
+                kyth_shared::system::io_tune::status(&destination)
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("io-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("io-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::io_tune::load(&config_path);
             config.profile = "kyth".into();
-            if let Err(error) = kyth_shared::system::io_tune::save(&config_path, &config)
-                .and_then(|_| kyth_shared::system::io_tune::generate(&config, &destination).map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::io_tune::save(&config_path, &config).and_then(|_| {
+                    kyth_shared::system::io_tune::generate(&config, &destination).map(|_| ())
+                })
             {
                 eprintln!("kyth-io-tune: {error}");
                 return ExitCode::from(1);
@@ -910,11 +1212,15 @@ fn dispatch_io_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" => {
-            if let Err(code) = ensure_root("io-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("io-tune", &[action.to_string()]) {
+                return code;
+            }
             let mut config = kyth_shared::system::io_tune::load(&config_path);
             config.profile = "balanced".into();
-            if let Err(error) = kyth_shared::system::io_tune::save(&config_path, &config)
-                .and_then(|_| kyth_shared::system::io_tune::generate(&config, &destination).map(|_| ()))
+            if let Err(error) =
+                kyth_shared::system::io_tune::save(&config_path, &config).and_then(|_| {
+                    kyth_shared::system::io_tune::generate(&config, &destination).map(|_| ())
+                })
             {
                 eprintln!("kyth-io-tune: {error}");
                 return ExitCode::from(1);
@@ -923,7 +1229,9 @@ fn dispatch_io_tune(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("io-tune", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("io-tune", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::io_tune::load(&config_path);
             if let Err(error) = kyth_shared::system::io_tune::generate(&config, &destination) {
                 eprintln!("kyth-io-tune: {error}");
@@ -939,24 +1247,41 @@ fn dispatch_io_tune(action: &str) -> ExitCode {
 }
 
 fn podman_on_btrfs() -> bool {
-    std::fs::read_to_string("/proc/mounts").ok().is_some_and(|mounts| mounts.lines().any(|line| line.split_whitespace().nth(2) == Some("btrfs")))
+    std::fs::read_to_string("/proc/mounts")
+        .ok()
+        .is_some_and(|mounts| {
+            mounts
+                .lines()
+                .any(|line| line.split_whitespace().nth(2) == Some("btrfs"))
+        })
 }
 
 fn dispatch_podman_overlay(action: &str) -> ExitCode {
     let config_path = overlay::config_path(None::<&Path>);
-    let destination = generated_path("containers/storage.conf.d", "99-kyth-overlay.conf", "/etc/containers/storage.conf.d/99-kyth-overlay.conf");
+    let destination = generated_path(
+        "containers/storage.conf.d",
+        "99-kyth-overlay.conf",
+        "/etc/containers/storage.conf.d/99-kyth-overlay.conf",
+    );
     let on_btrfs = podman_on_btrfs();
     match action {
         "status" => {
             let config = overlay::load(&config_path);
-            println!("metacopy={} resolved={} active={} kind=other", config.as_str(), overlay::resolve(config, on_btrfs).as_str(), if destination.is_file() { "on" } else { "off" });
+            println!(
+                "metacopy={} resolved={} active={} kind=other",
+                config.as_str(),
+                overlay::resolve(config, on_btrfs).as_str(),
+                if destination.is_file() { "on" } else { "off" }
+            );
             ExitCode::SUCCESS
         }
         "on" | "gaming" => {
-            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) { return code; }
-            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::On)
-                .and_then(|_| overlay::generate(overlay::Metacopy::On, on_btrfs, &destination).map(|_| ()))
-            {
+            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) {
+                return code;
+            }
+            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::On).and_then(|_| {
+                overlay::generate(overlay::Metacopy::On, on_btrfs, &destination).map(|_| ())
+            }) {
                 eprintln!("kyth-podman-overlay: {error}");
                 return ExitCode::from(1);
             }
@@ -964,10 +1289,12 @@ fn dispatch_podman_overlay(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "off" => {
-            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) { return code; }
-            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::Off)
-                .and_then(|_| overlay::generate(overlay::Metacopy::Off, on_btrfs, &destination).map(|_| ()))
-            {
+            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) {
+                return code;
+            }
+            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::Off).and_then(|_| {
+                overlay::generate(overlay::Metacopy::Off, on_btrfs, &destination).map(|_| ())
+            }) {
                 eprintln!("kyth-podman-overlay: {error}");
                 return ExitCode::from(1);
             }
@@ -975,9 +1302,13 @@ fn dispatch_podman_overlay(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "auto" | "balanced" => {
-            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) { return code; }
-            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::Auto)
-                .and_then(|_| overlay::generate(overlay::Metacopy::Auto, on_btrfs, &destination).map(|_| ()))
+            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) {
+                return code;
+            }
+            if let Err(error) =
+                overlay::save(&config_path, overlay::Metacopy::Auto).and_then(|_| {
+                    overlay::generate(overlay::Metacopy::Auto, on_btrfs, &destination).map(|_| ())
+                })
             {
                 eprintln!("kyth-podman-overlay: {error}");
                 return ExitCode::from(1);
@@ -986,7 +1317,9 @@ fn dispatch_podman_overlay(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) {
+                return code;
+            }
             let config = overlay::load(&config_path);
             if let Err(error) = overlay::generate(config, on_btrfs, &destination) {
                 eprintln!("kyth-podman-overlay: {error}");
@@ -1003,18 +1336,32 @@ fn dispatch_podman_overlay(action: &str) -> ExitCode {
 
 fn dispatch_podman_btrfs(action: &str) -> ExitCode {
     let config_path = podman_btrfs::config_path(None::<&Path>);
-    let destination = generated_path("containers/storage.conf.d", "99-kyth-btrfs.conf", "/etc/containers/storage.conf.d/99-kyth-btrfs.conf");
+    let destination = generated_path(
+        "containers/storage.conf.d",
+        "99-kyth-btrfs.conf",
+        "/etc/containers/storage.conf.d/99-kyth-btrfs.conf",
+    );
     let on_btrfs = podman_on_btrfs();
     match action {
         "status" => {
             let mode = podman_btrfs::load(&config_path);
-            println!("mode={} resolved={} active={} kind=other", mode.as_str(), podman_btrfs::resolve(mode, on_btrfs).as_str(), podman_btrfs::status(&destination, on_btrfs));
+            println!(
+                "mode={} resolved={} active={} kind=other",
+                mode.as_str(),
+                podman_btrfs::resolve(mode, on_btrfs).as_str(),
+                podman_btrfs::status(&destination, on_btrfs)
+            );
             ExitCode::SUCCESS
         }
         "btrfs" | "gaming" => {
-            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) {
+                return code;
+            }
             if let Err(error) = podman_btrfs::save(&config_path, podman_btrfs::PodmanMode::Btrfs)
-                .and_then(|_| podman_btrfs::generate(podman_btrfs::PodmanMode::Btrfs, on_btrfs, &destination).map(|_| ()))
+                .and_then(|_| {
+                    podman_btrfs::generate(podman_btrfs::PodmanMode::Btrfs, on_btrfs, &destination)
+                        .map(|_| ())
+                })
             {
                 eprintln!("kyth-podman-btrfs: {error}");
                 return ExitCode::from(1);
@@ -1023,8 +1370,14 @@ fn dispatch_podman_btrfs(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "overlay" | "off" => {
-            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) { return code; }
-            let mode = if action == "off" { podman_btrfs::PodmanMode::Off } else { podman_btrfs::PodmanMode::Overlay };
+            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) {
+                return code;
+            }
+            let mode = if action == "off" {
+                podman_btrfs::PodmanMode::Off
+            } else {
+                podman_btrfs::PodmanMode::Overlay
+            };
             if let Err(error) = podman_btrfs::save(&config_path, mode)
                 .and_then(|_| podman_btrfs::generate(mode, on_btrfs, &destination).map(|_| ()))
             {
@@ -1035,9 +1388,14 @@ fn dispatch_podman_btrfs(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "auto" | "balanced" => {
-            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) {
+                return code;
+            }
             if let Err(error) = podman_btrfs::save(&config_path, podman_btrfs::PodmanMode::Auto)
-                .and_then(|_| podman_btrfs::generate(podman_btrfs::PodmanMode::Auto, on_btrfs, &destination).map(|_| ()))
+                .and_then(|_| {
+                    podman_btrfs::generate(podman_btrfs::PodmanMode::Auto, on_btrfs, &destination)
+                        .map(|_| ())
+                })
             {
                 eprintln!("kyth-podman-btrfs: {error}");
                 return ExitCode::from(1);
@@ -1046,7 +1404,9 @@ fn dispatch_podman_btrfs(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) {
+                return code;
+            }
             let mode = podman_btrfs::load(&config_path);
             if let Err(error) = podman_btrfs::generate(mode, on_btrfs, &destination) {
                 eprintln!("kyth-podman-btrfs: {error}");
@@ -1055,7 +1415,9 @@ fn dispatch_podman_btrfs(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         _ => {
-            eprintln!("Usage: kyth-podman-btrfs [btrfs|overlay|off|auto|gaming|balanced|apply|status]");
+            eprintln!(
+                "Usage: kyth-podman-btrfs [btrfs|overlay|off|auto|gaming|balanced|apply|status]"
+            );
             ExitCode::from(1)
         }
     }
@@ -1066,12 +1428,22 @@ fn dispatch_gpu_power(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = gpu_power::load(&config_path);
-            println!("profile={} dpm={} active={} kind=other", config.profile, config.dpm, gpu_power::status(&config_path));
+            println!(
+                "profile={} dpm={} active={} kind=other",
+                config.profile,
+                config.dpm,
+                gpu_power::status(&config_path)
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "high" => {
-            if let Err(code) = ensure_root("gpu-power", &[action.to_string()]) { return code; }
-            let config = gpu_power::GpuPowerConfig { profile: "kyth".into(), dpm: "high".into() };
+            if let Err(code) = ensure_root("gpu-power", &[action.to_string()]) {
+                return code;
+            }
+            let config = gpu_power::GpuPowerConfig {
+                profile: "kyth".into(),
+                dpm: "high".into(),
+            };
             if let Err(error) = gpu_power::save(&config_path, &config) {
                 eprintln!("kyth-gpu-power: {error}");
                 return ExitCode::from(1);
@@ -1080,9 +1452,14 @@ fn dispatch_gpu_power(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "auto" | "low" => {
-            if let Err(code) = ensure_root("gpu-power", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("gpu-power", &[action.to_string()]) {
+                return code;
+            }
             let dpm = if action == "low" { "low" } else { "auto" };
-            let config = gpu_power::GpuPowerConfig { profile: "balanced".into(), dpm: dpm.into() };
+            let config = gpu_power::GpuPowerConfig {
+                profile: "balanced".into(),
+                dpm: dpm.into(),
+            };
             if let Err(error) = gpu_power::save(&config_path, &config) {
                 eprintln!("kyth-gpu-power: {error}");
                 return ExitCode::from(1);
@@ -1091,7 +1468,9 @@ fn dispatch_gpu_power(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("gpu-power", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("gpu-power", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -1106,11 +1485,18 @@ fn dispatch_numa(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = numa::load(&config_path);
-            println!("profile={} cpus={} effective_cpus={} kind=other", config.profile, config.cpus, numa::effective_cpus(&config, None));
+            println!(
+                "profile={} cpus={} effective_cpus={} kind=other",
+                config.profile,
+                config.cpus,
+                numa::effective_cpus(&config, None)
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("numa", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("numa", &[action.to_string()]) {
+                return code;
+            }
             let mut config = numa::load(&config_path);
             config.profile = "gaming".into();
             if let Err(error) = numa::save(&config_path, &config) {
@@ -1121,7 +1507,9 @@ fn dispatch_numa(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("numa", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("numa", &[action.to_string()]) {
+                return code;
+            }
             let mut config = numa::load(&config_path);
             config.profile = "balanced".into();
             if let Err(error) = numa::save(&config_path, &config) {
@@ -1132,7 +1520,9 @@ fn dispatch_numa(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("numa", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("numa", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -1147,12 +1537,20 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = preference_presets::load_selinux_gaming(&config_path);
-            println!("profile={} allow_execheap={} kind=other", config.profile, config.allow_execheap);
+            println!(
+                "profile={} allow_execheap={} kind=other",
+                config.profile, config.allow_execheap
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) { return code; }
-            let config = preference_presets::SelinuxGamingConfig { profile: "gaming".into(), allow_execheap: true };
+            if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) {
+                return code;
+            }
+            let config = preference_presets::SelinuxGamingConfig {
+                profile: "gaming".into(),
+                allow_execheap: true,
+            };
             if let Err(error) = preference_presets::save_selinux_gaming(&config_path, &config) {
                 eprintln!("kyth-selinux-gaming: {error}");
                 return ExitCode::from(1);
@@ -1161,7 +1559,9 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) {
+                return code;
+            }
             let config = preference_presets::SelinuxGamingConfig::default();
             if let Err(error) = preference_presets::save_selinux_gaming(&config_path, &config) {
                 eprintln!("kyth-selinux-gaming: {error}");
@@ -1171,7 +1571,9 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -1183,16 +1585,31 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
 
 fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
     let config_path = shader_tmpfs::config_path(None::<&Path>);
-    let tmpfiles = generated_path("tmpfiles.d", "99-kyth-shader.conf", "/etc/tmpfiles.d/99-kyth-shader.conf");
-    let service = generated_path("systemd", "kyth-shader-tmpfs.service", "/etc/systemd/system/kyth-shader-tmpfs.service");
+    let tmpfiles = generated_path(
+        "tmpfiles.d",
+        "99-kyth-shader.conf",
+        "/etc/tmpfiles.d/99-kyth-shader.conf",
+    );
+    let service = generated_path(
+        "systemd",
+        "kyth-shader-tmpfs.service",
+        "/etc/systemd/system/kyth-shader-tmpfs.service",
+    );
     match action {
         "status" => {
             let config = shader_tmpfs::load(&config_path);
-            println!("enabled={} size={} active={} kind=other", config.enabled, config.size, if service.is_file() { "enabled" } else { "off" });
+            println!(
+                "enabled={} size={} active={} kind=other",
+                config.enabled,
+                config.size,
+                if service.is_file() { "enabled" } else { "off" }
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "on" => {
-            if let Err(code) = ensure_root("shader-tmpfs", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("shader-tmpfs", &[action.to_string()]) {
+                return code;
+            }
             let mut config = shader_tmpfs::load(&config_path);
             config.enabled = true;
             if let Err(error) = shader_tmpfs::save(&config_path, &config)
@@ -1205,7 +1622,9 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("shader-tmpfs", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("shader-tmpfs", &[action.to_string()]) {
+                return code;
+            }
             let config = shader_tmpfs::ShaderTmpfsConfig::default();
             if let Err(error) = shader_tmpfs::save(&config_path, &config)
                 .and_then(|_| shader_tmpfs::generate(&config, &tmpfiles, &service).map(|_| ()))
@@ -1217,7 +1636,9 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("shader-tmpfs", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("shader-tmpfs", &[action.to_string()]) {
+                return code;
+            }
             let config = shader_tmpfs::load(&config_path);
             if let Err(error) = shader_tmpfs::generate(&config, &tmpfiles, &service) {
                 eprintln!("kyth-shader-tmpfs: {error}");
@@ -1237,12 +1658,20 @@ fn dispatch_steam_deadzone(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = preference_presets::load_steam_deadzone(&config_path);
-            println!("profile={} deadzone={} kind=other", config.profile, config.deadzone);
+            println!(
+                "profile={} deadzone={} kind=other",
+                config.profile, config.deadzone
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("steam-deadzone", &[action.to_string()]) { return code; }
-            let config = preference_presets::SteamDeadzoneConfig { profile: "gaming".into(), deadzone: 0.05 };
+            if let Err(code) = ensure_root("steam-deadzone", &[action.to_string()]) {
+                return code;
+            }
+            let config = preference_presets::SteamDeadzoneConfig {
+                profile: "gaming".into(),
+                deadzone: 0.05,
+            };
             if let Err(error) = preference_presets::save_steam_deadzone(&config_path, &config) {
                 eprintln!("kyth-steam-deadzone: {error}");
                 return ExitCode::from(1);
@@ -1251,7 +1680,9 @@ fn dispatch_steam_deadzone(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("steam-deadzone", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("steam-deadzone", &[action.to_string()]) {
+                return code;
+            }
             let config = preference_presets::SteamDeadzoneConfig::default();
             if let Err(error) = preference_presets::save_steam_deadzone(&config_path, &config) {
                 eprintln!("kyth-steam-deadzone: {error}");
@@ -1261,7 +1692,9 @@ fn dispatch_steam_deadzone(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("steam-deadzone", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("steam-deadzone", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -1280,8 +1713,12 @@ fn dispatch_hdr_store(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "gaming" | "on" => {
-            if let Err(code) = ensure_root("hdr-store", &[action.to_string()]) { return code; }
-            if let Err(error) = hdr_store::save(&config_path, hdr_store::HdrStoreConfig { preserve: true }) {
+            if let Err(code) = ensure_root("hdr-store", &[action.to_string()]) {
+                return code;
+            }
+            if let Err(error) =
+                hdr_store::save(&config_path, hdr_store::HdrStoreConfig { preserve: true })
+            {
                 eprintln!("kyth-hdr-store: {error}");
                 return ExitCode::from(1);
             }
@@ -1289,8 +1726,12 @@ fn dispatch_hdr_store(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("hdr-store", &[action.to_string()]) { return code; }
-            if let Err(error) = hdr_store::save(&config_path, hdr_store::HdrStoreConfig { preserve: false }) {
+            if let Err(code) = ensure_root("hdr-store", &[action.to_string()]) {
+                return code;
+            }
+            if let Err(error) =
+                hdr_store::save(&config_path, hdr_store::HdrStoreConfig { preserve: false })
+            {
                 eprintln!("kyth-hdr-store: {error}");
                 return ExitCode::from(1);
             }
@@ -1298,7 +1739,9 @@ fn dispatch_hdr_store(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("hdr-store", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("hdr-store", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -1329,16 +1772,31 @@ fn dispatch_hdr_per_game(action: &str) -> ExitCode {
 
 fn dispatch_work_cache(action: &str) -> ExitCode {
     let config_path = work_cache::config_path(None::<&Path>);
-    let tmpfiles = generated_path("tmpfiles.d", "99-kyth-work-cache.conf", "/etc/tmpfiles.d/99-kyth-work-cache.conf");
-    let service = generated_path("systemd", "kyth-work-cache.service", "/etc/systemd/system/kyth-work-cache.service");
+    let tmpfiles = generated_path(
+        "tmpfiles.d",
+        "99-kyth-work-cache.conf",
+        "/etc/tmpfiles.d/99-kyth-work-cache.conf",
+    );
+    let service = generated_path(
+        "systemd",
+        "kyth-work-cache.service",
+        "/etc/systemd/system/kyth-work-cache.service",
+    );
     match action {
         "status" => {
             let config = work_cache::load(&config_path);
-            println!("enabled={} size={} active={} kind=other", config.enabled, config.size, work_cache::status(&service));
+            println!(
+                "enabled={} size={} active={} kind=other",
+                config.enabled,
+                config.size,
+                work_cache::status(&service)
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "on" => {
-            if let Err(code) = ensure_root("work-cache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("work-cache", &[action.to_string()]) {
+                return code;
+            }
             let mut config = work_cache::load(&config_path);
             config.enabled = true;
             if let Err(error) = work_cache::save(&config_path, &config)
@@ -1351,7 +1809,9 @@ fn dispatch_work_cache(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("work-cache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("work-cache", &[action.to_string()]) {
+                return code;
+            }
             let config = work_cache::WorkCacheConfig::default();
             if let Err(error) = work_cache::save(&config_path, &config)
                 .and_then(|_| work_cache::generate(&config, &tmpfiles, &service).map(|_| ()))
@@ -1363,7 +1823,9 @@ fn dispatch_work_cache(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("work-cache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("work-cache", &[action.to_string()]) {
+                return code;
+            }
             let config = work_cache::load(&config_path);
             if let Err(error) = work_cache::generate(&config, &tmpfiles, &service) {
                 eprintln!("kyth-work-cache: {error}");
@@ -1383,11 +1845,22 @@ fn dispatch_telemetry_opt(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = telemetry_opt::load(&config_path);
-            println!("enabled={} collectors={} effective={} kind=other", config.enabled, config.collectors.len(), telemetry_opt::effective_collectors(&config, &["cpu", "gpu", "memory", "disk", "network"]).len());
+            println!(
+                "enabled={} collectors={} effective={} kind=other",
+                config.enabled,
+                config.collectors.len(),
+                telemetry_opt::effective_collectors(
+                    &config,
+                    &["cpu", "gpu", "memory", "disk", "network"]
+                )
+                .len()
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "on" => {
-            if let Err(code) = ensure_root("telemetry-opt", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("telemetry-opt", &[action.to_string()]) {
+                return code;
+            }
             let mut config = telemetry_opt::load(&config_path);
             config.enabled = true;
             if let Err(error) = telemetry_opt::save(&config_path, &config) {
@@ -1398,7 +1871,9 @@ fn dispatch_telemetry_opt(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("telemetry-opt", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("telemetry-opt", &[action.to_string()]) {
+                return code;
+            }
             if let Err(error) = telemetry_opt::purge(&config_path) {
                 eprintln!("kyth-telemetry-opt: {error}");
                 return ExitCode::from(1);
@@ -1407,7 +1882,9 @@ fn dispatch_telemetry_opt(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("telemetry-opt", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("telemetry-opt", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -1422,12 +1899,23 @@ fn dispatch_perf_gate(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = perf_gate::load(&config_path);
-            println!("enabled={} threshold={} kind=other", config.enabled, config.threshold);
+            println!(
+                "enabled={} threshold={} kind=other",
+                config.enabled, config.threshold
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "on" => {
-            if let Err(code) = ensure_root("perf-gate", &[action.to_string()]) { return code; }
-            if let Err(error) = perf_gate::save(&config_path, perf_gate::PerfGateConfig { enabled: true, ..perf_gate::load(&config_path) }) {
+            if let Err(code) = ensure_root("perf-gate", &[action.to_string()]) {
+                return code;
+            }
+            if let Err(error) = perf_gate::save(
+                &config_path,
+                perf_gate::PerfGateConfig {
+                    enabled: true,
+                    ..perf_gate::load(&config_path)
+                },
+            ) {
                 eprintln!("kyth-perf-gate: {error}");
                 return ExitCode::from(1);
             }
@@ -1435,8 +1923,16 @@ fn dispatch_perf_gate(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("perf-gate", &[action.to_string()]) { return code; }
-            if let Err(error) = perf_gate::save(&config_path, perf_gate::PerfGateConfig { enabled: false, ..perf_gate::load(&config_path) }) {
+            if let Err(code) = ensure_root("perf-gate", &[action.to_string()]) {
+                return code;
+            }
+            if let Err(error) = perf_gate::save(
+                &config_path,
+                perf_gate::PerfGateConfig {
+                    enabled: false,
+                    ..perf_gate::load(&config_path)
+                },
+            ) {
                 eprintln!("kyth-perf-gate: {error}");
                 return ExitCode::from(1);
             }
@@ -1444,7 +1940,9 @@ fn dispatch_perf_gate(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("perf-gate", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("perf-gate", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -1486,12 +1984,20 @@ fn dispatch_fcitx_latency(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = extended_preferences::load_fcitx_latency(&config_path);
-            println!("profile={} latency_ms={} kind=other", config.profile, config.latency_ms);
+            println!(
+                "profile={} latency_ms={} kind=other",
+                config.profile, config.latency_ms
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("fcitx-latency", &[action.to_string()]) { return code; }
-            let config = extended_preferences::FcitxLatencyConfig { profile: "gaming".into(), latency_ms: 10 };
+            if let Err(code) = ensure_root("fcitx-latency", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::FcitxLatencyConfig {
+                profile: "gaming".into(),
+                latency_ms: 10,
+            };
             if let Err(error) = extended_preferences::save_fcitx_latency(&config_path, &config) {
                 eprintln!("kyth-fcitx-latency: {error}");
                 return ExitCode::from(1);
@@ -1500,7 +2006,9 @@ fn dispatch_fcitx_latency(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("fcitx-latency", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("fcitx-latency", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::FcitxLatencyConfig::default();
             if let Err(error) = extended_preferences::save_fcitx_latency(&config_path, &config) {
                 eprintln!("kyth-fcitx-latency: {error}");
@@ -1510,7 +2018,9 @@ fn dispatch_fcitx_latency(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("fcitx-latency", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("fcitx-latency", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -1526,14 +2036,27 @@ fn dispatch_boot_timeout(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = kyth_shared::system::boot_loader::load_loader(&config_path);
-            println!("fast={} timeout={} active={} kind=other", config.fast, config.timeout, kyth_shared::system::boot_loader::loader_status(&destination));
+            println!(
+                "fast={} timeout={} active={} kind=other",
+                config.fast,
+                config.timeout,
+                kyth_shared::system::boot_loader::loader_status(&destination)
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("boot-timeout", &[action.to_string()]) { return code; }
-            let config = kyth_shared::system::boot_loader::LoaderConfig { fast: true, timeout: 0 };
+            if let Err(code) = ensure_root("boot-timeout", &[action.to_string()]) {
+                return code;
+            }
+            let config = kyth_shared::system::boot_loader::LoaderConfig {
+                fast: true,
+                timeout: 0,
+            };
             if let Err(error) = kyth_shared::system::boot_loader::save_loader(&config_path, &config)
-                .and_then(|_| kyth_shared::system::boot_loader::generate_loader_conf(&config, &destination).map(|_| ()))
+                .and_then(|_| {
+                    kyth_shared::system::boot_loader::generate_loader_conf(&config, &destination)
+                        .map(|_| ())
+                })
             {
                 eprintln!("kyth-boot-timeout: {error}");
                 return ExitCode::from(1);
@@ -1542,10 +2065,15 @@ fn dispatch_boot_timeout(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("boot-timeout", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("boot-timeout", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::boot_loader::LoaderConfig::default();
             if let Err(error) = kyth_shared::system::boot_loader::save_loader(&config_path, &config)
-                .and_then(|_| kyth_shared::system::boot_loader::generate_loader_conf(&config, &destination).map(|_| ()))
+                .and_then(|_| {
+                    kyth_shared::system::boot_loader::generate_loader_conf(&config, &destination)
+                        .map(|_| ())
+                })
             {
                 eprintln!("kyth-boot-timeout: {error}");
                 return ExitCode::from(1);
@@ -1554,9 +2082,13 @@ fn dispatch_boot_timeout(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("boot-timeout", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("boot-timeout", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::boot_loader::load_loader(&config_path);
-            if let Err(error) = kyth_shared::system::boot_loader::generate_loader_conf(&config, &destination) {
+            if let Err(error) =
+                kyth_shared::system::boot_loader::generate_loader_conf(&config, &destination)
+            {
                 eprintln!("kyth-boot-timeout: {error}");
                 return ExitCode::from(1);
             }
@@ -1576,13 +2108,28 @@ fn dispatch_kargs_apply(action: &str) -> ExitCode {
             let config = gaming_kargs::load_kargs(&config_path);
             let cmdline = std::fs::read_to_string("/proc/cmdline").unwrap_or_default();
             let drift = gaming_kargs::kargs_drift(&config, &cmdline);
-            println!("profile={} missing={} extra={} desired={} kind=other", config.profile, drift.missing.len(), drift.extra.len(), drift.desired.len());
+            println!(
+                "profile={} missing={} extra={} desired={} kind=other",
+                config.profile,
+                drift.missing.len(),
+                drift.extra.len(),
+                drift.desired.len()
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "performance" | "balanced" => {
-            if let Err(code) = ensure_root("kargs-apply", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("kargs-apply", &[action.to_string()]) {
+                return code;
+            }
             let mut config = gaming_kargs::load_kargs(&config_path);
-            config.profile = if action == "gaming" { "gaming" } else if action == "performance" { "performance" } else { "balanced" }.into();
+            config.profile = if action == "gaming" {
+                "gaming"
+            } else if action == "performance" {
+                "performance"
+            } else {
+                "balanced"
+            }
+            .into();
             if let Err(error) = gaming_kargs::save_kargs(&config_path, &config) {
                 eprintln!("kyth-kargs-apply: {error}");
                 return ExitCode::from(1);
@@ -1591,7 +2138,9 @@ fn dispatch_kargs_apply(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("kargs-apply", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("kargs-apply", &[action.to_string()]) {
+                return code;
+            }
             ExitCode::SUCCESS
         }
         _ => {
@@ -1602,7 +2151,14 @@ fn dispatch_kargs_apply(action: &str) -> ExitCode {
 }
 
 fn scheduler_bore_available() -> bool {
-    std::fs::read_to_string("/usr/share/kyth/kernel-flavor").ok().is_some_and(|flavor| matches!(flavor.trim().to_ascii_lowercase().as_str(), "cachy" | "cachyos"))
+    std::fs::read_to_string("/usr/share/kyth/kernel-flavor")
+        .ok()
+        .is_some_and(|flavor| {
+            matches!(
+                flavor.trim().to_ascii_lowercase().as_str(),
+                "cachy" | "cachyos"
+            )
+        })
 }
 
 fn dispatch_sched_arbiter(action: &str) -> ExitCode {
@@ -1611,15 +2167,33 @@ fn dispatch_sched_arbiter(action: &str) -> ExitCode {
     match action {
         "status" => {
             let config = scheduler_arbiter::ArbiterConfig::load(config_path);
-            let active = std::fs::read_to_string(&flag_path).ok().and_then(|raw| serde_json::from_str(&raw).ok()).map(|value| scheduler_arbiter::active_from_flag(&value)).unwrap_or_else(|| config.chosen.clone());
-            println!("chosen={} active={} scx_active={} bore_available={} kind=other", config.chosen, active, scheduler_arbiter::detect_scx_active(), scheduler_bore_available());
+            let active = std::fs::read_to_string(&flag_path)
+                .ok()
+                .and_then(|raw| serde_json::from_str(&raw).ok())
+                .map(|value| scheduler_arbiter::active_from_flag(&value))
+                .unwrap_or_else(|| config.chosen.clone());
+            println!(
+                "chosen={} active={} scx_active={} bore_available={} kind=other",
+                config.chosen,
+                active,
+                scheduler_arbiter::detect_scx_active(),
+                scheduler_bore_available()
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("sched-arbiter", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("sched-arbiter", &[action.to_string()]) {
+                return code;
+            }
             let config = scheduler_arbiter::ArbiterConfig::normalized("auto", false, false);
-            let state = scheduler_arbiter::desired_state(&config, scheduler_arbiter::detect_scx_active(), scheduler_bore_available());
-            if let Err(error) = scheduler_arbiter::save_config(config_path, &config).and_then(|_| scheduler_arbiter::write_flag(&flag_path, &state)) {
+            let state = scheduler_arbiter::desired_state(
+                &config,
+                scheduler_arbiter::detect_scx_active(),
+                scheduler_bore_available(),
+            );
+            if let Err(error) = scheduler_arbiter::save_config(config_path, &config)
+                .and_then(|_| scheduler_arbiter::write_flag(&flag_path, &state))
+            {
                 eprintln!("kyth-sched-arbiter: {error}");
                 return ExitCode::from(1);
             }
@@ -1627,10 +2201,14 @@ fn dispatch_sched_arbiter(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("sched-arbiter", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("sched-arbiter", &[action.to_string()]) {
+                return code;
+            }
             let config = scheduler_arbiter::ArbiterConfig::normalized("balanced", false, false);
             let state = scheduler_arbiter::desired_state(&config, false, false);
-            if let Err(error) = scheduler_arbiter::save_config(config_path, &config).and_then(|_| scheduler_arbiter::write_flag(&flag_path, &state)) {
+            if let Err(error) = scheduler_arbiter::save_config(config_path, &config)
+                .and_then(|_| scheduler_arbiter::write_flag(&flag_path, &state))
+            {
                 eprintln!("kyth-sched-arbiter: {error}");
                 return ExitCode::from(1);
             }
@@ -1638,9 +2216,15 @@ fn dispatch_sched_arbiter(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("sched-arbiter", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("sched-arbiter", &[action.to_string()]) {
+                return code;
+            }
             let config = scheduler_arbiter::ArbiterConfig::load(config_path);
-            let state = scheduler_arbiter::desired_state(&config, scheduler_arbiter::detect_scx_active(), scheduler_bore_available());
+            let state = scheduler_arbiter::desired_state(
+                &config,
+                scheduler_arbiter::detect_scx_active(),
+                scheduler_bore_available(),
+            );
             if let Err(error) = scheduler_arbiter::write_flag(&flag_path, &state) {
                 eprintln!("kyth-sched-arbiter: {error}");
                 return ExitCode::from(1);
@@ -1656,17 +2240,35 @@ fn dispatch_sched_arbiter(action: &str) -> ExitCode {
 
 fn dispatch_oom_gaming(action: &str) -> ExitCode {
     let config_path = preference_presets::oom_gaming_path(None::<&Path>);
-    let destination = generated_path("systemd/gaming.slice.d", "99-kyth-oom.conf", "/etc/systemd/system/gaming.slice.d/99-kyth-oom.conf");
+    let destination = generated_path(
+        "systemd/gaming.slice.d",
+        "99-kyth-oom.conf",
+        "/etc/systemd/system/gaming.slice.d/99-kyth-oom.conf",
+    );
     match action {
         "status" => {
             let config = preference_presets::load_oom_gaming(&config_path);
-            println!("profile={} limit={} active={} kind=other", config.profile, config.limit, preference_presets::oom_gaming_status(&destination));
+            println!(
+                "profile={} limit={} active={} kind=other",
+                config.profile,
+                config.limit,
+                preference_presets::oom_gaming_status(&destination)
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("oom-gaming", &[action.to_string()]) { return code; }
-            let config = preference_presets::OomGamingConfig { profile: "gaming".into(), limit: "75%".into() };
-            if let Err(error) = preference_presets::save_oom_gaming(&config_path, &config).and_then(|_| preference_presets::generate_oom_gaming(&config, &destination).map(|_| ())) {
+            if let Err(code) = ensure_root("oom-gaming", &[action.to_string()]) {
+                return code;
+            }
+            let config = preference_presets::OomGamingConfig {
+                profile: "gaming".into(),
+                limit: "75%".into(),
+            };
+            if let Err(error) =
+                preference_presets::save_oom_gaming(&config_path, &config).and_then(|_| {
+                    preference_presets::generate_oom_gaming(&config, &destination).map(|_| ())
+                })
+            {
                 eprintln!("kyth-oom-gaming: {error}");
                 return ExitCode::from(1);
             }
@@ -1674,9 +2276,15 @@ fn dispatch_oom_gaming(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("oom-gaming", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("oom-gaming", &[action.to_string()]) {
+                return code;
+            }
             let config = preference_presets::OomGamingConfig::default();
-            if let Err(error) = preference_presets::save_oom_gaming(&config_path, &config).and_then(|_| preference_presets::generate_oom_gaming(&config, &destination).map(|_| ())) {
+            if let Err(error) =
+                preference_presets::save_oom_gaming(&config_path, &config).and_then(|_| {
+                    preference_presets::generate_oom_gaming(&config, &destination).map(|_| ())
+                })
+            {
                 eprintln!("kyth-oom-gaming: {error}");
                 return ExitCode::from(1);
             }
@@ -1684,7 +2292,9 @@ fn dispatch_oom_gaming(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("oom-gaming", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("oom-gaming", &[action.to_string()]) {
+                return code;
+            }
             let config = preference_presets::load_oom_gaming(&config_path);
             if let Err(error) = preference_presets::generate_oom_gaming(&config, &destination) {
                 eprintln!("kyth-oom-gaming: {error}");
@@ -1715,10 +2325,13 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("gaming-master", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("gaming-master", &[action.to_string()]) {
+                return code;
+            }
             let thermal = gaming_master::thermal_high(sysfs_path("class/thermal"), 85);
             let battery = gaming_master::battery_low(sysfs_path("class/power_supply"), 30);
-            let (profile, reason) = gaming_master::effective_gaming(Profile::Gaming, thermal, battery);
+            let (profile, reason) =
+                gaming_master::effective_gaming(Profile::Gaming, thermal, battery);
             if let Err(error) = gaming_master::save_master(&config_path, profile) {
                 eprintln!("kyth-gaming-master: {error}");
                 return ExitCode::from(1);
@@ -1730,7 +2343,9 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" | "off" => {
-            if let Err(code) = ensure_root("gaming-master", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("gaming-master", &[action.to_string()]) {
+                return code;
+            }
             if let Err(error) = gaming_master::save_master(&config_path, Profile::Balanced) {
                 eprintln!("kyth-gaming-master: {error}");
                 return ExitCode::from(1);
@@ -1739,7 +2354,9 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("gaming-master", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("gaming-master", &[action.to_string()]) {
+                return code;
+            }
             let requested = gaming_master::load_master(&config_path);
             let thermal = gaming_master::thermal_high(sysfs_path("class/thermal"), 85);
             let battery = gaming_master::battery_low(sysfs_path("class/power_supply"), 30);
@@ -1763,18 +2380,32 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
 fn dispatch_windows_verify(args: &[String]) -> ExitCode {
     let json = args == ["--json"];
     if args.is_empty() || json {
-        let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("/root"));
+        let home = env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from("/root"));
         let report = windows_verify::verify(&home, Path::new("/var/home").exists());
         if json {
-            println!("{}", serde_json::to_string_pretty(&report).expect("verification report serializes"));
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&report).expect("verification report serializes")
+            );
         } else {
             for (name, value) in [
-                ("bookmarks", &report.bookmarks), ("drives", &report.drives),
-                ("files", &report.files), ("onedrive", &report.onedrive),
-                ("pwa", &report.pwa), ("parity", &report.parity),
-            ] { println!("{name}: {value}"); }
+                ("bookmarks", &report.bookmarks),
+                ("drives", &report.drives),
+                ("files", &report.files),
+                ("onedrive", &report.onedrive),
+                ("pwa", &report.pwa),
+                ("parity", &report.parity),
+            ] {
+                println!("{name}: {value}");
+            }
         }
-        return if report.parity == "ok" { ExitCode::SUCCESS } else { ExitCode::from(1) };
+        return if report.parity == "ok" {
+            ExitCode::SUCCESS
+        } else {
+            ExitCode::from(1)
+        };
     }
     if args == ["status"] {
         println!("profile=balanced active=unknown kind=other");
@@ -1786,18 +2417,36 @@ fn dispatch_windows_verify(args: &[String]) -> ExitCode {
 
 fn dispatch_mimalloc(action: &str) -> ExitCode {
     let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
-    let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
+    let environment = generated_path(
+        "environment.d",
+        "99-kyth-mimalloc.conf",
+        "/etc/environment.d/99-kyth-mimalloc.conf",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_mimalloc(&config_path);
-            println!("enabled={} global={} per_game={} active={} kind=other", config.enabled, config.global, config.per_game, extended_preferences::mimalloc_status(&config, environment.is_file()));
+            println!(
+                "enabled={} global={} per_game={} active={} kind=other",
+                config.enabled,
+                config.global,
+                config.per_game,
+                extended_preferences::mimalloc_status(&config, environment.is_file())
+            );
             ExitCode::SUCCESS
         }
         "on" | "gaming" => {
-            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) { return code; }
-            let config = extended_preferences::MimallocConfig { enabled: true, global: false, per_game: true };
-            if let Err(error) = extended_preferences::save_mimalloc(&config_path, &config)
-                .and_then(|_| extended_preferences::generate_mimalloc_env(&config, &environment).map(|_| ()))
+            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::MimallocConfig {
+                enabled: true,
+                global: false,
+                per_game: true,
+            };
+            if let Err(error) =
+                extended_preferences::save_mimalloc(&config_path, &config).and_then(|_| {
+                    extended_preferences::generate_mimalloc_env(&config, &environment).map(|_| ())
+                })
             {
                 eprintln!("kyth-mimalloc: {error}");
                 return ExitCode::from(1);
@@ -1806,10 +2455,18 @@ fn dispatch_mimalloc(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "off" | "balanced" => {
-            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) { return code; }
-            let config = extended_preferences::MimallocConfig { enabled: false, global: false, per_game: true };
-            if let Err(error) = extended_preferences::save_mimalloc(&config_path, &config)
-                .and_then(|_| extended_preferences::generate_mimalloc_env(&config, &environment).map(|_| ()))
+            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::MimallocConfig {
+                enabled: false,
+                global: false,
+                per_game: true,
+            };
+            if let Err(error) =
+                extended_preferences::save_mimalloc(&config_path, &config).and_then(|_| {
+                    extended_preferences::generate_mimalloc_env(&config, &environment).map(|_| ())
+                })
             {
                 eprintln!("kyth-mimalloc: {error}");
                 return ExitCode::from(1);
@@ -1818,10 +2475,18 @@ fn dispatch_mimalloc(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "global" => {
-            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) { return code; }
-            let config = extended_preferences::MimallocConfig { enabled: true, global: true, per_game: true };
-            if let Err(error) = extended_preferences::save_mimalloc(&config_path, &config)
-                .and_then(|_| extended_preferences::generate_mimalloc_env(&config, &environment).map(|_| ()))
+            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::MimallocConfig {
+                enabled: true,
+                global: true,
+                per_game: true,
+            };
+            if let Err(error) =
+                extended_preferences::save_mimalloc(&config_path, &config).and_then(|_| {
+                    extended_preferences::generate_mimalloc_env(&config, &environment).map(|_| ())
+                })
             {
                 eprintln!("kyth-mimalloc: {error}");
                 return ExitCode::from(1);
@@ -1830,7 +2495,9 @@ fn dispatch_mimalloc(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("mimalloc", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::load_mimalloc(&config_path);
             if let Err(error) = extended_preferences::generate_mimalloc_env(&config, &environment) {
                 eprintln!("kyth-mimalloc: {error}");
@@ -1845,6 +2512,14 @@ fn dispatch_mimalloc(action: &str) -> ExitCode {
     }
 }
 
+fn normalized_mimalloc_run_args(action: &str, args: &[String]) -> Vec<String> {
+    if action == "status" {
+        vec!["--status".to_string()]
+    } else {
+        args.to_vec()
+    }
+}
+
 fn dispatch_mimalloc_run(args: &[String]) -> ExitCode {
     if matches!(args.first().map(String::as_str), Some("--help" | "-h")) {
         println!("Usage: kyth-mimalloc-run [--status] -- <command> [args...]");
@@ -1852,12 +2527,26 @@ fn dispatch_mimalloc_run(args: &[String]) -> ExitCode {
     }
     if args.first().map(String::as_str) == Some("--status") {
         let config_path = module_config_path("mimalloc.toml", "/etc/kyth/mimalloc.toml");
-        let environment = generated_path("environment.d", "99-kyth-mimalloc.conf", "/etc/environment.d/99-kyth-mimalloc.conf");
+        let environment = generated_path(
+            "environment.d",
+            "99-kyth-mimalloc.conf",
+            "/etc/environment.d/99-kyth-mimalloc.conf",
+        );
         let config = extended_preferences::load_mimalloc(&config_path);
-        println!("enabled={} global={} per_game={} status={}", config.enabled, config.global, config.per_game, extended_preferences::mimalloc_status(&config, environment.is_file()));
+        println!(
+            "enabled={} global={} per_game={} status={}",
+            config.enabled,
+            config.global,
+            config.per_game,
+            extended_preferences::mimalloc_status(&config, environment.is_file())
+        );
         return ExitCode::SUCCESS;
     }
-    let command_args = if args.first().map(String::as_str) == Some("--") { &args[1..] } else { args };
+    let command_args = if args.first().map(String::as_str) == Some("--") {
+        &args[1..]
+    } else {
+        args
+    };
     let Some(program) = command_args.first() else {
         eprintln!("Usage: kyth-mimalloc-run [--status] -- <command> [args...]");
         return ExitCode::from(1);
@@ -1870,7 +2559,9 @@ fn dispatch_mimalloc_run(args: &[String]) -> ExitCode {
             Ok(existing) if !existing.is_empty() => format!("{library}:{existing}"),
             _ => library,
         };
-        command.env("LD_PRELOAD", preload).env("MIMALLOC_LARGE_OS_PAGES", "1");
+        command
+            .env("LD_PRELOAD", preload)
+            .env("MIMALLOC_LARGE_OS_PAGES", "1");
     }
     match command.status() {
         Ok(status) => ExitCode::from(status.code().unwrap_or(1).try_into().unwrap_or(1)),
@@ -1883,19 +2574,40 @@ fn dispatch_mimalloc_run(args: &[String]) -> ExitCode {
 
 fn dispatch_sccache(action: &str) -> ExitCode {
     let config_path = module_config_path("sccache.toml", "/etc/kyth/sccache.toml");
-    let environment = generated_path("environment.d", "99-kyth-sccache.conf", "/etc/environment.d/99-kyth-sccache.conf");
-    let service = generated_path("systemd", "sccache.service", "/etc/systemd/system/sccache.service");
+    let environment = generated_path(
+        "environment.d",
+        "99-kyth-sccache.conf",
+        "/etc/environment.d/99-kyth-sccache.conf",
+    );
+    let service = generated_path(
+        "systemd",
+        "sccache.service",
+        "/etc/systemd/system/sccache.service",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_sccache(&config_path);
-            println!("enabled={} size={} active={} kind=other", config.enabled, config.size, extended_preferences::sccache_status(&environment));
+            println!(
+                "enabled={} size={} active={} kind=other",
+                config.enabled,
+                config.size,
+                extended_preferences::sccache_status(&environment)
+            );
             ExitCode::SUCCESS
         }
         "on" | "gaming" => {
-            if let Err(code) = ensure_root("sccache", &[action.to_string()]) { return code; }
-            let config = extended_preferences::SccacheConfig { enabled: true, size: extended_preferences::load_sccache(&config_path).size };
-            if let Err(error) = extended_preferences::save_sccache(&config_path, &config)
-                .and_then(|_| extended_preferences::generate_sccache(&config, &environment, &service).map(|_| ()))
+            if let Err(code) = ensure_root("sccache", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::SccacheConfig {
+                enabled: true,
+                size: extended_preferences::load_sccache(&config_path).size,
+            };
+            if let Err(error) =
+                extended_preferences::save_sccache(&config_path, &config).and_then(|_| {
+                    extended_preferences::generate_sccache(&config, &environment, &service)
+                        .map(|_| ())
+                })
             {
                 eprintln!("kyth-sccache: {error}");
                 return ExitCode::from(1);
@@ -1904,10 +2616,18 @@ fn dispatch_sccache(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "off" | "balanced" => {
-            if let Err(code) = ensure_root("sccache", &[action.to_string()]) { return code; }
-            let config = extended_preferences::SccacheConfig { enabled: false, size: extended_preferences::load_sccache(&config_path).size };
-            if let Err(error) = extended_preferences::save_sccache(&config_path, &config)
-                .and_then(|_| extended_preferences::generate_sccache(&config, &environment, &service).map(|_| ()))
+            if let Err(code) = ensure_root("sccache", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::SccacheConfig {
+                enabled: false,
+                size: extended_preferences::load_sccache(&config_path).size,
+            };
+            if let Err(error) =
+                extended_preferences::save_sccache(&config_path, &config).and_then(|_| {
+                    extended_preferences::generate_sccache(&config, &environment, &service)
+                        .map(|_| ())
+                })
             {
                 eprintln!("kyth-sccache: {error}");
                 return ExitCode::from(1);
@@ -1916,9 +2636,13 @@ fn dispatch_sccache(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("sccache", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("sccache", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::load_sccache(&config_path);
-            if let Err(error) = extended_preferences::generate_sccache(&config, &environment, &service) {
+            if let Err(error) =
+                extended_preferences::generate_sccache(&config, &environment, &service)
+            {
                 eprintln!("kyth-sccache: {error}");
                 return ExitCode::from(1);
             }
@@ -1932,7 +2656,9 @@ fn dispatch_sccache(action: &str) -> ExitCode {
 }
 
 fn detect_vram_gb() -> u64 {
-    let Ok(entries) = std::fs::read_dir("/sys/class/drm") else { return 8; };
+    let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
+        return 8;
+    };
     for entry in entries.flatten() {
         let path = entry.path().join("device/mem_info_vram_total");
         if let Ok(value) = std::fs::read_to_string(path) {
@@ -1945,20 +2671,43 @@ fn detect_vram_gb() -> u64 {
 }
 
 fn dispatch_shader_cache_size(action: &str) -> ExitCode {
-    let config_path = module_config_path("shader-cache-size.toml", "/etc/kyth/shader-cache-size.toml");
-    let environment = generated_path("environment.d", "99-kyth-shader-size.conf", "/etc/environment.d/99-kyth-shader-size.conf");
+    let config_path =
+        module_config_path("shader-cache-size.toml", "/etc/kyth/shader-cache-size.toml");
+    let environment = generated_path(
+        "environment.d",
+        "99-kyth-shader-size.conf",
+        "/etc/environment.d/99-kyth-shader-size.conf",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_shader_size(&config_path);
             let resolved = extended_preferences::resolve_shader_size(&config, detect_vram_gb());
-            println!("mode={} size={} resolved={} active={} kind=other", config.mode, config.size, resolved, extended_preferences::shader_size_status(&environment));
+            println!(
+                "mode={} size={} resolved={} active={} kind=other",
+                config.mode,
+                config.size,
+                resolved,
+                extended_preferences::shader_size_status(&environment)
+            );
             ExitCode::SUCCESS
         }
         "auto" | "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("shader-cache-size", &[action.to_string()]) { return code; }
-            let config = extended_preferences::ShaderSizeConfig { mode: "auto".into(), size: extended_preferences::load_shader_size(&config_path).size };
+            if let Err(code) = ensure_root("shader-cache-size", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::ShaderSizeConfig {
+                mode: "auto".into(),
+                size: extended_preferences::load_shader_size(&config_path).size,
+            };
             if let Err(error) = extended_preferences::save_shader_size(&config_path, &config)
-                .and_then(|_| extended_preferences::generate_shader_size(&config, detect_vram_gb(), &environment).map(|_| ()))
+                .and_then(|_| {
+                    extended_preferences::generate_shader_size(
+                        &config,
+                        detect_vram_gb(),
+                        &environment,
+                    )
+                    .map(|_| ())
+                })
             {
                 eprintln!("kyth-shader-cache-size: {error}");
                 return ExitCode::from(1);
@@ -1967,9 +2716,13 @@ fn dispatch_shader_cache_size(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("shader-cache-size", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("shader-cache-size", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::load_shader_size(&config_path);
-            if let Err(error) = extended_preferences::generate_shader_size(&config, detect_vram_gb(), &environment) {
+            if let Err(error) =
+                extended_preferences::generate_shader_size(&config, detect_vram_gb(), &environment)
+            {
                 eprintln!("kyth-shader-cache-size: {error}");
                 return ExitCode::from(1);
             }
@@ -1984,20 +2737,36 @@ fn dispatch_shader_cache_size(action: &str) -> ExitCode {
 
 fn dispatch_wine_sync(action: &str) -> ExitCode {
     let config_path = module_config_path("wine-sync.toml", "/etc/kyth/wine-sync.toml");
-    let environment = generated_path("environment.d", "99-kyth-wine-sync.conf", "/etc/environment.d/99-kyth-wine-sync.conf");
+    let environment = generated_path(
+        "environment.d",
+        "99-kyth-wine-sync.conf",
+        "/etc/environment.d/99-kyth-wine-sync.conf",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_wine_sync(&config_path);
             let (ntsync, futex2) = extended_preferences::probe_wine_sync();
             let active = std::fs::read_to_string(&environment).ok();
-            println!("mode={} probe_ntsync={} probe_futex2={} env={} kind=other", config.mode, ntsync, futex2, extended_preferences::wine_sync_status(active.as_deref()));
+            println!(
+                "mode={} probe_ntsync={} probe_futex2={} env={} kind=other",
+                config.mode,
+                ntsync,
+                futex2,
+                extended_preferences::wine_sync_status(active.as_deref())
+            );
             ExitCode::SUCCESS
         }
         "auto" | "ntsync" | "fsync" | "esync" | "off" => {
-            if let Err(code) = ensure_root("wine-sync", &[action.to_string()]) { return code; }
-            let config = extended_preferences::WineSyncConfig { mode: action.into() };
+            if let Err(code) = ensure_root("wine-sync", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::WineSyncConfig {
+                mode: action.into(),
+            };
             if let Err(error) = extended_preferences::save_wine_sync(&config_path, &config)
-                .and_then(|_| extended_preferences::generate_wine_env(&config, &environment).map(|_| ()))
+                .and_then(|_| {
+                    extended_preferences::generate_wine_env(&config, &environment).map(|_| ())
+                })
             {
                 eprintln!("kyth-wine-sync: {error}");
                 return ExitCode::from(1);
@@ -2006,7 +2775,9 @@ fn dispatch_wine_sync(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("wine-sync", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("wine-sync", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::load_wine_sync(&config_path);
             if let Err(error) = extended_preferences::generate_wine_env(&config, &environment) {
                 eprintln!("kyth-wine-sync: {error}");
@@ -2023,23 +2794,46 @@ fn dispatch_wine_sync(action: &str) -> ExitCode {
 
 fn dispatch_kwin_latency(action: &str) -> ExitCode {
     let config_path = module_config_path("kwin-latency.toml", "/etc/kyth/kwin-latency.toml");
-    let dropin = generated_path("xdg/kwinrc.d", "99-kyth-latency.conf", "/etc/xdg/kwinrc.d/99-kyth-latency.conf");
-    let environment = generated_path("environment.d", "99-kyth-kwin.conf", "/etc/environment.d/99-kyth-kwin.conf");
-    let write_config = |config: &kyth_shared::system::kwin_latency::KwinLatencyConfig| -> std::io::Result<()> {
-        kyth_shared::atomic_io::atomic_write_text(&config_path, &config.to_toml(), Some(0o600))?;
-        let rendered_dropin = config.render_dropin();
-        write_optional(&dropin, rendered_dropin.as_deref())?;
-        write_optional(&environment, config.render_environment())
-    };
+    let dropin = generated_path(
+        "xdg/kwinrc.d",
+        "99-kyth-latency.conf",
+        "/etc/xdg/kwinrc.d/99-kyth-latency.conf",
+    );
+    let environment = generated_path(
+        "environment.d",
+        "99-kyth-kwin.conf",
+        "/etc/environment.d/99-kyth-kwin.conf",
+    );
+    let write_config =
+        |config: &kyth_shared::system::kwin_latency::KwinLatencyConfig| -> std::io::Result<()> {
+            kyth_shared::atomic_io::atomic_write_text(
+                &config_path,
+                &config.to_toml(),
+                Some(0o600),
+            )?;
+            let rendered_dropin = config.render_dropin();
+            write_optional(&dropin, rendered_dropin.as_deref())?;
+            write_optional(&environment, config.render_environment())
+        };
     match action {
         "status" => {
             let config = kyth_shared::system::kwin_latency::KwinLatencyConfig::load(&config_path);
-            println!("profile={} tearing={} active={} kind=other", config.profile, config.tearing, kyth_shared::system::kwin_latency::status(dropin.is_file()));
+            println!(
+                "profile={} tearing={} active={} kind=other",
+                config.profile,
+                config.tearing,
+                kyth_shared::system::kwin_latency::status(dropin.is_file())
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("kwin-latency", &[action.to_string()]) { return code; }
-            let config = kyth_shared::system::kwin_latency::KwinLatencyConfig::normalized(action, action == "gaming");
+            if let Err(code) = ensure_root("kwin-latency", &[action.to_string()]) {
+                return code;
+            }
+            let config = kyth_shared::system::kwin_latency::KwinLatencyConfig::normalized(
+                action,
+                action == "gaming",
+            );
             if let Err(error) = write_config(&config) {
                 eprintln!("kyth-kwin-latency: {error}");
                 return ExitCode::from(1);
@@ -2048,7 +2842,9 @@ fn dispatch_kwin_latency(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("kwin-latency", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("kwin-latency", &[action.to_string()]) {
+                return code;
+            }
             let config = kyth_shared::system::kwin_latency::KwinLatencyConfig::load(&config_path);
             if let Err(error) = write_config(&config) {
                 eprintln!("kyth-kwin-latency: {error}");
@@ -2065,15 +2861,25 @@ fn dispatch_kwin_latency(action: &str) -> ExitCode {
 
 fn dispatch_epp_ac(action: &str) -> ExitCode {
     let config_path = module_config_path("epp-ac.toml", "/etc/kyth/epp-ac.toml");
-    let rule = generated_path("udev/rules.d", "61-kyth-epp-ac.rules", "/etc/udev/rules.d/61-kyth-epp-ac.rules");
+    let rule = generated_path(
+        "udev/rules.d",
+        "61-kyth-epp-ac.rules",
+        "/etc/udev/rules.d/61-kyth-epp-ac.rules",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_epp_ac(&config_path);
-            println!("enabled={} active={} kind=other", config.enabled, if rule.is_file() { "enabled" } else { "off" });
+            println!(
+                "enabled={} active={} kind=other",
+                config.enabled,
+                if rule.is_file() { "enabled" } else { "off" }
+            );
             ExitCode::SUCCESS
         }
         "gaming" => {
-            if let Err(code) = ensure_root("epp-ac", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("epp-ac", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::EppAcConfig { enabled: true };
             if let Err(error) = extended_preferences::save_epp_ac(&config_path, &config)
                 .and_then(|_| write_optional(&rule, extended_preferences::epp_ac_rule(&config)))
@@ -2085,7 +2891,9 @@ fn dispatch_epp_ac(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "balanced" => {
-            if let Err(code) = ensure_root("epp-ac", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("epp-ac", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::EppAcConfig { enabled: false };
             if let Err(error) = extended_preferences::save_epp_ac(&config_path, &config)
                 .and_then(|_| write_optional(&rule, None))
@@ -2097,7 +2905,9 @@ fn dispatch_epp_ac(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("epp-ac", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("epp-ac", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::load_epp_ac(&config_path);
             if let Err(error) = write_optional(&rule, extended_preferences::epp_ac_rule(&config)) {
                 eprintln!("kyth-epp-ac: {error}");
@@ -2114,18 +2924,36 @@ fn dispatch_epp_ac(action: &str) -> ExitCode {
 
 fn dispatch_gaming_cfs(action: &str) -> ExitCode {
     let config_path = module_config_path("gaming-cfs.toml", "/etc/kyth/gaming-cfs.toml");
-    let dropin = generated_path("systemd/gaming.slice.d", "99-kyth-cfs.conf", "/etc/systemd/system/gaming.slice.d/99-kyth-cfs.conf");
+    let dropin = generated_path(
+        "systemd/gaming.slice.d",
+        "99-kyth-cfs.conf",
+        "/etc/systemd/system/gaming.slice.d/99-kyth-cfs.conf",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_gaming_cfs(&config_path);
-            println!("profile={} active={} kind=other", config.profile, if dropin.is_file() { "gaming" } else { "balanced" });
+            println!(
+                "profile={} active={} kind=other",
+                config.profile,
+                if dropin.is_file() {
+                    "gaming"
+                } else {
+                    "balanced"
+                }
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("gaming-cfs", &[action.to_string()]) { return code; }
-            let config = extended_preferences::GamingCfsConfig { profile: action.into() };
+            if let Err(code) = ensure_root("gaming-cfs", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::GamingCfsConfig {
+                profile: action.into(),
+            };
             if let Err(error) = extended_preferences::save_gaming_cfs(&config_path, &config)
-                .and_then(|_| write_optional(&dropin, extended_preferences::gaming_cfs_dropin(&config)))
+                .and_then(|_| {
+                    write_optional(&dropin, extended_preferences::gaming_cfs_dropin(&config))
+                })
             {
                 eprintln!("kyth-gaming-cfs: {error}");
                 return ExitCode::from(1);
@@ -2134,9 +2962,13 @@ fn dispatch_gaming_cfs(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("gaming-cfs", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("gaming-cfs", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::load_gaming_cfs(&config_path);
-            if let Err(error) = write_optional(&dropin, extended_preferences::gaming_cfs_dropin(&config)) {
+            if let Err(error) =
+                write_optional(&dropin, extended_preferences::gaming_cfs_dropin(&config))
+            {
                 eprintln!("kyth-gaming-cfs: {error}");
                 return ExitCode::from(1);
             }
@@ -2151,16 +2983,28 @@ fn dispatch_gaming_cfs(action: &str) -> ExitCode {
 
 fn dispatch_pcie(action: &str) -> ExitCode {
     let config_path = module_config_path("pcie.toml", "/etc/kyth/pcie.toml");
-    let rule = generated_path("udev/rules.d", "61-kyth-pcie.rules", "/etc/udev/rules.d/61-kyth-pcie.rules");
+    let rule = generated_path(
+        "udev/rules.d",
+        "61-kyth-pcie.rules",
+        "/etc/udev/rules.d/61-kyth-pcie.rules",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_pcie(&config_path);
-            println!("profile={} active={} kind=other", config.profile, if rule.is_file() { "gaming" } else { "balanced" });
+            println!(
+                "profile={} active={} kind=other",
+                config.profile,
+                if rule.is_file() { "gaming" } else { "balanced" }
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("pcie", &[action.to_string()]) { return code; }
-            let config = extended_preferences::PcieConfig { profile: action.into() };
+            if let Err(code) = ensure_root("pcie", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::PcieConfig {
+                profile: action.into(),
+            };
             if let Err(error) = extended_preferences::save_pcie(&config_path, &config)
                 .and_then(|_| extended_preferences::generate_pcie(&config, &rule).map(|_| ()))
             {
@@ -2171,7 +3015,9 @@ fn dispatch_pcie(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("pcie", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("pcie", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::load_pcie(&config_path);
             if let Err(error) = extended_preferences::generate_pcie(&config, &rule) {
                 eprintln!("kyth-pcie: {error}");
@@ -2188,18 +3034,38 @@ fn dispatch_pcie(action: &str) -> ExitCode {
 
 fn dispatch_pipewire_gaming(action: &str) -> ExitCode {
     let config_path = module_config_path("pipewire-gaming.toml", "/etc/kyth/pipewire-gaming.toml");
-    let destination = generated_path("wireplumber/main.lua.d", "99-kyth-gaming.lua", "/etc/wireplumber/main.lua.d/99-kyth-gaming.lua");
+    let destination = generated_path(
+        "wireplumber/main.lua.d",
+        "99-kyth-gaming.lua",
+        "/etc/wireplumber/main.lua.d/99-kyth-gaming.lua",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_pipewire_gaming(&config_path);
-            println!("profile={} active={} kind=other", config.profile, if destination.is_file() { "gaming" } else { "balanced" });
+            println!(
+                "profile={} active={} kind=other",
+                config.profile,
+                if destination.is_file() {
+                    "gaming"
+                } else {
+                    "balanced"
+                }
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("pipewire-gaming", &[action.to_string()]) { return code; }
-            let config = extended_preferences::PipewireGamingConfig { profile: action.into(), quantum: 128 };
+            if let Err(code) = ensure_root("pipewire-gaming", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::PipewireGamingConfig {
+                profile: action.into(),
+                quantum: 128,
+            };
             if let Err(error) = extended_preferences::save_pipewire_gaming(&config_path, &config)
-                .and_then(|_| extended_preferences::generate_pipewire_gaming(&config, &destination).map(|_| ()))
+                .and_then(|_| {
+                    extended_preferences::generate_pipewire_gaming(&config, &destination)
+                        .map(|_| ())
+                })
             {
                 eprintln!("kyth-pipewire-gaming: {error}");
                 return ExitCode::from(1);
@@ -2208,9 +3074,13 @@ fn dispatch_pipewire_gaming(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("pipewire-gaming", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("pipewire-gaming", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::load_pipewire_gaming(&config_path);
-            if let Err(error) = extended_preferences::generate_pipewire_gaming(&config, &destination) {
+            if let Err(error) =
+                extended_preferences::generate_pipewire_gaming(&config, &destination)
+            {
                 eprintln!("kyth-pipewire-gaming: {error}");
                 return ExitCode::from(1);
             }
@@ -2225,16 +3095,32 @@ fn dispatch_pipewire_gaming(action: &str) -> ExitCode {
 
 fn dispatch_psi_gaming(action: &str) -> ExitCode {
     let config_path = module_config_path("psi.toml", "/etc/kyth/psi.toml");
-    let dropin = generated_path("systemd/gaming.slice.d", "99-kyth-psi.conf", "/etc/systemd/system/gaming.slice.d/99-kyth-psi.conf");
+    let dropin = generated_path(
+        "systemd/gaming.slice.d",
+        "99-kyth-psi.conf",
+        "/etc/systemd/system/gaming.slice.d/99-kyth-psi.conf",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_psi(&config_path);
-            println!("profile={} active={} kind=other", config.profile, if dropin.is_file() { "gaming" } else { "balanced" });
+            println!(
+                "profile={} active={} kind=other",
+                config.profile,
+                if dropin.is_file() {
+                    "gaming"
+                } else {
+                    "balanced"
+                }
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
-            if let Err(code) = ensure_root("psi-gaming", &[action.to_string()]) { return code; }
-            let config = extended_preferences::PsiConfig { profile: action.into() };
+            if let Err(code) = ensure_root("psi-gaming", &[action.to_string()]) {
+                return code;
+            }
+            let config = extended_preferences::PsiConfig {
+                profile: action.into(),
+            };
             if let Err(error) = extended_preferences::save_psi(&config_path, &config)
                 .and_then(|_| extended_preferences::generate_psi(&config, &dropin).map(|_| ()))
             {
@@ -2245,7 +3131,9 @@ fn dispatch_psi_gaming(action: &str) -> ExitCode {
             ExitCode::SUCCESS
         }
         "apply" => {
-            if let Err(code) = ensure_root("psi-gaming", &[action.to_string()]) { return code; }
+            if let Err(code) = ensure_root("psi-gaming", &[action.to_string()]) {
+                return code;
+            }
             let config = extended_preferences::load_psi(&config_path);
             if let Err(error) = extended_preferences::generate_psi(&config, &dropin) {
                 eprintln!("kyth-psi-gaming: {error}");
@@ -2268,11 +3156,19 @@ fn dispatch_thp_tune(action: &str) -> ExitCode {
     } else {
         PathBuf::from("/etc/kyth/thp.toml")
     };
-    let drop_in = generated_path("sysctl.d", "99-kyth-thp.conf", "/etc/sysctl.d/99-kyth-thp.conf");
+    let drop_in = generated_path(
+        "sysctl.d",
+        "99-kyth-thp.conf",
+        "/etc/sysctl.d/99-kyth-thp.conf",
+    );
     match action {
         "status" => {
             let config = extended_preferences::load_thp(&config_path);
-            let active = if drop_in.is_file() { "kyth" } else { "balanced" };
+            let active = if drop_in.is_file() {
+                "kyth"
+            } else {
+                "balanced"
+            };
             println!("profile={} active={} kind=sysctl", config.profile, active);
             ExitCode::SUCCESS
         }
@@ -2281,12 +3177,22 @@ fn dispatch_thp_tune(action: &str) -> ExitCode {
                 return code;
             }
             let mut config = extended_preferences::load_thp(&config_path);
-            config.profile = if action == "gaming" { "kyth" } else { "balanced" }.into();
-            if let Err(error) = extended_preferences::save_thp(&config_path, &config)
-                .and_then(|_| {
+            config.profile = if action == "gaming" {
+                "kyth"
+            } else {
+                "balanced"
+            }
+            .into();
+            if let Err(error) =
+                extended_preferences::save_thp(&config_path, &config).and_then(|_| {
                     let content = extended_preferences::thp_dropin(&config);
                     match content {
-                        Some(content) => kyth_shared::atomic_io::atomic_write_text(&drop_in, &content, Some(0o644)).map(|_| ()),
+                        Some(content) => kyth_shared::atomic_io::atomic_write_text(
+                            &drop_in,
+                            &content,
+                            Some(0o644),
+                        )
+                        .map(|_| ()),
                         None => match std::fs::remove_file(&drop_in) {
                             Ok(()) => Ok(()),
                             Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -2308,7 +3214,10 @@ fn dispatch_thp_tune(action: &str) -> ExitCode {
             }
             let config: ThpConfig = extended_preferences::load_thp(&config_path);
             let result = match extended_preferences::thp_dropin(&config) {
-                Some(content) => kyth_shared::atomic_io::atomic_write_text(&drop_in, &content, Some(0o644)).map(|_| ()),
+                Some(content) => {
+                    kyth_shared::atomic_io::atomic_write_text(&drop_in, &content, Some(0o644))
+                        .map(|_| ())
+                }
                 None => match std::fs::remove_file(&drop_in) {
                     Ok(()) => Ok(()),
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -2360,7 +3269,14 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             "pipewire-gaming" => dispatch_pipewire_gaming(action),
             "psi-gaming" => dispatch_psi_gaming(action),
             "mimalloc" => dispatch_mimalloc(action),
-            "mimalloc-run" => dispatch_mimalloc_run(args),
+            "mimalloc-run" => {
+                // The compatibility aliases use the common `status` action,
+                // while the runner's historical CLI spells it `--status`.
+                // Normalize both forms before handing the remaining command
+                // arguments to the runner.
+                let run_args = normalized_mimalloc_run_args(action, args);
+                dispatch_mimalloc_run(&run_args)
+            }
             "sccache" => dispatch_sccache(action),
             "shader-cache-size" => dispatch_shader_cache_size(action),
             "wine-sync" => dispatch_wine_sync(action),
@@ -2400,7 +3316,10 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
         };
     }
     if spec.kind != "sysctl" || !native_implemented(&spec.name) {
-        eprintln!("kyth-{}: native Rust implementation is not ready; use the compatibility dispatcher", spec.name);
+        eprintln!(
+            "kyth-{}: native Rust implementation is not ready; use the compatibility dispatcher",
+            spec.name
+        );
         return ExitCode::from(2);
     }
     if spec.name == "bore" {
@@ -2420,17 +3339,26 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
         "status" => {
             let profile = sysctl_profiles::load(&config, None);
             let active = sysctl_profiles::status(&config, None).as_str();
-            println!("profile={} active={} kind={}", profile.as_str(), active, spec.kind);
+            println!(
+                "profile={} active={} kind={}",
+                profile.as_str(),
+                active,
+                spec.kind
+            );
             ExitCode::SUCCESS
         }
         "gaming" | "balanced" => {
             if let Err(code) = ensure_root(&spec.name, args) {
                 return code;
             }
-            let profile = if action == "gaming" { Profile::Gaming } else { Profile::Balanced };
-            if let Err(error) = sysctl_profiles::save(&config, None, profile)
-                .and_then(|_| sysctl_profiles::generate(&config, None, None, Some(profile)).map(|_| ()))
-            {
+            let profile = if action == "gaming" {
+                Profile::Gaming
+            } else {
+                Profile::Balanced
+            };
+            if let Err(error) = sysctl_profiles::save(&config, None, profile).and_then(|_| {
+                sysctl_profiles::generate(&config, None, None, Some(profile)).map(|_| ())
+            }) {
                 eprintln!("kyth-{}: {error}", spec.name);
                 return ExitCode::from(1);
             }
@@ -2491,8 +3419,25 @@ mod tests {
 
     #[test]
     fn resolves_direct_and_compat_invocations() {
-        assert_eq!(resolve_name("kyth-swappiness", &[]).unwrap().0, "swappiness");
-        assert_eq!(resolve_name("kyth-tunable-rs", &["swappiness".into(), "status".into()]).unwrap(), ("swappiness".into(), vec!["status".into()]));
+        assert_eq!(
+            resolve_name("kyth-swappiness", &[]).unwrap().0,
+            "swappiness"
+        );
+        assert_eq!(
+            resolve_name("kyth-tunable-rs", &["swappiness".into(), "status".into()]).unwrap(),
+            ("swappiness".into(), vec!["status".into()])
+        );
+    }
+
+    #[test]
+    fn normalizes_mimalloc_runner_status_action() {
+        let args = vec!["status".to_string()];
+        assert_eq!(
+            normalized_mimalloc_run_args("status", &args),
+            vec!["--status"]
+        );
+        let args = vec!["--status".to_string()];
+        assert_eq!(normalized_mimalloc_run_args("--status", &args), args);
     }
 
     #[test]

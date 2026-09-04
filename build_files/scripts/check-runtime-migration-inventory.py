@@ -30,8 +30,10 @@ NATIVE_BINARIES = {
     "kyth-ai-perfd", "kyth-perf-gate-rs",
 }
 NATIVE_BINARIES = NATIVE_BINARIES | {"kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check", "kyth-nvidia-status", "kyth-controller-check", "kyth-creator-check", "kyth-exe-compat", "kyth-snapshot-timeline", "kyth-print-check", "kyth-windows-verify", "kyth-tunable", "kyth-configure-session", "kyth-set-resolution", "kyth-set-kickoff-icon", "kyth-greeter-compositor", "kyth-config-apply"}
+NATIVE_BINARIES = NATIVE_BINARIES | {"kyth-tunable-rs", "kyth-game-boost"}
 PACKAGED_NATIVE_LAUNCHERS = NATIVE_BINARIES
 NOT_PORTED = {"kyth-default-flatpaks", "kyth-flathub-setup", "kyth-local-bin-migrate", "rclone@", "scx_loader"}
+NOT_PORTED_PATHS = {"src/kyth-welcome/kyth_welcome/services/privileged.py"}
 READ_ONLY_NAMES = {
     "kyth-doctor", "kyth-health-check", "kyth-smoke-check", "kyth-resume-check",
     "kyth-nvidia-status", "kyth-controller-check", "kyth-creator-check",
@@ -95,27 +97,36 @@ def risk_for(name: str, kind: str, path: Path) -> str:
 def entry(path: Path, *, surface: str, implementation: str | None = None, name: str | None = None) -> dict:
     item_name = name or name_for(path)
     kind = implementation or launcher_kind(path)
-    if item_name in NOT_PORTED:
+    is_tunable_alias = surface == "launcher" and path.is_symlink() and path.resolve() == ROOT / "build_files/kyth-tunable"
+    if item_name in NOT_PORTED or rel(path) in NOT_PORTED_PATHS:
         status = "explicitly-not-ported"
         reason = "documented third-party or declarative build/runtime exception"
     elif (
         implementation == "rust"
         or (surface == "systemd-unit" and item_name in NATIVE_BINARIES)
         or (surface == "launcher" and item_name in PACKAGED_NATIVE_LAUNCHERS)
+        or is_tunable_alias
     ):
         status = "done-native"
         reason = "native Rust crate or installed unit is already declared/packaged"
     else:
         status = "queued"
         reason = None
-    owner = f"fixture::{rel(path)}" if status == "queued" else f"native::{item_name}"
+    owner = (
+        f"fixture::{rel(path)}" if status in {"queued", "explicitly-not-ported"}
+        else "native::kyth-tunable-rs" if is_tunable_alias
+        else f"native::{item_name}"
+    )
     return {
         "path": rel(path),
         "surface": surface,
         "name": item_name,
         "resolved_target": rel(path.resolve()) if path.exists() else None,
         "current_implementation": kind,
-        "installed_implementation": "rust" if status == "done-native" else kind,
+        "installed_implementation": (
+            "rust" if status == "done-native" else
+            "not-installed" if status == "explicitly-not-ported" else kind
+        ),
         "status": status,
         "risk_tier": risk_for(item_name, kind, path),
         "priority": 0 if status != "queued" else 1,

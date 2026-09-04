@@ -321,6 +321,9 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-greeter-compositor /usr/bin
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-config-apply /usr/bin/kyth-config-apply
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0
+# Branding fragments retain the legacy fixtures for rollback; re-run the
+# native dispatcher last so every tunable alias points at Rust in the
+# installed image and cannot be overwritten by a later fragment.
 RUN --mount=type=bind,source=build_files,target=/ctx \
     --mount=type=bind,source=src/kyth-welcome,target=/ctx/kyth-welcome \
     --mount=type=bind,source=src/kyth-installer,target=/ctx/kyth-installer \
@@ -336,4 +339,5 @@ RUN --mount=type=bind,source=build_files,target=/ctx \
     fi && \
     SECUREBOOT_SIGNING_REQUESTED=${SECUREBOOT_SIGNING_REQUESTED} bash /ctx/scripts/secureboot.sh && \
     bash /ctx/scripts/branding.sh && \
+    bash /ctx/scripts/sysconfig/tunable/01-tunable-dispatcher.sh && \
     bash /ctx/scripts/plymouth-initramfs.sh
