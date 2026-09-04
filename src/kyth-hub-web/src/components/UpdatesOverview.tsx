@@ -19,6 +19,8 @@ import {
   type UpdateStatusLive,
 } from "../services/liveData";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
+import { hubAcceptanceMode, recordHubAcceptance } from "../services/acceptance";
+import { invoke } from "@tauri-apps/api/core";
 
 type UpdateReadings = {
   snapshot: BootcSnapshot | null;
@@ -86,6 +88,32 @@ export function UpdatesOverview() {
         setLoaded(true);
       }
     });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Exercise one read-only update probe and the native validation failure
+  // path in an installed-image run. The deliberately unknown operation can
+  // never reach the privileged socket or mutate the guest.
+  useEffect(() => {
+    let cancelled = false;
+    async function runAcceptanceProbes() {
+      if (!(await hubAcceptanceMode()) || cancelled) return;
+      try {
+        const availability = await fetchCollectAvailability(null, false);
+        if (!cancelled) {
+          void recordHubAcceptance("updates-probe", JSON.stringify({ state: availability ? "ok" : "degraded", check_state: availability?.state ?? null }));
+        }
+      } catch (error) {
+        if (!cancelled) void recordHubAcceptance("updates-probe", JSON.stringify({ state: "failed", detail: String(error) }));
+      }
+      try {
+        await invoke("privileged_action", { operation: "acceptance-not-allowlisted", payload: {} });
+        if (!cancelled) void recordHubAcceptance("privileged-failure", JSON.stringify({ state: "unexpected-success" }));
+      } catch (error) {
+        if (!cancelled) void recordHubAcceptance("privileged-failure", JSON.stringify({ state: "expected", detail: String(error) }));
+      }
+    }
+    void runAcceptanceProbes();
     return () => { cancelled = true; };
   }, []);
 

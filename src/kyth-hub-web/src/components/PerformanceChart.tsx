@@ -73,7 +73,7 @@ export function PerformanceChart() {
                 cursor={{ stroke: "var(--hairline-light)", strokeWidth: 1 }}
                 contentStyle={{ background: "var(--surface-raised)", border: "1px solid var(--hairline)", borderRadius: 10, fontSize: 12 }}
                 labelStyle={{ color: "var(--text-muted)" }}
-                formatter={(v: number) => [`${v} fps`, "Average"]}
+                formatter={(v) => [`${typeof v === "number" ? v : 0} fps`, "Average"]}
               />
               <Area type="monotone" dataKey="fps" stroke="url(#fpsStroke)" strokeWidth={2.5} fill="url(#fpsFill)" activeDot={{ r: 4, strokeWidth: 0, fill: "var(--accent-end)" }} />
             </AreaChart>

@@ -28,6 +28,10 @@ _UPDATE_ACCEPTANCE_PHASES = (
     "UPDATE_STAGED", "UPDATE_BOOTED", "UPDATE_SMOKE_OK", "ROLLBACK_STAGED",
     "ROLLBACK_BOOTED", "ROLLBACK_SMOKE_OK",
 )
+_HUB_ACCEPTANCE_PHASES = (
+    "HUB_BINARY_OK", "HUB_DEEP_LINKS_OK", "HUB_SECOND_LAUNCH_OK",
+    "HUB_DASHBOARD_DEGRADED_OK", "HUB_UPDATES_OK", "HUB_PRIVILEGED_FAILURE_OK",
+)
 
 
 @dataclass(frozen=True)
@@ -266,7 +270,7 @@ def acceptance_report(log: str, *, update_required: bool = False) -> Qualificati
         match = _ACCEPTANCE_LINE.match(line.strip())
         if match:
             events[match.group(1)] = match.group(2)
-    expected = _BASE_ACCEPTANCE_PHASES + (_UPDATE_ACCEPTANCE_PHASES if update_required else ())
+    expected = _BASE_ACCEPTANCE_PHASES + _HUB_ACCEPTANCE_PHASES + (_UPDATE_ACCEPTANCE_PHASES if update_required else ())
     checks = [
         QualificationCheck(
             name=phase.lower().replace("_", " "),

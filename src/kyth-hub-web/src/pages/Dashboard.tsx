@@ -3,6 +3,7 @@ import type { GuardianEvent } from "../data/dashboardTypes";
 import { GuardianHistoryCard } from "../components/GuardianHistoryCard";
 import { ActionButton } from "../components/SectionActions";
 import { useNavigate } from "react-router-dom";
+import { degradedDashboardAcceptance, recordHubAcceptance } from "../services/acceptance";
 import {
   fetchBootRuntimeChecks,
   fetchGpuName,
@@ -38,22 +39,41 @@ export function Dashboard() {
   const [userName, setUserName] = useState<string | null>(null);
   const [bootChecks, setBootChecks] = useState<BootRuntimeCheck[] | null>(null);
   const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [, setClock] = useState(() => Date.now());
 
   useEffect(() => {
     let cancelled = false;
-    const set = <T,>(setter: (v: T) => void) => (value: T) => {
-      if (!cancelled) setter(value);
-    };
-    fetchGuardianSnapshot().then(set(setGuardian));
-    fetchUpdateChannel().then(set(setUpdateChannel));
-    fetchGpuName().then(set(setGpuName));
-    fetchStorageFree().then(set(setStorageFree));
-    fetchUserName().then(set(setUserName));
-    fetchBootRuntimeChecks().then(set(setBootChecks));
-    fetchRecoveryStatus().then(set(setRecovery));
+    let forcedDegraded = false;
+    async function readDashboard() {
+      if (await degradedDashboardAcceptance()) {
+        forcedDegraded = true;
+        if (!cancelled) {
+          setLoaded(true);
+          void recordHubAcceptance("dashboard", JSON.stringify({ state: "degraded", label: "Status unavailable" }));
+        }
+        return;
+      }
+      const [nextGuardian, nextChannel, nextGpu, nextStorage, nextUser, nextBoot, nextRecovery] = await Promise.all([
+        fetchGuardianSnapshot(), fetchUpdateChannel(), fetchGpuName(), fetchStorageFree(),
+        fetchUserName(), fetchBootRuntimeChecks(), fetchRecoveryStatus(),
+      ]);
+      if (cancelled) return;
+      setGuardian(nextGuardian);
+      setUpdateChannel(nextChannel);
+      setGpuName(nextGpu);
+      setStorageFree(nextStorage);
+      setUserName(nextUser);
+      setBootChecks(nextBoot);
+      setRecovery(nextRecovery);
+      setLoaded(true);
+      const hasInitialReadings = nextGuardian !== null || nextBoot !== null || nextRecovery !== null || nextChannel !== null || nextGpu !== null || nextStorage !== null;
+      void recordHubAcceptance("dashboard", JSON.stringify({ state: hasInitialReadings ? "live" : "degraded", label: hasInitialReadings ? "System at a glance" : "Status unavailable" }));
+    }
+    void readDashboard();
     const refresh = window.setInterval(() => {
-      fetchGuardianSnapshot().then(set(setGuardian));
+      if (forcedDegraded) return;
+      fetchGuardianSnapshot().then((value) => { if (!cancelled) setGuardian(value); });
       setClock(Date.now());
     }, 60_000);
     const clock = window.setInterval(() => setClock(Date.now()), 30_000);
@@ -98,23 +118,25 @@ export function Dashboard() {
   const guardianGood = guardian === null ? null : guardian.pendingCount === 0;
   const recoveryGood = recovery === null ? null : !recovery.quarantined_digest;
   const recoverySafeguards = recovery === null ? null : Number(recovery.has_rollback) + Number(!recovery.quarantined_digest);
-  const healthLabel = bootChecks === null ? "Checking…" : totalChecks === 0 ? "Not reported" : `${passedChecks}/${totalChecks} passing`;
-  const healthDetail = bootChecks === null ? "Boot runtime checks are being read." : healthGood ? "All boot checks are passing." : "Review the checks that need attention.";
-  const recoveryLabel = recovery === null ? "Checking…" : recovery.quarantined_digest ? "Review needed" : recovery.has_rollback ? "Rollback ready" : "Protected";
-  const recoveryDetail = recovery === null ? "Recovery safeguards are being read." : `${recoverySafeguards} of 2 safeguards ready · ${recovery.has_rollback ? "a previous deployment is available" : "no rollback recorded"}.`;
-  const guardianLabel = guardian === null ? "Checking…" : guardian.pendingCount === 0 ? "Healthy" : `${guardian.pendingCount} issue${guardian.pendingCount === 1 ? "" : "s"}`;
-  const guardianDetail = guardian === null ? "Guardian is checking the device." : guardian.pendingCount === 0 ? "No recommendations are waiting." : "Open Guardian to review recommendations.";
+  const healthLabel = !loaded ? "Checking…" : bootChecks === null ? "Unavailable" : totalChecks === 0 ? "Not reported" : `${passedChecks}/${totalChecks} passing`;
+  const healthDetail = !loaded ? "Boot runtime checks are being read." : bootChecks === null ? "Boot health data is unavailable; open Diagnostics for recovery guidance." : healthGood ? "All boot checks are passing." : "Review the checks that need attention.";
+  const recoveryLabel = !loaded ? "Checking…" : recovery === null ? "Unavailable" : recovery.quarantined_digest ? "Review needed" : recovery.has_rollback ? "Rollback ready" : "Protected";
+  const recoveryDetail = !loaded ? "Recovery safeguards are being read." : recovery === null ? "Recovery data is unavailable." : `${recoverySafeguards} of 2 safeguards ready · ${recovery.has_rollback ? "a previous deployment is available" : "no rollback recorded"}.`;
+  const guardianLabel = !loaded ? "Checking…" : guardian === null ? "Unavailable" : guardian.pendingCount === 0 ? "Healthy" : `${guardian.pendingCount} issue${guardian.pendingCount === 1 ? "" : "s"}`;
+  const guardianDetail = !loaded ? "Guardian is checking the device." : guardian === null ? "Guardian data is unavailable; open This PC to retry." : guardian.pendingCount === 0 ? "No recommendations are waiting." : "Open Guardian to review recommendations.";
+  const dashboardLabel = loaded && !hasReadings ? "Status unavailable" : loaded ? "System at a glance" : "Checking system";
+  const dashboardDetail = loaded && !hasReadings ? "Live system data is unavailable. The Hub is still usable for navigation and local recovery guidance." : "Health, recovery, updates, and device status in one place.";
 
   return (
     <div className="home-page">
       <section className="home-overview" aria-label="Home overview">
-        <div className={`home-hero ${hasReadings ? "home-hero-live" : "home-hero-muted"}`}><div><span className="home-eyebrow">KythOS command center</span><h1>Welcome back{userName ? `, ${userName}` : ""}</h1><p>Health, recovery, updates, and device status in one place.</p></div><div className="home-ready-chip"><span />{guardianGood === false || healthGood === false ? "Needs attention" : hasReadings ? "System at a glance" : "Checking system"}</div></div>
+        <div className={`home-hero ${hasReadings ? "home-hero-live" : "home-hero-muted"}`}><div><span className="home-eyebrow">KythOS command center</span><h1>Welcome back{userName ? `, ${userName}` : ""}</h1><p>{dashboardDetail}</p></div><div className="home-ready-chip"><span />{guardianGood === false || healthGood === false ? "Needs attention" : dashboardLabel}</div></div>
         <div className="home-card-grid">
           <HomeCard icon="✓" label="Guardian" value={guardianLabel} detail={guardianDetail} good={guardianGood} pendingLabel="PENDING" />
           <HomeCard icon="⌁" label="Boot health" value={healthLabel} detail={healthDetail} good={healthGood} pendingLabel="PENDING" pendingNote={bootChecks ? "Boot checks were reported." : "Boot checks are still pending."} />
           <HomeCard icon="↶" label="Recovery" value={recoveryLabel} detail={recoveryDetail} good={recoveryGood} pendingLabel="PENDING" meterValue={recoverySafeguards} />
-          <HomeCard icon="◈" label="Update channel" value={updateChannel ?? "Checking…"} detail="The release stream this device follows." good={updateChannel === null ? null : true} pendingLabel="PENDING" />
-          <HomeCard icon="▣" label="Storage & graphics" value={storageFree ?? "Checking…"} detail={`${gpuName ?? "Graphics not identified"} · hardware summary`} good={storageFree === null && gpuName === null ? null : true} />
+          <HomeCard icon="◈" label="Update channel" value={!loaded ? "Checking…" : updateChannel ?? "Unavailable"} detail="The release stream this device follows." good={!loaded || updateChannel === null ? null : true} pendingLabel="PENDING" />
+          <HomeCard icon="▣" label="Storage & graphics" value={!loaded ? "Checking…" : storageFree ?? gpuName ?? "Unavailable"} detail={`${gpuName ?? (loaded ? "Hardware data unavailable" : "Graphics not identified")} · hardware summary`} good={!loaded || (storageFree === null && gpuName === null) ? null : true} />
         </div>
         <div className="home-actions-card"><div><span className="home-eyebrow">System actions</span><h2>Keep this device healthy</h2><p>Open the system tools you need without leaving the Home overview.</p></div><div className="home-actions"><ActionButton label="Run health check" onClick={() => navigate("/this-pc?section=Guardian")} /><ActionButton label="Check updates" onClick={() => navigate("/updates")} /><ActionButton label="Open Repair" onClick={() => navigate("/this-pc?section=Repair")} /><ActionButton label="Open Hardware" onClick={() => navigate("/this-pc?section=Hardware")} /></div></div>
       </section>

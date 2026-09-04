@@ -99,6 +99,7 @@ class HubWebDeepLinkTests(unittest.TestCase):
     def test_shipped_desktop_files_page_keys_resolve(self):
         emitted = set(_PAGE_ARG_RE.findall(CTX_INSTALLS_SH))
         self.assertIn("App Store", emitted, "context-menu installer entry lost its --page key")
+        self.assertIn("/usr/share/kyth/hubRoutes.json", CTX_INSTALLS_SH)
         self.assertEqual(sorted(emitted - _resolvable_keys()), [])
 
     def test_destinations_cover_the_full_pulse_rail(self):

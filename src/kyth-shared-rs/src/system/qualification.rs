@@ -208,8 +208,9 @@ pub fn acceptance_report(log: &str, update_required: bool, generated_at: impl In
         if let Some(captures) = sentinel.captures(line.trim()) { events.insert(captures[1].to_string(), captures[2].to_string()); }
     }
     let base = ["LIVE_READY", "LIVE_SMOKE_OK", "INSTALL_COMPLETE", "INSTALLED_READY", "INSTALLED_SMOKE_OK", "COMPLETE"];
+    let hub = ["HUB_BINARY_OK", "HUB_DEEP_LINKS_OK", "HUB_SECOND_LAUNCH_OK", "HUB_DASHBOARD_DEGRADED_OK", "HUB_UPDATES_OK", "HUB_PRIVILEGED_FAILURE_OK"];
     let update = ["UPDATE_STAGED", "UPDATE_BOOTED", "UPDATE_SMOKE_OK", "ROLLBACK_STAGED", "ROLLBACK_BOOTED", "ROLLBACK_SMOKE_OK"];
-    let phases = base.into_iter().chain(update.into_iter().filter(|_| update_required));
+    let phases = base.into_iter().chain(hub).chain(update.into_iter().filter(|_| update_required));
     let checks = phases.map(|phase| QualificationCheck {
         name: phase.to_ascii_lowercase().replace('_', " "),
         status: if events.contains_key(phase) { "pass" } else { "fail" }.into(),
@@ -243,7 +244,7 @@ mod tests {
     fn parses_acceptance_sentinels_and_update_phases() {
         let report = acceptance_report("KYTH_ACCEPTANCE:LIVE_READY:fedora\nKYTH_ACCEPTANCE:INSTALL_COMPLETE:sha256:x\n", true, "now");
         assert_eq!(report.identity["installed_image"], "sha256:x");
-        assert_eq!(report.checks.iter().filter(|check| check.status == "fail").count(), 10);
+        assert_eq!(report.checks.iter().filter(|check| check.status == "fail").count(), 16);
         assert_eq!(report.overall(), "fail");
     }
 

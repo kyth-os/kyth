@@ -101,16 +101,19 @@ against the user-owned Kyth configuration, runs the same remote-to-local
 `rclone sync` direction as the Python workflow, and returns captured output to
 the Hub. OAuth setup and schedules remain in the existing full workflow.
 
-### 10. Freshness and acceptance coverage — IN PROGRESS
+### 10. Freshness and acceptance coverage — INSTALLED-IMAGE GATE
 Home Guardian activity is limited to the last 24 hours, refreshes on a short
 heartbeat, and always includes pending recommendations so an old alert cannot
 remain an unexplained "confirmation required" row. Both Home and This PC use
 expandable activity rows with confirm/run and dismiss paths. Contract/build/
-smoke tests cover the native bridge; final installed-image acceptance still
-needs a real KythOS image with WebKitGTK, services, and representative
-network/update state.
-Strict service ownership is code-complete for the listed service authorities;
-installed-image acceptance and the post-cutover observation window remain open.
+Contract/build/smoke tests cover the native bridge, and the VM guest now boots
+the installed Rust/Tauri shell to check its binary, every manifest-derived
+`--page` route, single-instance forwarding, degraded Home state, Updates
+probe, and an allowlist rejection. The guest emits these checks into the
+existing `qualification.json` and `qualification.md` artifacts. A real
+testing ISO run with WebKitGTK, services, and representative network/update
+state remains the release gate; the post-cutover observation window remains
+open until that run passes.
 
 ## Remaining work
 

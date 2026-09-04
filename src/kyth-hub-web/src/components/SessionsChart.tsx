@@ -63,7 +63,10 @@ export function SessionsChart() {
                 cursor={{ fill: "var(--hairline)" }}
                 contentStyle={{ background: "var(--surface-raised)", border: "1px solid var(--hairline)", borderRadius: 10, fontSize: 12 }}
                 labelStyle={{ color: "var(--text-muted)" }}
-                formatter={(v: number) => [`${v} session${v === 1 ? "" : "s"}`, ""]}
+                formatter={(v) => {
+                  const count = typeof v === "number" ? v : 0;
+                  return [`${count} session${count === 1 ? "" : "s"}`, ""];
+                }}
               />
               <Bar dataKey="sessions" fill="url(#sessionsFill)" radius={[6, 6, 0, 0]} maxBarSize={28} />
             </BarChart>

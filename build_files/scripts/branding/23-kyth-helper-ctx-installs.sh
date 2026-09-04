@@ -56,6 +56,11 @@ install -m 0644 "${_welcome_src}/kyth-welcome.desktop" \
 /usr/bin/kyth-hub-desktop-entries \
 	/src/kyth-hub-web/src/data/hubRoutes.json \
 	/usr/share/applications/kyth-hub
+# Keep the same route manifest available to installed-image acceptance. The
+# frontend remains the runtime authority; this copy only lets the guest derive
+# the complete --page matrix without duplicating page names in the harness.
+install -Dm0644 /src/kyth-hub-web/src/data/hubRoutes.json \
+	/usr/share/kyth/hubRoutes.json
 
 unset _welcome_src _installer_src installer_package_dir
 write_config /usr/share/applications/kyth-app-store.desktop <<'APPSTOREEOF'

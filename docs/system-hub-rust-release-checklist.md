@@ -67,7 +67,8 @@ image/runtime checkboxes remain visibly unchecked.
 ## Python retirement gate
 
 For this YOLO cutover, the Python Hub UI package is no longer installed in the
-normal image even though installed-image acceptance is waived. The remaining
+normal image. Installed-image acceptance is now exercised by the VM guest;
+the exact ISO run remains a release gate. The remaining
 Python pieces are transitional authorities or source artifacts:
 
 - `kyth-guardian` now owns the extended deterministic sweep and a bounded,
@@ -203,8 +204,8 @@ git diff --check                                      # pass
 
 The environment does not provide `cargo fmt`/`rustfmt`; formatting was
 therefore not independently run. The exact-image security review and rollback
-drill remain unchecked because installed-image acceptance is waived for this
-YOLO cutover.
+drill remain unchecked until the new installed-image acceptance run has passed
+on the testing ISO.
 
 `npm run tauri:build` compiled the optimized `kyth-hub-shell` application and
 loaded the capability configuration, but final AppImage bundling was blocked by

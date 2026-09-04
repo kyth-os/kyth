@@ -3,10 +3,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import pwd
 import re
+import signal
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import quote
 
 from kyth_shared.commands import run, run_text
 
@@ -19,6 +23,9 @@ SERIAL_DEVICE = Path("/dev/ttyS0")
 LOG_FILE = Path("/var/log/kyth-vm-acceptance.log")
 TARGET_BY_ID = Path("/dev/disk/by-id/virtio-KYTH_ACCEPT")
 INSTALLER_ENV_FILE = Path("/etc/kyth-installer.env")
+HUB_BINARY = Path("/usr/bin/kyth-hub-shell")
+HUB_ROUTE_MANIFEST = Path("/usr/share/kyth/hubRoutes.json")
+HUB_ACCEPTANCE_TIMEOUT = 45
 UPDATE_REF_PATTERN = re.compile(r"^[A-Za-z0-9._/@:+-]+$")
 
 
@@ -202,6 +209,202 @@ def _logged(command: list[str], error: str) -> None:
         fail(error)
 
 
+def _active_graphical_session() -> tuple[str, dict[str, str]] | None:
+    """Return the active desktop user and the minimal environment it needs."""
+    active = run_text(["loginctl", "show-seat", "seat0", "-p", "ActiveSession", "--value"], timeout=5)
+    session = active.stdout.strip() if active and active.returncode == 0 else ""
+    if not session:
+        return None
+    owner = run_text(["loginctl", "show-session", session, "-p", "Name", "--value"], timeout=5)
+    username = owner.stdout.strip() if owner and owner.returncode == 0 else ""
+    if not username:
+        return None
+    try:
+        account = pwd.getpwnam(username)
+    except KeyError:
+        return None
+    runtime = Path(f"/run/user/{account.pw_uid}")
+    wayland = next(iter(sorted(runtime.glob("wayland-*"))), None)
+    x11 = next(iter(sorted(Path("/tmp/.X11-unix").glob("X*"))), None)
+    environment = {
+        "HOME": account.pw_dir,
+        "LOGNAME": username,
+        "USER": username,
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "XDG_RUNTIME_DIR": str(runtime),
+        "XDG_CURRENT_DESKTOP": "KDE",
+        "XDG_SESSION_TYPE": "wayland" if wayland else "x11" if x11 else "",
+        "DBUS_SESSION_BUS_ADDRESS": f"unix:path={runtime}/bus",
+    }
+    if wayland:
+        environment["WAYLAND_DISPLAY"] = wayland.name
+    if x11:
+        environment["DISPLAY"] = f":{x11.name.removeprefix('X')}"
+    xauthority = Path(account.pw_dir) / ".Xauthority"
+    if xauthority.is_file():
+        environment["XAUTHORITY"] = str(xauthority)
+    return username, environment
+
+
+def _hub_pages() -> tuple[tuple[str, str], ...]:
+    try:
+        manifest = json.loads(HUB_ROUTE_MANIFEST.read_text(encoding="utf-8"))
+        pages: list[tuple[str, str]] = [("Welcome", "/")]
+        for destination in manifest["destinations"]:
+            route = str(destination["route"])
+            key = str(destination["key"])
+            pages.append((key, route))
+            pages.extend(
+                (str(section["key"]), f"{route}?section={quote(str(section['key']), safe='')}" )
+                for section in destination["sections"]
+            )
+        if len({key for key, _ in pages}) != len(pages):
+            raise ValueError("Hub route manifest contains duplicate page keys")
+        return tuple(pages)
+    except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        fail(f"Hub route manifest could not be read: {exc}")
+    return ()
+
+
+def _hub_start(username: str, environment: dict[str, str], page: str, evidence: Path, *, degraded: bool = False) -> subprocess.Popen[bytes]:
+    values = dict(environment)
+    values["KYTH_HUB_ACCEPTANCE_FILE"] = str(evidence)
+    if degraded:
+        values["KYTH_HUB_ACCEPTANCE_DEGRADED"] = "1"
+    command = [
+        "runuser", "-u", username, "--", "env",
+        *(f"{key}={value}" for key, value in values.items() if value),
+        str(HUB_BINARY), "--page", page,
+    ]
+    stream = evidence.with_suffix(".process.log").open("ab")
+    try:
+        return subprocess.Popen(command, stdout=stream, stderr=subprocess.STDOUT, start_new_session=True)
+    finally:
+        stream.close()
+
+
+def _hub_stop(process: subprocess.Popen[bytes]) -> None:
+    if process.poll() is not None:
+        return
+    try:
+        os.killpg(process.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+    try:
+        process.wait(timeout=8)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.wait(timeout=8)
+
+
+def _hub_event(evidence: Path, event: str) -> dict[str, object] | None:
+    prefix = f"KYTH_HUB_ACCEPTANCE:{event}:"
+    try:
+        lines = evidence.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    for line in reversed(lines):
+        if line.startswith(prefix):
+            try:
+                value = json.loads(line.removeprefix(prefix))
+            except json.JSONDecodeError:
+                return None
+            return value if isinstance(value, dict) else None
+    return None
+
+
+def _wait_hub_event(evidence: Path, event: str, *, timeout: int = HUB_ACCEPTANCE_TIMEOUT) -> dict[str, object] | None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        value = _hub_event(evidence, event)
+        if value is not None:
+            return value
+        time.sleep(0.5)
+    return None
+
+
+def _hub_launch_check(username: str, environment: dict[str, str], page: str, expected_route: str, evidence: Path) -> bool:
+    evidence.unlink(missing_ok=True)
+    try:
+        process = _hub_start(username, environment, page, evidence)
+    except OSError:
+        return False
+    try:
+        event = _wait_hub_event(evidence, "deep-link")
+        return bool(
+            event
+            and event.get("page") == page
+            and event.get("route") == expected_route
+            and event.get("source") == "initial"
+        )
+    finally:
+        _hub_stop(process)
+
+
+def run_hub_acceptance() -> None:
+    """Exercise the installed Rust/Tauri shell from the installed desktop."""
+    if not HUB_BINARY.is_file() or not os.access(HUB_BINARY, os.X_OK):
+        fail(f"installed Rust/Tauri Hub binary is missing or not executable: {HUB_BINARY}")
+    session = _active_graphical_session()
+    if session is None:
+        fail("active graphical session for installed Hub acceptance was not found")
+    username, environment = session
+    evidence = Path(f"/tmp/kyth-hub-acceptance-{os.getuid()}.log")
+    emit("HUB_BINARY_OK", str(HUB_BINARY))
+
+    pages = _hub_pages()
+    for page, route in pages:
+        if not _hub_launch_check(username, environment, page, route, evidence):
+            fail(f"Hub --page deep link failed for {page!r}")
+    emit(
+        "HUB_DEEP_LINKS_OK",
+        "; ".join(f"{page}={route}" for page, route in pages),
+    )
+
+    evidence.unlink(missing_ok=True)
+    first = _hub_start(username, environment, "Welcome", evidence)
+    try:
+        if _wait_hub_event(evidence, "deep-link") is None:
+            fail("Hub first launch did not resolve Welcome")
+        second = _hub_start(username, environment, "Updates", evidence)
+        try:
+            forwarded = _wait_hub_event(evidence, "deep-link")
+            if not forwarded or forwarded.get("page") != "Updates" or forwarded.get("source") != "single-instance":
+                fail("Hub second launch did not forward the Updates page")
+        finally:
+            _hub_stop(second)
+    finally:
+        _hub_stop(first)
+    emit("HUB_SECOND_LAUNCH_OK", "Updates forwarded to the existing Hub process")
+
+    evidence.unlink(missing_ok=True)
+    degraded = _hub_start(username, environment, "Welcome", evidence, degraded=True)
+    try:
+        dashboard = _wait_hub_event(evidence, "dashboard")
+        if not dashboard or dashboard.get("state") != "degraded" or dashboard.get("label") != "Status unavailable":
+            fail("Hub dashboard did not report its unavailable-data state honestly")
+    finally:
+        _hub_stop(degraded)
+    emit("HUB_DASHBOARD_DEGRADED_OK", "Status unavailable")
+
+    evidence.unlink(missing_ok=True)
+    updates = _hub_start(username, environment, "Updates", evidence)
+    try:
+        update_probe = _wait_hub_event(evidence, "updates-probe")
+        privilege_probe = _wait_hub_event(evidence, "privileged-failure")
+        if not update_probe or update_probe.get("state") not in {"ok", "degraded"}:
+            fail("Hub Updates page did not report a usable or degraded probe result")
+        if not privilege_probe or privilege_probe.get("state") != "expected":
+            fail("Hub privileged-action failure was not surfaced as an expected failure")
+    finally:
+        _hub_stop(updates)
+    emit("HUB_UPDATES_OK", str(update_probe.get("state", "unknown")))
+    emit("HUB_PRIVILEGED_FAILURE_OK", "allowlist rejection surfaced")
+
+
 def run_installed_lifecycle() -> None:
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     state = _state_value()
@@ -213,6 +416,7 @@ def run_installed_lifecycle() -> None:
     if state == "fresh":
         emit("INSTALLED_READY", "display-manager-active")
         run_smoke_check("INSTALLED")
+        run_hub_acceptance()
         initial = booted_digest()
         if not initial:
             fail("could not read initial booted digest")

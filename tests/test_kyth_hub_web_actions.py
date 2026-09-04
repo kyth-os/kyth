@@ -57,6 +57,9 @@ UNWRAPPED_COMMANDS = {
     "strip_ansi": "text helper, no section renders raw command output",
     "disk_write_bytes": "installer progress helper, no Hub surface",
     "amd64_manifest_entry": "registry parsing detail behind collect_availability",
+    "acceptance_record": "installed-image evidence channel used by deepLink.ts and acceptance probes",
+    "acceptance_mode": "installed-image evidence channel used by acceptance probes",
+    "acceptance_degraded_dashboard": "installed-image degraded-state fixture used by Dashboard.tsx",
 }
 
 

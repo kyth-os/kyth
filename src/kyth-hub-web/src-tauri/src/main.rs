@@ -1191,6 +1191,50 @@ fn take_pending_page(state: tauri::State<PendingPage>) -> Option<String> {
     state.0.lock().unwrap().take()
 }
 
+/// Append a small, opt-in record for the installed-image acceptance guest.
+/// The command is inert on normal launches: the guest supplies the file path
+/// through the environment and only then does the shell write evidence. Keep
+/// the path constrained to /tmp because this is test telemetry, not a general
+/// filesystem-write bridge.
+#[tauri::command]
+fn acceptance_record(event: String, detail: String) -> Result<(), String> {
+    let Some(path) = std::env::var_os("KYTH_HUB_ACCEPTANCE_FILE") else {
+        return Err("Hub acceptance telemetry is disabled".into());
+    };
+    let path = PathBuf::from(path);
+    if !path.starts_with("/tmp/") {
+        return Err("Hub acceptance telemetry path is outside /tmp".into());
+    }
+    if event.is_empty()
+        || event.len() > 64
+        || !event.bytes().all(|byte| byte.is_ascii_lowercase() || byte == b'-')
+    {
+        return Err("invalid Hub acceptance event".into());
+    }
+    let detail = detail.replace(['\n', '\r'], " ");
+    if detail.len() > 4096 {
+        return Err("Hub acceptance detail is too long".into());
+    }
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .open(path)
+        .map_err(|error| format!("could not write Hub acceptance evidence: {error}"))?;
+    writeln!(file, "KYTH_HUB_ACCEPTANCE:{event}:{detail}")
+        .map_err(|error| format!("could not flush Hub acceptance evidence: {error}"))
+}
+
+#[tauri::command]
+fn acceptance_mode() -> bool {
+    std::env::var("KYTH_HUB_ACCEPTANCE_FILE").is_ok()
+}
+
+#[tauri::command]
+fn acceptance_degraded_dashboard() -> bool {
+    acceptance_mode() && std::env::var("KYTH_HUB_ACCEPTANCE_DEGRADED").as_deref() == Ok("1")
+}
+
 fn main() {
     let initial_page = extract_page_arg(&std::env::args().collect::<Vec<_>>());
 
@@ -1220,6 +1264,9 @@ fn main() {
             guardian_control,
             commands::privilege::privileged_action,
             commands::privilege::privileged_action_status,
+            acceptance_record,
+            acceptance_mode,
+            acceptance_degraded_dashboard,
             commands::dashboard::hardware_snapshot,
             commands::dashboard::storage_snapshot,
             telemetry_recent,

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { inTauriShell } from "./services/tauriEnv";
+import { recordHubAcceptance } from "./services/acceptance";
 import { DESTINATIONS } from "./data/destinations";
 
 // Builds the page-key route table from the shared manifest. Kept on the TS
@@ -45,10 +46,12 @@ export function routeForPage(page: string): string {
   return "/";
 }
 
-function navigateToPage(page: string): void {
+function navigateToPage(page: string, source: "initial" | "single-instance"): void {
   // HashRouter, not history-API routing (see main.tsx) — this is the
   // entire deep-link contract with the shell: one string, one convention.
-  window.location.hash = routeForPage(page);
+  const route = routeForPage(page);
+  window.location.hash = route;
+  void recordHubAcceptance("deep-link", JSON.stringify({ page: page.trim(), route, source }));
 }
 
 /** Call once from main.tsx before the first render settles. Handles both
@@ -61,7 +64,7 @@ export async function installDeepLinkHandling(): Promise<void> {
   if (!inTauriShell()) return;
 
   const pending = await invoke<string | null>("take_pending_page");
-  if (pending) navigateToPage(pending);
+  if (pending) navigateToPage(pending, "initial");
 
-  await listen<string>("navigate", (event) => navigateToPage(event.payload));
+  await listen<string>("navigate", (event) => navigateToPage(event.payload, "single-instance"));
 }

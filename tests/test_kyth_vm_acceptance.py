@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import json
 import subprocess
 import sys
 import tempfile
@@ -33,7 +34,10 @@ class VmAcceptanceTests(unittest.TestCase):
         for phase in (
             "LIVE_READY", "INSTALL_COMPLETE", "INSTALLED_READY",
             "UPDATE_STAGED", "UPDATE_BOOTED", "ROLLBACK_STAGED",
-            "ROLLBACK_BOOTED", "COMPLETE", "FAILED",
+            "ROLLBACK_BOOTED", "COMPLETE", "FAILED", "HUB_BINARY_OK",
+            "HUB_DEEP_LINKS_OK", "HUB_SECOND_LAUNCH_OK",
+            "HUB_DASHBOARD_DEGRADED_OK", "HUB_UPDATES_OK",
+            "HUB_PRIVILEGED_FAILURE_OK",
         ):
             self.assertIn(phase, text)
         self.assertIn("oci:/usr/share/kyth/image:latest", text)
@@ -72,6 +76,15 @@ class VmAcceptanceTests(unittest.TestCase):
         self.assertIn("qualification.json", text)
         self.assertIn("qualification.md", text)
 
+    def test_installed_hub_acceptance_matrix_is_required(self):
+        text = pathlib.Path(vm_acceptance.__file__).read_text(encoding="utf-8")
+        for marker in (
+            "kyth-hub-shell", "hubRoutes.json", "HUB_DEEP_LINKS_OK",
+            "HUB_SECOND_LAUNCH_OK", "HUB_DASHBOARD_DEGRADED_OK",
+            "HUB_UPDATES_OK", "HUB_PRIVILEGED_FAILURE_OK", "KYTH_HUB_ACCEPTANCE_FILE",
+        ):
+            self.assertIn(marker, text)
+
 
 class ReadFwCfgTests(unittest.TestCase):
     def test_missing_file_returns_empty_string(self):
@@ -100,6 +113,74 @@ class ReadFwCfgTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             with mock.patch("kyth_shared.vm_acceptance.ENABLE_FILE", pathlib.Path(tmp) / "absent"):
                 self.assertFalse(vm_acceptance.enabled())
+
+
+class HubAcceptanceHelpersTests(unittest.TestCase):
+    def test_hub_pages_expands_destinations_and_sections_from_manifest(self):
+        manifest = {
+            "destinations": [{
+                "key": "Move In",
+                "route": "/move-in",
+                "sections": [{"key": "Network Shares"}],
+            }],
+        }
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "hubRoutes.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            with mock.patch("kyth_shared.vm_acceptance.HUB_ROUTE_MANIFEST", path):
+                self.assertEqual(
+                    vm_acceptance._hub_pages(),
+                    (("Welcome", "/"), ("Move In", "/move-in"), ("Network Shares", "/move-in?section=Network%20Shares")),
+                )
+
+    def test_hub_event_requires_json_object_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = pathlib.Path(tmp) / "hub.log"
+            evidence.write_text(
+                "KYTH_HUB_ACCEPTANCE:deep-link:{\"page\":\"Updates\",\"route\":\"/updates\"}\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(
+                vm_acceptance._hub_event(evidence, "deep-link"),
+                {"page": "Updates", "route": "/updates"},
+            )
+            evidence.write_text("KYTH_HUB_ACCEPTANCE:deep-link:[1]\n", encoding="utf-8")
+            self.assertIsNone(vm_acceptance._hub_event(evidence, "deep-link"))
+
+    def test_hub_acceptance_emits_all_qualification_phases(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            binary = pathlib.Path(tmp) / "kyth-hub-shell"
+            binary.write_bytes(b"hub")
+            binary.chmod(0o755)
+            evidence = pathlib.Path(f"/tmp/kyth-hub-acceptance-{999991}.log")
+            evidence.unlink(missing_ok=True)
+            starts = [mock.Mock() for _ in range(4)]
+            for process in starts:
+                process.poll.return_value = 0
+            events = [
+                {"page": "Welcome", "source": "initial"},
+                {"page": "Updates", "source": "single-instance"},
+                {"state": "degraded", "label": "Status unavailable"},
+                {"state": "degraded"},
+                {"state": "expected"},
+            ]
+            with mock.patch("kyth_shared.vm_acceptance.HUB_BINARY", binary), \
+                 mock.patch("kyth_shared.vm_acceptance._active_graphical_session", return_value=("tester", {"HOME": "/tmp"})), \
+                 mock.patch("kyth_shared.vm_acceptance._hub_pages", return_value=(("Welcome", "/"),)), \
+                 mock.patch("kyth_shared.vm_acceptance._hub_launch_check", return_value=True), \
+                 mock.patch("kyth_shared.vm_acceptance._hub_start", side_effect=starts), \
+                 mock.patch("kyth_shared.vm_acceptance._wait_hub_event", side_effect=events), \
+                 mock.patch("kyth_shared.vm_acceptance._hub_stop"), \
+                 mock.patch("kyth_shared.vm_acceptance.emit") as emit:
+                vm_acceptance.run_hub_acceptance()
+            self.assertEqual(
+                [entry.args[0] for entry in emit.call_args_list],
+                [
+                    "HUB_BINARY_OK", "HUB_DEEP_LINKS_OK", "HUB_SECOND_LAUNCH_OK",
+                    "HUB_DASHBOARD_DEGRADED_OK", "HUB_UPDATES_OK", "HUB_PRIVILEGED_FAILURE_OK",
+                ],
+            )
+            evidence.unlink(missing_ok=True)
 
 
 class EmitAndPowerTests(unittest.TestCase):
@@ -372,6 +453,7 @@ class RunInstalledLifecycleTests(unittest.TestCase):
                  mock.patch("kyth_shared.vm_acceptance.read_update_ref", return_value=""), \
                  mock.patch("kyth_shared.vm_acceptance.wait_for_desktop", return_value=True), \
                  mock.patch("kyth_shared.vm_acceptance.run_smoke_check") as mock_smoke, \
+                 mock.patch("kyth_shared.vm_acceptance.run_hub_acceptance"), \
                  mock.patch("kyth_shared.vm_acceptance.booted_digest", return_value="sha256:aaa"), \
                  mock.patch("kyth_shared.vm_acceptance.power") as mock_power:
                 vm_acceptance.run_installed_lifecycle()
@@ -392,6 +474,7 @@ class RunInstalledLifecycleTests(unittest.TestCase):
                  ), \
                  mock.patch("kyth_shared.vm_acceptance.wait_for_desktop", return_value=True), \
                  mock.patch("kyth_shared.vm_acceptance.run_smoke_check"), \
+                 mock.patch("kyth_shared.vm_acceptance.run_hub_acceptance"), \
                  mock.patch("kyth_shared.vm_acceptance.booted_digest", return_value="sha256:aaa"), \
                  mock.patch("kyth_shared.vm_acceptance._logged") as mock_logged, \
                  mock.patch("kyth_shared.vm_acceptance.power") as mock_power:
