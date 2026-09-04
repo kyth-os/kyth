@@ -135,6 +135,15 @@ class PythonPackagingTests(unittest.TestCase):
                 self.assertIn(f"/build/{entry_point} /usr/bin/{entry_point}", dockerfile)
                 self.assertFalse((ROOT / "build_files" / entry_point).exists())
 
+        helper_copy = next(
+            line
+            for line in dockerfile.splitlines()
+            if line.startswith("COPY build_files/kyth-vscode-wallet ")
+        )
+        for entry_point in entry_points:
+            with self.subTest(host_copy_entry_point=entry_point):
+                self.assertNotIn(f"build_files/{entry_point}", helper_copy)
+
     def test_tunable_dispatcher_uses_native_subset_before_static_sysconfig(self):
         dockerfile = (ROOT / "Dockerfile").read_text()
         cargo = (ROOT / "src/kyth-shared-rs/Cargo.toml").read_text()
