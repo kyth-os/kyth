@@ -15,6 +15,8 @@ sys.path.insert(0, str(ROOT / "src" / "kyth_shared"))
 sys.path.insert(0, str(ROOT / "src" / "kyth-installer"))
 
 from kyth_installer.executor import ExecutorCommand, PrivilegedExecutor  # noqa: E402
+from kyth_installer.context import InstallerContext, InstallPhase  # noqa: E402
+from kyth_installer import execution  # noqa: E402
 
 
 class InstallerExecutorTests(unittest.TestCase):
@@ -95,6 +97,35 @@ class InstallerExecutorTests(unittest.TestCase):
             timeout=30,
             description="inspect browser",
         )
+
+    def test_native_cancel_decisions_cover_rejection_and_non_cancel(self):
+        context = InstallerContext()
+        with mock.patch("kyth_installer.orchestration.decision", return_value={"accepted": False}):
+            self.assertFalse(execution.request_cancel(context))
+        with mock.patch("kyth_installer.orchestration.decision", return_value={"cancelled": False}):
+            execution.check_cancelled(context)
+
+    def test_native_cancel_decision_requires_a_message(self):
+        context = InstallerContext()
+        context.phase = InstallPhase.PREPARE
+        with mock.patch("kyth_installer.orchestration.decision", return_value={"cancelled": True}):
+            with self.assertRaisesRegex(RuntimeError, "malformed"):
+                execution.check_cancelled(context)
+
+    def test_native_cancel_decision_can_cancel(self):
+        context = InstallerContext()
+        with mock.patch(
+            "kyth_installer.orchestration.decision",
+            return_value={"cancelled": True, "cancel_message": "native cancellation"},
+        ):
+            with self.assertRaises(execution.InstallCancelled):
+                execution.check_cancelled(context)
+
+    def test_native_cancel_decision_accepts_a_running_install(self):
+        context = InstallerContext()
+        with mock.patch("kyth_installer.orchestration.decision", return_value={"accepted": True}):
+            self.assertTrue(execution.request_cancel(context))
+        self.assertTrue(context.cancel_requested.is_set())
 
 
 if __name__ == "__main__":

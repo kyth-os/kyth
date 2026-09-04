@@ -95,6 +95,22 @@ class PostRouteCoverageTests(unittest.TestCase):
         payload = json.loads(run.call_args.kwargs["input"])
         self.assertEqual(payload["usb_mount"], str(mount))
 
+    def test_rescue_logs_native_export_rejects_malformed_or_failed_responses(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            mount = Path(tmp) / "usb"
+            mount.mkdir()
+            for result in (
+                mock.Mock(stdout=json.dumps({"ok": False})),
+                mock.Mock(stdout="not json"),
+            ):
+                with (
+                    mock.patch("kyth_installer.post_routes.shutil.which", return_value="/usr/bin/kyth-installer-exec"),
+                    mock.patch("kyth_installer.runner.run_command", return_value=result),
+                    mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+                ):
+                    response = self.routes.rescue_logs_to_usb({"usb_mount": str(mount)})
+                self.assertEqual(response.status, 500)
+
     def test_rescue_logs_reports_missing_media_empty_logs_and_copy_failure(self):
         self.assertEqual(
             self.routes.rescue_logs_to_usb({"usb_mount": "/definitely/missing"}).status, 400

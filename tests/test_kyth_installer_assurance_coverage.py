@@ -51,6 +51,16 @@ class InstallerAssuranceCoverageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(_battery_check(Path(tmp)).status, "pass")
 
+    def test_native_power_check_covers_pass_fail_and_malformed_responses(self):
+        with patch("kyth_installer.orchestration.power_check", return_value={"status": "pass", "detail": "AC connected"}):
+            self.assertEqual(_battery_check().detail, "AC connected")
+        with patch("kyth_installer.orchestration.power_check", return_value={"status": "fail", "detail": "unplugged"}):
+            with self.assertRaisesRegex(RuntimeError, "unplugged"):
+                _battery_check()
+        with patch("kyth_installer.orchestration.power_check", return_value={"status": "pass", "detail": ""}):
+            with self.assertRaisesRegex(RuntimeError, "malformed"):
+                _battery_check()
+
     def test_snapshot_detects_direct_and_child_luks(self):
         direct = SimpleNamespace(partitions_by_name={"/dev/sda1": {"fstype": "crypto_LUKS"}})
         child = SimpleNamespace(partitions_by_name={"/dev/sda2": {"children": [{"fstype": "crypto_luks"}]}})

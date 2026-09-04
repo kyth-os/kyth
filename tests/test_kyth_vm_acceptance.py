@@ -116,6 +116,43 @@ class ReadFwCfgTests(unittest.TestCase):
 
 
 class HubAcceptanceHelpersTests(unittest.TestCase):
+    def test_active_graphical_session_builds_minimal_environment(self):
+        account = mock.Mock(pw_uid=1000, pw_dir="/home/tester")
+        with tempfile.TemporaryDirectory() as tmp:
+            runtime = pathlib.Path(tmp) / "run-user"
+            runtime.mkdir()
+            with mock.patch(
+                "kyth_shared.vm_acceptance.run_text",
+                side_effect=[_completed(0, "c1\n"), _completed(0, "tester\n")],
+            ), mock.patch("kyth_shared.vm_acceptance.pwd.getpwnam", return_value=account), mock.patch(
+                "kyth_shared.vm_acceptance.Path", side_effect=lambda value: runtime if str(value).startswith("/run/user/") else pathlib.Path(tmp) / "x11"
+            ):
+                result = vm_acceptance._active_graphical_session()
+        self.assertEqual(result[0], "tester")
+        self.assertEqual(result[1]["XDG_SESSION_TYPE"], "")
+
+    def test_install_from_live_iso_runs_complete_install_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_file = pathlib.Path(tmp) / "acceptance.log"
+            target = mock.Mock()
+            target.is_block_device.return_value = True
+            target.resolve.return_value = target
+            with (
+                mock.patch("kyth_shared.vm_acceptance.wait_for_desktop", return_value=True),
+                mock.patch("kyth_shared.vm_acceptance.run_smoke_check"),
+                mock.patch("kyth_shared.vm_acceptance.TARGET_BY_ID", target),
+                mock.patch("kyth_shared.vm_acceptance.Path.is_dir", return_value=True),
+                mock.patch("kyth_shared.vm_acceptance.LOG_FILE", log_file),
+                mock.patch("kyth_shared.vm_acceptance._installer_target_ref", return_value="ghcr.io/example/kyth:testing"),
+                mock.patch("kyth_shared.vm_acceptance.read_update_ref", return_value=""),
+                mock.patch("kyth_shared.vm_acceptance.run", return_value=_completed(0)),
+                mock.patch("kyth_shared.vm_acceptance.power") as power,
+                mock.patch("kyth_shared.vm_acceptance.emit") as emit,
+            ):
+                vm_acceptance.install_from_live_iso()
+        power.assert_called_once_with("reboot")
+        self.assertTrue(any(call.args[0] == "INSTALL_COMPLETE" for call in emit.call_args_list))
+
     def test_hub_pages_expands_destinations_and_sections_from_manifest(self):
         manifest = {
             "destinations": [{
@@ -146,6 +183,43 @@ class HubAcceptanceHelpersTests(unittest.TestCase):
             )
             evidence.write_text("KYTH_HUB_ACCEPTANCE:deep-link:[1]\n", encoding="utf-8")
             self.assertIsNone(vm_acceptance._hub_event(evidence, "deep-link"))
+
+    def test_hub_event_and_wait_handle_missing_invalid_and_delayed_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = pathlib.Path(tmp) / "missing.log"
+            self.assertIsNone(vm_acceptance._hub_event(evidence, "deep-link"))
+            evidence.write_text("KYTH_HUB_ACCEPTANCE:deep-link:not-json\n", encoding="utf-8")
+            self.assertIsNone(vm_acceptance._hub_event(evidence, "deep-link"))
+            evidence.write_text("KYTH_HUB_ACCEPTANCE:deep-link:{\"page\":\"Welcome\"}\n", encoding="utf-8")
+            with mock.patch("kyth_shared.vm_acceptance.time.monotonic", side_effect=[0, 0, 1]), \
+                 mock.patch("kyth_shared.vm_acceptance.time.sleep"):
+                self.assertEqual(vm_acceptance._wait_hub_event(evidence, "deep-link", timeout=0.5), {"page": "Welcome"})
+
+    def test_hub_launch_and_stop_helpers_cover_process_lifecycle(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = pathlib.Path(tmp) / "hub.log"
+            process = mock.Mock()
+            with mock.patch("kyth_shared.vm_acceptance.subprocess.Popen", return_value=process) as popen:
+                started = vm_acceptance._hub_start("tester", {"HOME": "/tmp"}, "Updates", evidence, degraded=True)
+            self.assertIs(started, process)
+            self.assertIn("KYTH_HUB_ACCEPTANCE_DEGRADED=1", popen.call_args.args[0])
+            process.poll.return_value = 0
+            vm_acceptance._hub_stop(process)
+            process.poll.return_value = None
+            with mock.patch("kyth_shared.vm_acceptance.os.killpg", side_effect=ProcessLookupError):
+                vm_acceptance._hub_stop(process)
+
+    def test_hub_launch_check_handles_start_failure_and_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evidence = pathlib.Path(tmp) / "hub.log"
+            process = mock.Mock()
+            event = {"page": "Updates", "route": "/updates", "source": "initial"}
+            with mock.patch("kyth_shared.vm_acceptance._hub_start", return_value=process), \
+                 mock.patch("kyth_shared.vm_acceptance._wait_hub_event", return_value=event), \
+                 mock.patch("kyth_shared.vm_acceptance._hub_stop"):
+                self.assertTrue(vm_acceptance._hub_launch_check("tester", {}, "Updates", "/updates", evidence))
+            with mock.patch("kyth_shared.vm_acceptance._hub_start", side_effect=OSError("missing")):
+                self.assertFalse(vm_acceptance._hub_launch_check("tester", {}, "Updates", "/updates", evidence))
 
     def test_hub_acceptance_emits_all_qualification_phases(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -364,6 +438,15 @@ class RunSmokeCheckTests(unittest.TestCase):
                  mock.patch("kyth_shared.vm_acceptance.power"):
                 with self.assertRaises(SystemExit):
                     vm_acceptance.run_smoke_check("LIVE")
+
+    def test_smoke_check_tolerates_serial_copy_failure(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_file = pathlib.Path(tmp) / "log"
+            with mock.patch("kyth_shared.vm_acceptance.LOG_FILE", log_file), \
+                 mock.patch("kyth_shared.vm_acceptance.SERIAL_DEVICE", pathlib.Path(tmp)), \
+                 mock.patch("kyth_shared.vm_acceptance.run", return_value=_completed(1)), \
+                 mock.patch("kyth_shared.vm_acceptance.emit"):
+                vm_acceptance.run_smoke_check("LIVE")
 
 
 class MainEntrypointTests(unittest.TestCase):

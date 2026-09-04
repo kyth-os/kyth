@@ -117,6 +117,30 @@ class PhaseCommonTests(unittest.TestCase):
         context.cancel_requested.set.assert_not_called()
         context.events.publish.assert_not_called()
 
+    @mock.patch("kyth_installer.phases.common.threading.Thread", _ImmediateThread)
+    @mock.patch("kyth_installer.assurance._battery_check", return_value=SimpleNamespace(status="pass", detail="AC"))
+    def test_power_watch_continues_after_a_healthy_probe(self, _battery):
+        event = _WatchEvent()
+        context = SimpleNamespace(
+            cancel_requested=SimpleNamespace(set=mock.Mock()),
+            events=SimpleNamespace(publish=mock.Mock()),
+        )
+        common._start_power_watch(mock.Mock(), context, event)
+        context.cancel_requested.set.assert_not_called()
+
+    @mock.patch("kyth_installer.phases.common.threading.Thread", _ImmediateThread)
+    def test_power_watch_does_not_start_when_already_stopped(self):
+        event = mock.Mock()
+        event.is_set.return_value = True
+        common._start_power_watch(mock.Mock(), SimpleNamespace(), event)
+
+    @mock.patch("kyth_installer.phases.common.write_transaction_state")
+    @mock.patch("kyth_installer.orchestration.decision", return_value={"accepted": False, "status": "other"})
+    def test_record_transaction_rejects_native_transition(self, _decision, _write):
+        log = mock.Mock()
+        common._record_transaction(InstallerContext(), "started", log=log)
+        self.assertIn("could not validate installer transaction transition", log.call_args.args[0])
+
     def test_stop_power_watch_sets_event_and_joins(self):
         event = mock.Mock()
         thread = mock.Mock()

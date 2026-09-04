@@ -135,6 +135,14 @@ class InstallerServiceCrudTests(unittest.TestCase):
         res = self.service.delete_partition({"disk": "/dev/sda"})
         self.assertFalse(res.get("ok"))
 
+    @patch("kyth_installer.disk.list_disks")
+    def test_partition_for_propagates_native_target_validation_error(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        journal = partition_ops.get_journal(self.context)
+        journal.rust_validate_target = MagicMock(return_value="native target rejected")
+        result = self.service._partition_for({"disk": "/dev/sda", "partition": "/dev/sda1"})
+        self.assertEqual(result[3], {"ok": False, "message": "native target rejected"})
+
     @patch("kyth_installer.disk._parent_disk")
     @patch("kyth_installer.disk.list_disks")
     def test_partition_for_rejects_a_partition_from_another_disk(self, mock_list_disks, mock_parent):

@@ -35,6 +35,23 @@ def _request(**changes) -> InstallRequest:
 
 
 class FstabFailureTests(unittest.TestCase):
+    def test_blkid_uses_native_probe_and_rejects_empty_result(self):
+        log = mock.Mock()
+        with (
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout=json.dumps({"uuid": "abc"}))) as run,
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            self.assertEqual(finalize._blkid_uuid("/dev/sda1", log), "abc")
+            payload = json.loads(run.call_args.kwargs["input"])
+            self.assertEqual(payload["device"], "/dev/sda1")
+        with (
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout="{}")),
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            self.assertIsNone(finalize._blkid_uuid("/dev/sda1", log))
+
     def test_append_fstab_uses_typed_rust_writer_when_helper_is_installed(self):
         log = mock.Mock()
         with (
@@ -86,6 +103,17 @@ class FstabFailureTests(unittest.TestCase):
         self.assertFalse(result)
         self.assertIn("tee failed", log.call_args.args[0])
 
+    def test_native_append_fstab_failures_are_nonfatal(self):
+        for failure in (OSError("read-only"), RuntimeError("native writer failed")):
+            with self.subTest(failure=type(failure).__name__):
+                log = mock.Mock()
+                with (
+                    mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+                    mock.patch("kyth_installer.install.run_command", side_effect=failure),
+                    mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+                ):
+                    self.assertFalse(finalize._append_fstab_line("/target/etc", "line\n", log, "data"))
+
     def test_alongside_without_uuid_skips_fstab(self):
         with (
             mock.patch("kyth_installer.install.run_command"),
@@ -96,6 +124,61 @@ class FstabFailureTests(unittest.TestCase):
         ):
             finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", mock.Mock())
         append.assert_not_called()
+
+    def test_native_alongside_mount_reports_success_and_failure(self):
+        log = mock.Mock()
+        with (
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"fstab_written": true}')),
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", log)
+        self.assertTrue(any("Fstab updated" in call.args[0] for call in log.call_args_list))
+        with (
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", side_effect=RuntimeError("native failed")),
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "native alongside"):
+                finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", log)
+        with (
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"fstab_written": false}')),
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", log)
+        self.assertTrue(any("fstab update failed" in call.args[0] for call in log.call_args_list))
+
+    def test_native_manual_mounts_collects_uuids_and_reports_skips(self):
+        context = InstallerContext()
+        mounts = [{"partition": "/dev/sda2", "mountpoint": "/home"}, {"partition": "/dev/sda3", "mountpoint": "swap"}]
+        with (
+            mock.patch("kyth_installer.install._get_manual_mounts", return_value=mounts),
+            mock.patch.object(finalize, "_blkid_uuid", side_effect=["uuid-home", None]),
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"skipped": 1}')) as run,
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), context)
+        payload = json.loads(run.call_args.kwargs["input"])
+        self.assertEqual(payload["mounts"][0]["uuid"], "uuid-home")
+
+    def test_native_manual_mounts_failure_is_reported(self):
+        with (
+            mock.patch("kyth_installer.install._get_manual_mounts", return_value=[]),
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", side_effect=RuntimeError("manual failed")),
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "native manual"):
+                finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), InstallerContext())
+        with (
+            mock.patch("kyth_installer.install._get_manual_mounts", return_value=[]),
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout="{}")),
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), InstallerContext())
 
 
 class UserCreationTests(unittest.TestCase):
@@ -540,6 +623,20 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
 
 
 class InstallFailureTests(unittest.TestCase):
+    def test_failure_handler_reports_non_os_log_write_failure(self):
+        context = InstallerContext()
+        context.transition(InstallLifecycle.VALIDATED)
+        context.transition(InstallLifecycle.INSTALLING)
+        log = mock.Mock()
+        with (
+            mock.patch.object(finalize.os, "open", side_effect=ValueError("bad fd")),
+            mock.patch.object(finalize, "_record_transaction"),
+            mock.patch.object(finalize, "write_failure_summary"),
+            mock.patch.object(finalize, "_persist_failure_to_target_disk"),
+        ):
+            finalize._handle_install_failure(RuntimeError("primary"), log, context)
+        self.assertTrue(any("bad fd" in call.args[0] for call in log.call_args_list))
+
     def test_failure_handler_publishes_error_and_records_diagnostics(self):
         context = InstallerContext()
         context.transition(InstallLifecycle.VALIDATED)

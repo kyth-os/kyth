@@ -491,6 +491,74 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
             response = journal._rust_commit(mock.Mock(), record=broken_record)
         self.assertTrue(response["ok"])
 
+    def test_native_target_validation_covers_success_failure_and_fail_closed_paths(self):
+        journal = self._journal(dry_run=False)
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.runner.run_command", return_value=SimpleNamespace(stdout='{"valid": true, "error": null}')),
+            mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+        ):
+            self.assertIsNone(journal.rust_validate_target("/dev/sda1"))
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.runner.run_command", return_value=SimpleNamespace(stdout='{"valid": false, "error": "not a target"}')),
+            mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+        ):
+            self.assertEqual(journal.rust_validate_target("/dev/sda1"), "not a target")
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.runner.run_command", return_value=SimpleNamespace(stdout='{"valid": "yes"}')),
+            mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+        ):
+            self.assertIn("refusing", journal.rust_validate_target("/dev/sda1"))
+
+    def test_native_commit_covers_resize_guard_and_non_json_runner_output(self):
+        journal = self._journal(dry_run=False)
+        journal.add_op("resize", {"partition": "/dev/sda2", "new_size_bytes": 4096})
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, _command, _start, _end, log, _progress, **_kwargs):
+                log("native progress")
+                log("[]")
+                log(json.dumps({"ok": True}))
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda2", "fstype": "ext4"}]),
+            mock.patch("kyth_installer.fsresize.validate_shrink_request"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            response = journal._rust_commit(mock.Mock())
+        self.assertTrue(response["ok"])
+
+    def test_native_commit_requires_a_valid_final_response(self):
+        journal = self._journal(dry_run=False)
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, *_args, **_kwargs):
+                return None
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "no valid response"):
+                journal._rust_commit(mock.Mock())
+
+    def test_commit_surfaces_native_failure_without_falling_back_to_disk(self):
+        journal = self._journal(dry_run=False)
+        with mock.patch.object(
+            journal, "_rust_commit", return_value={"ok": False, "message": "native commit failed", "irreversible": True}
+        ):
+            with self.assertRaisesRegex(RuntimeError, "native commit failed"):
+                journal.commit(mock.Mock())
+
 
 if __name__ == "__main__":
     unittest.main()
