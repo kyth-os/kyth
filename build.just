@@ -20,7 +20,7 @@ import "_internal.just"
 build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0":
     #!/usr/bin/env bash
     set -euo pipefail
-    PODMAN="sudo --preserve-env=MOK_KEY podman"
+    PODMAN="./build_files/scripts/rootful-podman.sh"
 
     if command -v cosign &>/dev/null; then
         echo "Verifying base image signature with cosign..."
@@ -60,7 +60,7 @@ build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0
 build: build-base
     #!/usr/bin/env bash
     set -euo pipefail
-    PODMAN="sudo --preserve-env=MOK_KEY podman"
+    PODMAN="./build_files/scripts/rootful-podman.sh"
 
     PROTON_CACHYOS_VER=$(python3 ./build_files/scripts/resolve-versions.py proton-cachyos)
     [[ -n "${PROTON_CACHYOS_VER}" ]] || { echo "Unable to pin Proton-CachyOS" >&2; exit 1; }
@@ -109,7 +109,7 @@ build: build-base
 switch-local tag="latest":
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! sudo podman image exists localhost/kyth:{{ tag }}; then
+    if ! ./build_files/scripts/rootful-podman.sh image exists localhost/kyth:{{ tag }}; then
         echo "localhost/kyth:{{ tag }} not found in root's container storage — run 'just build' first." >&2
         exit 1
     fi

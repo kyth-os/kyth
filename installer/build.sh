@@ -63,7 +63,16 @@ EOF
 # registry reference for future bootc updates. Optional kernel variants remain
 # registry-backed because they are separate images.
 mkdir -p /usr/share/kyth/image
+skopeo_source_args=()
+case "${INSTALL_SOURCE_IMAGE#docker://}" in
+	localhost:*|127.0.0.1:*|\[::1\]:*)
+		# Local test registries are intentionally HTTP-only. Keep normal
+		# registry pulls TLS-verified; relax verification only for loopback.
+		skopeo_source_args+=(--src-tls-verify=false)
+		;;
+esac
 skopeo copy --retry-times 3 \
+	"${skopeo_source_args[@]}" \
 	"docker://${INSTALL_SOURCE_IMAGE#docker://}" \
 	"oci:/usr/share/kyth/image:latest"
 embedded_digest="$(skopeo inspect --format '{{.Digest}}' 'oci:/usr/share/kyth/image:latest')"
@@ -343,6 +352,22 @@ for unit in \
 	systemctl disable "${unit}" 2>/dev/null || true
 	ln -sf /dev/null "/etc/systemd/system/${unit}"
 done
+
+# The acceptance unit is intentionally present in the installed image. Keep
+# its enablement explicit after the live-image service masking above so the
+# QEMU qualification guest starts automatically at graphical.target.
+install -m 0644 /src/build_files/kyth-vm-acceptance.service \
+	/usr/lib/systemd/system/kyth-vm-acceptance.service
+systemctl enable kyth-vm-acceptance.service
+
+# Live-session presets may remove target wants links at first boot. Tie the
+# acceptance guest directly to the live-session late setup service as well,
+# so QEMU qualification remains runnable without relying on those links.
+mkdir -p /etc/systemd/system/livesys-late.service.d
+cat >/etc/systemd/system/livesys-late.service.d/kyth-vm-acceptance.conf <<'EOF'
+[Unit]
+Wants=kyth-vm-acceptance.service
+EOF
 
 # ── Larger /var/tmp for bootc install to-disk ─────────────────────────────────
 rm -rf /var/tmp

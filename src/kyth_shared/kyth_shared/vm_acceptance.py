@@ -174,7 +174,7 @@ def install_from_live_iso() -> None:
                     "--target-imgref", target_ref, "--filesystem", "btrfs",
                     "--wipe", "--skip-fetch-check", str(target),
                 ],
-                stdout=log, stderr=subprocess.STDOUT,
+                stdout=log, stderr=subprocess.STDOUT, timeout=1800,
             )
     except OSError:
         fail("bootc install to-disk failed")

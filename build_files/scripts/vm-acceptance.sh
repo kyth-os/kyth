@@ -111,7 +111,8 @@ QEMU_ARGS=(
 	-nodefaults
 	-no-user-config
 	-device virtio-vga
-	-display none
+	-display "spice-app"
+	-spice "unix=on,addr=${ARTIFACTS}/spice.sock,disable-ticketing=on,disable-copy-paste=off,disable-agent-file-xfer=off"
 	-device virtio-rng-pci
 	-device ich9-ahci,id=ahci
 	-drive "if=none,id=liveiso,format=raw,media=cdrom,readonly=on,file=${ISO}"

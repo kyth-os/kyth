@@ -457,7 +457,14 @@ class MainEntrypointTests(unittest.TestCase):
         self.assertIn('name = "kyth-vm-acceptance-guest"', cargo)
         self.assertIn("/build/kyth-vm-acceptance-guest /usr/bin/kyth-vm-acceptance-guest", docker)
         self.assertIn("/ctx/kyth-vm-acceptance-guest /usr/libexec/kyth-vm-acceptance-guest", branding)
-        self.assertIn("ExecStart=/usr/libexec/kyth-vm-acceptance-guest run", UNIT.read_text(encoding="utf-8"))
+        self.assertNotIn("ExecCondition=", UNIT.read_text(encoding="utf-8"))
+        unit = UNIT.read_text(encoding="utf-8")
+        self.assertIn("ExecStart=/usr/libexec/kyth-vm-acceptance-guest run", unit)
+        self.assertIn("WantedBy=multi-user.target", unit)
+        self.assertIn("MemoryMax=4G", unit)
+        installer = (ROOT / "installer/build.sh").read_text(encoding="utf-8")
+        self.assertIn("livesys-late.service.d/kyth-vm-acceptance.conf", installer)
+        self.assertIn("Wants=kyth-vm-acceptance.service", installer)
 
     def test_enabled_command_reflects_fw_cfg_state(self):
         with mock.patch("kyth_shared.vm_acceptance.enabled", return_value=True):

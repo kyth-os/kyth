@@ -84,6 +84,7 @@ RUN mkdir -p /etc/yum.repos.d.bak && \
         > /etc/yum.repos.d/fedora.repo
 
 ARG CALAMARES=0
+ARG INSTALLER_BUILD_HASH=unset
 RUN --mount=type=bind,source=installer/build.sh,target=/src/installer/build.sh \
     --mount=type=bind,source=installer/iso.yaml,target=/src/installer/iso.yaml \
     --mount=type=bind,source=installer/calamares,target=/src/installer/calamares \
@@ -92,6 +93,8 @@ RUN --mount=type=bind,source=installer/build.sh,target=/src/installer/build.sh \
     --mount=type=bind,source=build_files/kyth_shared,target=/src/build_files/kyth_shared \
     --mount=type=bind,source=build_files/kyth-launch-installer,target=/src/build_files/kyth-launch-installer \
     --mount=type=bind,source=build_files/kyth-installerd.service,target=/src/build_files/kyth-installerd.service \
+    --mount=type=bind,source=build_files/kyth-vm-acceptance.service,target=/src/build_files/kyth-vm-acceptance.service \
+    : "cache-bust:installer=${INSTALLER_BUILD_HASH}" && \
     env BASE_IMAGE="${BASE_IMAGE}" INSTALL_SOURCE_IMAGE="${INSTALL_SOURCE_IMAGE}" \
     SOURCE_TAG="${SOURCE_TAG}" CALAMARES="${CALAMARES}" \
     bash /src/installer/build.sh; \

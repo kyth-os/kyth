@@ -222,6 +222,12 @@ prune-live-dev:
     df -h /tmp /var || true
     docker system df || true
 
+# Remove only disposable ISO/VM acceptance state. Safe before a fresh run and
+# after an interrupted run; refuses to act while QEMU/build work is active.
+[group('Utility')]
+clean-vm-acceptance:
+    build_files/scripts/cleanup-vm-acceptance.sh
+
 # Full local cleanup: build temps + stale outputs + Docker cache.
 [group('Utility')]
 clean-all: clean clean-output clean-docker

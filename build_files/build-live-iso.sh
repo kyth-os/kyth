@@ -14,19 +14,21 @@ LIVE_TAG="${KYTH_LIVE_TAG:-localhost/kyth-live:${SOURCE_TAG}}"
 TITANOBOA_REF="7737f4748458252ac827dca14b3d6dd09298472a"
 TITANOBOA_DIR="${TITANOBOA_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/kyth/titanoboa}"
 
-for cmd in git podman sudo; do
+for cmd in git podman sudo unshare; do
 	command -v "${cmd}" >/dev/null || {
 		echo "ERROR: missing required command: ${cmd}" >&2
 		exit 1
 	}
 done
 
+ROOTFUL_PODMAN="${REPO_ROOT}/build_files/scripts/rootful-podman.sh"
+
 if [[ "${BASE_IMAGE}" == localhost/* ]] &&
-	! sudo podman image exists "${BASE_IMAGE}" &&
+	! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}" &&
 	command -v docker >/dev/null &&
 	docker image inspect "${BASE_IMAGE}" >/dev/null 2>&1; then
 	echo "==> Importing Docker image into rootful Podman: ${BASE_IMAGE}"
-	docker save "${BASE_IMAGE}" | sudo podman load
+	docker save "${BASE_IMAGE}" | "${ROOTFUL_PODMAN}" load
 fi
 
 # installer/build.sh always bakes KYTH_SOURCE_IMAGE=ghcr.io/kyth-os/kyth:${SOURCE_TAG}
@@ -77,7 +79,7 @@ _titanoboa_ok="/tmp/kyth-titanoboa-ok.$$"
 echo "==> Building KythOS live payload from ${BASE_IMAGE}"
 pull_flag=(--pull=newer)
 [[ "${BASE_IMAGE}" == localhost/* ]] && pull_flag=()
-sudo podman build \
+"${ROOTFUL_PODMAN}" build \
 	"${pull_flag[@]}" \
 	--cap-add SYS_ADMIN \
 	--security-opt label=disable \
@@ -103,7 +105,7 @@ WORK="$(mktemp -d -p "${TMPDIR:-/var/tmp}" kyth-titanoboa.XXXXXXXXXX)"
 trap 'sudo rm -rf "${WORK}"' EXIT
 
 echo "==> Assembling ISO with Titanoboa"
-sudo podman run --rm -i \
+"${ROOTFUL_PODMAN}" run --rm -i \
 	--network host \
 	--cap-add sys_admin --security-opt label=disable \
 	-v "${TITANOBOA_DIR}/build_iso.sh:/src/build_iso.sh:ro" \
