@@ -22,7 +22,8 @@ just clean / just clean-all / just purge  # Reclaim build/disk space (increasing
 just lint && just format          # Shellcheck + shfmt on all *.sh
 ```
 
-Quality gates — run these before pushing, or when validating a change:
+Quality gates — the pre-push hook always runs the Python coverage-floor gate;
+run these directly when validating a change:
 
 ```bash
 just test                          # Python unit tests (tests/) via unittest discover

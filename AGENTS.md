@@ -24,9 +24,12 @@ session (WAYLAND_DISPLAY/DISPLAY/KDE) — it skips the heavy 600s
 `systemd-run --scope CPUWeight=10 MemoryHigh=35% MemoryMax=55%`. The full
 suite is CI-gated (`validation.yml` → `build.yml`).
 
-- Local `git push` runs the pre-push hook in **fast mode** by default
-  (`validate.sh --fast` + `run-quality.sh --fast`, Hub smoke skipped).
-- Force heavy locally only when needed:
+- Local `git push` runs fast repository validation plus the **full Python
+  coverage-floor gate** by default (`validate.sh --fast` + `run-quality.sh`).
+  This prevents coverage-floor failures from reaching GitHub. Hub smoke and
+  the additional uninstrumented full validation remain opt-in because they
+  are expensive on a live desktop.
+- Force the additional heavy checks locally when needed:
   `KYTH_ALLOW_HEAVY_PRE_PUSH=1 git push` or
   `KYTH_FORCE_FULL_VALIDATION=1 ./build_files/scripts/validate.sh --full`.
 - Targeted smoke: `timeout 60 python3 -m unittest tests.test_…`.

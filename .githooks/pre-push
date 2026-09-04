@@ -8,18 +8,16 @@ fi
 
 repo_root="$(git rev-parse --show-toplevel)"
 
-# Full CI mirror locally before push: validate.sh (lint, actionlint, zizmor,
-# shell analysis, syntax/secrets/systemd, full test suite once, plain) plus
-# run-quality.sh with coverage (ruff/BLE001 + second coverage-instrumented
-# suite run and json/xml/html generation + coverage floors). This mirrors the
-# parallel CI jobs (validate + quality + gui-smoke) in one local gate — ~17s
-# extra for coverage — so fsresize/plan_commit-style floor regressions are
-# caught before push instead of after.
+# Local push gate: validate.sh (lint, actionlint, zizmor, shell analysis,
+# syntax/secrets/systemd, and optionally the plain test suite) plus
+# run-quality.sh with coverage. The latter is intentionally mandatory even in
+# fast mode: it runs the coverage-instrumented suite and check-critical-coverage
+# so coverage-floor regressions are caught before push instead of in CI.
 if [[ "${KYTH_ALLOW_HEAVY_PRE_PUSH:-0}" == "1" ]]; then
 	echo "[pre-push] Running FULL local validation (heavy, opt-in via KYTH_ALLOW_HEAVY_PRE_PUSH=1)..." 
 else
-	echo "[pre-push] Running fast validation (lint/syntax/coverage-fast only) — full suite is CI-gated." 
-	echo "[pre-push] To force heavy locally: KYTH_ALLOW_HEAVY_PRE_PUSH=1 git push" 
+	echo "[pre-push] Running fast validation plus mandatory coverage-floor gate."
+	echo "[pre-push] To also run the uninstrumented full validation and Hub smoke: KYTH_ALLOW_HEAVY_PRE_PUSH=1 git push"
 fi
 # Deprioritized (not paused) relative to the interactive session: this box is
 # a live desktop, not a dedicated CI runner, and the old validate+coverage-
@@ -48,11 +46,14 @@ if command -v systemd-run >/dev/null 2>&1; then
 fi
 if [[ "${KYTH_ALLOW_HEAVY_PRE_PUSH:-0}" == "1" ]]; then
 	"${scope[@]}" "${repo_root}/build_files/scripts/validate.sh" --full
-	"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh"
 else
 	"${scope[@]}" "${repo_root}/build_files/scripts/validate.sh" --fast
-	"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh" --fast
 fi
+
+# Do not pass --fast here. Coverage floors are a required local pre-push gate,
+# including on live desktops where validate.sh deliberately remains fast.
+echo "[pre-push] Running Python coverage and coverage-floor gate..."
+"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh"
 
 # P1-3: also catch System Hub regressions the CI gui-smoke job checks. Run
 # the same canonical module CI runs (tests/test_kyth_welcome_hub_smoke.py)
