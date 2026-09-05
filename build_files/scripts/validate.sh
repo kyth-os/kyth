@@ -50,7 +50,13 @@ echo "==> Gaming hash gate"
 bash build_files/scripts/hash-gaming-versions.sh
 
 echo "==> Perf gate (10% ledger, probe collection duration)"
-PYTHONPATH=build_files/kyth_shared python3 build_files/scripts/check-perf-gate.py
+if [[ "${KYTH_PERF_GATE_ADVISORY:-0}" == "1" ]]; then
+	if ! PYTHONPATH=build_files/kyth_shared python3 build_files/scripts/check-perf-gate.py; then
+		echo "warning: perf gate regression is advisory in this local validation context" >&2
+	fi
+else
+	PYTHONPATH=build_files/kyth_shared python3 build_files/scripts/check-perf-gate.py
+fi
 
 echo "==> Sysconfig hash gate (must stay unset locally, pinned in CI)"
 if grep -qE '^ARG SYSCONFIG_HASH=unset' Dockerfile && grep -qE '^ARG RPM_SET_HASH=unset' Dockerfile && grep -qE '^ARG GAMING_VERSIONS_HASH=unset' Dockerfile; then echo "hash ARGs unset locally — ok"; else echo "hash ARGs must be unset locally (pinned only in CI)" >&2; exit 1; fi

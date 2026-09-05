@@ -8,6 +8,11 @@ fi
 
 repo_root="$(git rev-parse --show-toplevel)"
 
+# Probe collection is a useful regression signal, but wall-clock timing on a
+# live desktop is too noisy to block publication. CI remains responsible for
+# enforcing the perf policy on a stable runner.
+export KYTH_PERF_GATE_ADVISORY=1
+
 # Local push gate: validate.sh (lint, actionlint, zizmor, shell analysis,
 # syntax/secrets/systemd, and optionally the plain test suite) plus
 # run-quality.sh with coverage. The latter is intentionally mandatory even in
