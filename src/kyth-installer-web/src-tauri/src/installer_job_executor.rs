@@ -9,6 +9,7 @@
 //! generic command or filesystem bridge.
 
 use std::fmt;
+use std::process::Command;
 
 use crate::installer_configuration;
 use super::installer_executor::{self, InstallerExecutionInput, InstallerExecutionPlan};
@@ -159,10 +160,7 @@ impl NativePhaseExecutor {
                 phase,
                 operation: NativeOperation::StorageMutation,
             }),
-            Phase::Image => Err(NativePhaseError::NotImplemented {
-                phase,
-                operation: NativeOperation::ImageWrite,
-            }),
+            Phase::Image => self.execute_image(phase),
             Phase::Configure => installer_configuration::apply_plan(
                 self.execution_plan.configuration.clone(),
             )
@@ -175,6 +173,24 @@ impl NativePhaseExecutor {
                 phase,
                 operation: NativeOperation::CompletionCommit,
             }),
+        }
+    }
+
+    fn execute_image(&self, phase: Phase) -> Result<(), NativePhaseError> {
+        let status = Command::new("/usr/bin/bootc")
+            .args(self.execution_plan.bootc.argv.iter().skip(1))
+            .status()
+            .map_err(|error| NativePhaseError::Execution {
+                phase,
+                message: format!("could not run bootc: {error}"),
+            })?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(NativePhaseError::Execution {
+                phase,
+                message: format!("bootc exited with status {}", status),
+            })
         }
     }
 
@@ -299,13 +315,6 @@ mod tests {
             Err(NativePhaseError::NotImplemented {
                 phase: Phase::Storage,
                 operation: NativeOperation::StorageMutation,
-            })
-        );
-        assert_eq!(
-            executor.execute_phase_typed(Phase::Image, &cancellation),
-            Err(NativePhaseError::NotImplemented {
-                phase: Phase::Image,
-                operation: NativeOperation::ImageWrite,
             })
         );
     }
