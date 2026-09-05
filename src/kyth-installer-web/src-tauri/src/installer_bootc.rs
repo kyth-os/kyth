@@ -6,7 +6,9 @@
 
 use serde::{Deserialize, Serialize};
 
-fn default_true() -> bool { true }
+fn default_true() -> bool {
+    true
+}
 
 #[derive(Clone, Debug, Deserialize)]
 pub(crate) struct BootcInstallInput {
@@ -54,8 +56,7 @@ fn safe_absolute_path(value: &str, label: &str) -> Result<String, String> {
         return Err(format!("{label} must be an absolute safe path."));
     }
     if !value.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric()
-            || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
+        byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
     }) {
         return Err(format!("{label} contains unsupported characters."));
     }
@@ -65,7 +66,9 @@ fn safe_absolute_path(value: &str, label: &str) -> Result<String, String> {
 pub(crate) fn build_plan(input: BootcInstallInput) -> Result<BootcInstallPlan, String> {
     let subcommand = input.subcommand.trim().to_ascii_lowercase();
     if !matches!(subcommand.as_str(), "to-disk" | "to-filesystem") {
-        return Err(format!("unsupported bootc install subcommand: {subcommand}"));
+        return Err(format!(
+            "unsupported bootc install subcommand: {subcommand}"
+        ));
     }
     let source_imgref = safe_reference(&input.source_imgref, "source image reference")?;
     let target_imgref = safe_reference(&input.target_imgref, "target image reference")?;
@@ -135,10 +138,16 @@ mod tests {
 
     #[test]
     fn builds_disk_install_without_arbitrary_flags() {
-        let plan = build_plan(BootcInstallInput { wipe: true, ..input("to-disk") })
-            .expect("disk plan should validate");
+        let plan = build_plan(BootcInstallInput {
+            wipe: true,
+            ..input("to-disk")
+        })
+        .expect("disk plan should validate");
         assert_eq!(plan.argv[..3], ["bootc", "install", "to-disk"]);
-        assert!(plan.argv.windows(2).any(|pair| pair == ["--filesystem", "btrfs"]));
+        assert!(plan
+            .argv
+            .windows(2)
+            .any(|pair| pair == ["--filesystem", "btrfs"]));
         assert!(plan.argv.iter().any(|arg| arg == "--wipe"));
         assert!(plan.requires_network);
     }
@@ -151,24 +160,35 @@ mod tests {
             skip_finalize: true,
             root_subvolume: true,
             ..input("to-filesystem")
-        }).expect("filesystem plan should validate");
-        assert!(plan.argv.iter().any(|arg| arg == "--acknowledge-destructive"));
+        })
+        .expect("filesystem plan should validate");
+        assert!(plan
+            .argv
+            .iter()
+            .any(|arg| arg == "--acknowledge-destructive"));
         assert!(plan.argv.iter().any(|arg| arg == "--skip-finalize"));
-        assert!(plan.argv.iter().any(|arg| arg == "--karg=rootflags=subvol=@"));
+        assert!(plan
+            .argv
+            .iter()
+            .any(|arg| arg == "--karg=rootflags=subvol=@"));
         assert!(plan.requires_network);
     }
 
     #[test]
     fn rejects_unsafe_targets_and_references() {
         for target in ["../../etc", "relative", "/mnt/with space"] {
-            let error = build_plan(BootcInstallInput { target: target.to_string(), ..input("to-filesystem") })
-                .expect_err("unsafe target must fail");
+            let error = build_plan(BootcInstallInput {
+                target: target.to_string(),
+                ..input("to-filesystem")
+            })
+            .expect_err("unsafe target must fail");
             assert!(error.contains("target"), "{error}");
         }
         let error = build_plan(BootcInstallInput {
             source_imgref: "docker://example/$(touch /tmp/pwned)".to_string(),
             ..input("to-disk")
-        }).expect_err("unsafe image reference must fail");
+        })
+        .expect_err("unsafe image reference must fail");
         assert!(error.contains("image reference"));
     }
 }

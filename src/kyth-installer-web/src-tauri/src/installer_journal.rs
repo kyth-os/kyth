@@ -625,8 +625,8 @@ fn acquire_disk_lock(disk: &str) -> Result<File, String> {
 }
 
 fn runtime_lsblk(disk: &str) -> Result<Value, String> {
-    let disk = normalize_device_path(disk)
-        .ok_or_else(|| "disk must be a safe device path".to_string())?;
+    let disk =
+        normalize_device_path(disk).ok_or_else(|| "disk must be a safe device path".to_string())?;
     let output = Command::new("/usr/bin/lsblk")
         .args([
             "--json",
@@ -651,8 +651,8 @@ fn runtime_partition_records(disk: &str) -> Result<Vec<PartitionRecord>, String>
 }
 
 fn runtime_disk_metadata(disk: &str) -> Result<(String, u64), String> {
-    let disk = normalize_device_path(disk)
-        .ok_or_else(|| "disk must be a safe device path".to_string())?;
+    let disk =
+        normalize_device_path(disk).ok_or_else(|| "disk must be a safe device path".to_string())?;
     let snapshot = runtime_lsblk(&disk)?;
     snapshot
         .get("blockdevices")
@@ -1196,7 +1196,10 @@ mod tests {
             partition: "/dev/sdb3".to_string(),
         });
         assert_eq!(invalid["valid"], false);
-        assert!(invalid["error"].as_str().unwrap().contains("does not belong"));
+        assert!(invalid["error"]
+            .as_str()
+            .unwrap()
+            .contains("does not belong"));
     }
 
     #[test]

@@ -52,8 +52,7 @@ pub(crate) fn normalize_device_path(raw: &str) -> Option<String> {
         || value.len() > 4096
         || value.contains("..")
         || !value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(byte, b'.' | b'_' | b'/' | b'+' | b':' | b'-')
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'+' | b':' | b'-')
         })
     {
         return None;
@@ -69,9 +68,16 @@ fn required_device(raw: &str, message: &str) -> Result<String, String> {
 pub fn build_plan(input: InstallerPlanInput) -> Result<InstallerPlan, String> {
     let mode = {
         let value = input.install_mode.trim().to_ascii_lowercase();
-        if value.is_empty() { "wipe".to_string() } else { value }
+        if value.is_empty() {
+            "wipe".to_string()
+        } else {
+            value
+        }
     };
-    if !matches!(mode.as_str(), "wipe" | "resize_ntfs" | "alongside" | "free_space" | "manual") {
+    if !matches!(
+        mode.as_str(),
+        "wipe" | "resize_ntfs" | "alongside" | "free_space" | "manual"
+    ) {
         return Err(format!("Unsupported install mode: {mode}"));
     }
 
@@ -97,7 +103,10 @@ pub fn build_plan(input: InstallerPlanInput) -> Result<InstallerPlan, String> {
             ));
         }
         (
-            Some(required_device(partition, "No NTFS partition was selected to shrink.")?),
+            Some(required_device(
+                partition,
+                "No NTFS partition was selected to shrink.",
+            )?),
             (input.resize_gib as u64) * BYTES_PER_GIB,
         )
     } else {
@@ -185,22 +194,60 @@ mod tests {
     #[test]
     fn rejects_invalid_modes_paths_and_sizes() {
         let cases = [
-            (InstallerPlanInput { install_mode: "other".to_string(), ..input() }, "Unsupported"),
-            (InstallerPlanInput { disk: "../../etc/passwd".to_string(), ..input() }, "target disk"),
-            (InstallerPlanInput { install_mode: "alongside".to_string(), ..input() }, "target partition"),
-            (InstallerPlanInput { install_mode: "resize_ntfs".to_string(), resize_gib: 1, ..input() }, "at least"),
-            (InstallerPlanInput { install_mode: "free_space".to_string(), disk: "/dev/sda".to_string(), free_region_start: 10, free_region_end: 5, ..input() }, "free space"),
+            (
+                InstallerPlanInput {
+                    install_mode: "other".to_string(),
+                    ..input()
+                },
+                "Unsupported",
+            ),
+            (
+                InstallerPlanInput {
+                    disk: "../../etc/passwd".to_string(),
+                    ..input()
+                },
+                "target disk",
+            ),
+            (
+                InstallerPlanInput {
+                    install_mode: "alongside".to_string(),
+                    ..input()
+                },
+                "target partition",
+            ),
+            (
+                InstallerPlanInput {
+                    install_mode: "resize_ntfs".to_string(),
+                    resize_gib: 1,
+                    ..input()
+                },
+                "at least",
+            ),
+            (
+                InstallerPlanInput {
+                    install_mode: "free_space".to_string(),
+                    disk: "/dev/sda".to_string(),
+                    free_region_start: 10,
+                    free_region_end: 5,
+                    ..input()
+                },
+                "free space",
+            ),
         ];
         for (request, message) in cases {
             let error = build_plan(request).expect_err("invalid request must fail");
-            assert!(error.contains(message), "{error:?} did not contain {message:?}");
+            assert!(
+                error.contains(message),
+                "{error:?} did not contain {message:?}"
+            );
         }
     }
 
     #[test]
     fn shared_parity_fixture_matches_rust_projection_and_errors() {
-        let cases: Vec<Value> = serde_json::from_str(include_str!("../testdata/installer_plan_cases.json"))
-            .expect("installer plan parity fixture must be valid JSON");
+        let cases: Vec<Value> =
+            serde_json::from_str(include_str!("../testdata/installer_plan_cases.json"))
+                .expect("installer plan parity fixture must be valid JSON");
         for case in cases {
             let name = case["name"].as_str().expect("fixture case needs a name");
             let input: InstallerPlanInput = serde_json::from_value(case["input"].clone())
@@ -208,7 +255,11 @@ mod tests {
             let result = build_plan(input);
             if let Some(expected) = case.get("expected") {
                 let plan = result.unwrap_or_else(|error| panic!("{name}: {error}"));
-                assert_eq!(serde_json::to_value(plan).expect("plan serializes"), *expected, "{name}");
+                assert_eq!(
+                    serde_json::to_value(plan).expect("plan serializes"),
+                    *expected,
+                    "{name}"
+                );
             } else {
                 let error = result.expect_err("invalid fixture case must fail");
                 assert!(

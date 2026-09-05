@@ -73,21 +73,36 @@ mod tests {
         for case in cases {
             let name = case["name"].as_str().expect("fixture case needs a name");
             let mut registry = MountRegistry::default();
-            for operation in case["operations"].as_array().expect("operations are an array") {
-                match operation["action"].as_str().expect("operation action is a string") {
+            for operation in case["operations"]
+                .as_array()
+                .expect("operations are an array")
+            {
+                match operation["action"]
+                    .as_str()
+                    .expect("operation action is a string")
+                {
                     "register" => registry.register(operation["path"].as_str().unwrap()),
                     "release" => registry.release(operation["path"].as_str().unwrap()),
                     "clear" => registry.clear(),
                     action => panic!("{name}: unsupported action {action}"),
                 }
             }
-            let expected_snapshot: Vec<String> = serde_json::from_value(case["expected_snapshot"].clone())
-                .expect("expected snapshot is a string array");
-            let expected_cleanup: Vec<String> = serde_json::from_value(case["expected_cleanup"].clone())
-                .expect("expected cleanup is a string array");
+            let expected_snapshot: Vec<String> =
+                serde_json::from_value(case["expected_snapshot"].clone())
+                    .expect("expected snapshot is a string array");
+            let expected_cleanup: Vec<String> =
+                serde_json::from_value(case["expected_cleanup"].clone())
+                    .expect("expected cleanup is a string array");
             assert_eq!(registry.snapshot(), expected_snapshot, "{name}: snapshot");
-            assert_eq!(registry.cleanup_order(), expected_cleanup, "{name}: cleanup");
-            assert!(registry.snapshot().is_empty(), "{name}: cleanup must clear state");
+            assert_eq!(
+                registry.cleanup_order(),
+                expected_cleanup,
+                "{name}: cleanup"
+            );
+            assert!(
+                registry.snapshot().is_empty(),
+                "{name}: cleanup must clear state"
+            );
         }
     }
 }

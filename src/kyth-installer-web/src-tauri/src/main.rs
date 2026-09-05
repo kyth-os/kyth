@@ -6,24 +6,28 @@
 // command bridge.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod installer_plan;
+mod installer_bootc;
+mod installer_accounts;
+mod installer_configuration;
 #[allow(dead_code)]
 mod installer_disk;
-mod installer_journal;
-mod installer_storage;
-mod installer_recovery;
-mod installer_transaction;
-mod installer_stream;
-mod installer_mount;
-mod installer_bootc;
-mod installer_configuration;
-mod installer_secure_boot;
 mod installer_executor;
+mod installer_journal;
+mod installer_mount;
+mod installer_plan;
+mod installer_recovery;
+mod installer_secure_boot;
+mod installer_storage;
+mod installer_stream;
+mod installer_transaction;
 
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::net::UnixStream;
 use std::net::TcpStream;
-use std::sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex};
+use std::os::unix::net::UnixStream;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -58,7 +62,9 @@ fn arg_value<S: AsRef<str>>(argv: &[S], name: &str) -> Option<String> {
 }
 
 #[tauri::command]
-fn installer_connection(state: tauri::State<InstallerTokens>) -> Result<InstallerConnection, String> {
+fn installer_connection(
+    state: tauri::State<InstallerTokens>,
+) -> Result<InstallerConnection, String> {
     state
         .0
         .lock()
@@ -68,7 +74,9 @@ fn installer_connection(state: tauri::State<InstallerTokens>) -> Result<Installe
 }
 
 #[tauri::command]
-fn installer_validate_plan(request: serde_json::Value) -> Result<installer_plan::InstallerPlan, String> {
+fn installer_validate_plan(
+    request: serde_json::Value,
+) -> Result<installer_plan::InstallerPlan, String> {
     let input: installer_plan::InstallerPlanInput = serde_json::from_value(request)
         .map_err(|error| format!("invalid installer request: {error}"))?;
     installer_plan::build_plan(input)
@@ -98,21 +106,42 @@ fn connection(state: &tauri::State<InstallerTokens>) -> Result<InstallerConnecti
 }
 
 fn allowlisted_path(method: &str, path: &str) -> bool {
-    if path.is_empty() || path.len() > 4096 || path.bytes().any(|byte| byte < 0x20 || byte == 0x7f) {
+    if path.is_empty() || path.len() > 4096 || path.bytes().any(|byte| byte < 0x20 || byte == 0x7f)
+    {
         return false;
     }
     let route = path.split('?').next().unwrap_or(path);
     match method {
-        "GET" => matches!(route,
-            "/api/config" | "/api/disks" | "/api/partitions" | "/api/free-space" |
-            "/api/timezones" | "/api/locales" | "/api/keymaps" | "/api/disk/pending" |
-            "/api/disk/filesystems" | "/api/report" | "/api/rescue/probe" | "/api/log"
+        "GET" => matches!(
+            route,
+            "/api/config"
+                | "/api/disks"
+                | "/api/partitions"
+                | "/api/free-space"
+                | "/api/timezones"
+                | "/api/locales"
+                | "/api/keymaps"
+                | "/api/disk/pending"
+                | "/api/disk/filesystems"
+                | "/api/report"
+                | "/api/rescue/probe"
+                | "/api/log"
         ),
-        "POST" => matches!(route,
-            "/api/start" | "/api/cancel" | "/api/reboot" | "/api/disk/new-table" |
-            "/api/disk/create" | "/api/disk/delete" | "/api/disk/resize" |
-            "/api/disk/format" | "/api/disk/set-mountpoint" | "/api/disk/pending/remove" |
-            "/api/disk/commit" | "/api/disk/rollback" | "/api/rescue/logs-to-usb"
+        "POST" => matches!(
+            route,
+            "/api/start"
+                | "/api/cancel"
+                | "/api/reboot"
+                | "/api/disk/new-table"
+                | "/api/disk/create"
+                | "/api/disk/delete"
+                | "/api/disk/resize"
+                | "/api/disk/format"
+                | "/api/disk/set-mountpoint"
+                | "/api/disk/pending/remove"
+                | "/api/disk/commit"
+                | "/api/disk/rollback"
+                | "/api/rescue/logs-to-usb"
         ),
         _ => false,
     }
@@ -122,58 +151,99 @@ fn socket_path(value: &InstallerConnection) -> Result<&str, String> {
     if value.transport != "unix" {
         return Err("Unix-socket transport is not enabled".to_string());
     }
-    value.socket_path.as_deref().ok_or_else(|| "installer socket path is missing".to_string())
+    value
+        .socket_path
+        .as_deref()
+        .ok_or_else(|| "installer socket path is missing".to_string())
 }
 
 fn read_http_response<R: Read>(stream: R) -> Result<InstallerResponse, String> {
     let mut reader = BufReader::new(stream);
     let mut status_line = String::new();
-    reader.read_line(&mut status_line).map_err(|err| format!("could not read installer response: {err}"))?;
-    let status = status_line.split_whitespace().nth(1)
+    reader
+        .read_line(&mut status_line)
+        .map_err(|err| format!("could not read installer response: {err}"))?;
+    let status = status_line
+        .split_whitespace()
+        .nth(1)
         .ok_or_else(|| "installer returned an invalid HTTP status".to_string())?
-        .parse::<u16>().map_err(|_| "installer returned an invalid HTTP status".to_string())?;
+        .parse::<u16>()
+        .map_err(|_| "installer returned an invalid HTTP status".to_string())?;
     let mut content_length = None;
     loop {
         let mut line = String::new();
-        reader.read_line(&mut line).map_err(|err| format!("could not read installer headers: {err}"))?;
-        if line == "\r\n" || line == "\n" { break; }
+        reader
+            .read_line(&mut line)
+            .map_err(|err| format!("could not read installer headers: {err}"))?;
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
         if let Some(value) = line.strip_prefix("Content-Length:") {
-            content_length = Some(value.trim().parse::<usize>().map_err(|_| "invalid installer response length".to_string())?);
+            content_length = Some(
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .map_err(|_| "invalid installer response length".to_string())?,
+            );
         }
     }
-    let length = content_length.ok_or_else(|| "installer response had no bounded body".to_string())?;
-    if length > MAX_RESPONSE_BYTES { return Err("installer response exceeded the size limit".to_string()); }
+    let length =
+        content_length.ok_or_else(|| "installer response had no bounded body".to_string())?;
+    if length > MAX_RESPONSE_BYTES {
+        return Err("installer response exceeded the size limit".to_string());
+    }
     let mut body = vec![0_u8; length];
-    reader.read_exact(&mut body).map_err(|err| format!("could not read installer response body: {err}"))?;
-    let body = String::from_utf8(body).map_err(|_| "installer response was not UTF-8".to_string())?;
+    reader
+        .read_exact(&mut body)
+        .map_err(|err| format!("could not read installer response body: {err}"))?;
+    let body =
+        String::from_utf8(body).map_err(|_| "installer response was not UTF-8".to_string())?;
     Ok(InstallerResponse { status, body })
 }
 
-fn send_socket_request(value: &InstallerConnection, method: &str, path: &str, body: Option<&str>) -> Result<InstallerResponse, String> {
-    if !allowlisted_path(method, path) { return Err("installer route is not allowlisted".to_string()); }
-    let mut stream = UnixStream::connect(socket_path(value)?).map_err(|err| format!("could not connect to installer service: {err}"))?;
+fn send_socket_request(
+    value: &InstallerConnection,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> Result<InstallerResponse, String> {
+    if !allowlisted_path(method, path) {
+        return Err("installer route is not allowlisted".to_string());
+    }
+    let mut stream = UnixStream::connect(socket_path(value)?)
+        .map_err(|err| format!("could not connect to installer service: {err}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(610))).ok();
     let payload = body.unwrap_or("");
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: kyth-installer.local\r\nX-Kyth-Session-Token: {}\r\nAccept: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
         value.session_token, payload.len()
     );
-    stream.write_all(request.as_bytes()).map_err(|err| format!("could not contact installer service: {err}"))?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|err| format!("could not contact installer service: {err}"))?;
     read_http_response(stream)
 }
 
-fn send_http_request(value: &InstallerConnection, method: &str, path: &str, body: Option<&str>) -> Result<InstallerResponse, String> {
+fn send_http_request(
+    value: &InstallerConnection,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> Result<InstallerResponse, String> {
     if value.base_url != BACKEND_URL || !allowlisted_path(method, path) {
         return Err("installer HTTP route is not allowlisted".to_string());
     }
-    let mut stream = TcpStream::connect("127.0.0.1:7777").map_err(|err| format!("could not connect to installer HTTP service: {err}"))?;
+    let mut stream = TcpStream::connect("127.0.0.1:7777")
+        .map_err(|err| format!("could not connect to installer HTTP service: {err}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(610))).ok();
     let payload = body.unwrap_or("");
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Kyth-Session-Token: {}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
         value.session_token, payload.len()
     );
-    stream.write_all(request.as_bytes()).map_err(|err| format!("could not contact installer HTTP service: {err}"))?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|err| format!("could not contact installer HTTP service: {err}"))?;
     read_http_response(stream)
 }
 
@@ -197,13 +267,16 @@ fn start_socket_stream(
     value: InstallerConnection,
     stop: Arc<AtomicBool>,
 ) -> Result<(), String> {
-    let mut stream = UnixStream::connect(socket_path(&value)?).map_err(|err| format!("could not connect to installer stream: {err}"))?;
+    let mut stream = UnixStream::connect(socket_path(&value)?)
+        .map_err(|err| format!("could not connect to installer stream: {err}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(1))).ok();
     let request = format!(
         "GET /api/stream HTTP/1.1\r\nHost: kyth-installer.local\r\nX-Kyth-Session-Token: {}\r\nAccept: text/event-stream\r\n\r\n",
         value.session_token
     );
-    stream.write_all(request.as_bytes()).map_err(|err| format!("could not contact installer stream: {err}"))?;
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|err| format!("could not contact installer stream: {err}"))?;
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     loop {
@@ -211,26 +284,42 @@ fn start_socket_stream(
         match reader.read_line(&mut line) {
             Ok(0) => break,
             Ok(_) => {}
-            Err(err) if err.kind() == std::io::ErrorKind::WouldBlock || err.kind() == std::io::ErrorKind::TimedOut => {
-                if stop.load(Ordering::Relaxed) { break; }
+            Err(err)
+                if err.kind() == std::io::ErrorKind::WouldBlock
+                    || err.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                if stop.load(Ordering::Relaxed) {
+                    break;
+                }
                 continue;
             }
             Err(err) => return Err(format!("could not read installer stream: {err}")),
         }
-        if stop.load(Ordering::Relaxed) { break; }
+        if stop.load(Ordering::Relaxed) {
+            break;
+        }
         if let Some(payload) = line.strip_prefix("data: ") {
-            let event: serde_json::Value = serde_json::from_str(payload.trim()).map_err(|err| format!("invalid installer event: {err}"))?;
-            app.emit("installer-event", event).map_err(|err| format!("could not deliver installer event: {err}"))?;
+            let event: serde_json::Value = serde_json::from_str(payload.trim())
+                .map_err(|err| format!("invalid installer event: {err}"))?;
+            app.emit("installer-event", event)
+                .map_err(|err| format!("could not deliver installer event: {err}"))?;
         }
     }
     Ok(())
 }
 
 #[tauri::command]
-fn installer_stream(app: tauri::AppHandle, state: tauri::State<InstallerTokens>, stream_state: tauri::State<InstallerStream>) -> Result<(), String> {
+fn installer_stream(
+    app: tauri::AppHandle,
+    state: tauri::State<InstallerTokens>,
+    stream_state: tauri::State<InstallerStream>,
+) -> Result<(), String> {
     let value = connection(&state)?;
     let stop = Arc::new(AtomicBool::new(false));
-    *stream_state.0.lock().map_err(|_| "installer stream state unavailable".to_string())? = Some(stop.clone());
+    *stream_state
+        .0
+        .lock()
+        .map_err(|_| "installer stream state unavailable".to_string())? = Some(stop.clone());
     std::thread::spawn(move || {
         if let Err(error) = start_socket_stream(app.clone(), value, stop) {
             let _ = app.emit("installer-stream-error", error);
@@ -241,7 +330,12 @@ fn installer_stream(app: tauri::AppHandle, state: tauri::State<InstallerTokens>,
 
 #[tauri::command]
 fn installer_stream_stop(stream_state: tauri::State<InstallerStream>) -> Result<(), String> {
-    if let Some(stop) = stream_state.0.lock().map_err(|_| "installer stream state unavailable".to_string())?.take() {
+    if let Some(stop) = stream_state
+        .0
+        .lock()
+        .map_err(|_| "installer stream state unavailable".to_string())?
+        .take()
+    {
         stop.store(true, Ordering::Relaxed);
     }
     Ok(())
@@ -254,7 +348,11 @@ fn main() {
         bootstrap_token: arg_value(&argv, "--bootstrap-token").unwrap_or_default(),
         session_token: arg_value(&argv, "--session-token").unwrap_or_default(),
         socket_path: arg_value(&argv, "--socket-path"),
-        transport: if argv.iter().any(|arg| arg == "--socket-path") { "unix".to_string() } else { "http".to_string() },
+        transport: if argv.iter().any(|arg| arg == "--socket-path") {
+            "unix".to_string()
+        } else {
+            "http".to_string()
+        },
     };
 
     tauri::Builder::default()
@@ -266,7 +364,15 @@ fn main() {
         }))
         .manage(InstallerTokens(Mutex::new(Some(tokens))))
         .manage(InstallerStream(Mutex::new(None)))
-        .invoke_handler(tauri::generate_handler![installer_connection, installer_validate_plan, installer_recovery_guidance, installer_execution_plan, installer_request, installer_stream, installer_stream_stop])
+        .invoke_handler(tauri::generate_handler![
+            installer_connection,
+            installer_validate_plan,
+            installer_recovery_guidance,
+            installer_execution_plan,
+            installer_request,
+            installer_stream,
+            installer_stream_stop
+        ])
         .run(tauri::generate_context!())
         .expect("error while running the KythOS installer shell");
 }

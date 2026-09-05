@@ -42,18 +42,18 @@ pub(crate) struct InstallerExecutionPlan {
 }
 
 pub(crate) fn build_plan(input: InstallerExecutionInput) -> Result<InstallerExecutionPlan, String> {
-    let account = input
-        .account
-        .map(|account| -> Result<AccountCreationPlan, String> {
+    let account = match input.account {
+        Some(account) => {
             let (deploy_root, target_root) = installer_accounts::validate(&account)?;
-            Ok(AccountCreationPlan {
+            Some(AccountCreationPlan {
                 deploy_root: deploy_root.to_string_lossy().into_owned(),
                 target_root: target_root.to_string_lossy().into_owned(),
                 username: account.username.trim().to_string(),
                 executor: "kyth-installer-exec",
             })
-        })
-        .transpose()?;
+        }
+        None => None,
+    };
     Ok(InstallerExecutionPlan {
         protocol_version: EXECUTOR_PROTOCOL_VERSION,
         executor: "kyth-installerd",

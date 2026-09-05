@@ -957,7 +957,8 @@ mod tests {
         assert!(build_plan(DiskOperationInput::BtrfsSubvolumeCreate {
             mountpoint: "/tmp/kyth-btrfs-root".into(),
             name: "../escape".into(),
-        }).is_err());
+        })
+        .is_err());
     }
 
     #[test]
@@ -965,27 +966,44 @@ mod tests {
         let create = build_plan(DiskOperationInput::BtrfsSubvolumeCreate {
             mountpoint: "/var/tmp/kyth-btrfs-root".into(),
             name: "@home".into(),
-        }).expect("subvolume create should validate");
+        })
+        .expect("subvolume create should validate");
         assert_eq!(
             create.argv,
-            ["/usr/sbin/btrfs", "subvolume", "create", "/var/tmp/kyth-btrfs-root/@home"]
+            [
+                "/usr/sbin/btrfs",
+                "subvolume",
+                "create",
+                "/var/tmp/kyth-btrfs-root/@home"
+            ]
         );
 
         let default = build_plan(DiskOperationInput::BtrfsSubvolumeSetDefault {
             mountpoint: "/var/tmp/kyth-btrfs-root".into(),
             name: "@".into(),
-        }).expect("subvolume default should validate");
+        })
+        .expect("subvolume default should validate");
         assert_eq!(
             default.argv,
-            ["/usr/sbin/btrfs", "subvolume", "set-default", "/var/tmp/kyth-btrfs-root/@"]
+            [
+                "/usr/sbin/btrfs",
+                "subvolume",
+                "set-default",
+                "/var/tmp/kyth-btrfs-root/@"
+            ]
         );
 
         let directory = build_plan(DiskOperationInput::EnsureDirectory {
             path: "/var/tmp/kyth-alongside-target/boot/efi".into(),
-        }).expect("directory creation should validate");
+        })
+        .expect("directory creation should validate");
         assert_eq!(
             directory.argv,
-            ["/usr/bin/mkdir", "-p", "/var/tmp/kyth-alongside-target/boot/efi"]
+            [
+                "/usr/bin/mkdir",
+                "-p",
+                "/var/tmp/kyth-alongside-target/boot/efi"
+            ]
         );
     }
 

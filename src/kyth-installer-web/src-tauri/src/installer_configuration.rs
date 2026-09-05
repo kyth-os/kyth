@@ -44,8 +44,12 @@ pub(crate) struct FstabAppendInput {
     pub line: String,
 }
 
-fn default_locale() -> String { "en_US.UTF-8".to_string() }
-fn default_keymap() -> String { "us".to_string() }
+fn default_locale() -> String {
+    "en_US.UTF-8".to_string()
+}
+fn default_keymap() -> String {
+    "us".to_string()
+}
 
 fn safe_component(value: &str, label: &str, allow_slash: bool) -> Result<String, String> {
     let value = value.trim();
@@ -68,8 +72,7 @@ fn safe_root(value: &str) -> Result<String, String> {
         return Err("target root must be an absolute safe path.".to_string());
     }
     if !value.bytes().all(|byte| {
-        byte.is_ascii_alphanumeric()
-            || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
+        byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
     }) {
         return Err("target root contains unsupported characters.".to_string());
     }
@@ -84,8 +87,7 @@ fn safe_absolute_path(raw: &str, label: &str) -> Result<String, String> {
         || value.contains("..")
         || value.contains("//")
         || !value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
+            byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
         })
     {
         return Err(format!("{label} must be an absolute safe path."));
@@ -109,9 +111,21 @@ pub(crate) fn build_plan(input: ConfigurationInput) -> Result<ConfigurationPlan,
     Ok(ConfigurationPlan {
         target_root,
         writes: vec![
-            ConfigWrite { path: format!("{etc}/hostname"), content: format!("{hostname}\n"), mode: 0o644 },
-            ConfigWrite { path: format!("{etc}/locale.conf"), content: format!("LANG={locale}\n"), mode: 0o644 },
-            ConfigWrite { path: format!("{etc}/vconsole.conf"), content: format!("KEYMAP={keymap}\n"), mode: 0o644 },
+            ConfigWrite {
+                path: format!("{etc}/hostname"),
+                content: format!("{hostname}\n"),
+                mode: 0o644,
+            },
+            ConfigWrite {
+                path: format!("{etc}/locale.conf"),
+                content: format!("LANG={locale}\n"),
+                mode: 0o644,
+            },
+            ConfigWrite {
+                path: format!("{etc}/vconsole.conf"),
+                content: format!("KEYMAP={keymap}\n"),
+                mode: 0o644,
+            },
         ],
         localtime_target: format!("/usr/share/zoneinfo/{timezone}"),
         executor: "kyth-installer-exec",
@@ -173,12 +187,17 @@ fn validate_fstab_line(line: &str) -> Result<(), String> {
         return Err("fstab entry has an unsupported shape".to_string());
     }
     if fields[0].len() <= "UUID=".len()
-        || !fields[0]["UUID=".len()..].bytes().all(|byte| {
-            byte.is_ascii_hexdigit() || byte == b'-'
-        })
+        || !fields[0]["UUID=".len()..]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
         || (fields[1] != "none" && safe_absolute_path(fields[1], "fstab mount point").is_err())
-        || !fields[2].bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
-        || !fields[3].bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'=' | b',' | b':' | b'.' | b'_' | b'+' | b'@' | b'-'))
+        || !fields[2]
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+        || !fields[3].bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'=' | b',' | b':' | b'.' | b'_' | b'+' | b'@' | b'-')
+        })
         || fields[4] != "0"
         || !matches!(fields[5], "0" | "2")
     {
@@ -219,9 +238,13 @@ mod tests {
             timezone: "Europe/Berlin".to_string(),
             locale: "en_US.UTF-8".to_string(),
             keymap: "us".to_string(),
-        }).expect("configuration should validate");
+        })
+        .expect("configuration should validate");
         assert_eq!(plan.writes.len(), 3);
-        assert!(plan.writes.iter().any(|write| write.content == "kyth-box\n"));
+        assert!(plan
+            .writes
+            .iter()
+            .any(|write| write.content == "kyth-box\n"));
         assert_eq!(plan.localtime_target, "/usr/share/zoneinfo/Europe/Berlin");
     }
 
@@ -234,9 +257,21 @@ mod tests {
             locale: "en_US.UTF-8".to_string(),
             keymap: "us".to_string(),
         };
-        assert!(build_plan(ConfigurationInput { target_root: "/mnt/../etc".to_string(), ..base.clone() }).is_err());
-        assert!(build_plan(ConfigurationInput { hostname: "bad name".to_string(), ..base.clone() }).is_err());
-        assert!(build_plan(ConfigurationInput { timezone: "../UTC".to_string(), ..base }).is_err());
+        assert!(build_plan(ConfigurationInput {
+            target_root: "/mnt/../etc".to_string(),
+            ..base.clone()
+        })
+        .is_err());
+        assert!(build_plan(ConfigurationInput {
+            hostname: "bad name".to_string(),
+            ..base.clone()
+        })
+        .is_err());
+        assert!(build_plan(ConfigurationInput {
+            timezone: "../UTC".to_string(),
+            ..base
+        })
+        .is_err());
     }
 
     #[test]
@@ -253,7 +288,10 @@ mod tests {
         })
         .expect("configuration should validate");
         apply_plan(plan).expect("configuration should apply");
-        assert_eq!(std::fs::read_to_string(etc.join("hostname")).unwrap(), "kyth-box\n");
+        assert_eq!(
+            std::fs::read_to_string(etc.join("hostname")).unwrap(),
+            "kyth-box\n"
+        );
         assert_eq!(
             std::fs::read_link(etc.join("localtime")).unwrap(),
             Path::new("/usr/share/zoneinfo/UTC")
@@ -269,11 +307,16 @@ mod tests {
         append_fstab(FstabAppendInput {
             path: path.to_string_lossy().into_owned(),
             line: "UUID=ABCD-1234 /var/home btrfs subvol=@home,compress=zstd:1 0 0\n".into(),
-        }).expect("fstab entry should append");
-        assert_eq!(std::fs::read_to_string(path).unwrap(), "UUID=ABCD-1234 /var/home btrfs subvol=@home,compress=zstd:1 0 0\n");
+        })
+        .expect("fstab entry should append");
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "UUID=ABCD-1234 /var/home btrfs subvol=@home,compress=zstd:1 0 0\n"
+        );
         assert!(append_fstab(FstabAppendInput {
             path: etc.join("not-fstab").to_string_lossy().into_owned(),
             line: "UUID=ABCD /data ext4 defaults 0 2\n".into(),
-        }).is_err());
+        })
+        .is_err());
     }
 }

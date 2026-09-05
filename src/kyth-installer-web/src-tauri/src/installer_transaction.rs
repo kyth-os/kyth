@@ -13,7 +13,9 @@ use std::path::{Path, PathBuf};
 
 use crate::installer_recovery::{rescue_guidance, RecoveryGuidance};
 
-fn default_schema_version() -> u32 { 1 }
+fn default_schema_version() -> u32 {
+    1
+}
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
 pub(crate) struct TransactionSource {
@@ -73,9 +75,9 @@ fn safe_transaction_path(raw: &str) -> Result<PathBuf, String> {
     let path = Path::new(raw.trim());
     if !path.is_absolute()
         || path.as_os_str().len() > 4096
-        || path.components().any(|component| {
-            matches!(component, std::path::Component::ParentDir)
-        })
+        || path
+            .components()
+            .any(|component| matches!(component, std::path::Component::ParentDir))
     {
         return Err("transaction path must be an absolute safe path".to_string());
     }
@@ -143,7 +145,10 @@ pub(crate) fn decode(input: &str) -> Result<DecodedTransaction, String> {
     let state: TransactionState = serde_json::from_str(input)
         .map_err(|error| format!("invalid transaction state: {error}"))?;
     if state.schema_version != 1 {
-        return Err(format!("unsupported transaction state schema: {}", state.schema_version));
+        return Err(format!(
+            "unsupported transaction state schema: {}",
+            state.schema_version
+        ));
     }
     let guidance = rescue_guidance(Some(&state.status));
     Ok(DecodedTransaction { state, guidance })
@@ -156,22 +161,51 @@ mod tests {
 
     #[test]
     fn shared_transaction_fixture_decodes_and_classifies() {
-        let cases: Vec<Value> = serde_json::from_str(include_str!("../testdata/transaction_cases.json"))
-            .expect("transaction parity fixture must be valid JSON");
+        let cases: Vec<Value> =
+            serde_json::from_str(include_str!("../testdata/transaction_cases.json"))
+                .expect("transaction parity fixture must be valid JSON");
         for case in cases {
             let name = case["name"].as_str().expect("fixture case needs a name");
             if case.get("error_contains").is_some() {
                 let error = decode(&case["json"].to_string()).expect_err("invalid state must fail");
-                assert!(error.contains(case["error_contains"].as_str().unwrap()), "{name}: {error}");
+                assert!(
+                    error.contains(case["error_contains"].as_str().unwrap()),
+                    "{name}: {error}"
+                );
                 continue;
             }
-            let decoded = decode(&case["json"].to_string()).unwrap_or_else(|error| panic!("{name}: {error}"));
-            assert_eq!(decoded.state.status, case["expected"]["status"].as_str().unwrap(), "{name}");
-            assert_eq!(decoded.state.phase, case["expected"]["phase"].as_str().unwrap(), "{name}");
-            assert_eq!(decoded.state.disk, case["expected"]["disk"].as_str().unwrap(), "{name}");
-            assert_eq!(decoded.state.source.digest, case["expected"]["source_digest"].as_str().unwrap(), "{name}");
-            assert_eq!(decoded.guidance.severity, case["expected"]["severity"].as_str().unwrap(), "{name}");
-            assert_eq!(decoded.guidance.bootable, case["expected"]["bootable"].as_bool().unwrap(), "{name}");
+            let decoded =
+                decode(&case["json"].to_string()).unwrap_or_else(|error| panic!("{name}: {error}"));
+            assert_eq!(
+                decoded.state.status,
+                case["expected"]["status"].as_str().unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                decoded.state.phase,
+                case["expected"]["phase"].as_str().unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                decoded.state.disk,
+                case["expected"]["disk"].as_str().unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                decoded.state.source.digest,
+                case["expected"]["source_digest"].as_str().unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                decoded.guidance.severity,
+                case["expected"]["severity"].as_str().unwrap(),
+                "{name}"
+            );
+            assert_eq!(
+                decoded.guidance.bootable,
+                case["expected"]["bootable"].as_bool().unwrap(),
+                "{name}"
+            );
         }
     }
 
@@ -199,8 +233,8 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_transaction_paths() {
-        let state: TransactionState = serde_json::from_value(serde_json::json!({}))
-            .expect("default transaction state");
+        let state: TransactionState =
+            serde_json::from_value(serde_json::json!({})).expect("default transaction state");
         let error = write_request(TransactionWriteInput {
             path: "../transaction.json".to_string(),
             state,

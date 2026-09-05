@@ -91,8 +91,7 @@ fn normalize_device_path(raw: &str) -> Option<String> {
     if !value.starts_with("/dev/")
         || value.contains("..")
         || !value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(byte, b'.' | b'_' | b'/' | b'+' | b':' | b'-')
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'+' | b':' | b'-')
         })
     {
         return None;
@@ -123,7 +122,9 @@ fn parse_snapshot(input: &str) -> Result<LsblkSnapshot, String> {
     serde_json::from_str(input).map_err(|error| format!("invalid lsblk snapshot: {error}"))
 }
 
-fn device_ancestry(input: &str) -> Result<std::collections::HashMap<String, (String, Option<String>)>, String> {
+fn device_ancestry(
+    input: &str,
+) -> Result<std::collections::HashMap<String, (String, Option<String>)>, String> {
     let snapshot = parse_snapshot(input)?;
     let mut devices = std::collections::HashMap::new();
     fn walk(
@@ -132,10 +133,7 @@ fn device_ancestry(input: &str) -> Result<std::collections::HashMap<String, (Str
     ) {
         for entry in entries {
             if let Some(name) = entry.name.as_deref().and_then(normalize_device_path) {
-                let parent = entry
-                    .pkname
-                    .as_deref()
-                    .and_then(normalize_device_path);
+                let parent = entry.pkname.as_deref().and_then(normalize_device_path);
                 let _ = devices.insert(
                     name,
                     (entry.device_type.clone().unwrap_or_default(), parent),
@@ -204,7 +202,11 @@ fn disk_metadata(input: &str, disk: &str) -> Result<(u64, bool), String> {
             (name == target && entry.device_type.as_deref() == Some("disk")).then(|| {
                 (
                     entry.size.unwrap_or(0),
-                    entry.pttype.as_deref().unwrap_or_default().eq_ignore_ascii_case("gpt"),
+                    entry
+                        .pttype
+                        .as_deref()
+                        .unwrap_or_default()
+                        .eq_ignore_ascii_case("gpt"),
                 )
             })
         })
@@ -230,7 +232,11 @@ pub(crate) fn free_regions(
         .iter()
         .any(|part| part.parttype.eq_ignore_ascii_case(BIOS_BOOT_GUID));
     let required = MIN_KYTHOS_BYTES
-        + if is_gpt && !has_bios_boot { GPT_RESERVE_BYTES } else { 0 };
+        + if is_gpt && !has_bios_boot {
+            GPT_RESERVE_BYTES
+        } else {
+            0
+        };
     let mut spans = Vec::new();
     for partition in partitions {
         if partition.size_bytes == 0
@@ -311,7 +317,11 @@ pub(crate) fn parse_disks(
                 ssd: !device.rota.unwrap_or(false),
                 transport: device.tran.clone().unwrap_or_default(),
                 removable: device.rm.unwrap_or(false),
-                partition_table: device.pttype.clone().unwrap_or_default().to_ascii_lowercase(),
+                partition_table: device
+                    .pttype
+                    .clone()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase(),
             })
         })
         .collect())
@@ -345,11 +355,8 @@ pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, Stri
                     let current = !mounts.is_empty();
                     let in_use = !device.children.is_empty();
                     let read_only = device.ro.unwrap_or(false);
-                    let alongside_candidate = size_bytes >= MIN_KYTHOS_BYTES
-                        && !efi
-                        && !current
-                        && !in_use
-                        && !read_only;
+                    let alongside_candidate =
+                        size_bytes >= MIN_KYTHOS_BYTES && !efi && !current && !in_use && !read_only;
                     let ntfs_resize_candidate = alongside_candidate
                         && matches!(fstype.as_str(), "ntfs" | "ntfs3")
                         && size_bytes >= NTFS_MIN_BYTES;
@@ -403,7 +410,10 @@ mod tests {
         assert!(partitions[1].in_use);
         assert!(partitions[1].current);
         assert!(!partitions[1].ntfs_resize_candidate);
-        assert!(partitions[1].mountpoints.iter().any(|mount| mount == "/mnt"));
+        assert!(partitions[1]
+            .mountpoints
+            .iter()
+            .any(|mount| mount == "/mnt"));
     }
 
     #[test]
@@ -430,7 +440,12 @@ mod tests {
         assert_eq!(disks.len(), 1);
         assert_eq!(disks[0].name, "/dev/sda");
         assert!(disks[0].current);
-        assert_eq!(parent_disk_in_snapshot(ancestry, "/dev/sdb1").unwrap().as_deref(), Some("/dev/sdb"));
+        assert_eq!(
+            parent_disk_in_snapshot(ancestry, "/dev/sdb1")
+                .unwrap()
+                .as_deref(),
+            Some("/dev/sdb")
+        );
     }
 
     #[test]
