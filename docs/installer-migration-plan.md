@@ -251,6 +251,14 @@ Do not start selective installer logic ports merely because a Rust shell exists.
 
 ## Remaining plan
 
+### Acceptance scope decision
+
+Per the current migration execution request, the live-media and destructive VM
+acceptance stages are deferred. This does not authorize retiring the Python
+compatibility runtime or changing the installed-authority classifications:
+those changes still require the deferred acceptance gates. Code-level parity,
+contract tests, and host-independent validation continue below.
+
 ### Phase 2 — Tauri installer shell (in progress)
 
 - Add an unprivileged Tauri shell around the React build. **Done:** `src/kyth-installer-web/src-tauri/` embeds the production assets and exposes only the fixed backend connection/token handoff.
