@@ -19,6 +19,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use super::installer_plan::{build_plan, InstallerPlanInput};
+use super::installer_job_executor::{NativeInstallRequest, NativePhaseExecutor};
 use super::installer_runtime::RuntimeCoordinator;
 use super::installer_storage;
 
@@ -585,6 +586,22 @@ fn normalize_start_request(request: &[u8]) -> Result<Vec<u8>, String> {
     rebuild_request(request, &body)
 }
 
+/// Validate and construct the native executor at the daemon boundary.
+///
+/// This is deliberately separate from route handling so the eventual native
+/// cutover can atomically install a request-specific supervisor only after all
+/// typed plans have passed validation.
+fn native_executor_from_start(request: &[u8]) -> Result<NativePhaseExecutor, String> {
+    let (method, target, _headers) = request_parts(request)?;
+    if method != "POST" || target.split('?').next().unwrap_or(target) != "/api/start" {
+        return Err("native executor requires POST /api/start".to_string());
+    }
+    let end = header_end(request)?;
+    let value: serde_json::Value = serde_json::from_slice(&request[end..])
+        .map_err(|error| format!("Invalid installer request JSON: {error}"))?;
+    NativePhaseExecutor::from_request(NativeInstallRequest::from_http(value)?)
+}
+
 fn response_status(response: &[u8]) -> Option<u16> {
     let header_end = response
         .windows(4)
@@ -845,7 +862,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_start_request, options, read_session_token, route_allowed};
+    use super::{native_executor_from_start, normalize_start_request, options, read_session_token, route_allowed};
     use serde_json::Value;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
@@ -929,5 +946,15 @@ mod tests {
     fn leaves_other_routes_byte_for_byte_unchanged() {
         let request = b"GET /api/disks HTTP/1.1\r\nHost: installer\r\nContent-Length: 0\r\n\r\n";
         assert_eq!(normalize_start_request(request).unwrap(), request);
+    }
+
+    #[test]
+    fn native_start_boundary_builds_typed_executor() {
+        let request = start_request(
+            r#"{"disk":"sda","install_mode":"wipe","source_imgref":"oci:/image","target_imgref":"kyth:latest","hostname":"kyth"}"#,
+        );
+        let executor = native_executor_from_start(&request).expect("native plan should validate");
+        assert_eq!(executor.storage_plan().disk, "/dev/sda");
+        assert_eq!(executor.execution_plan().bootc.target, "/dev/sda");
     }
 }
