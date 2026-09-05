@@ -17,10 +17,33 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 INVENTORY = ROOT / "build_files/config/runtime-migration-inventory.json"
-SCHEMA_VERSION = 1
+REPORT = ROOT / "build_files/config/runtime-migration-report.json"
+SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 1
 STATUSES = {"done-native", "queued", "explicitly-not-ported"}
 RISK = {"read-only", "user-session-writer", "privileged-writer", "daemon", "destructive", "build-time"}
 UNIT_SUFFIXES = {".service", ".timer", ".path"}
+RUNTIME_AUTHORITIES = {
+    "rust-binary", "rust-dispatcher", "rust-service", "rust-transport-python-backend",
+    "rust-library", "python-installer", "python-runtime", "python-shared-package",
+    "shell-orchestration", "source-only", "data-or-config", "build-only",
+}
+RUNTIME_SCOPES = {
+    "installer", "system-hub", "system-service", "user-session", "standalone",
+    "build", "test-fixture", "configuration",
+}
+FRONTEND_ROOTS = (
+    ROOT / "src/kyth-hub-web/src",
+    ROOT / "src/kyth-installer-web/src",
+)
+FORBIDDEN_FRONTEND_PATTERNS = (
+    (re.compile(r"\b(?:PySide6|PyQt6|PyQt5|subprocess|child_process)\b"), "direct Python/process API"),
+    (re.compile(r"@tauri-apps/plugin-(?:shell|fs|process)"), "unscoped Tauri shell/filesystem/process plugin"),
+    (re.compile(r"window\.__TAURI__"), "direct Tauri global access"),
+    (re.compile(
+        r"invoke(?:\s*<[^>]+>)?\s*\(\s*['\"](?:run|exec|spawn|shell|execute)(?:[_-](?:command|process|argv)|['\"])",
+    ), "generic Tauri command bridge"),
+)
 
 NATIVE_BINARIES = {
     "kyth-probe", "kyth-guardian", "kyth-update-watcher", "kyth-network-share",
@@ -94,6 +117,74 @@ def risk_for(name: str, kind: str, path: Path) -> str:
     return "build-time"
 
 
+def runtime_metadata(
+    path: Path,
+    *,
+    surface: str,
+    name: str,
+    kind: str,
+    status: str,
+    exec_start: list[str] | None = None,
+) -> dict[str, object]:
+    """Classify the installed authority separately from the source file.
+
+    A Python source file can be a retired fixture (the old Hub), a Python
+    package still installed for compatibility, or a source counterpart whose
+    installed entry point is already native Rust.  The original inventory had
+    no way to distinguish those cases, which made the migration queue look
+    much larger than the actual runtime surface.
+    """
+    authority = "build-only"
+    scope = "build"
+    active = False
+    priority = 3
+
+    if surface == "installer-runtime":
+        authority, scope, active, priority = "python-installer", "installer", True, 0
+    elif surface == "python-runtime":
+        if rel(path).startswith("src/kyth-welcome/"):
+            authority, scope, active, priority = "source-only", "test-fixture", False, 3
+        else:
+            authority, scope, active, priority = "python-shared-package", "standalone", True, 2
+    elif surface == "rust-crate":
+        authority, scope, active, priority = "rust-library", "build", False, 3
+    elif surface == "ujust-recipe":
+        authority, scope, active, priority = "shell-orchestration", "user-session", True, 2
+    elif surface == "systemd-unit":
+        commands = " ".join(exec_start or [])
+        if "kyth-installerd" in commands:
+            authority, scope, active, priority = "rust-transport-python-backend", "installer", True, 0
+        elif any(binary in commands for binary in NATIVE_BINARIES):
+            authority, scope, active, priority = "rust-service", "system-service", True, 1
+        elif "python" in commands:
+            authority, scope, active, priority = "python-runtime", "system-service", True, 1
+        else:
+            authority, scope, active, priority = "shell-orchestration", "system-service", True, 2
+    elif surface == "launcher":
+        scope = "user-session"
+        active = True
+        if name in NATIVE_BINARIES:
+            authority, priority = "rust-dispatcher", 1
+        elif kind == "python":
+            authority, priority = "python-runtime", 2
+        elif kind in {"shell", "alias"}:
+            authority, priority = "shell-orchestration", 2
+        else:
+            authority, priority = "data-or-config", 3
+
+    if status == "explicitly-not-ported" and authority != "source-only":
+        # Third-party/declarative exceptions are not active migration targets.
+        active = False
+        priority = 3
+
+    return {
+        "runtime_authority": authority,
+        "runtime_scope": scope,
+        "runtime_active": active,
+        "migration_priority": priority,
+    }
+
+
 def entry(path: Path, *, surface: str, implementation: str | None = None, name: str | None = None) -> dict:
     item_name = name or name_for(path)
     kind = implementation or launcher_kind(path)
@@ -117,7 +208,7 @@ def entry(path: Path, *, surface: str, implementation: str | None = None, name: 
         else "native::kyth-tunable-rs" if is_tunable_alias
         else f"native::{item_name}"
     )
-    return {
+    result = {
         "path": rel(path),
         "surface": surface,
         "name": item_name,
@@ -137,6 +228,16 @@ def entry(path: Path, *, surface: str, implementation: str | None = None, name: 
         "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
         **({"reason": reason} if reason else {}),
     }
+    metadata = runtime_metadata(path, surface=surface, name=item_name, kind=kind, status=status)
+    if metadata["runtime_authority"] == "source-only":
+        result.update({
+            "status": "explicitly-not-ported",
+            "installed_implementation": "not-installed",
+            "owner": f"fixture::{rel(path)}",
+            "reason": "retired Python/Qt Hub source retained only for compatibility fixtures; not installed in the supported image",
+        })
+    result.update(metadata)
+    return result
 
 
 def discover() -> list[dict]:
@@ -147,11 +248,22 @@ def discover() -> list[dict]:
     for path in sorted((ROOT / "build_files").rglob("*")):
         if path.is_file() and path.suffix in UNIT_SUFFIXES:
             unit = entry(path, surface="systemd-unit")
-            text = path.read_text(encoding="utf-8", errors="replace")
+            text = "\n".join(
+                line for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
+                if not line.lstrip().startswith("//")
+            )
             execs = re.findall(r"^Exec(?:Start|Condition|Stop)=([^\n]+)", text, re.MULTILINE)
             unit["exec_start"] = execs
             if any("kyth-privileged" in command or "kyth-installerd" in command for command in execs):
                 unit["risk_tier"] = "privileged-writer" if "installerd" not in path.name else "destructive"
+            unit.update(runtime_metadata(
+                path,
+                surface="systemd-unit",
+                name=unit["name"],
+                kind=unit["current_implementation"],
+                status=unit["status"],
+                exec_start=execs,
+            ))
             items.append(unit)
     for root, surface in ((ROOT / "src/kyth_shared", "python-runtime"), (ROOT / "src/kyth-welcome", "python-runtime"), (ROOT / "src/kyth-installer", "installer-runtime")):
         for path in sorted(root.rglob("*.py")):
@@ -172,7 +284,11 @@ def validate(document: dict, *, expected_paths: set[str] | None = None) -> list[
     if not isinstance(entries, list) or not entries:
         return ["entries must be a non-empty list"]
     seen: set[str] = set()
-    required = {"path", "surface", "resolved_target", "current_implementation", "installed_implementation", "status", "risk_tier", "priority", "owner", "parity_tests", "cutover", "rollback", "retirement"}
+    required = {
+        "path", "surface", "resolved_target", "current_implementation", "installed_implementation",
+        "status", "risk_tier", "priority", "owner", "parity_tests", "cutover", "rollback",
+        "retirement", "runtime_authority", "runtime_scope", "runtime_active", "migration_priority",
+    }
     for index, item in enumerate(entries):
         if not isinstance(item, dict):
             errors.append(f"entry {index} is not an object")
@@ -194,6 +310,14 @@ def validate(document: dict, *, expected_paths: set[str] | None = None) -> list[
             errors.append(f"entry {path} has invalid status")
         if item.get("risk_tier") not in RISK:
             errors.append(f"entry {path} has invalid risk_tier")
+        if item.get("runtime_authority") not in RUNTIME_AUTHORITIES:
+            errors.append(f"entry {path} has invalid runtime_authority")
+        if item.get("runtime_scope") not in RUNTIME_SCOPES:
+            errors.append(f"entry {path} has invalid runtime_scope")
+        if not isinstance(item.get("runtime_active"), bool):
+            errors.append(f"entry {path} has invalid runtime_active")
+        if not isinstance(item.get("migration_priority"), int) or not 0 <= item["migration_priority"] <= 3:
+            errors.append(f"entry {path} has invalid migration_priority")
         if not isinstance(item.get("priority"), int) or item["priority"] < 0:
             errors.append(f"entry {path} has invalid priority")
         for field in ("owner", "cutover", "rollback", "retirement"):
@@ -211,9 +335,96 @@ def validate(document: dict, *, expected_paths: set[str] | None = None) -> list[
     return errors
 
 
+def report(document: dict) -> dict:
+    entries = document["entries"]
+    active = [item for item in entries if item.get("runtime_active")]
+    active_python = [
+        item for item in active
+        if str(item.get("runtime_authority", "")).startswith("python")
+        or item.get("runtime_authority") == "rust-transport-python-backend"
+    ]
+    p0_open = [
+        item for item in active
+        if item.get("migration_priority") == 0 and item.get("status") != "done-native"
+    ]
+
+    def counts(field: str, rows: list[dict]) -> dict[str, int]:
+        result: dict[str, int] = {}
+        for item in rows:
+            key = str(item.get(field, "unknown"))
+            result[key] = result.get(key, 0) + 1
+        return dict(sorted(result.items()))
+
+    def compact(item: dict) -> dict:
+        return {
+            "path": item["path"],
+            "name": item.get("name"),
+            "runtime_authority": item["runtime_authority"],
+            "runtime_scope": item["runtime_scope"],
+            "status": item["status"],
+            "migration_priority": item["migration_priority"],
+            "owner": item["owner"],
+        }
+
+    return {
+        "schema_version": REPORT_SCHEMA_VERSION,
+        "inventory_schema_version": document.get("schema_version"),
+        "generated_from": "build_files/config/runtime-migration-inventory.json",
+        "summary": {
+            "entries": len(entries),
+            "active_entries": len(active),
+            "active_python_entries": len(active_python),
+            "p0_open_entries": len(p0_open),
+            "active_by_authority": counts("runtime_authority", active),
+            "active_by_scope": counts("runtime_scope", active),
+            "status_by_active_entry": counts("status", active),
+        },
+        "p0_open": [compact(item) for item in sorted(p0_open, key=lambda row: row["path"])],
+        "active_python": [compact(item) for item in sorted(active_python, key=lambda row: row["path"])],
+        "source_only": [
+            compact(item) for item in sorted(
+                (item for item in entries if item.get("runtime_authority") == "source-only"),
+                key=lambda row: row["path"],
+            )
+        ],
+    }
+
+
+def boundary_errors(document: dict) -> list[str]:
+    """Reject new untyped frontend bridges and unclassified Python paths."""
+    errors: list[str] = []
+    for root in FRONTEND_ROOTS:
+        if not root.exists():
+            continue
+        for path in sorted(root.rglob("*")):
+            if path.suffix not in {".ts", ".tsx", ".js", ".jsx"}:
+                continue
+            text = "\n".join(
+                line
+                for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
+                if not line.lstrip().startswith("//")
+            )
+            for pattern, label in FORBIDDEN_FRONTEND_PATTERNS:
+                if pattern.search(text):
+                    errors.append(f"frontend boundary violation in {rel(path)}: {label}")
+
+    for item in document.get("entries", []):
+        authority = item.get("runtime_authority")
+        if not item.get("runtime_active") or not str(authority).startswith("python"):
+            continue
+        if item.get("surface") not in {"launcher", "systemd-unit", "python-runtime", "installer-runtime"}:
+            errors.append(f"active Python path has unsupported surface: {item.get('path')}")
+        if not str(item.get("owner", "")).startswith("fixture::"):
+            errors.append(f"active Python path needs an explicit fixture owner: {item.get('path')}")
+        if not item.get("retirement"):
+            errors.append(f"active Python path needs a retirement condition: {item.get('path')}")
+    return errors
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--generate", action="store_true", help="regenerate the inventory from the checkout")
+    parser.add_argument("--report", action="store_true", help="regenerate the active-runtime report")
     parser.add_argument("--inventory", type=Path, default=INVENTORY)
     args = parser.parse_args(argv)
     path = args.inventory if args.inventory.is_absolute() else ROOT / args.inventory
@@ -227,10 +438,27 @@ def main(argv: list[str] | None = None) -> int:
         print(f"runtime inventory: cannot read {path}: {exc}", file=sys.stderr)
         return 1
     errors = validate(document, expected_paths={item["path"] for item in discover()})
+    errors.extend(boundary_errors(document))
     if errors:
         for error in errors:
             print(f"runtime inventory: {error}", file=sys.stderr)
         return 1
+    generated_report = report(document)
+    if args.generate or args.report:
+        REPORT.parent.mkdir(parents=True, exist_ok=True)
+        REPORT.write_text(json.dumps(generated_report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    elif REPORT.exists():
+        try:
+            checked_report = json.loads(REPORT.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"runtime migration report: cannot read {REPORT}: {exc}", file=sys.stderr)
+            return 1
+        if checked_report != generated_report:
+            print(
+                f"runtime migration report is stale: regenerate with {sys.argv[0]} --report",
+                file=sys.stderr,
+            )
+            return 1
     print(f"runtime inventory: valid ({len(document['entries'])} entries)")
     return 0
 

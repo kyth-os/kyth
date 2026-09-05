@@ -43,6 +43,35 @@ def test_checker_cli_passes():
     assert "valid" in result.stdout
 
 
+def test_inventory_records_runtime_authority_and_scope():
+    document = json.loads(INVENTORY.read_text(encoding="utf-8"))
+    entries = document["entries"]
+    installer = next(item for item in entries if item["path"] == "src/kyth-installer/kyth_installer/server.py")
+    welcome = next(item for item in entries if item["path"] == "src/kyth-welcome/kyth_welcome/core_base.py")
+    assert installer["runtime_authority"] == "python-installer"
+    assert installer["runtime_scope"] == "installer"
+    assert installer["runtime_active"] is True
+    assert installer["migration_priority"] == 0
+    assert welcome["runtime_authority"] == "source-only"
+    assert welcome["runtime_scope"] == "test-fixture"
+    assert welcome["runtime_active"] is False
+
+
+def test_active_runtime_report_is_current_and_calls_out_installer():
+    checker = load_checker()
+    document = json.loads(INVENTORY.read_text(encoding="utf-8"))
+    report = json.loads((ROOT / "build_files/config/runtime-migration-report.json").read_text(encoding="utf-8"))
+    assert report == checker.report(document)
+    assert report["summary"]["p0_open_entries"] > 0
+    assert any(item["runtime_authority"] == "python-installer" for item in report["active_python"])
+
+
+def test_frontend_and_python_boundaries_are_clean():
+    checker = load_checker()
+    document = json.loads(INVENTORY.read_text(encoding="utf-8"))
+    assert checker.boundary_errors(document) == []
+
+
 def test_inventory_preserves_actual_unit_execstart():
     entries = json.loads(INVENTORY.read_text(encoding="utf-8"))["entries"]
     unit = next(item for item in entries if item["path"] == "build_files/kyth-browser-wallet-defaults.service")

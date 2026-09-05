@@ -68,6 +68,9 @@ echo "Checked ${#js_files[@]} JavaScript files"
 echo "==> Committed-secret patterns"
 python3 build_files/scripts/check-committed-secrets.py
 
+echo "==> Runtime migration inventory and frontend boundaries"
+python3 build_files/scripts/check-runtime-migration-inventory.py
+
 # --fast skips the heavy 600s unittest discover on a live desktop.
 # Live-desktop auto-skip: full suite is CI-gated (validation.yml). Force
 # locally with --full or KYTH_FORCE_FULL_VALIDATION=1. `pre-push` defaults

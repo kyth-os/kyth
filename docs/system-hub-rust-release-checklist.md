@@ -5,7 +5,7 @@ System Hub the default launcher. The checklist is intentionally separate from
 the migration roadmap: a green Rust build does not by itself demonstrate
 runtime parity on an installed image.
 
-## Status snapshot (2026-09-03)
+## Status snapshot (2026-09-05)
 
 Current target: `testing` at `192ee5ba` with the Hub migration cutover changes;
 the local worktree also contains the P0 closed-action-allowlist fix.
@@ -26,10 +26,16 @@ the compatibility dispatcher remains only as a rollback fixture for older images
 GitHub Actions Validation run
 [`33665906864`](https://github.com/kyth-os/kyth/actions/runs/33665906864)
 is green for this commit, including the Hub web shell and coverage/lint jobs.
-The available testing ISO build result is from an earlier commit, so it is not
-evidence for this cutover. No installed-image or real-session runtime gate has
-been signed off. Acceptance is intentionally waived for the YOLO cutover; the
-image/runtime checkboxes remain visibly unchecked.
+The locally built ISO has now completed the install-only KVM/QEMU/SPICE
+acceptance path. The guest booted the installed image, found the native Hub
+binary, exercised the manifest-derived route matrix, verified second-launch
+page forwarding, checked degraded dashboard behavior, exercised the Hub update
+read, and verified a privileged allowlist failure. The qualification artifacts
+are under `output/live-iso/vm-acceptance-final/`.
+
+This is local install-only evidence. Update staging/rollback, all destructive
+installer modes, and the exact promoted-image security/rollback drill remain
+open and are not implied by the acceptance run.
 
 ## Pre-build gates
 
@@ -51,24 +57,30 @@ image/runtime checkboxes remain visibly unchecked.
 
 ## Image and runtime gates
 
-- [ ] The image contains `/usr/bin/kyth-hub-shell` and the launcher selects it.
-- [ ] `kyth-welcome-launch --page` routes to every destination and section.
-- [ ] A second launch focuses the existing shell and forwards its page.
-- [ ] Dashboard renders honest degraded states with probe services absent.
-- [ ] Updates check, stage, rollback, and restart guidance are truthful.
+- [x] The locally built installed image contains `/usr/bin/kyth-hub-shell` and
+      the launcher selects it.
+- [x] `kyth-welcome-launch --page` routes to every manifest-derived destination
+      and section in the local installed image.
+- [x] A second launch focuses the existing shell and forwards its page in the
+      local installed image.
+- [x] Dashboard renders an honest degraded state with probe data absent in the
+      local installed image.
+- [ ] Updates check, stage, rollback, and restart guidance are all truthful;
+      the local run covers the update read only, not staging and rollback.
 - [ ] Guardian, Hardware, App Store, and Gaming actions complete or report
       bounded failures on a real installed image.
 - [x] Tauri system-changing controls have an explicit confirmation gate;
       secret-bearing and argument-bearing workflows remain withheld from the
       bridge until dedicated controls exist.
-- [ ] Privileged actions require the expected local authorization and leave no
-      secret in the UI status, audit detail, or process arguments.
+- [x] The local installed image rejects a non-allowlisted privileged action.
+- [ ] Complete the promoted-image authorization and secret-redaction drill;
+      the local install-only run is not the final security sign-off.
 
 ## Python retirement gate
 
-For this YOLO cutover, the Python Hub UI package is no longer installed in the
-normal image. Installed-image acceptance is now exercised by the VM guest;
-the exact ISO run remains a release gate. The remaining
+The Python Hub UI package is no longer installed in the normal image. The
+locally built installed image has been exercised by the VM guest; promoted
+image acceptance remains a release gate. The remaining
 Python pieces are transitional authorities or source artifacts:
 
 - `kyth-guardian` now owns the extended deterministic sweep and a bounded,

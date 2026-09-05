@@ -22,7 +22,7 @@ scope boundary is:
   that no Python service may remain in the runtime path, complete the optional
   service-port work in Phase 5 before Phase 7.
 
-## Current status — 2026-09-03
+## Current status — 2026-09-05
 
 The React/Tauri shell is the primary implementation and its code-level build,
 contract, SSR, Rust, and embedded-asset checks pass on the `testing` branch.
@@ -37,11 +37,13 @@ the sole update notifier, so no Python/Qt tray process is installed or
 autostarted.
 The pushed cutover commit passed GitHub Validation workflow
 `33665906864` (all four jobs, including the Hub shell and coverage/lint gates).
-The available testing ISO result is from an earlier commit and must not be
-used as evidence for this cutover. Per the current YOLO migration direction,
-installed-image/user acceptance is intentionally waived for this cutover and
-remains unverified. The remaining transitional Python service package is a
-technical follow-up item, not an acceptance finding.
+Local KVM/QEMU/SPICE acceptance has since passed against the locally built ISO,
+including the installed Rust/Tauri Hub, every manifest-derived deep link,
+single-instance forwarding, degraded dashboard behavior, Hub update probing,
+and the privileged allowlist failure path. The local run was `install-only`;
+update staging/rollback and promoted-image security drills remain separate open
+gates. The remaining transitional Python service package is a technical
+follow-up item, not the old Hub UI.
 
 The current local P0 follow-up also closes the last static Hub-action routing
 gap: Secure Boot enrollment is in the Rust `HubAction` allowlist, and contract
@@ -161,10 +163,8 @@ replacement are intentionally not certified by this phase.
 
 ### Phase 2 — Prove installed-image runtime behavior
 
-Status: waived for this cutover (2026-09-02); the testing ISO is built and
-published, but installed-image/user acceptance was intentionally skipped.
-The runtime behavior remains unverified and is excluded from the active
-implementation summary for this YOLO migration.
+Status: local install-only acceptance complete (2026-09-05); full lifecycle and
+promoted-image gates remain open.
 
 - Build a testing ISO containing `/usr/bin/kyth-hub-shell` and WebKitGTK
   runtime dependencies.
@@ -182,7 +182,10 @@ implementation summary for this YOLO migration.
 - Test update check, staging, rollback, restart guidance, and post-reboot
   state on both testing and stable images.
 - Run the same acceptance with representative network, Flatpak, storage,
-  and update states; record qualification artifacts and screenshots.
+  and update states; record qualification artifacts and screenshots. The local
+  install-only evidence is under
+  `output/live-iso/vm-acceptance-final/`; it does not certify the update and
+  rollback lifecycle.
 
 Exit criteria: a disposable VM acceptance report passes on both channels and
 contains no false-success, routing, startup, secret-leak, or single-instance
@@ -300,8 +303,8 @@ without an explicit, time-bounded exception.
 
 ### Phase 6 — Security, observability, and rollback hardening
 
-Status: code-level hardening complete (2026-09-02); exact-image security and
-rollback drills remain open/waived for the YOLO cutover.
+Status: code-level hardening and local install-only acceptance complete
+(2026-09-05); promoted-image security and rollback drills remain open.
 
 - [x] Audit every exposed Tauri command for capability scope, argument
   validation, fixed allowlisting, bounded execution, and output redaction.
@@ -319,9 +322,8 @@ rollback drills remain open/waived for the YOLO cutover.
 - [x] Define release-blocking signals and a removal/revert procedure for failed
   Tauri launch, broken deep link, false-success action, or leaked secret in the
   rollback runbook.
-- [ ] Run the security review and rollback drill on the exact installed image;
-  this remains waived/not started because installed-image acceptance is being
-  skipped by direction.
+- [ ] Run the security review and rollback drill on the exact promoted image;
+      the local install-only run does not cover this gate.
 
 Code-level exit criteria are met: native tests cover secret redaction, bounded
 execution, and SAML URL rejection. Full Phase 6 exit still requires an
@@ -335,7 +337,7 @@ also pass. The installed-image security/rollback drill was not run.
 
 ### Phase 7 — Declare completion and monitor
 
-Status: code cleanup in progress (2026-09-03); direct Python-backed Just recipe
+Status: code cleanup in progress (2026-09-05); direct Python-backed Just recipe
 parsing, the installed AI performance daemon, the listed diagnostic/game entry
 points, 49 sysctl-backed tunable entries, and all 45 module-specific tunable
 entries are now native Rust/non-Python. The compatibility dispatcher remains
@@ -386,12 +388,12 @@ paths.
 
 | Priority | Open item | Blocking phase |
 |---|---|---|
-| P0 | Complete installed-image Hub acceptance on testing and stable images. | 2 (waived for YOLO cutover; remains an operational risk) |
+| P0 | Complete installed-image Hub acceptance on testing and stable images. | 2 (local install-only pass; testing/stable and lifecycle coverage remain open) |
 | P0 | Remove or isolate the `kyth-welcome-launch` Python fallback. | 3 (complete 2026-09-02) |
 | P0 | Replace update-notification launches of `kyth-welcome --page updates` (normal path now uses the wrapper). | 3 (complete 2026-09-02; image verification waived) |
-| P0 | Prove second-launch focus and page forwarding in a real session. | 2 (waived for YOLO cutover) |
-| P0 | Validate privileged actions, secret redaction, and bounded failures on the image. | 2, 6 (image validation waived; code gates pass) |
-| P0 | Run the exact-image Phase 6 security review and rollback drill. | 6 (waived/not started for YOLO cutover) |
+| P0 | Prove second-launch focus and page forwarding in a real session. | 2 (local pass; promoted-image repeat remains open) |
+| P0 | Validate privileged actions, secret redaction, and bounded failures on the image. | 2, 6 (local pass; promoted-image repeat remains open) |
+| P0 | Run the exact-image Phase 6 security review and rollback drill. | 6 (open) |
 | P1 | Replace Python-generated runtime route/search metadata. | 3, 4 (complete 2026-09-02) |
 | P1 | Remove `Justfile run-hub` Python/Qt startup behavior. | 3 (complete) |
 | P1 | Add Tauri command-unit tests to CI instead of compile-only coverage. | 1 (complete) |
@@ -404,7 +406,7 @@ paths.
 | P1 | Reconcile any other Hub-facing Python authorities listed in `MIGRATION.md` before declaring strict mode complete. | 5 (complete 2026-09-02; native Rust authorities installed) |
 | P2 | Remove remaining compatibility service fixtures and stale support references after strict-mode cutover. | 7 (complete 2026-09-02; native helper entry points, dead fixtures, and stale VPN launch references removed) |
 | P2 | Port remaining indirect recipe executors (`kyth-tunable`) and remove its compatibility module. | 7 (all 49 sysctl and all 45 module-specific entries complete 2026-09-03; compatibility retained only as a rollback fixture) |
-| P2 | Run a post-cutover observation window before deleting compatibility code. | 7 (waived/not started for YOLO cutover; installed-image acceptance was skipped) |
+| P2 | Run a post-cutover observation window before deleting compatibility code. | 7 (open; begins after promoted-image acceptance) |
 
 ## Definition of done
 

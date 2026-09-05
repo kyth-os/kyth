@@ -1,14 +1,17 @@
 # Installer Migration Plan
 
-**Status:** In progress; Phase 1 needs parity work before the Tauri shell starts
+**Status:** P0 control plane complete; installer backend migration is the next
+high-risk workstream
 **Scope:** Migrate the KythOS installer to the React/Tauri style used by the System Hub.
 
 ## Context
 
-The installer already has a web frontend, but its compatibility backend is
-Python and is displayed through a native client. The backend owns disk discovery,
-partitioning, filesystem resize, bootc deployment, Secure Boot setup, progress,
-cancellation, transaction recovery, and rescue mode.
+The installer now has a production React/Tauri client, a native Slint recovery
+client, a root-owned Rust transport daemon, and a typed Rust execution helper.
+The compatibility backend is still Python and remains authoritative for most
+phase orchestration. It owns disk discovery fallbacks, partitioning fallbacks,
+filesystem resize orchestration, bootc deployment sequencing, Secure Boot
+setup, progress, cancellation, transaction recovery, and rescue mode.
 
 The migration must preserve those safety properties. A UI rewrite and a
 Python-to-Rust rewrite should not happen simultaneously: that would make disk
@@ -18,12 +21,16 @@ and boot failures difficult to distinguish from frontend regressions.
 
 Migrate in layers:
 
-1. Rewrite the existing WebUI in React/TypeScript while retaining the Python
-   backend and HTTP/SSE contract.
-2. Host the React build in an unprivileged Tauri shell.
-3. Move the privileged backend behind a root-owned Unix-socket service.
-4. Port backend components selectively to Rust after behavioral parity is
-   established.
+1. Keep the frozen logical HTTP/SSE contract while the React client is hosted
+   in an unprivileged Tauri shell.
+2. Keep the root-owned Rust Unix-socket daemon as the only user-visible
+   privileged boundary; it currently proxies to Python for the remaining
+   compatibility operations.
+3. Port backend components selectively to Rust after behavioral parity is
+   established, with storage and recovery gates before every destructive
+   cutover.
+4. Remove the Python installer package and root Python launcher only after the
+   native daemon passes all install-mode and recovery acceptance gates.
 
 The Tauri process must not run as root and must not gain a generic command,
 filesystem, or disk-writing bridge. The privileged service remains the trust
@@ -179,18 +186,33 @@ Before replacing Chromium in the image:
 
 ## Current progress
 
-- Phase 0 — API contract: complete. See [`installer-api-contract.md`](installer-api-contract.md).
-- Phase 1 — React frontend: complete as a compatibility client. Typecheck,
+- P0 — Migration control plane: complete (2026-09-05). The generated
+  [runtime migration report](../build_files/config/runtime-migration-report.json)
+  distinguishes installed authorities from source-only fixtures, and the
+  repository validation gate rejects untyped frontend process/filesystem
+  bridges and unclassified active Python paths.
+- Phase 0 — API contract: complete. See
+  [`installer-api-contract.md`](installer-api-contract.md).
+- Phase 1 — React frontend: complete as the embedded Tauri client. Typecheck,
   production build, API decoding, request guards, manual-error handling, and
-  contract smoke tests pass. The Rust/Slint client is the production UI.
+  contract smoke tests pass. The Slint client remains an explicit recovery
+  fallback, not a second backend authority.
+- Phase 2/3 — Tauri shell and Rust Unix-socket boundary: implemented and
+  packaged. The Rust daemon still proxies the compatibility Python backend for
+  the remaining destructive workflow.
+- Local acceptance — the live ISO, install-only path, reboot into the installed
+  system, and installed Hub checks pass in KVM/QEMU/SPICE. All installer modes,
+  cancellation, power-loss recovery, and update/rollback lifecycle acceptance
+  remain open.
 
-## Review findings (2026-08-31)
+## Review findings (2026-09-05)
 
-The code-level migration is complete for the current Rust/Slint production
-client and native Rust Unix-socket boundary. The Python backend remains
-authoritative for destructive execution until future Rust backend ports
-independently achieve behavioral parity. The remaining release work is
-live-media and disposable-VM validation.
+The code-level migration is complete for the current React/Tauri client and
+native Rust Unix-socket boundary. The Python backend remains authoritative for
+destructive execution until future Rust backend ports independently achieve
+behavioral parity. The local install-only live-media qualification is complete;
+the remaining installer work is native backend ownership plus the broader
+disposable-VM destructive-path matrix.
 
 ## Prepared continuation
 
@@ -360,10 +382,15 @@ is excluded from this backlog.
 - Remove the Chromium/Python UI launcher only after all safety gates pass.
 - Reassess whether Calamares remains an optional fallback or can be retired.
 
-## Next session starting point
+## Next implementation starting point
 
-Begin with the Phase 1 parity change set above. The first bounded slice is to
-add the frontend test harness, extract/test install-mode request selection, and
-fix the missing `target_partition`, `resize_partition`, free-region, and
-`confirm_current` values. Do not create the Tauri shell until this slice and the
-remaining Phase 1 gates pass.
+Begin with the installer P1 slices in this order:
+
+1. Make the Rust daemon own the typed installer job/state machine and event
+   stream while preserving the logical API.
+2. Complete native storage execution and all five install-mode paths.
+3. Move target configuration, account creation, and secret handling into the
+   Rust executor.
+4. Move Secure Boot/MOK execution and final reboot classification.
+5. Run the complete destructive-path acceptance matrix, then remove the
+   Python installer runtime and compatibility launcher.
