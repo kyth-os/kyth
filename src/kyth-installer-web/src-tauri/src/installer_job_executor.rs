@@ -27,6 +27,49 @@ pub(crate) struct NativeInstallRequest {
     pub execution: InstallerExecutionInput,
 }
 
+impl NativeInstallRequest {
+    /// Decode the flat HTTP representation used by the existing frontend.
+    /// Secrets are consumed into the typed request and never serialized back.
+    pub(crate) fn from_http(value: serde_json::Value) -> Result<Self, String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| "installer start request must be a JSON object".to_string())?;
+        let text = |name: &str, default: &str| {
+            object
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(default)
+                .to_string()
+        };
+        let number = |name: &str| object.get(name).and_then(serde_json::Value::as_i64).unwrap_or(0);
+        let flag = |name: &str, default: bool| object.get(name).and_then(serde_json::Value::as_bool).unwrap_or(default);
+        let username = text("username", "");
+        let password_hash = text("password_hash", "");
+        let account = (!username.is_empty()).then_some(crate::installer_accounts::CreateUserInput {
+            deploy_root: text("deploy_root", "/mnt/deploy"),
+            target_root: text("target_root", "/mnt/target"),
+            username,
+            password_hash,
+        });
+        Ok(Self {
+            storage: InstallerPlanInput {
+                disk: text("disk", ""), install_mode: text("install_mode", "wipe"),
+                target_partition: text("target_partition", ""), resize_partition: text("resize_partition", ""),
+                resize_gib: number("resize_gib"), free_region_start: number("free_region_start"), free_region_end: number("free_region_end"),
+            },
+            execution: InstallerExecutionInput {
+                bootc: crate::installer_bootc::BootcInstallInput {
+                    subcommand: text("subcommand", "to-disk"), source_imgref: text("source_imgref", ""), target_imgref: text("target_imgref", ""), target: text("disk", ""),
+                    skip_fetch_check: flag("skip_fetch_check", true), skip_finalize: flag("skip_finalize", false), root_subvolume: flag("root_subvolume", false), wipe: flag("wipe", false),
+                },
+                configuration: crate::installer_configuration::ConfigurationInput { target_root: text("target_root", "/mnt/target"), hostname: text("hostname", "kyth"), timezone: text("timezone", "UTC"), locale: text("locale", "en_US.UTF-8"), keymap: text("keymap", "us") },
+                account,
+                secure_boot: crate::installer_secure_boot::SecureBootInput { kernel: text("kernel", "fedora"), force_stage: flag("force_stage", false), certificate_present: flag("certificate_present", false), mokutil_present: flag("mokutil_present", false), secure_boot: text("secure_boot", "unknown"), enrolled: text("enrolled", "unknown"), pending: text("pending", "unknown") },
+            },
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum NativeOperation {
     ValidateStoragePlan,
