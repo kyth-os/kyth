@@ -15,7 +15,7 @@ default:
 check:
     #!/usr/bin/env bash
     set -euo pipefail
-    find . -type f -name "*.just" | while read -r file; do
+    find . -path './tmp' -prune -o -type f -name "*.just" -print | while read -r file; do
     	echo "Checking syntax: $file"
     	just --unstable --fmt --check -f "$file"
     done
@@ -111,7 +111,7 @@ ci-preflight:
 fix:
     #!/usr/bin/env bash
     set -euo pipefail
-    find . -type f -name "*.just" | while read -r file; do
+    find . -path './tmp' -prune -o -type f -name "*.just" -print | while read -r file; do
     	echo "Checking syntax: $file"
     	just --unstable --fmt -f "$file"
     done
