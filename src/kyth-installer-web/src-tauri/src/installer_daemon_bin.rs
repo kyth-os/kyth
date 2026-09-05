@@ -1,4 +1,5 @@
 mod installer_daemon;
+mod installer_job;
 mod installer_plan;
 mod installer_runtime;
 mod installer_storage;

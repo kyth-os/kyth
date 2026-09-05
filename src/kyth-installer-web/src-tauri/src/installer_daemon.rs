@@ -206,6 +206,7 @@ fn route_allowed(method: &str, target: &str) -> bool {
                 | "/api/disk/pending"
                 | "/api/disk/filesystems"
                 | "/api/report"
+                | "/api/runtime"
                 | "/api/rescue/probe"
                 | "/api/log"
                 | "/api/stream"
@@ -410,12 +411,17 @@ fn storage_lsblk_args(disk: Option<&str>) -> Vec<String> {
 fn read_only_storage_route(
     method: &str,
     target: &str,
+    runtime: &RuntimeCoordinator,
 ) -> Result<Option<serde_json::Value>, String> {
     if method != "GET" {
         return Ok(None);
     }
     let path = target.split('?').next().unwrap_or(target);
     match path {
+        "/api/runtime" => Ok(Some(
+            serde_json::to_value(runtime.snapshot()?)
+                .map_err(|error| format!("could not serialize installer runtime: {error}"))?,
+        )),
         "/api/disks" => {
             let disk_snapshot = command_output(
                 "/usr/bin/lsblk",
@@ -667,7 +673,7 @@ fn handle(
         forbidden(&mut client);
         return Ok(());
     }
-    match read_only_storage_route(method, target) {
+    match read_only_storage_route(method, target, &runtime) {
         Ok(Some(value)) => {
             json_response(&mut client, "200 OK", &value);
             return Ok(());
