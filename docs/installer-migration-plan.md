@@ -204,6 +204,11 @@ Before replacing Chromium in the image:
   system, and installed Hub checks pass in KVM/QEMU/SPICE. All installer modes,
   cancellation, power-loss recovery, and update/rollback lifecycle acceptance
   remain open.
+- Host-side acceptance harness checks — the unittest-based VM acceptance
+  contract tests pass (68 tests), and the fast repository validation gate
+  passes. A destructive VM run is still pending because this host has neither
+  a built live ISO nor `/dev/kvm`; the acceptance harness must not silently
+  fall back to software emulation.
 
 ## Review findings (2026-09-05)
 
