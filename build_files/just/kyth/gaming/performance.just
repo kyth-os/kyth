@@ -111,4 +111,3 @@ health-check:
     #!/usr/bin/env bash
     set -euo pipefail
     /usr/bin/kyth-health-check
-

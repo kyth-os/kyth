@@ -87,4 +87,3 @@ setup-tailscale:
     sudo tailscale up --accept-routes
     echo
     echo "Done. Check your Tailscale network at https://login.tailscale.com/admin/machines"
-
