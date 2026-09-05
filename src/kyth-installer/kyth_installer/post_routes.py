@@ -100,6 +100,13 @@ class PostRouteService:
         return ApiResponse(res, status)
 
     def reboot(self, body: dict) -> ApiResponse:
+        if shutil.which("kyth-installer-exec"):
+            from .orchestration import native_operation
+            try:
+                native_operation("reboot", {})
+                return ApiResponse({"ok": True}, 200)
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+                return ApiResponse({"ok": False, "error": str(exc)}, 500)
         res = self.installer_service.reboot(body)
         status = 200 if res.get("ok") else 500
         return ApiResponse(res, status)

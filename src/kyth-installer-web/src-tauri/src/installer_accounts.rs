@@ -11,7 +11,7 @@ use std::process::Command;
 
 const MAX_USERNAME: usize = 32;
 
-#[derive(Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Deserialize)]
 pub struct CreateUserInput {
     pub deploy_root: String,
     pub target_root: String,

@@ -6,13 +6,103 @@
 //! run installer commands.
 
 use std::collections::VecDeque;
+use std::io::{self, Read};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::time::{Duration, Instant};
 
 const RECENT_OUTPUT_LINES: usize = 30;
 const FAILURE_OUTPUT_LINES: usize = 10;
+const STREAM_READ_CHUNK: usize = 64 * 1024;
+const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum StreamEvent {
     Log(String),
+}
+
+/// Own a long-running executor child until it exits, is cancelled, or times out.
+///
+/// The daemon currently consumes the same line-oriented log protocol as the
+/// compatibility runner, so events are written to stdout one line at a time.
+/// Keeping the child and its cleanup here makes cancellation and failure
+/// classification independent of the caller that planned the operation.
+pub(crate) fn run_command(
+    command: &mut Command,
+    cancel_requested: impl Fn() -> bool,
+) -> Result<ExitStatus, String> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("could not spawn streaming command: {error}"))?;
+    let result = run_child(&mut child, cancel_requested);
+    if result.is_err() && child.try_wait().ok().flatten().is_none() {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    result
+}
+
+fn run_child(child: &mut Child, cancel_requested: impl Fn() -> bool) -> Result<ExitStatus, String> {
+    let started = Instant::now();
+    let mut model = StreamingCommandModel::new(0, 0);
+    let mut output = child
+        .stdout
+        .take()
+        .ok_or_else(|| "streaming command stdout was not captured".to_string())?;
+    let fd = std::os::unix::io::AsRawFd::as_raw_fd(&output);
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+    if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0 {
+        return Err(format!(
+            "could not configure streaming command output: {}",
+            io::Error::last_os_error()
+        ));
+    }
+    let mut buffer = [0u8; STREAM_READ_CHUNK];
+    loop {
+        if cancel_requested() {
+            let _ = child.kill();
+            return Err(
+                "Installation cancelled by user. Disk changes may have already started."
+                    .to_string(),
+            );
+        }
+        match output.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(size) => {
+                for event in model.feed(&buffer[..size], started.elapsed().as_secs()) {
+                    let StreamEvent::Log(line) = event;
+                    println!("{line}");
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(format!("could not read streaming command output: {error}")),
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("could not poll streaming command: {error}"))?
+        {
+            for event in model.finish_output() {
+                let StreamEvent::Log(line) = event;
+                println!("{line}");
+            }
+            return model
+                .finish_status(status.code().unwrap_or(1))
+                .map(|_| status);
+        }
+        std::thread::sleep(STREAM_POLL_INTERVAL);
+    }
+    let status = child
+        .wait()
+        .map_err(|error| format!("could not wait for streaming command: {error}"))?;
+    for event in model.finish_output() {
+        let StreamEvent::Log(line) = event;
+        println!("{line}");
+    }
+    model
+        .finish_status(status.code().unwrap_or(1))
+        .map(|_| status)
 }
 
 #[derive(Debug)]
@@ -75,8 +165,9 @@ impl StreamingCommandModel {
                     let invalid_start = valid_end;
                     let Some(error_len) = error.error_len() else {
                         if final_chunk {
-                            self.pending
-                                .push_str(&String::from_utf8_lossy(&self.pending_utf8[invalid_start..]));
+                            self.pending.push_str(&String::from_utf8_lossy(
+                                &self.pending_utf8[invalid_start..],
+                            ));
                             self.pending_utf8.clear();
                         } else {
                             self.pending_utf8 = self.pending_utf8[invalid_start..].to_vec();
@@ -97,7 +188,9 @@ impl StreamingCommandModel {
     fn take_lines(&mut self, final_chunk: bool) -> Vec<StreamEvent> {
         let mut events = Vec::new();
         loop {
-            let Some(index) = self.pending.find(['\n', '\r']) else { break };
+            let Some(index) = self.pending.find(['\n', '\r']) else {
+                break;
+            };
             let line = self.pending[..index].to_string();
             self.pending.drain(..=index);
             self.emit_line(line, &mut events);
@@ -147,26 +240,38 @@ impl StreamingCommandModel {
     ) -> Option<String> {
         if let Some(limit) = absolute_timeout {
             if now.saturating_sub(self.started_at) > limit {
-                return Some(format!("Command exceeded absolute timeout of {limit} seconds"));
+                return Some(format!(
+                    "Command exceeded absolute timeout of {limit} seconds"
+                ));
             }
         }
         if now.saturating_sub(self.last_activity) > io_timeout {
-            return Some(format!("Command timed out after {io_timeout} seconds with no output"));
+            return Some(format!(
+                "Command timed out after {io_timeout} seconds with no output"
+            ));
         }
         if self.total_bytes > 0 && now.saturating_sub(self.last_rx_activity) > net_timeout {
-            return Some(format!("Command timed out after {net_timeout} seconds with no network progress"));
+            return Some(format!(
+                "Command timed out after {net_timeout} seconds with no network progress"
+            ));
         }
         None
     }
 
     pub(crate) fn finish_status(&self, exit_code: i32) -> Result<(), String> {
         if self.cancelled {
-            return Err("Installation cancelled by user. Disk changes may have already started.".to_string());
+            return Err(
+                "Installation cancelled by user. Disk changes may have already started."
+                    .to_string(),
+            );
         }
         if exit_code == 0 {
             return Ok(());
         }
-        let start = self.recent_output.len().saturating_sub(FAILURE_OUTPUT_LINES);
+        let start = self
+            .recent_output
+            .len()
+            .saturating_sub(FAILURE_OUTPUT_LINES);
         let detail = self
             .recent_output
             .iter()
@@ -174,7 +279,11 @@ impl StreamingCommandModel {
             .cloned()
             .collect::<Vec<_>>()
             .join("\n");
-        let detail = if detail.is_empty() { "No command output was captured." } else { &detail };
+        let detail = if detail.is_empty() {
+            "No command output was captured."
+        } else {
+            &detail
+        };
         Err(format!("Command failed (exit {exit_code}):\n\n{detail}"))
     }
 }
@@ -222,10 +331,8 @@ mod tests {
             let mut model = StreamingCommandModel::new(0, 0);
             let mut feed_events = Vec::new();
             for chunk in case["chunks_hex"].as_array().expect("chunks are an array") {
-                feed_events.extend(model.feed(
-                    &decode_hex(chunk.as_str().expect("chunk is hex")),
-                    1,
-                ));
+                feed_events
+                    .extend(model.feed(&decode_hex(chunk.as_str().expect("chunk is hex")), 1));
             }
             assert_eq!(
                 event_lines(feed_events),
@@ -238,7 +345,8 @@ mod tests {
                 "{name}: final events"
             );
             if let Some(expected) = case.get("expected_error_contains") {
-                let error = model.finish_status(case["exit_code"].as_i64().unwrap() as i32)
+                let error = model
+                    .finish_status(case["exit_code"].as_i64().unwrap() as i32)
                     .expect_err("fixture failure must return an error");
                 for needle in expected.as_array().unwrap() {
                     assert!(error.contains(needle.as_str().unwrap()), "{name}: {error}");
@@ -247,7 +355,12 @@ mod tests {
                     assert!(!error.contains(needle.as_str().unwrap()), "{name}: {error}");
                 }
             } else {
-                assert!(model.finish_status(case["exit_code"].as_i64().unwrap() as i32).is_ok(), "{name}");
+                assert!(
+                    model
+                        .finish_status(case["exit_code"].as_i64().unwrap() as i32)
+                        .is_ok(),
+                    "{name}"
+                );
             }
         }
     }
@@ -255,13 +368,22 @@ mod tests {
     #[test]
     fn preserves_split_utf8_and_replaces_invalid_bytes_at_eof() {
         let mut model = StreamingCommandModel::new(0, 0);
-        assert_eq!(model.feed("café\n".as_bytes(), 1), vec![StreamEvent::Log("café".to_string())]);
+        assert_eq!(
+            model.feed("café\n".as_bytes(), 1),
+            vec![StreamEvent::Log("café".to_string())]
+        );
 
         let mut model = StreamingCommandModel::new(0, 0);
         assert_eq!(model.feed(b"caf\xc3", 1), Vec::<StreamEvent>::new());
-        assert_eq!(model.feed(b"\xa9\n", 2), vec![StreamEvent::Log("café".to_string())]);
+        assert_eq!(
+            model.feed(b"\xa9\n", 2),
+            vec![StreamEvent::Log("café".to_string())]
+        );
         assert_eq!(model.feed(b"bad\xff", 3), Vec::<StreamEvent>::new());
-        assert_eq!(model.finish_output(), vec![StreamEvent::Log("bad�".to_string())]);
+        assert_eq!(
+            model.finish_output(),
+            vec![StreamEvent::Log("bad�".to_string())]
+        );
     }
 
     #[test]
@@ -290,9 +412,18 @@ mod tests {
         let mut model = StreamingCommandModel::new(100, 10);
         assert_eq!(model.timeout_error(105, 5, 5, Some(50)), None);
         model.observe_network(105, 20, 100);
-        assert!(model.timeout_error(111, 20, 5, Some(50)).unwrap().contains("network"));
-        assert!(model.timeout_error(151, 100, 100, Some(50)).unwrap().contains("absolute"));
+        assert!(model
+            .timeout_error(111, 20, 5, Some(50))
+            .unwrap()
+            .contains("network"));
+        assert!(model
+            .timeout_error(151, 100, 100, Some(50))
+            .unwrap()
+            .contains("absolute"));
         model.feed(b"progress\n", 200);
-        assert!(model.timeout_error(221, 20, 100, Some(200)).unwrap().contains("output"));
+        assert!(model
+            .timeout_error(221, 20, 100, Some(200))
+            .unwrap()
+            .contains("output"));
     }
 }

@@ -7,6 +7,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::installer_accounts::{self, CreateUserInput};
 use crate::installer_bootc::{self, BootcInstallInput, BootcInstallPlan};
 use crate::installer_configuration::{self, ConfigurationInput, ConfigurationPlan};
 use crate::installer_secure_boot::{self, SecureBootInput, SecureBootPlan};
@@ -18,6 +19,16 @@ pub(crate) struct InstallerExecutionInput {
     pub bootc: BootcInstallInput,
     pub configuration: ConfigurationInput,
     pub secure_boot: SecureBootInput,
+    #[serde(default)]
+    pub account: Option<CreateUserInput>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub(crate) struct AccountCreationPlan {
+    pub deploy_root: String,
+    pub target_root: String,
+    pub username: String,
+    pub executor: &'static str,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -26,15 +37,29 @@ pub(crate) struct InstallerExecutionPlan {
     pub executor: &'static str,
     pub bootc: BootcInstallPlan,
     pub configuration: ConfigurationPlan,
+    pub account: Option<AccountCreationPlan>,
     pub secure_boot: SecureBootPlan,
 }
 
 pub(crate) fn build_plan(input: InstallerExecutionInput) -> Result<InstallerExecutionPlan, String> {
+    let account = input
+        .account
+        .map(|account| -> Result<AccountCreationPlan, String> {
+            let (deploy_root, target_root) = installer_accounts::validate(&account)?;
+            Ok(AccountCreationPlan {
+                deploy_root: deploy_root.to_string_lossy().into_owned(),
+                target_root: target_root.to_string_lossy().into_owned(),
+                username: account.username.trim().to_string(),
+                executor: "kyth-installer-exec",
+            })
+        })
+        .transpose()?;
     Ok(InstallerExecutionPlan {
         protocol_version: EXECUTOR_PROTOCOL_VERSION,
         executor: "kyth-installerd",
         bootc: installer_bootc::build_plan(input.bootc)?,
         configuration: installer_configuration::build_plan(input.configuration)?,
+        account,
         secure_boot: installer_secure_boot::build_plan(input.secure_boot)?,
     })
 }
@@ -72,10 +97,56 @@ mod tests {
                 enrolled: "unknown".to_string(),
                 pending: "unknown".to_string(),
             },
-        }).expect("execution plan should validate");
+            account: None,
+        })
+        .expect("execution plan should validate");
         assert_eq!(plan.protocol_version, 1);
         assert_eq!(plan.executor, "kyth-installerd");
         assert!(plan.bootc.destructive);
         assert_eq!(plan.secure_boot.state, "skipped");
+        assert!(plan.account.is_none());
+    }
+
+    #[test]
+    fn account_plan_excludes_password_hash() {
+        let account = CreateUserInput {
+            deploy_root: "/mnt/deploy".into(),
+            target_root: "/mnt/target".into(),
+            username: "kyth_user".into(),
+            password_hash: "$6$must-not-be-planned".into(),
+        };
+        let plan = build_plan(InstallerExecutionInput {
+            bootc: BootcInstallInput {
+                subcommand: "to-disk".into(),
+                source_imgref: "oci:/image".into(),
+                target_imgref: "kyth:latest".into(),
+                target: "/dev/sda".into(),
+                skip_fetch_check: true,
+                skip_finalize: false,
+                root_subvolume: false,
+                wipe: true,
+            },
+            configuration: ConfigurationInput {
+                target_root: "/mnt/target".into(),
+                hostname: "kyth".into(),
+                timezone: "UTC".into(),
+                locale: "en_US.UTF-8".into(),
+                keymap: "us".into(),
+            },
+            account: Some(account),
+            secure_boot: SecureBootInput {
+                kernel: "fedora".into(),
+                force_stage: false,
+                certificate_present: false,
+                mokutil_present: false,
+                secure_boot: "unknown".into(),
+                enrolled: "unknown".into(),
+                pending: "unknown".into(),
+            },
+        })
+        .expect("execution plan should validate");
+        let encoded = serde_json::to_string(&plan.account).unwrap();
+        assert!(!encoded.contains("must-not-be-planned"));
+        assert!(encoded.contains("kyth_user"));
     }
 }

@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::path::Path;
 use std::process::Command;
 
 #[derive(Debug, Deserialize)]
@@ -75,7 +76,17 @@ fn normalized_fs(value: &str) -> Result<&'static str, String> {
 pub(crate) fn apply(input: ManualMountsInput) -> Result<ManualMountsResult, String> {
     let root = safe_path(&input.config_root, "config root")?;
     let fstab = safe_path(&input.fstab_path, "fstab path")?;
-    if !fstab.ends_with("/etc/fstab") {
+    // Keep the check component-based: `Path::ends_with("/etc/fstab")` does
+    // not match an absolute path such as `/mnt/target/etc/fstab` because the
+    // leading root component is significant to `Path`.
+    let fstab_path = Path::new(&fstab);
+    if fstab_path.file_name().and_then(|name| name.to_str()) != Some("fstab")
+        || fstab_path
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            != Some("etc")
+    {
         return Err("fstab path must point to installed /etc/fstab".into());
     }
     let mut configured = 0;

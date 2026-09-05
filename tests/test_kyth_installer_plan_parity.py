@@ -53,7 +53,9 @@ class InstallerPlanParityTests(unittest.TestCase):
             if "expected" not in case:
                 continue
             with self.subTest(case=case["name"]):
-                plan = install_plan_from_state(InstallRequest.from_state(case["input"]))
+                request = InstallRequest.from_state(case["input"])
+                raw = case["input"]
+                plan = install_plan_from_state(request)
                 expected = case["expected"]
                 self.assertEqual(plan.mode, expected["mode"])
                 self.assertEqual(plan.disk, expected["disk"])
@@ -61,6 +63,30 @@ class InstallerPlanParityTests(unittest.TestCase):
                     plan.target_partition or None,
                     _normal_device_path(case["input"].get("target_partition")),
                 )
+                # The Python projection intentionally remains storage-only,
+                # but it must preserve every mode selector that the native
+                # plan boundary consumes.  Resize/free-space values are
+                # checked directly from the immutable request so this test
+                # cannot accidentally bless a dropped field.
+                if expected["mode"] == "resize_ntfs":
+                    self.assertEqual(
+                        _normal_device_path(
+                            raw.get("resize_partition") or raw.get("target_partition")
+                        ),
+                        expected["resize_partition"],
+                    )
+                    self.assertEqual(
+                        raw.get("resize_gib", 0) * 1024**3,
+                        expected["resize_bytes"],
+                    )
+                else:
+                    self.assertEqual(expected["resize_bytes"], 0)
+                if expected["mode"] == "free_space":
+                    self.assertEqual(raw.get("free_region_start", 0), expected["free_region_start"])
+                    self.assertEqual(raw.get("free_region_end", 0), expected["free_region_end"])
+                else:
+                    self.assertIsNone(expected["free_region_start"])
+                    self.assertIsNone(expected["free_region_end"])
 
     def test_python_validation_matches_shared_error_cases(self):
         snapshot = _snapshot()

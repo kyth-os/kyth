@@ -13,6 +13,7 @@ use std::path::Path;
 
 const MAX_RECOVERY_PATH_BYTES: usize = 4096;
 const MAX_SUPPORT_FILE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_SUPPORT_EXPORT_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub(crate) struct RecoveryGuidance {
@@ -52,7 +53,8 @@ const GUIDANCE: &[(&str, &str, &str, bool)] = &[
 
 pub(crate) fn rescue_guidance(status: Option<&str>) -> RecoveryGuidance {
     let status = status.unwrap_or_default();
-    if let Some((_, severity, message, bootable)) = GUIDANCE.iter().find(|entry| entry.0 == status) {
+    if let Some((_, severity, message, bootable)) = GUIDANCE.iter().find(|entry| entry.0 == status)
+    {
         return RecoveryGuidance {
             status: status.to_string(),
             severity: (*severity).to_string(),
@@ -63,7 +65,9 @@ pub(crate) fn rescue_guidance(status: Option<&str>) -> RecoveryGuidance {
     RecoveryGuidance {
         status: status.to_string(),
         severity: "unknown".to_string(),
-        message: format!("Unrecognized transaction status {status:?}. Do not assume the disk is bootable."),
+        message: format!(
+            "Unrecognized transaction status {status:?}. Do not assume the disk is bootable."
+        ),
         bootable: false,
     }
 }
@@ -76,8 +80,7 @@ fn safe_absolute_path(raw: &str, label: &str) -> Result<String, String> {
         || value.contains("..")
         || value.contains("//")
         || !value.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric()
-                || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
+            byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'.' | b'_' | b'+' | b':' | b'-')
         })
     {
         return Err(format!("{label} must be an absolute safe path."));
@@ -116,8 +119,25 @@ fn copy_support_file(source: &Path, destination: &Path) -> Result<bool, String> 
     let mut output = output
         .open(destination)
         .map_err(|error| format!("could not create recovery export: {error}"))?;
-    io::copy(&mut input, &mut output)
-        .map_err(|error| format!("could not copy recovery file: {error}"))?;
+    let mut copied = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let read = io::Read::read(&mut input, &mut buffer)
+            .map_err(|error| format!("could not read recovery file: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        copied = copied.saturating_add(read as u64);
+        if copied > MAX_SUPPORT_FILE_BYTES {
+            return Err(format!(
+                "recovery file {} grew beyond the supported export limit",
+                source.display()
+            ));
+        }
+        output
+            .write_all(&buffer[..read])
+            .map_err(|error| format!("could not copy recovery file: {error}"))?;
+    }
     output
         .flush()
         .map_err(|error| format!("could not flush recovery export: {error}"))?;
@@ -158,8 +178,24 @@ pub(crate) fn export_logs(input: RecoveryExportInput) -> Result<RecoveryExportRe
         ),
     ];
     let mut copied = Vec::new();
+    let mut total_bytes = 0_u64;
     for (name, source) in sources {
-        if copy_support_file(Path::new(&source), &destination.join(name))? {
+        let target = destination.join(name);
+        if let Ok(metadata) = fs::symlink_metadata(&target) {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                return Err(format!(
+                    "recovery export target {} is not a safe file",
+                    target.display()
+                ));
+            }
+        }
+        if let Ok(metadata) = fs::symlink_metadata(Path::new(&source)) {
+            total_bytes = total_bytes.saturating_add(metadata.len());
+            if total_bytes > MAX_SUPPORT_EXPORT_BYTES {
+                return Err("recovery export exceeds the aggregate size limit".to_string());
+            }
+        }
+        if copy_support_file(Path::new(&source), &target)? {
             copied.push(name.to_string());
         }
     }
@@ -180,14 +216,27 @@ mod tests {
 
     #[test]
     fn shared_recovery_fixture_matches_all_durable_statuses() {
-        let cases: Vec<Value> = serde_json::from_str(include_str!("../testdata/recovery_cases.json"))
-            .expect("recovery parity fixture must be valid JSON");
+        let cases: Vec<Value> =
+            serde_json::from_str(include_str!("../testdata/recovery_cases.json"))
+                .expect("recovery parity fixture must be valid JSON");
         for case in cases {
             let status = case["status"].as_str().expect("status is a string");
             let guidance = rescue_guidance(Some(status));
-            assert_eq!(guidance.severity, case["severity"].as_str().unwrap(), "{status}");
-            assert_eq!(guidance.bootable, case["bootable"].as_bool().unwrap(), "{status}");
-            assert_eq!(guidance.message, case["message"].as_str().unwrap(), "{status}");
+            assert_eq!(
+                guidance.severity,
+                case["severity"].as_str().unwrap(),
+                "{status}"
+            );
+            assert_eq!(
+                guidance.bootable,
+                case["bootable"].as_bool().unwrap(),
+                "{status}"
+            );
+            assert_eq!(
+                guidance.message,
+                case["message"].as_str().unwrap(),
+                "{status}"
+            );
         }
         let unknown = rescue_guidance(Some("future_status"));
         assert!(!unknown.bootable);
@@ -201,7 +250,8 @@ mod tests {
             log_path: "/run/kyth-installer/log".to_string(),
             transaction_path: "/run/kyth-installer/transaction.json".to_string(),
             failure_summary_path: "/run/kyth-installer/failure.json".to_string(),
-        }).is_err());
+        })
+        .is_err());
     }
 
     #[test]
@@ -217,8 +267,52 @@ mod tests {
         assert!(export_logs(RecoveryExportInput {
             usb_mount: mount.to_string_lossy().into_owned(),
             log_path: sources.join("log").to_string_lossy().into_owned(),
-            transaction_path: sources.join("transaction.json").to_string_lossy().into_owned(),
+            transaction_path: sources
+                .join("transaction.json")
+                .to_string_lossy()
+                .into_owned(),
             failure_summary_path: sources.join("failure.json").to_string_lossy().into_owned(),
-        }).is_err());
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn recovery_export_rejects_existing_symlink_target() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mount = directory.path().join("usb");
+        let sources = directory.path().join("sources");
+        fs::create_dir(&mount).expect("USB directory");
+        fs::create_dir(&sources).expect("source directory");
+        fs::write(sources.join("log"), "safe").expect("source content");
+        fs::create_dir(mount.join("kyth-installer-logs")).expect("destination");
+        std::os::unix::fs::symlink(sources.join("log"), mount.join("kyth-installer-logs/log"))
+            .expect("destination symlink");
+        assert!(export_logs(RecoveryExportInput {
+            usb_mount: mount.to_string_lossy().into_owned(),
+            log_path: sources.join("log").to_string_lossy().into_owned(),
+            transaction_path: sources.join("missing").to_string_lossy().into_owned(),
+            failure_summary_path: sources.join("missing2").to_string_lossy().into_owned(),
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn recovery_export_enforces_aggregate_limit() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mount = directory.path().join("usb");
+        let sources = directory.path().join("sources");
+        fs::create_dir(&mount).expect("USB directory");
+        fs::create_dir(&sources).expect("source directory");
+        let payload = vec![b'x'; (MAX_SUPPORT_EXPORT_BYTES / 2 + 1) as usize];
+        for name in ["log", "transaction", "failure"] {
+            fs::write(sources.join(name), &payload).expect("source content");
+        }
+        assert!(export_logs(RecoveryExportInput {
+            usb_mount: mount.to_string_lossy().into_owned(),
+            log_path: sources.join("log").to_string_lossy().into_owned(),
+            transaction_path: sources.join("transaction").to_string_lossy().into_owned(),
+            failure_summary_path: sources.join("failure").to_string_lossy().into_owned(),
+        })
+        .is_err());
     }
 }

@@ -7,26 +7,27 @@
 //! streaming operations are spawned and waited by this helper so parent-death
 //! cancellation cannot orphan a long-running utility.
 
+mod installer_accounts;
+mod installer_alongside;
 mod installer_bootc;
+mod installer_configuration;
 mod installer_disk;
 #[allow(dead_code)]
 mod installer_journal;
+mod installer_manual;
+mod installer_orchestration;
 #[allow(dead_code)]
 mod installer_plan;
-#[allow(dead_code)]
-mod installer_storage;
+mod installer_probe;
 #[allow(dead_code)]
 mod installer_recovery;
 #[allow(dead_code)]
-mod installer_transaction;
-mod installer_configuration;
-mod installer_alongside;
-mod installer_probe;
-mod installer_manual;
-mod installer_accounts;
-#[allow(dead_code)]
 mod installer_secure_boot;
-mod installer_orchestration;
+#[allow(dead_code)]
+mod installer_storage;
+mod installer_stream;
+#[allow(dead_code)]
+mod installer_transaction;
 
 use std::io::{self, Read, Write};
 use std::os::unix::process::CommandExt;
@@ -75,6 +76,8 @@ fn operation_args_valid(args: &[String]) -> bool {
                 | "recovery-export"
                 | "stream"
                 | "secure-boot-plan"
+                | "secure-boot-stage"
+                | "reboot"
                 | "orchestration"
                 | "power-check"
                 | "uuid-probe"
@@ -111,11 +114,15 @@ fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
     let operation = serde_json::from_slice::<StreamingOperationInput>(input)
         .map_err(|error| format!("invalid streaming operation JSON: {error}"))?;
     let (argv, description) = match operation {
-        StreamingOperationInput::BootcInstall(input) => {
-            (installer_bootc::build_plan(input)?.argv, "bootc image installation")
-        }
+        StreamingOperationInput::BootcInstall(input) => (
+            installer_bootc::build_plan(input)?.argv,
+            "bootc image installation",
+        ),
         StreamingOperationInput::Disk(input) => {
-            if !matches!(&input, installer_disk::DiskOperationInput::FilesystemResize { .. }) {
+            if !matches!(
+                &input,
+                installer_disk::DiskOperationInput::FilesystemResize { .. }
+            ) {
                 return Err("streaming disk operation must be a filesystem resize".to_string());
             }
             let plan = installer_disk::build_plan(input)?;
@@ -126,16 +133,12 @@ fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
         .first()
         .ok_or_else(|| format!("{description} plan was empty"))?;
     let mut command = Command::new(executable);
-    command
-        .args(&argv[1..])
-        .stdin(Stdio::inherit())
-        .stdout(Stdio::inherit())
-        .stderr(Stdio::inherit());
-    let mut child = unsafe { command.pre_exec(parent_death_signal).spawn() }
-        .map_err(|error| format!("could not spawn {description}: {error}"))?;
-    let status = child
-        .wait()
-        .map_err(|error| format!("could not wait for {description}: {error}"))?;
+    command.args(&argv[1..]).stdin(Stdio::inherit());
+    unsafe {
+        command.pre_exec(parent_death_signal);
+    }
+    let status = installer_stream::run_command(&mut command, || false)
+        .map_err(|error| format!("{description}: {error}"))?;
     Ok(exit_code(status))
 }
 
@@ -209,15 +212,22 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         let input = serde_json::from_slice::<installer_alongside::AlongsideHomeInput>(&input)
             .map_err(|error| format!("invalid alongside-home JSON: {error}"))?;
         let response = installer_alongside::apply(input)?;
-        println!("{}", serde_json::to_string(&response).map_err(|error| format!("could not encode alongside-home response: {error}"))?);
+        println!(
+            "{}",
+            serde_json::to_string(&response)
+                .map_err(|error| format!("could not encode alongside-home response: {error}"))?
+        );
         return Ok(ExitCode::SUCCESS);
     }
     if args[1] == "manual-mounts" {
         let input = serde_json::from_slice::<installer_manual::ManualMountsInput>(&input)
             .map_err(|error| format!("invalid manual mounts JSON: {error}"))?;
         let response = installer_manual::apply(input)?;
-        println!("{}", serde_json::to_string(&response)
-            .map_err(|error| format!("could not encode manual mounts response: {error}"))?);
+        println!(
+            "{}",
+            serde_json::to_string(&response)
+                .map_err(|error| format!("could not encode manual mounts response: {error}"))?
+        );
         return Ok(ExitCode::SUCCESS);
     }
     if args[1] == "create-user" {
@@ -242,6 +252,25 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
                 .map_err(|error| format!("could not encode Secure Boot plan: {error}"))?
         );
         return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "secure-boot-stage" {
+        let input = serde_json::from_slice::<installer_secure_boot::SecureBootStageInput>(&input)
+            .map_err(|error| format!("invalid Secure Boot staging JSON: {error}"))?;
+        let plan = installer_secure_boot::stage(input)?;
+        println!(
+            "{}",
+            serde_json::to_string(&plan).map_err(|error| format!(
+                "could not encode Secure Boot staging response: {error}"
+            ))?
+        );
+        return Ok(ExitCode::SUCCESS);
+    }
+    if args[1] == "reboot" {
+        let status = Command::new("/usr/bin/systemctl")
+            .args(["reboot", "--no-block"])
+            .status()
+            .map_err(|error| format!("could not request installer reboot: {error}"))?;
+        return Ok(exit_code(status));
     }
     if args[1] == "orchestration" {
         let input = serde_json::from_slice::<installer_orchestration::OrchestrationInput>(&input)
@@ -308,7 +337,7 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         // Ensure a helper cancellation cannot leave an interactive child
         // running after the parent process has gone away.
         let mut child = unsafe { command.pre_exec(parent_death_signal).spawn() }
-        .map_err(|error| format!("could not spawn {operation}: {error}"))?;
+            .map_err(|error| format!("could not spawn {operation}: {error}"))?;
         if let Some(mut stdin) = child.stdin.take() {
             if let Err(error) = stdin.write_all(b"Yes\n") {
                 let _ = child.kill();
@@ -389,6 +418,14 @@ mod tests {
         assert!(operation_args_valid(&[
             "--operation".into(),
             "secure-boot-plan".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "secure-boot-stage".into()
+        ]));
+        assert!(operation_args_valid(&[
+            "--operation".into(),
+            "reboot".into()
         ]));
         assert!(operation_args_valid(&[
             "--operation".into(),

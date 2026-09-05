@@ -186,6 +186,32 @@ def _try_stage_mok_enrollment(log, kernel: str = "fedora", mok_password: str = "
     Returns one of: skipped, enrolled, pending, staged, failed.
     """
     force_stage = os.environ.get("KYTH_STAGE_MOK", "0").lower() in ("1", "true", "yes", "on")
+    if shutil.which("kyth-installer-exec"):
+        # Rust owns firmware probing and mokutil execution when the native
+        # helper is installed. The password is carried only in this stdin
+        # payload; it never enters argv, logs, telemetry, or the response.
+        try:
+            native = run_command(
+                _as_root(["kyth-installer-exec", "--operation", "secure-boot-stage"]),
+                input=json.dumps(
+                    {"kernel": kernel, "force_stage": force_stage, "password": mok_password},
+                    separators=(",", ":"),
+                ),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=45,
+            )
+            response = json.loads(native.stdout or "{}")
+            state = response.get("state")
+            message = response.get("message")
+            if not isinstance(state, str) or not isinstance(message, str):
+                raise RuntimeError("native Secure Boot staging response was malformed")
+            log(f"Secure Boot: {message}")
+            return state
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, json.JSONDecodeError) as exc:
+            log(f"Secure Boot: native enrollment staging failed: {exc}")
+            return "failed"
     plan_mok = _plan_mok
     executor = PrivilegedExecutor(run_command=run_command, as_root=_as_root)
 

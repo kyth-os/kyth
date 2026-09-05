@@ -51,7 +51,18 @@ pub(crate) fn validate(input: &AlongsideHomeInput) -> Result<(PathBuf, String, P
     let root = safe_path(&input.config_root, "config root")?;
     let device = safe_device(&input.target_device)?;
     let fstab = safe_path(&input.fstab_path, "fstab path")?;
-    if !fstab.ends_with("/etc/fstab") {
+    // `Path::ends_with` compares path components and treats a leading `/` in
+    // the argument as an anchored path.  That makes a perfectly valid
+    // `/mnt/target/etc/fstab` fail the check.  Validate the installed fstab
+    // shape component-wise instead, without weakening the absolute-path
+    // checks above.
+    if fstab.file_name().and_then(|name| name.to_str()) != Some("fstab")
+        || fstab
+            .parent()
+            .and_then(|parent| parent.file_name())
+            .and_then(|name| name.to_str())
+            != Some("etc")
+    {
         return Err("fstab path must point to installed /etc/fstab".into());
     }
     Ok((root, device, fstab))

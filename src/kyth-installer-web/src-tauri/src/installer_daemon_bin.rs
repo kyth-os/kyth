@@ -1,5 +1,6 @@
-mod installer_plan;
 mod installer_daemon;
+mod installer_plan;
+mod installer_runtime;
 mod installer_storage;
 
 fn main() -> std::process::ExitCode {
