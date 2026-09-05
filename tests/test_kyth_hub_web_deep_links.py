@@ -137,5 +137,10 @@ class HubWebDeepLinkTests(unittest.TestCase):
         # deep link; the tab state must live only in the URL.
         self.assertNotIn("useState", HUB_PAGE_CODE)
 
+    def test_single_instance_listener_is_registered_before_initial_dispatch(self):
+        listener = DEEP_LINK_TS.index('await listen<string>("navigate"')
+        pending = DEEP_LINK_TS.index('const pending = await invoke<string | null>("take_pending_page")')
+        self.assertLess(listener, pending)
+
 if __name__ == "__main__":
     unittest.main()

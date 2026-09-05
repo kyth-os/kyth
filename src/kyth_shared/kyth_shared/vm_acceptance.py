@@ -344,11 +344,51 @@ def _hub_launch_check(username: str, environment: dict[str, str], page: str, exp
         _hub_stop(process)
 
 
+def _ensure_acceptance_graphical_session() -> tuple[str, dict[str, str]] | None:
+    """Create a disposable desktop account when the installed image has none.
+
+    The live image's ``liveuser`` is created by livesys at runtime and is not
+    part of the installed bootc image. The normal installed system therefore
+    correctly stops at the login manager until a user is created, but that
+    leaves the firmware-gated VM acceptance service without a graphical
+    session in which to exercise the installed Hub. Create an acceptance-only
+    account and restart the login manager; this path is reachable only when
+    QEMU exposes the acceptance fw_cfg flag.
+    """
+    session = _active_graphical_session()
+    if session and (session[1].get("WAYLAND_DISPLAY") or session[1].get("DISPLAY")):
+        return session
+
+    username = "kyth-acceptance"
+    account = run_text(["id", "-u", username], timeout=5)
+    if account is None or account.returncode:
+        created = run(["useradd", "--create-home", "--shell", "/bin/bash", username], timeout=30)
+        if created.returncode:
+            return None
+    try:
+        config = Path("/etc/plasmalogin.conf.d/90-kyth-vm-acceptance.conf")
+        config.write_text(
+            "[Autologin]\nUser=kyth-acceptance\nSession=plasma.desktop\nRelogin=true\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        return None
+    restarted = run(["systemctl", "restart", "display-manager.service", "--no-block"], timeout=30)
+    if restarted.returncode:
+        return None
+    for _ in range(60):
+        session = _active_graphical_session()
+        if session and (session[1].get("WAYLAND_DISPLAY") or session[1].get("DISPLAY")):
+            return session
+        time.sleep(1)
+    return None
+
+
 def run_hub_acceptance() -> None:
     """Exercise the installed Rust/Tauri shell from the installed desktop."""
     if not HUB_BINARY.is_file() or not os.access(HUB_BINARY, os.X_OK):
         fail(f"installed Rust/Tauri Hub binary is missing or not executable: {HUB_BINARY}")
-    session = _active_graphical_session()
+    session = _ensure_acceptance_graphical_session()
     if session is None:
         fail("active graphical session for installed Hub acceptance was not found")
     username, environment = session
@@ -369,6 +409,7 @@ def run_hub_acceptance() -> None:
     try:
         if _wait_hub_event(evidence, "deep-link") is None:
             fail("Hub first launch did not resolve Welcome")
+        evidence.unlink(missing_ok=True)
         second = _hub_start(username, environment, "Updates", evidence)
         try:
             forwarded = _wait_hub_event(evidence, "deep-link")

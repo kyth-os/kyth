@@ -158,15 +158,26 @@ class SmokeCheck:
             if status and status.returncode == 0:
                 try:
                     data = json.loads(status.stdout)
-                    booted = data.get("status", {}).get("booted", {})
-                    image = booted.get("image", {})
-                    ref = image.get("image", {}).get("image") or image.get("imageDigest") or "unknown"
-                    self.passed("Booted image", ref)
-                    if data.get("status", {}).get("staged"):
+                    status_data = data.get("status", {})
+                    if not isinstance(status_data, dict):
+                        status_data = {}
+                    booted = status_data.get("booted")
+                    if not isinstance(booted, dict):
+                        # Live media has bootc installed for diagnostics, but
+                        # it does not necessarily have a booted deployment.
+                        self.warn("Booted image", "no booted deployment reported")
+                    else:
+                        image = booted.get("image")
+                        image = image if isinstance(image, dict) else {}
+                        nested = image.get("image")
+                        nested = nested if isinstance(nested, dict) else {}
+                        ref = nested.get("image") or image.get("imageDigest") or "unknown"
+                        self.passed("Booted image", ref)
+                    if status_data.get("staged"):
                         self.warn("Staged update", "reboot before performance testing")
                     else:
                         self.passed("Staged update", "none detected")
-                except (TypeError, ValueError):
+                except (AttributeError, TypeError, ValueError):
                     self.fail("bootc status", "invalid JSON")
             else:
                 self.fail("bootc status", "unreadable")

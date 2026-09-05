@@ -22,6 +22,15 @@ build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0
     set -euo pipefail
     PODMAN="./build_files/scripts/rootful-podman.sh"
 
+    resolve_version() {
+        local query="$1"
+        if [[ -x /run/host/usr/bin/distrobox-host-exec ]]; then
+            distrobox-host-exec python3 ./build_files/scripts/resolve-versions.py "${query}"
+        else
+            python3 ./build_files/scripts/resolve-versions.py "${query}"
+        fi
+    }
+
     if command -v cosign &>/dev/null; then
         echo "Verifying base image signature with cosign..."
         cosign verify \
@@ -38,12 +47,13 @@ build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0
     fi
     CACHYOS_KERNEL_VER=unused
     if [[ "{{ kernel_flavor }}" != "fedora" ]]; then
-        CACHYOS_KERNEL_VER=$(python3 ./build_files/scripts/resolve-versions.py cachyos-kernel)
+        CACHYOS_KERNEL_VER=$(resolve_version cachyos-kernel)
     fi
     echo "CachyOS kernel: ${CACHYOS_KERNEL_VER}"
     echo "Kernel flavor: {{ kernel_flavor }}"
     echo "Enable NVIDIA: {{ enable_nvidia }}"
     ${PODMAN} build \
+        --security-opt label=disable \
         --build-arg BASE_IMAGE={{ base_image }} \
         --build-arg KYTH_KERNEL_FLAVOR="{{ kernel_flavor }}" \
         --build-arg CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VER}" \
@@ -62,9 +72,18 @@ build: build-base
     set -euo pipefail
     PODMAN="./build_files/scripts/rootful-podman.sh"
 
-    PROTON_CACHYOS_VER=$(python3 ./build_files/scripts/resolve-versions.py proton-cachyos)
+    resolve_version() {
+        local query="$1"
+        if [[ -x /run/host/usr/bin/distrobox-host-exec ]]; then
+            distrobox-host-exec python3 ./build_files/scripts/resolve-versions.py "${query}"
+        else
+            python3 ./build_files/scripts/resolve-versions.py "${query}"
+        fi
+    }
+
+    PROTON_CACHYOS_VER=$(resolve_version proton-cachyos)
     [[ -n "${PROTON_CACHYOS_VER}" ]] || { echo "Unable to pin Proton-CachyOS" >&2; exit 1; }
-    UMU_VERSION=$(python3 ./build_files/scripts/resolve-versions.py thirdparty-versions)
+    UMU_VERSION=$(resolve_version thirdparty-versions)
     THIRDPARTY_VERSIONS_HASH=$(printf '%s' "${UMU_VERSION}" | sha256sum | cut -c1-16)
     echo "Pinned third-party release: umu=${UMU_VERSION}"
     MOK_SECRET_ARG=()
@@ -85,6 +104,7 @@ build: build-base
         echo "Secure Boot: MOK key not set — signing skipped (set MOK_KEY_FILE to enable)"
     fi
     ${PODMAN} build \
+        --security-opt label=disable \
         --build-arg ENABLE_SCX="${ENABLE_SCX:-0}" \
         --build-arg ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS:-0}" \
         --build-arg ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST:-0}" \

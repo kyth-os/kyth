@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -14,6 +15,22 @@ from kyth_shared.smoke_check import Result, SmokeCheck
 
 
 class SmokeCheckTests(unittest.TestCase):
+    def test_missing_live_booted_deployment_is_a_warning(self) -> None:
+        checker = SmokeCheck(quiet=True)
+        status = subprocess.CompletedProcess(
+            ["bootc", "status"], 0, '{"status":{"booted":null}}', ""
+        )
+        with (
+            mock.patch("shutil.which", side_effect=lambda command: "/usr/bin/" + command),
+            mock.patch.object(checker, "command", return_value=status),
+            mock.patch.object(checker, "check_unit"),
+            mock.patch.object(checker, "check_command"),
+        ):
+            checker.identity_and_updates()
+        booted = next(item for item in checker.results if item.name == "Booted image")
+        self.assertEqual(booted.level, "WARN")
+        self.assertIn("no booted deployment", booted.detail)
+
     def test_results_retain_their_section(self) -> None:
         checker = SmokeCheck()
         with mock.patch("builtins.print"):

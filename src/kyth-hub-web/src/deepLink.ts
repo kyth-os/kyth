@@ -63,8 +63,12 @@ function navigateToPage(page: string, source: "initial" | "single-instance"): vo
 export async function installDeepLinkHandling(): Promise<void> {
   if (!inTauriShell()) return;
 
+  // Register before resolving the initial page. The acceptance harness (and
+  // real desktop launchers) can issue a second invocation as soon as the
+  // initial telemetry is recorded; registering afterward creates a narrow
+  // lost-event window for the single-instance `navigate` callback.
+  await listen<string>("navigate", (event) => navigateToPage(event.payload, "single-instance"));
+
   const pending = await invoke<string | null>("take_pending_page");
   if (pending) navigateToPage(pending, "initial");
-
-  await listen<string>("navigate", (event) => navigateToPage(event.payload, "single-instance"));
 }

@@ -49,6 +49,8 @@ class VmAcceptanceTests(unittest.TestCase):
 
         self.assertIn('"oci:/usr/share/kyth/image:latest"', build)
         self.assertIn("skopeo copy --retry-times 3", build)
+        self.assertIn('source_imgref="${INSTALL_SOURCE_IMAGE}"', build)
+        self.assertIn("containers-storage:*|oci:*|dir:*|ostree:*)", build)
         self.assertIn("KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest", build)
         self.assertIn("INSTALL_SOURCE_IMAGE", containerfile)
 
@@ -76,6 +78,12 @@ class VmAcceptanceTests(unittest.TestCase):
         self.assertIn("qualification.json", text)
         self.assertIn("qualification.md", text)
 
+    def test_harness_uses_iso_once_then_defaults_to_installed_disk(self):
+        text = HOST.read_text(encoding="utf-8")
+        self.assertIn("ide-cd,bus=ahci.0,drive=liveiso,bootindex=2", text)
+        self.assertIn("virtio-blk-pci,drive=systemdisk,serial=KYTH_ACCEPT,bootindex=1", text)
+        self.assertIn("-boot once=d,menu=off", text)
+
     def test_installed_hub_acceptance_matrix_is_required(self):
         text = pathlib.Path(vm_acceptance.__file__).read_text(encoding="utf-8")
         for marker in (
@@ -84,6 +92,19 @@ class VmAcceptanceTests(unittest.TestCase):
             "HUB_UPDATES_OK", "HUB_PRIVILEGED_FAILURE_OK", "KYTH_HUB_ACCEPTANCE_FILE",
         ):
             self.assertIn(marker, text)
+
+    def test_installed_hub_acceptance_bootstraps_a_disposable_graphical_user(self):
+        text = pathlib.Path(vm_acceptance.__file__).read_text(encoding="utf-8")
+        self.assertIn("kyth-acceptance", text)
+        self.assertIn("useradd", text)
+        self.assertIn("90-kyth-vm-acceptance.conf", text)
+        self.assertIn("systemctl", text)
+
+    def test_hub_second_launch_does_not_read_first_launch_evidence(self):
+        text = pathlib.Path(vm_acceptance.__file__).read_text(encoding="utf-8")
+        first = text.index('if _wait_hub_event(evidence, "deep-link") is None:')
+        second = text.index('second = _hub_start', first)
+        self.assertIn("evidence.unlink(missing_ok=True)", text[first:second])
 
 
 class ReadFwCfgTests(unittest.TestCase):
@@ -239,7 +260,7 @@ class HubAcceptanceHelpersTests(unittest.TestCase):
                 {"state": "expected"},
             ]
             with mock.patch("kyth_shared.vm_acceptance.HUB_BINARY", binary), \
-                 mock.patch("kyth_shared.vm_acceptance._active_graphical_session", return_value=("tester", {"HOME": "/tmp"})), \
+                 mock.patch("kyth_shared.vm_acceptance._active_graphical_session", return_value=("tester", {"HOME": "/tmp", "DISPLAY": ":0"})), \
                  mock.patch("kyth_shared.vm_acceptance._hub_pages", return_value=(("Welcome", "/"),)), \
                  mock.patch("kyth_shared.vm_acceptance._hub_launch_check", return_value=True), \
                  mock.patch("kyth_shared.vm_acceptance._hub_start", side_effect=starts), \

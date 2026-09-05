@@ -116,9 +116,12 @@ QEMU_ARGS=(
 	-device virtio-rng-pci
 	-device ich9-ahci,id=ahci
 	-drive "if=none,id=liveiso,format=raw,media=cdrom,readonly=on,file=${ISO}"
-	-device ide-cd,bus=ahci.0,drive=liveiso,bootindex=1
+	# `-boot once=d` selects the ISO for the initial live boot. Keep the
+	# installed disk first in the persistent device order so a guest reboot
+	# after installation enters the installed system instead of reinstalling.
+	-device ide-cd,bus=ahci.0,drive=liveiso,bootindex=2
 	-drive "if=none,id=systemdisk,file=${DISK},format=qcow2,cache=writeback"
-	-device virtio-blk-pci,drive=systemdisk,serial=KYTH_ACCEPT,bootindex=2
+	-device virtio-blk-pci,drive=systemdisk,serial=KYTH_ACCEPT,bootindex=1
 	-netdev user,id=net0
 	-device virtio-net-pci,netdev=net0
 	-serial "file:${SERIAL_LOG}"

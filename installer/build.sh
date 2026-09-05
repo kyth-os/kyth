@@ -64,7 +64,18 @@ EOF
 # registry-backed because they are separate images.
 mkdir -p /usr/share/kyth/image
 skopeo_source_args=()
-case "${INSTALL_SOURCE_IMAGE#docker://}" in
+source_imgref="${INSTALL_SOURCE_IMAGE}"
+case "${source_imgref}" in
+	containers-storage:*|oci:*|dir:*|ostree:*)
+		;;
+	docker://*)
+		source_imgref="docker://${source_imgref#docker://}"
+		;;
+	*)
+		source_imgref="docker://${source_imgref}"
+		;;
+esac
+case "${source_imgref#docker://}" in
 	localhost:*|127.0.0.1:*|\[::1\]:*)
 		# Local test registries are intentionally HTTP-only. Keep normal
 		# registry pulls TLS-verified; relax verification only for loopback.
@@ -73,7 +84,7 @@ case "${INSTALL_SOURCE_IMAGE#docker://}" in
 esac
 skopeo copy --retry-times 3 \
 	"${skopeo_source_args[@]}" \
-	"docker://${INSTALL_SOURCE_IMAGE#docker://}" \
+	"${source_imgref}" \
 	"oci:/usr/share/kyth/image:latest"
 embedded_digest="$(skopeo inspect --format '{{.Digest}}' 'oci:/usr/share/kyth/image:latest')"
 case "${embedded_digest}" in

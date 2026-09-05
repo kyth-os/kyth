@@ -22,6 +22,12 @@ for cmd in git podman sudo unshare; do
 done
 
 ROOTFUL_PODMAN="${REPO_ROOT}/build_files/scripts/rootful-podman.sh"
+mkdir -p "${OUTPUT_DIR}"
+build_volume_args=()
+INSTALLER_BUILD_HASH="${INSTALLER_BUILD_HASH:-$(sha256sum \
+	installer/build.sh \
+	build_files/kyth_shared/kyth_shared/vm_acceptance.py \
+	build_files/kyth-vm-acceptance.service | sha256sum | awk '{print $1}')}"
 
 if [[ "${BASE_IMAGE}" == localhost/* ]] &&
 	! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}" &&
@@ -31,23 +37,30 @@ if [[ "${BASE_IMAGE}" == localhost/* ]] &&
 	docker save "${BASE_IMAGE}" | "${ROOTFUL_PODMAN}" load
 fi
 
-# installer/build.sh always bakes KYTH_SOURCE_IMAGE=ghcr.io/kyth-os/kyth:${SOURCE_TAG}
-# into the live ISO, regardless of where the live payload itself was built from.
-# The booted live VM is a separate environment with no access to this host's
-# local image storage, so a local BASE_IMAGE must be published under that exact
-# ref or the installer's `bootc install` will fail with "manifest unknown".
-#
-# Pushed with `docker`, not `podman`: this image shares many blobs with the
-# public ghcr.io/ublue-os/kinoite-main base it's built FROM, and podman's push
-# reproducibly fails those blobs with "trying to reuse blob ... 403 Forbidden"
-# — a cross-repository blob-mount that GHCR rejects and podman doesn't fall
-# back from. `docker push` uploads them directly and does not hit this.
-if [[ "${BASE_IMAGE}" == localhost/* ]] && command -v docker >/dev/null; then
-	GHCR_REF="ghcr.io/kyth-os/kyth:${SOURCE_TAG}"
-	echo "==> Publishing local build to ${GHCR_REF} so the installer can fetch it from inside the live VM"
-	docker tag "${BASE_IMAGE}" "${GHCR_REF}"
-	docker push "${GHCR_REF}"
-	INSTALL_SOURCE_IMAGE="${GHCR_REF}"
+# The live VM cannot access the host's local image storage, so the installer
+# builder embeds the local image into the ISO through the OCI layout.  Keep the
+# public registry reference as the update target, but never publish a local
+# test image as a side effect of a local ISO build.
+if [[ "${BASE_IMAGE}" == localhost/* ]]; then
+	if ! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}"; then
+		echo "ERROR: local installer image is unavailable to Podman: ${BASE_IMAGE}" >&2
+		exit 1
+	fi
+	LOCAL_IMAGE_DIR="${OUTPUT_DIR}/.kyth-installer-image"
+	mkdir -p "${LOCAL_IMAGE_DIR}"
+	if [[ -n "${CONTAINER_ID:-}" ]] && command -v distrobox-host-exec >/dev/null 2>&1; then
+		SKOPEO=(distrobox-host-exec skopeo)
+	else
+		SKOPEO=(skopeo)
+	fi
+	echo "==> Exporting ${BASE_IMAGE} to a local OCI layout for the installer builder"
+	"${SKOPEO[@]}" copy --retry-times 3 \
+		"containers-storage:${BASE_IMAGE}" \
+		"oci:${LOCAL_IMAGE_DIR}:latest"
+	# Podman build containers have their own containers-storage namespace. Mount
+	# the exported layout into the build and use the OCI transport from there.
+	INSTALL_SOURCE_IMAGE="oci:/src/kyth-installer-image:latest"
+	build_volume_args+=(--volume "${LOCAL_IMAGE_DIR}:/src/kyth-installer-image:ro")
 fi
 
 echo "==> Fetching Titanoboa (background) and building KythOS live payload (foreground) in parallel"
@@ -84,8 +97,10 @@ pull_flag=(--pull=newer)
 	--cap-add SYS_ADMIN \
 	--security-opt label=disable \
 	--network host \
+	"${build_volume_args[@]}" \
 	--build-arg "BASE_IMAGE=${BASE_IMAGE}" \
 	--build-arg "INSTALL_SOURCE_IMAGE=${INSTALL_SOURCE_IMAGE}" \
+	--build-arg "INSTALLER_BUILD_HASH=${INSTALLER_BUILD_HASH}" \
 	--build-arg "SOURCE_TAG=${SOURCE_TAG}" \
 	--tag "${LIVE_TAG}" \
 	-f installer/Containerfile \
@@ -98,8 +113,10 @@ if [[ ! -f "${_titanoboa_ok}" ]]; then
 fi
 rm -f "${_titanoboa_ok}"
 
-mkdir -p "${OUTPUT_DIR}"
-WORK="$(mktemp -d -p "${TMPDIR:-/var/tmp}" kyth-titanoboa.XXXXXXXXXX)"
+# The build runs through host-user Podman when this checkout is inside
+# Distrobox. /tmp and /var/tmp are container-local there, so a temporary
+# directory under the shared checkout is visible to the host Podman mount.
+WORK="$(mktemp -d -p "${OUTPUT_DIR}" kyth-titanoboa.XXXXXXXXXX)"
 # Rootful podman writes root-owned files into ${WORK} — an unprivileged rm
 # would fail silently and leak multi-GB dirs in /var/tmp.
 trap 'sudo rm -rf "${WORK}"' EXIT
