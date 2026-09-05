@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import pathlib
+import re
 import unittest
 
 
@@ -52,7 +53,11 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn("!part.current", rust)
         self.assertIn("!part.in_use", rust)
         self.assertIn('request.resize_partition = if window.get_install_mode().as_str() == "resize_ntfs"', rust)
-        self.assertIn('self.install_mode != "resize_ntfs" || (!self.resize_partition.is_empty() && self.resize_gib >= 32)', rust)
+        self.assertRegex(
+            rust,
+            re.escape('self.install_mode != "resize_ntfs"')
+            + r"\s*\|\|\s*\(\s*!self\.resize_partition\.is_empty\(\)\s*&&\s*self\.resize_gib\s*>=\s*32\s*\)",
+        )
 
     def test_native_install_uses_the_authenticated_event_stream(self):
         rust = NATIVE_RS.read_text()
