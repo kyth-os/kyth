@@ -1,7 +1,13 @@
+mod installer_accounts;
+mod installer_bootc;
+mod installer_configuration;
 mod installer_daemon;
+mod installer_executor;
 mod installer_job;
+mod installer_job_executor;
 mod installer_plan;
 mod installer_runtime;
+mod installer_secure_boot;
 mod installer_storage;
 
 fn main() -> std::process::ExitCode {

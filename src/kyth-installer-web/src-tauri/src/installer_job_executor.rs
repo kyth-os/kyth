@@ -1,0 +1,326 @@
+//! Production adapter between the native job supervisor and typed operations.
+//!
+//! This adapter is deliberately conservative while the remaining destructive
+//! operations are being moved into Rust.  It accepts a complete typed request,
+//! validates it through the existing plan builders, and retains only the
+//! resulting non-secret plans.  A phase is either safe to execute without
+//! live installer state or fails with an explicit typed capability error.
+//! It never starts the Python whole-install worker and never provides a
+//! generic command or filesystem bridge.
+
+use std::fmt;
+
+use crate::installer_configuration;
+use super::installer_executor::{self, InstallerExecutionInput, InstallerExecutionPlan};
+use super::installer_job::{CancellationToken, JobSupervisor, PhaseExecutor};
+use super::installer_plan::{self, InstallerPlan, InstallerPlanInput};
+use super::installer_runtime::Phase;
+
+/// The complete typed request accepted by the native phase adapter.
+///
+/// The storage request and executor request intentionally remain separate:
+/// the former describes the selected install mode, while the latter contains
+/// the typed bootc, configuration, account, and Secure Boot inputs.
+pub(crate) struct NativeInstallRequest {
+    pub storage: InstallerPlanInput,
+    pub execution: InstallerExecutionInput,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum NativeOperation {
+    ValidateStoragePlan,
+    ValidateExecutionPlan,
+    StorageMutation,
+    ImageWrite,
+    ConfigurationWrite,
+    AccountCreate,
+    SecureBootInteraction,
+    CompletionCommit,
+}
+
+impl fmt::Display for NativeOperation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::ValidateStoragePlan => "validate_storage_plan",
+            Self::ValidateExecutionPlan => "validate_execution_plan",
+            Self::StorageMutation => "storage_mutation",
+            Self::ImageWrite => "image_write",
+            Self::ConfigurationWrite => "configuration_write",
+            Self::AccountCreate => "account_create",
+            Self::SecureBootInteraction => "secure_boot_interaction",
+            Self::CompletionCommit => "completion_commit",
+        };
+        formatter.write_str(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum NativePhaseError {
+    Cancelled { phase: Phase },
+    NotImplemented {
+        phase: Phase,
+        operation: NativeOperation,
+    },
+    Execution { phase: Phase, message: String },
+}
+
+impl fmt::Display for NativePhaseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cancelled { phase } => write!(
+                formatter,
+                "native installer phase {phase:?} was cancelled before execution"
+            ),
+            Self::NotImplemented { phase, operation } => write!(
+                formatter,
+                "native installer operation {operation} for phase {phase:?} is not implemented"
+            ),
+            Self::Execution { phase, message } => {
+                write!(formatter, "native installer phase {phase:?} failed: {message}")
+            }
+        }
+    }
+}
+
+/// A typed phase executor suitable for `JobSupervisor` in production.
+///
+/// The plans are built before a worker can start, so malformed requests fail
+/// before any lifecycle state is claimed.  The account password hash is
+/// consumed by plan construction and is not retained by this type.
+pub(crate) struct NativePhaseExecutor {
+    storage_plan: InstallerPlan,
+    execution_plan: InstallerExecutionPlan,
+}
+
+impl NativePhaseExecutor {
+    pub(crate) fn from_request(request: NativeInstallRequest) -> Result<Self, String> {
+        let storage_plan = installer_plan::build_plan(request.storage)?;
+        let execution_plan = installer_executor::build_plan(request.execution)?;
+        Ok(Self {
+            storage_plan,
+            execution_plan,
+        })
+    }
+
+    pub(crate) fn from_plans(
+        storage_plan: InstallerPlan,
+        execution_plan: InstallerExecutionPlan,
+    ) -> Self {
+        Self {
+            storage_plan,
+            execution_plan,
+        }
+    }
+
+    pub(crate) fn storage_plan(&self) -> &InstallerPlan {
+        &self.storage_plan
+    }
+
+    pub(crate) fn execution_plan(&self) -> &InstallerExecutionPlan {
+        &self.execution_plan
+    }
+
+    /// Return the only operation sequence this adapter may expose to the
+    /// native job.  The sequence is also useful for fixture-based parity tests
+    /// before the corresponding live operation is implemented.
+    pub(crate) fn operation_order(&self) -> Vec<NativeOperation> {
+        let mut operations = vec![
+            NativeOperation::ValidateStoragePlan,
+            NativeOperation::ValidateExecutionPlan,
+            NativeOperation::StorageMutation,
+            NativeOperation::ImageWrite,
+            NativeOperation::ConfigurationWrite,
+        ];
+        if self.execution_plan.account.is_some() {
+            operations.push(NativeOperation::AccountCreate);
+        }
+        operations.extend([
+            NativeOperation::SecureBootInteraction,
+            NativeOperation::CompletionCommit,
+        ]);
+        operations
+    }
+
+    pub(crate) fn execute_phase_typed(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
+        if cancellation.is_cancelled() {
+            return Err(NativePhaseError::Cancelled { phase });
+        }
+
+        match phase {
+            // Request and execution plans were already validated before the
+            // worker was claimed.  Preparation therefore has no live side
+            // effects and is safe to execute in fixture and production paths.
+            Phase::Prepare => Ok(()),
+            Phase::Storage => Err(NativePhaseError::NotImplemented {
+                phase,
+                operation: NativeOperation::StorageMutation,
+            }),
+            Phase::Image => Err(NativePhaseError::NotImplemented {
+                phase,
+                operation: NativeOperation::ImageWrite,
+            }),
+            Phase::Configure => installer_configuration::apply_plan(
+                self.execution_plan.configuration.clone(),
+            )
+            .map_err(|message| NativePhaseError::Execution { phase, message }),
+            Phase::SecureBoot => Err(NativePhaseError::NotImplemented {
+                phase,
+                operation: NativeOperation::SecureBootInteraction,
+            }),
+            Phase::Complete => Err(NativePhaseError::NotImplemented {
+                phase,
+                operation: NativeOperation::CompletionCommit,
+            }),
+        }
+    }
+
+    /// Build a native supervisor without starting a Python compatibility
+    /// worker.  The caller supplies this supervisor to the daemon's native
+    /// route integration once request decoding is connected.
+    pub(crate) fn into_supervisor(self) -> JobSupervisor<Self> {
+        JobSupervisor::new(self)
+    }
+}
+
+impl PhaseExecutor for NativePhaseExecutor {
+    fn execute_phase(&self, phase: Phase, cancellation: &CancellationToken) -> Result<(), String> {
+        self.execute_phase_typed(phase, cancellation)
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::installer_accounts::CreateUserInput;
+    use crate::installer_bootc::BootcInstallInput;
+    use crate::installer_configuration::ConfigurationInput;
+    use crate::installer_secure_boot::SecureBootInput;
+
+    fn request(with_account: bool) -> NativeInstallRequest {
+        NativeInstallRequest {
+            storage: InstallerPlanInput {
+                disk: "sda".into(),
+                install_mode: "wipe".into(),
+                target_partition: String::new(),
+                resize_partition: String::new(),
+                resize_gib: 0,
+                free_region_start: 0,
+                free_region_end: 0,
+            },
+            execution: InstallerExecutionInput {
+                bootc: BootcInstallInput {
+                    subcommand: "to-disk".into(),
+                    source_imgref: "oci:/usr/share/kyth/image:latest".into(),
+                    target_imgref: "ghcr.io/kyth-os/kyth:latest".into(),
+                    target: "/dev/sda".into(),
+                    skip_fetch_check: true,
+                    skip_finalize: false,
+                    root_subvolume: false,
+                    wipe: true,
+                },
+                configuration: ConfigurationInput {
+                    target_root: "/mnt/target".into(),
+                    hostname: "kyth".into(),
+                    timezone: "UTC".into(),
+                    locale: "en_US.UTF-8".into(),
+                    keymap: "us".into(),
+                },
+                account: with_account.then_some(CreateUserInput {
+                    deploy_root: "/mnt/deploy".into(),
+                    target_root: "/mnt/target".into(),
+                    username: "kyth_user".into(),
+                    password_hash: "$6$secret-must-not-leak".into(),
+                }),
+                secure_boot: SecureBootInput {
+                    kernel: "fedora".into(),
+                    force_stage: false,
+                    certificate_present: false,
+                    mokutil_present: false,
+                    secure_boot: "unknown".into(),
+                    enrolled: "unknown".into(),
+                    pending: "unknown".into(),
+                },
+            },
+        }
+    }
+
+    #[test]
+    fn validates_request_and_preserves_native_operation_order() {
+        let executor = NativePhaseExecutor::from_request(request(true))
+            .expect("typed native install request should validate");
+        assert_eq!(
+            executor.operation_order(),
+            vec![
+                NativeOperation::ValidateStoragePlan,
+                NativeOperation::ValidateExecutionPlan,
+                NativeOperation::StorageMutation,
+                NativeOperation::ImageWrite,
+                NativeOperation::ConfigurationWrite,
+                NativeOperation::AccountCreate,
+                NativeOperation::SecureBootInteraction,
+                NativeOperation::CompletionCommit,
+            ]
+        );
+        assert_eq!(executor.storage_plan().mode, "wipe");
+        assert_eq!(executor.execution_plan().bootc.target, "/dev/sda");
+    }
+
+    #[test]
+    fn execution_plan_and_operation_diagnostics_exclude_password_hash() {
+        let executor = NativePhaseExecutor::from_request(request(true))
+            .expect("typed native install request should validate");
+        let plan = serde_json::to_string(executor.execution_plan()).unwrap();
+        let operations = executor
+            .operation_order()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(!plan.contains("secret-must-not-leak"));
+        assert!(!operations.contains("secret-must-not-leak"));
+    }
+
+    #[test]
+    fn safe_prepare_executes_and_live_mutations_fail_explicitly() {
+        let executor = NativePhaseExecutor::from_request(request(false))
+            .expect("typed native install request should validate");
+        let cancellation = CancellationToken::default();
+        assert_eq!(
+            executor.execute_phase_typed(Phase::Prepare, &cancellation),
+            Ok(())
+        );
+        assert_eq!(
+            executor.execute_phase_typed(Phase::Storage, &cancellation),
+            Err(NativePhaseError::NotImplemented {
+                phase: Phase::Storage,
+                operation: NativeOperation::StorageMutation,
+            })
+        );
+        assert_eq!(
+            executor.execute_phase_typed(Phase::Image, &cancellation),
+            Err(NativePhaseError::NotImplemented {
+                phase: Phase::Image,
+                operation: NativeOperation::ImageWrite,
+            })
+        );
+    }
+
+    #[test]
+    fn cancellation_is_reported_before_any_phase_operation() {
+        let executor = NativePhaseExecutor::from_request(request(false))
+            .expect("typed native install request should validate");
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
+        assert_eq!(
+            executor.execute_phase_typed(Phase::Prepare, &cancellation),
+            Err(NativePhaseError::Cancelled {
+                phase: Phase::Prepare,
+            })
+        );
+    }
+}
