@@ -374,6 +374,25 @@ pub fn save_state(state: &Value) -> Result<(), String> {
     std::fs::rename(temp, path).map_err(|_| "could not commit Guardian state".to_string())
 }
 
+fn append_history_record(history: &mut Vec<Value>, record: Value) {
+    let recipe_id = record.get("recipe_id").and_then(Value::as_str);
+    if record.get("action").and_then(Value::as_str) == Some("recommended") {
+        if let Some(recipe_id) = recipe_id {
+            for previous in history.iter_mut().rev() {
+                if previous.get("recipe_id").and_then(Value::as_str) != Some(recipe_id) {
+                    continue;
+                }
+                if previous.get("action").and_then(Value::as_str) == Some("recommended") {
+                    *previous = record;
+                    return;
+                }
+                break;
+            }
+        }
+    }
+    history.push(record);
+}
+
 /// Record a native service check using the same history shape consumed by the
 /// Hub's pending-recommendation projection.
 pub fn record_service_check(symptoms: &[Value], decisions: &[Value]) -> Result<Value, String> {
@@ -402,7 +421,9 @@ pub fn record_service_check(symptoms: &[Value], decisions: &[Value]) -> Result<V
         .get_mut("history")
         .and_then(Value::as_array_mut)
         .ok_or_else(|| "Guardian history is unavailable".to_string())?;
-    history.extend(decisions.iter().cloned());
+    for decision in decisions.iter().cloned() {
+        append_history_record(history, decision);
+    }
     if history.len() > 200 {
         let keep_from = history.len() - 200;
         history.drain(0..keep_from);
@@ -789,6 +810,40 @@ mod tests {
         let pending = pending_recommendations(&state);
         assert_eq!(pending.len(), 1);
         assert_eq!(pending[0].detail, "new");
+    }
+
+    #[test]
+    fn repeated_recommendation_replaces_current_event() {
+        let mut history = vec![json!({
+            "timestamp": 1.0,
+            "recipe_id": "storage.maint",
+            "action": "recommended",
+            "detail": "old",
+        })];
+        append_history_record(
+            &mut history,
+            json!({
+                "timestamp": 2.0,
+                "recipe_id": "storage.maint",
+                "action": "recommended",
+                "detail": "new",
+            }),
+        );
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0]["detail"], "new");
+    }
+
+    #[test]
+    fn recommendation_after_terminal_event_starts_new_event() {
+        let mut history = vec![
+            json!({ "timestamp": 1.0, "recipe_id": "storage.maint", "action": "recommended" }),
+            json!({ "timestamp": 2.0, "recipe_id": "storage.maint", "action": "dismissed" }),
+        ];
+        append_history_record(
+            &mut history,
+            json!({ "timestamp": 3.0, "recipe_id": "storage.maint", "action": "recommended" }),
+        );
+        assert_eq!(history.len(), 3);
     }
 
     #[test]

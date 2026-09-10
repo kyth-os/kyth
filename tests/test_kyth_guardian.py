@@ -213,6 +213,26 @@ class GuardianPolicyTests(unittest.TestCase):
 
 
 class GuardianStorageTests(unittest.TestCase):
+    def test_repeated_recommendation_replaces_current_event(self):
+        state = {"history": [
+            {"timestamp": 1, "recipe_id": "storage.maint", "action": "recommended", "detail": "old"},
+        ]}
+        guardian._append_history_record(state, {
+            "timestamp": 2, "recipe_id": "storage.maint", "action": "recommended", "detail": "new",
+        })
+        self.assertEqual(len(state["history"]), 1)
+        self.assertEqual(state["history"][0]["detail"], "new")
+
+    def test_recommendation_after_terminal_event_starts_new_event(self):
+        state = {"history": [
+            {"timestamp": 1, "recipe_id": "storage.maint", "action": "recommended"},
+            {"timestamp": 2, "recipe_id": "storage.maint", "action": "dismissed"},
+        ]}
+        guardian._append_history_record(state, {
+            "timestamp": 3, "recipe_id": "storage.maint", "action": "recommended",
+        })
+        self.assertEqual(len(state["history"]), 3)
+
     def test_history_is_bounded_and_rotated(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(
             os.environ, {"XDG_STATE_HOME": temp}, clear=False

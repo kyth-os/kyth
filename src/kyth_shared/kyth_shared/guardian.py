@@ -234,6 +234,30 @@ def save_state(state: dict[str, Any]) -> None:
 from .atomic_io import atomic_write_json as _atomic_json
 
 
+def _append_history_record(state: dict[str, Any], record: dict[str, Any]) -> None:
+    """Store one current recommendation while its symptom remains active.
+
+    Guardian checks run periodically, so appending the same unresolved
+    recommendation on every pass turns a stable condition into a noisy,
+    ever-growing activity list. Replace the latest recommendation for that
+    recipe until a terminal action (execution or dismissal) is recorded. A
+    later recommendation after that terminal action is intentionally a new
+    history event.
+    """
+    history = state.setdefault("history", [])
+    recipe_id = record.get("recipe_id")
+    if record.get("action") == "recommended" and recipe_id:
+        for previous in reversed(history):
+            if not isinstance(previous, dict) or previous.get("recipe_id") != recipe_id:
+                continue
+            if previous.get("action") == "recommended":
+                previous.clear()
+                previous.update(record)
+                return
+            break
+    history.append(record)
+
+
 def _run(argv: Iterable[str], timeout: float = 8) -> subprocess.CompletedProcess[str] | None:
     try:
         return APPLICATION_RUNNER.run(list(argv), capture_output=True, text=True, check=False,
@@ -1120,7 +1144,7 @@ def check(
             "verified": verified, "detail": detail,
         }
         if persist:
-            state.setdefault("history", []).append(record)
+            _append_history_record(state, record)
         results.append(record)
     if persist:
         state["last_check"] = time.time()

@@ -228,14 +228,55 @@ prune-live-dev:
 clean-vm-acceptance:
     build_files/scripts/cleanup-vm-acceptance.sh
 
+# Remove generated Rust/Tauri build trees. These are disposable incremental
+# outputs and can otherwise grow across repeated Hub, installer, and shared
+# native checks. Keep the manifest list explicit so this cannot touch a user's
+# unrelated Cargo projects.
+[group('Utility')]
+clean-rust-targets:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v cargo >/dev/null 2>&1 || { echo "cargo could not be found. Please install Rust." >&2; exit 1; }
+    for manifest in \
+        src/kyth-hub-web/src-tauri/Cargo.toml \
+        src/kyth-installer-web/src-tauri/Cargo.toml \
+        src/kyth-shared-rs/Cargo.toml; do
+        if [[ -f "${manifest}" ]]; then
+            echo "Cleaning ${manifest%/Cargo.toml}/target..."
+            cargo clean --manifest-path "${manifest}"
+        fi
+    done
+
+# Remove only Git's interrupted-operation temporary packfiles. Refuse to run
+# while Git is indexing, receiving, or packing so an active fetch/push cannot
+# be mistaken for stale garbage. Valid pack-*.pack files are never touched.
+[group('Utility')]
+clean-git-temp-packs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pack_dir=.git/objects/pack
+    [[ -d "${pack_dir}" ]] || exit 0
+    if ps -eo pid=,args= | awk -v self="$$" '$1 != self && $0 ~ /(^|[[:space:]])(git|git-[^[:space:]]*|receive-pack|index-pack|pack-objects)([[:space:]]|$)/ { print; found=1 } END { exit found ? 0 : 1 }'; then
+        echo "Refusing Git temp-pack cleanup while a Git operation is active." >&2
+        exit 75
+    fi
+    mapfile -t stale_packs < <(find "${pack_dir}" -maxdepth 1 -type f -name 'tmp_pack_*' -print)
+    if [[ ${#stale_packs[@]} -eq 0 ]]; then
+        echo "No stale Git temporary packfiles found."
+        exit 0
+    fi
+    printf 'Removing stale Git temporary packfile: %s\n' "${stale_packs[@]}"
+    rm -f -- "${stale_packs[@]}"
+
 # Run the exact-image Rust migration install/update/rollback evidence flow.
 # The image ref must be pinned to the promoted testing image under review.
 rust-migration-acceptance iso image_ref artifacts="/tmp/kyth-rust-migration-acceptance":
     build_files/scripts/run-rust-migration-acceptance.sh --iso "{{ iso }}" --image-ref "{{ image_ref }}" --artifacts "{{ artifacts }}"
 
-# Full local cleanup: build temps + stale outputs + Docker cache.
+# Full local cleanup: build temps + stale acceptance/output artifacts + Rust
+# build trees + Docker cache.
 [group('Utility')]
-clean-all: clean clean-output clean-docker
+clean-all: clean clean-output clean-vm-acceptance clean-rust-targets clean-git-temp-packs clean-docker
 
 # Nuclear purge: reclaim maximum disk space.
 [group('Utility')]
