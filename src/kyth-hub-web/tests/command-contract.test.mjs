@@ -11,6 +11,7 @@ const dashboard = await readFile(resolve(root, "src/pages/Dashboard.tsx"), "utf8
 const guardianHistory = await readFile(resolve(root, "src/components/GuardianHistoryCard.tsx"), "utf8");
 const updates = await readFile(resolve(root, "src/components/UpdatesSection.tsx"), "utf8");
 const updatesOverview = await readFile(resolve(root, "src/components/UpdatesOverview.tsx"), "utf8");
+const updateMessages = await readFile(resolve(root, "src/components/updateMessages.ts"), "utf8");
 const guardian = await readFile(resolve(root, "src/components/GuardianSection.tsx"), "utf8");
 const hardware = await readFile(resolve(root, "src/components/HardwareSection.tsx"), "utf8");
 const apps = await readFile(resolve(root, "src/components/AppStoreSection.tsx"), "utf8");
@@ -113,6 +114,17 @@ test("Updates overview exposes the automatic watcher controls", () => {
   }
   assert.match(updatesOverview, /Defer automatic updates/);
   assert.match(updatesOverview, /Disable automatic updates|Enable automatic updates/);
+});
+
+test("Updates overview gives a plain-language next step", () => {
+  assert.match(updatesOverview, /updates-guidance/);
+  assert.match(updatesOverview, /Downloading and preparing your update/);
+  assert.match(updatesOverview, /Update ready — restart to finish/);
+  assert.match(updatesOverview, /Choose “Restart to apply”/);
+  assert.doesNotMatch(updatesOverview, /<ActionStatus/);
+  assert.match(updateMessages, /We couldn't reach the update service/);
+  assert.match(updateMessages, /The update is downloaded and ready/);
+  assert.match(updateMessages, /No changes were made/);
 });
 
 test("ledger commands are registered in the Tauri handler", () => {

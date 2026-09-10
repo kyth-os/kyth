@@ -11,7 +11,7 @@ export function Updates() {
         <div>
           <span className="updates-eyebrow">Detailed update tools</span>
           <h2>Deployment details</h2>
-          <p>Inspect raw status and use the full update workflow when you need more context.</p>
+          <p>See more information about your system update and recovery options.</p>
         </div>
       </div>
       <HubPage

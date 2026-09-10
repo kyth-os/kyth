@@ -18,6 +18,7 @@ import {
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
+import { friendlyActionError, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityResult } from "./updateMessages";
 
 function shortDigest(digest: string | undefined): string | null {
   if (!digest) return null;
@@ -106,25 +107,37 @@ export function UpdatesSection({ section }: { section: HubSection }) {
       detail: availability.detail,
     } : current);
     setPending((current) => ({ ...(current ?? {}), flatpak: availability.flatpak_count }));
-    return availability.blocked_reason || card?.title || availability.detail;
+    return friendlyAvailabilityResult(availability.state, availability.staged, availability.blocked_reason || card?.title || availability.detail);
   }
 
   async function downloadAndStage(): Promise<string> {
-    const detail = await invokeBootcUpgrade();
-    await refreshUpdateState();
-    return detail;
+    try {
+      const detail = await invokeBootcUpgrade();
+      await refreshUpdateState();
+      return friendlyActionResult("stage", detail);
+    } catch (error) {
+      throw new Error(friendlyActionError("stage", error));
+    }
   }
 
   async function rollback(): Promise<string> {
-    const detail = await invokeBootcRollback();
-    await refreshUpdateState();
-    return detail;
+    try {
+      const detail = await invokeBootcRollback();
+      await refreshUpdateState();
+      return friendlyActionResult("rollback", detail);
+    } catch (error) {
+      throw new Error(friendlyActionError("rollback", error));
+    }
   }
 
   async function applyStaged(): Promise<string> {
-    const detail = await invokeApplyStaged();
-    await refreshUpdateState();
-    return detail;
+    try {
+      const detail = await invokeApplyStaged();
+      await refreshUpdateState();
+      return friendlyActionResult("apply", detail);
+    } catch (error) {
+      throw new Error(friendlyActionError("apply", error));
+    }
   }
 
   async function healthReport(): Promise<string> {
@@ -186,10 +199,10 @@ export function UpdatesSection({ section }: { section: HubSection }) {
       )}
 
       {updateStatus?.detail && (
-        <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>{updateStatus.detail}</p>
+        <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>{friendlyAvailabilityDetail(updateStatus.detail, "Update status is available in the overview above.")}</p>
       )}
       {updateStatus?.blocked_reason && (
-        <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Blocked: {updateStatus.blocked_reason}</p>
+        <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Next step: {friendlyAvailabilityDetail(updateStatus.blocked_reason, "Check your connection and try the update check again.")}</p>
       )}
 
       {health && (
