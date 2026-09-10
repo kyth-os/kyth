@@ -365,13 +365,42 @@ pub fn save_state(state: &Value) -> Result<(), String> {
     std::fs::create_dir_all(parent)
         .map_err(|_| "could not create Guardian state directory".to_string())?;
     let temp = path.with_extension("json.tmp");
+    let mut normalized = state.clone();
+    if let Some(history) = normalized.get_mut("history").and_then(Value::as_array_mut) {
+        coalesce_recommendations(history);
+        if history.len() > 200 {
+            let keep_from = history.len() - 200;
+            history.drain(0..keep_from);
+        }
+    }
     std::fs::write(
         &temp,
-        serde_json::to_vec_pretty(state)
+        serde_json::to_vec_pretty(&normalized)
             .map_err(|_| "could not encode Guardian state".to_string())?,
     )
     .map_err(|_| "could not write Guardian state".to_string())?;
     std::fs::rename(temp, path).map_err(|_| "could not commit Guardian state".to_string())
+}
+
+fn coalesce_recommendations(history: &mut Vec<Value>) {
+    let mut active = std::collections::HashMap::<String, usize>::new();
+    let mut compact = Vec::with_capacity(history.len());
+    for item in history.drain(..) {
+        let recipe_id = item.get("recipe_id").and_then(Value::as_str).unwrap_or("");
+        if !recipe_id.is_empty()
+            && item.get("action").and_then(Value::as_str) == Some("recommended")
+        {
+            if let Some(previous) = active.get(recipe_id) {
+                compact[*previous] = item;
+                continue;
+            }
+            active.insert(recipe_id.to_string(), compact.len());
+        } else if !recipe_id.is_empty() {
+            active.remove(recipe_id);
+        }
+        compact.push(item);
+    }
+    *history = compact;
 }
 
 fn append_history_record(history: &mut Vec<Value>, record: Value) {
@@ -424,6 +453,7 @@ pub fn record_service_check(symptoms: &[Value], decisions: &[Value]) -> Result<V
     for decision in decisions.iter().cloned() {
         append_history_record(history, decision);
     }
+    coalesce_recommendations(history);
     if history.len() > 200 {
         let keep_from = history.len() - 200;
         history.drain(0..keep_from);
@@ -844,6 +874,18 @@ mod tests {
             json!({ "timestamp": 3.0, "recipe_id": "storage.maint", "action": "recommended" }),
         );
         assert_eq!(history.len(), 3);
+    }
+
+    #[test]
+    fn legacy_recommendation_duplicates_are_compacted() {
+        let mut history = vec![
+            json!({ "timestamp": 1.0, "recipe_id": "storage.maint", "action": "recommended", "detail": "old" }),
+            json!({ "timestamp": 2.0, "recipe_id": "thermal.notify", "action": "recommended" }),
+            json!({ "timestamp": 3.0, "recipe_id": "storage.maint", "action": "recommended", "detail": "new" }),
+        ];
+        coalesce_recommendations(&mut history);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0]["detail"], "new");
     }
 
     #[test]

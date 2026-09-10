@@ -225,7 +225,7 @@ def save_state(state: dict[str, Any]) -> None:
     now = time.time()
     history = [item for item in state.get("history", [])
                if isinstance(item, dict) and now - float(item.get("timestamp", 0)) <= MAX_HISTORY_AGE]
-    state["history"] = history[-MAX_HISTORY:]
+    state["history"] = _coalesce_recommendations(history)[-MAX_HISTORY:]
     target = _state_path()
     target.parent.mkdir(parents=True, exist_ok=True)
     _atomic_json(target, state)
@@ -256,6 +256,25 @@ def _append_history_record(state: dict[str, Any], record: dict[str, Any]) -> Non
                 return
             break
     history.append(record)
+
+
+def _coalesce_recommendations(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop superseded unresolved recommendations from legacy state."""
+    active: dict[str, int] = {}
+    compact: list[dict[str, Any]] = []
+    for item in history:
+        recipe_id = item.get("recipe_id")
+        key = str(recipe_id) if recipe_id else ""
+        if key and item.get("action") == "recommended":
+            previous = active.get(key)
+            if previous is not None:
+                compact[previous] = item
+                continue
+            active[key] = len(compact)
+        elif key:
+            active.pop(key, None)
+        compact.append(item)
+    return compact
 
 
 def _run(argv: Iterable[str], timeout: float = 8) -> subprocess.CompletedProcess[str] | None:

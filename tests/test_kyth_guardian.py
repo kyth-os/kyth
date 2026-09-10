@@ -233,6 +233,22 @@ class GuardianStorageTests(unittest.TestCase):
         })
         self.assertEqual(len(state["history"]), 3)
 
+    def test_save_state_compacts_legacy_recommendation_duplicates(self):
+        now = guardian.time.time()
+        state = {"history": [
+            {"timestamp": now - 3, "recipe_id": "storage.maint", "action": "recommended", "detail": "old"},
+            {"timestamp": now - 2, "recipe_id": "thermal.notify", "action": "recommended"},
+            {"timestamp": now - 1, "recipe_id": "storage.maint", "action": "recommended", "detail": "new"},
+        ]}
+        with tempfile.TemporaryDirectory() as temp, patch.dict(
+            os.environ, {"XDG_STATE_HOME": temp}, clear=False
+        ):
+            guardian.save_state(state)
+            loaded = guardian.load_state()
+        self.assertEqual(len(loaded["history"]), 2)
+        storage = next(item for item in loaded["history"] if item["recipe_id"] == "storage.maint")
+        self.assertEqual(storage["detail"], "new")
+
     def test_history_is_bounded_and_rotated(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(
             os.environ, {"XDG_STATE_HOME": temp}, clear=False
