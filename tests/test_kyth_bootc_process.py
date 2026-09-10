@@ -385,6 +385,23 @@ class BootcQueryLockTests(unittest.TestCase):
         self.assertFalse(bootc_query.holds_sysroot_lock("/usr/bin/ostree admin status"))
         self.assertFalse(bootc_query.holds_sysroot_lock("kyth-bootc-guard status-json"))
 
+    def test_search_commands_containing_upgrade_text_are_not_active(self):
+        self.assertFalse(bootc_query.holds_sysroot_lock("rg -n 'bootc upgrade' src tests"))
+        self.assertFalse(bootc_query.holds_sysroot_lock("python3 -c 'print(\\\"bootc upgrade\\\")'"))
+
+    def test_active_operation_uses_the_executable_not_search_arguments(self):
+        ps = subprocess.CompletedProcess(
+            ["ps"],
+            0,
+            stdout=(
+                "123 rg -n 'bootc upgrade' src tests\n"
+                "456 /usr/bin/bootc upgrade\n"
+            ),
+            stderr="",
+        )
+        with patch.object(bootc_query, "run_command", return_value=ps):
+            self.assertEqual(bootc_query.active_operation(), "456 /usr/bin/bootc upgrade")
+
     def test_status_probes_are_skipped_during_finalize(self):
         with patch.object(
             bootc_query,

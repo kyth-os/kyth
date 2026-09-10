@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 from datetime import datetime
 from typing import Any
 from kyth_shared.runtime_output import parse_json_object
@@ -103,20 +104,49 @@ def status_data() -> dict | None:
 # Commands that take ostree's sysroot write-lock. Hub `bootc status`
 # probes must not run while any of these are alive or they convoy
 # behind the lock and the GUI updater hits its timeout.
-# argv0 is often /usr/bin/bootc, so a leading-space " bootc upgrade"
-# marker misses the real process and lets Hub take the lock.
-_BOOTC_LOCK_RE = re.compile(
-    r"(?:^|[\s/])bootc\s+(upgrade|switch|rollback|reset)(?:\s|$)"
-)
-_FINALIZE_MARKER = "ostree admin finalize-staged"
 
 
 def holds_sysroot_lock(cmdline: str) -> bool:
     """True if *cmdline* is a bootc/ostree process holding the sysroot lock."""
-    text = cmdline.strip()
-    if _FINALIZE_MARKER in text:
-        return True
-    return _BOOTC_LOCK_RE.search(text) is not None
+    try:
+        argv = shlex.split(cmdline.strip())
+    except ValueError:
+        return False
+    if argv and argv[0].isdigit():
+        argv = argv[1:]
+    if not argv:
+        return False
+
+    # `ps args` includes arguments for every process, not just its executable.
+    # Only inspect the command being launched (with the small set of wrappers
+    # used by our services), so a validation search such as
+    # `rg 'bootc upgrade'` cannot look like a live upgrade.
+    index = 0
+    while index < len(argv):
+        executable = os.path.basename(argv[index])
+        index += 1
+        if executable == "sudo":
+            while index < len(argv) and argv[index].startswith("-"):
+                index += 2 if argv[index] in {"-u", "--user", "-g", "--group"} else 1
+            continue
+        if executable in {"env", "timeout", "nice"}:
+            while index < len(argv):
+                token = argv[index]
+                if executable == "env" and "=" in token and not token.startswith("="):
+                    index += 1
+                elif token.startswith("-"):
+                    index += 1
+                elif executable == "timeout" and token.replace(".", "", 1).isdigit():
+                    index += 1
+                else:
+                    break
+            continue
+        if executable == "bootc":
+            return index < len(argv) and argv[index] in {"upgrade", "switch", "rollback", "reset"}
+        if executable == "ostree":
+            return argv[index:index + 2] == ["admin", "finalize-staged"]
+        return False
+    return False
 
 
 def active_operation() -> str | None:
