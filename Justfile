@@ -247,9 +247,10 @@ clean-rust-targets:
         fi
     done
 
-# Remove only Git's interrupted-operation temporary packfiles. Refuse to run
+# Remove only Git's interrupted-operation temporary files. Refuse to run
 # while Git is indexing, receiving, or packing so an active fetch/push cannot
-# be mistaken for stale garbage. Valid pack-*.pack files are never touched.
+# be mistaken for stale garbage. Valid pack-*.pack/pack-*.idx files are never
+# touched.
 [group('Utility')]
 clean-git-temp-packs:
     #!/usr/bin/env bash
@@ -260,13 +261,13 @@ clean-git-temp-packs:
         echo "Refusing Git temp-pack cleanup while a Git operation is active." >&2
         exit 75
     fi
-    mapfile -t stale_packs < <(find "${pack_dir}" -maxdepth 1 -type f -name 'tmp_pack_*' -print)
-    if [[ ${#stale_packs[@]} -eq 0 ]]; then
-        echo "No stale Git temporary packfiles found."
+    mapfile -t stale_files < <(find "${pack_dir}" -maxdepth 1 -type f -name 'tmp_*' -print)
+    if [[ ${#stale_files[@]} -eq 0 ]]; then
+        echo "No stale Git temporary files found."
         exit 0
     fi
-    printf 'Removing stale Git temporary packfile: %s\n' "${stale_packs[@]}"
-    rm -f -- "${stale_packs[@]}"
+    printf 'Removing stale Git temporary file: %s\n' "${stale_files[@]}"
+    rm -f -- "${stale_files[@]}"
 
 # Run the exact-image Rust migration install/update/rollback evidence flow.
 # The image ref must be pinned to the promoted testing image under review.
