@@ -325,6 +325,10 @@ class BridgeFieldTests(unittest.TestCase):
         self.assertIn("fetchVpnSavedProfile", LIVE_DATA)
         self.assertIn("Open full VPN connection", vpn)
         self.assertIn("Saved profile", vpn)
+        self.assertIn("initialization_script_for_all_frames", MAIN_RS)
+        self.assertIn("127.0.0.1/kyth-vpn/saml-acs", MAIN_RS)
+        self.assertIn('callback_value(&url, "token")', MAIN_RS)
+        self.assertIn("MutationObserver", MAIN_RS)
 
     def test_vpn_connect_uses_tauri_wire_argument_names(self):
         vpn = (HUB_WEB / "components" / "VpnSection.tsx").read_text(encoding="utf-8")

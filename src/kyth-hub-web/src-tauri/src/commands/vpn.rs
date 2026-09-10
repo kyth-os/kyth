@@ -258,8 +258,10 @@ fn handle_saml_callback(
             return;
         };
         if callback.len() > 8 * 1024 * 1024
-            || url.scheme() != "kyth-vpn"
-            || url.host_str() != Some("saml-acs")
+            || url.scheme() != "http"
+            || url.host_str() != Some("127.0.0.1")
+            || url.path() != "/kyth-vpn/saml-acs"
+            || callback_value(&url, "token").as_deref() != Some(job.as_str())
         {
             if let Ok(runtime) = get_job(&job) {
                 status(&runtime, "failed", "VPN sign-in callback was rejected.");
@@ -345,14 +347,32 @@ fn open_saml_window(app: &AppHandle, job: &str, gateway: &str, saml_url: &str) {
     let callback_gateway = gateway.to_string();
     let init_script = r#"(function(){
       function submitToKyth(form){
-        var action=form.action||''; if(action.indexOf('/SAML20/SP/ACS')<0)return false;
-        var fd; try{fd=new FormData(form)}catch(e){return false}; if(!fd.get('SAMLResponse'))return false;
-        var p=new URLSearchParams(); for(var pair of fd.entries())p.append(pair[0],pair[1]);
-        window.location.href='kyth-vpn://saml-acs?url='+encodeURIComponent(action)+'&body='+encodeURIComponent(p.toString()); return true;
+        if(!form || form.__kythVpnCaptured)return false;
+        var action=form.getAttribute('action')||form.action||'';
+        if(!/\/SAML20\/SP\/ACS(?:[/?#]|$)/i.test(action))return false;
+        var fd; try{fd=new FormData(form)}catch(e){return false};
+        if(typeof fd.get('SAMLResponse')!=='string' || !fd.get('SAMLResponse'))return false;
+        form.__kythVpnCaptured=true;
+        var p=new URLSearchParams(); fd.forEach(function(value,key){if(typeof value==='string')p.append(key,value)});
+        window.location.replace('http://127.0.0.1/kyth-vpn/saml-acs?token=__KYTH_VPN_TOKEN__&url='+encodeURIComponent(action)+'&body='+encodeURIComponent(p.toString()));
+        return true;
       }
-      var original=HTMLFormElement.prototype.submit; HTMLFormElement.prototype.submit=function(){if(!submitToKyth(this))original.call(this)};
+      function inspect(node){
+        if(!node || node.nodeType!==1)return;
+        if(node.matches && node.matches('form'))submitToKyth(node);
+        if(node.closest) { var parent=node.closest('form'); if(parent)submitToKyth(parent); }
+        if(node.querySelectorAll)node.querySelectorAll('form').forEach(submitToKyth);
+      }
+      var original=HTMLFormElement.prototype.submit;
+      HTMLFormElement.prototype.submit=function(){if(!submitToKyth(this))original.call(this)};
       document.addEventListener('submit',function(e){if(submitToKyth(e.target)){e.preventDefault();e.stopImmediatePropagation()}},true);
-    })();"#;
+      function watch(){
+        if(!document.documentElement)return;
+        new MutationObserver(function(records){records.forEach(function(record){record.addedNodes.forEach(inspect)})}).observe(document.documentElement,{childList:true,subtree:true});
+        document.querySelectorAll('form').forEach(submitToKyth);
+      }
+      if(document.documentElement)watch();else document.addEventListener('DOMContentLoaded',watch);
+    })();"#.replace("__KYTH_VPN_TOKEN__", job);
     let Ok(initial_url) = Url::parse(saml_url) else {
         if let Ok(runtime) = get_job(job) {
             status(&runtime, "failed", "VPN sign-in redirect was invalid.");
@@ -373,9 +393,12 @@ fn open_saml_window(app: &AppHandle, job: &str, gateway: &str, saml_url: &str) {
     let result = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(initial_url))
         .title("VPN — Secure sign-in")
         .inner_size(960.0, 720.0)
-        .initialization_script(init_script)
+        .initialization_script_for_all_frames(init_script)
         .on_navigation(move |url| {
-            if url.scheme() == "kyth-vpn" && url.host_str() == Some("saml-acs") {
+            if url.scheme() == "http"
+                && url.host_str() == Some("127.0.0.1")
+                && url.path() == "/kyth-vpn/saml-acs"
+            {
                 handle_saml_callback(
                     callback_app.clone(),
                     callback_label.clone(),
