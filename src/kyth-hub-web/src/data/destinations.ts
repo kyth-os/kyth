@@ -4,6 +4,7 @@ import {
   PLAY_SECTIONS,
   THIS_PC_SECTIONS,
   UPDATES_SECTIONS,
+  VPN_SECTIONS,
   type HubSection,
 } from "./hubSections";
 import routeManifest from "./hubRoutes.json";
@@ -26,6 +27,7 @@ const sectionsByDestination: Record<string, HubSection[]> = {
   Apps: APPS_SECTIONS,
   "This PC": THIS_PC_SECTIONS,
   "Move In": MOVE_IN_SECTIONS,
+  VPN: VPN_SECTIONS,
   Updates: UPDATES_SECTIONS,
 };
 

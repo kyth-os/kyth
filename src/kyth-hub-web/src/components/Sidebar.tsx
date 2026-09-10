@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { IconHome, IconPlay, IconGrid, IconMonitor, IconRefresh, IconShield, IconTransfer } from "./icons";
+import { IconHome, IconPlay, IconGrid, IconLock, IconMonitor, IconRefresh, IconShield, IconTransfer } from "./icons";
 import type { ComponentType, SVGProps } from "react";
 
 // The web Hub's left rail. Updates is deliberately last: it is a global,
@@ -12,6 +12,7 @@ const destinations: { to: string; label: string; hint: string; Icon: ComponentTy
   { to: "/apps", label: "Apps", hint: "Discover and work setup", Icon: IconGrid },
   { to: "/this-pc", label: "This PC", hint: "Health, hardware, repair", Icon: IconMonitor },
   { to: "/move-in", label: "Move In", hint: "Files, saves, workflows", Icon: IconTransfer },
+  { to: "/vpn", label: "VPN", hint: "Secure work connections", Icon: IconLock },
   { to: "/updates", label: "Updates", hint: "System updates and rollback", Icon: IconRefresh },
 ];
 

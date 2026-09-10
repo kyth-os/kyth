@@ -796,7 +796,7 @@ export async function openVpnApp(): Promise<string> {
   if (!inTauriShell()) throw new Error("Native VPN controls are available from the installed Kyth Hub.");
   return await invoke<string>("open_vpn_app");
 }
-export async function startVpnConnection(profile: { gateway: string; protocol: string; os_emulation: string; username: string; password: string }): Promise<string> {
+export async function startVpnConnection(profile: { gateway: string; protocol: string; osEmulation: string; username: string; password: string }): Promise<string> {
   if (!inTauriShell()) throw new Error("VPN connections require the installed Kyth Hub.");
   return await invoke<string>("vpn_connect", profile);
 }

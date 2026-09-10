@@ -71,3 +71,4 @@ export const UPDATES_SECTIONS = sectionsFor("Updates");
 export const THIS_PC_SECTIONS = sectionsFor("This PC");
 
 export const MOVE_IN_SECTIONS = sectionsFor("Move In");
+export const VPN_SECTIONS = sectionsFor("VPN");

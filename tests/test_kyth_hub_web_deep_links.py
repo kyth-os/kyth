@@ -106,7 +106,7 @@ class HubWebDeepLinkTests(unittest.TestCase):
     def test_destinations_cover_the_full_pulse_rail(self):
         self.assertEqual(
             _destination_keys(),
-            {"Welcome", "Play", "Apps", "This PC", "Move In", "Updates"},
+            {"Welcome", "Play", "Apps", "This PC", "Move In", "VPN", "Updates"},
         )
 
     def test_updates_is_the_last_left_rail_destination(self):
@@ -118,7 +118,7 @@ class HubWebDeepLinkTests(unittest.TestCase):
         # Guards the regression's actual cause: if someone re-lists sections
         # by hand, adding a section to hubSections.ts stops being enough and
         # the next key silently falls back to Home.
-        for array in ("PLAY_SECTIONS", "APPS_SECTIONS", "THIS_PC_SECTIONS", "MOVE_IN_SECTIONS", "UPDATES_SECTIONS"):
+        for array in ("PLAY_SECTIONS", "APPS_SECTIONS", "THIS_PC_SECTIONS", "MOVE_IN_SECTIONS", "VPN_SECTIONS", "UPDATES_SECTIONS"):
             self.assertIn(array, DESTINATIONS_CODE)
         self.assertIn("DESTINATIONS", DEEP_LINK_CODE)
         for key in sorted(_section_keys()):

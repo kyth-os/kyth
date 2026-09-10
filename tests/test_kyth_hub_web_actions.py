@@ -206,7 +206,7 @@ class HubWebCoverageTests(unittest.TestCase):
         ]
         self.assertGreaterEqual(len(keys), 20, "hubSections.ts keys not parsed")
         wired = set()
-        for page in ("Play.tsx", "Apps.tsx", "ThisPc.tsx", "MoveIn.tsx", "Updates.tsx"):
+        for page in ("Play.tsx", "Apps.tsx", "ThisPc.tsx", "MoveIn.tsx", "Vpn.tsx", "Updates.tsx"):
             text = (HUB_WEB / "pages" / page).read_text(encoding="utf-8")
             block = re.search(r"sectionContent=\{\{(.*?)\}\}", text, re.S)
             self.assertIsNotNone(block, f"{page} has no sectionContent map")

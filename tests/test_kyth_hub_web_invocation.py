@@ -326,6 +326,12 @@ class BridgeFieldTests(unittest.TestCase):
         self.assertIn("Open full VPN connection", vpn)
         self.assertIn("Saved profile", vpn)
 
+    def test_vpn_connect_uses_tauri_wire_argument_names(self):
+        vpn = (HUB_WEB / "components" / "VpnSection.tsx").read_text(encoding="utf-8")
+        self.assertIn("osEmulation: string", LIVE_DATA)
+        self.assertIn("osEmulation, username", vpn)
+        self.assertNotIn("os_emulation: osEmulation", vpn)
+
     def test_move_in_readiness_and_full_workflow_bridges_are_registered(self):
         move_files = (HUB_WEB / "components" / "MoveFilesSection.tsx").read_text(encoding="utf-8")
         cloud = (HUB_WEB / "components" / "CloudStorageSection.tsx").read_text(encoding="utf-8")

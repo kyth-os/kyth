@@ -9,6 +9,7 @@ const Play = lazy(() => import("./pages/Play").then(({ Play: page }) => ({ defau
 const Apps = lazy(() => import("./pages/Apps").then(({ Apps: page }) => ({ default: page })));
 const ThisPc = lazy(() => import("./pages/ThisPc").then(({ ThisPc: page }) => ({ default: page })));
 const MoveIn = lazy(() => import("./pages/MoveIn").then(({ MoveIn: page }) => ({ default: page })));
+const Vpn = lazy(() => import("./pages/Vpn").then(({ Vpn: page }) => ({ default: page })));
 const Updates = lazy(() => import("./pages/Updates").then(({ Updates: page }) => ({ default: page })));
 
 const crumbFor: Record<string, string> = {
@@ -17,6 +18,7 @@ const crumbFor: Record<string, string> = {
   "/apps": "Apps",
   "/this-pc": "This PC",
   "/move-in": "Move In",
+  "/vpn": "VPN",
   "/updates": "Updates",
 };
 
@@ -38,6 +40,7 @@ export function App() {
               <Route path="/apps" element={<Apps />} />
               <Route path="/this-pc" element={<ThisPc />} />
               <Route path="/move-in" element={<MoveIn />} />
+              <Route path="/vpn" element={<Vpn />} />
               <Route path="/updates" element={<Updates />} />
             </Routes>
           </Suspense>

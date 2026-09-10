@@ -6,7 +6,7 @@ import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./Se
 
 const fieldStyle = { padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 13, minWidth: 180 } as const;
 
-// Real "Move In > VPN" content — one facet of the "network-summary" probe
+// Real VPN controls — one facet of the "network-summary" probe
 // section (NetworkSharesSection and CloudStorageSection read the other
 // two facets of the same read). Refresh escalates to the live nmcli read.
 export function VpnSection({ section }: { section: HubSection }) {
@@ -106,7 +106,7 @@ export function VpnSection({ section }: { section: HubSection }) {
           <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username (optional)" style={fieldStyle} />
           <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password (optional)" style={fieldStyle} />
           <ActionButton label={busy === "connect" ? "Starting…" : "Connect"} disabled={busy !== null || !gateway.trim()} onClick={() => run("connect", "Starting native VPN connection…", async () => {
-            const nextJob = await startVpnConnection({ gateway: gateway.trim(), protocol, os_emulation: osEmulation, username: username.trim(), password });
+            const nextJob = await startVpnConnection({ gateway: gateway.trim(), protocol, osEmulation, username: username.trim(), password });
             setJob(nextJob);
             setPassword("");
             return "VPN connection started. Complete SAML sign-in if the secure window appears.";
