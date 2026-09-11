@@ -184,6 +184,7 @@ fn validate_request(request: &Value, uid: u32, gid: u32) -> Result<ExecSpec, Str
         .and_then(Value::as_str)
         .unwrap_or("");
     let (argv, stdin) = match operation {
+        "flatpak_update" => (vec!["/usr/bin/flatpak", "update", "--system", "-y"], None),
         "flatpak_uninstall" => {
             let app_id = text(request, "app_id");
             if !valid_flatpak_id(app_id) {

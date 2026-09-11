@@ -28,6 +28,9 @@ export function friendlyActionError(action: string, error: unknown): string {
   if (action === "stage") {
     return "We couldn't download the update. Check your connection and available disk space, then try again.";
   }
+  if (action === "apps") {
+    return `We couldn't update every app. Check your connection, then try again. Details: ${detail}`;
+  }
   if (action === "apply") {
     return "The update is ready, but KythOS couldn't restart to apply it. Please restart from the system menu.";
   }

@@ -1124,6 +1124,58 @@ pub(crate) struct InstallActionLaunch {
 }
 
 #[tauri::command]
+fn update_flatpaks() -> Result<InstallActionLaunch, String> {
+    let job = format!(
+        "flatpak-update-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let pending_detail = "Updating your apps…".to_string();
+    app_installs()
+        .lock()
+        .unwrap()
+        .insert(job.clone(), ("running".into(), pending_detail.clone()));
+    let job_for_thread = job.clone();
+    std::thread::spawn(move || {
+        let user_result = match std::process::Command::new("flatpak")
+            .args(["update", "--user", "-y"])
+            .output()
+        {
+            Ok(output) if output.status.success() => Ok(()),
+            Ok(output) => Err(commands::process::bounded_text(&output.stderr)),
+            Err(error) => Err(format!("Could not start Flatpak: {error}")),
+        };
+        let system_result = commands::privilege::flatpak_update().map(|_| ());
+        let (state, detail) = match (user_result, system_result) {
+            (Ok(()), Ok(())) => ("complete", "Your apps are up to date.".to_string()),
+            (Err(user_error), Ok(())) => (
+                "failed",
+                format!("Your personal apps could not be updated: {user_error}"),
+            ),
+            (Ok(()), Err(system_error)) => (
+                "failed",
+                format!("Your personal apps were updated, but system-wide app updates need attention: {system_error}"),
+            ),
+            (Err(user_error), Err(system_error)) => (
+                "failed",
+                format!("Your apps could not be updated: {user_error}; system-wide updates: {system_error}"),
+            ),
+        };
+        app_installs()
+            .lock()
+            .unwrap()
+            .insert(job_for_thread, (state.into(), detail));
+    });
+    Ok(InstallActionLaunch {
+        job,
+        state: "running".into(),
+        detail: pending_detail,
+    })
+}
+
+#[tauri::command]
 fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     let job = format!(
@@ -1668,6 +1720,7 @@ fn main() {
             import_appimage,
             launch_appimage,
             install_flatpak,
+            update_flatpaks,
             install_status,
             protondb_lookup_many,
             anti_cheat_table,

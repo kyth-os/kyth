@@ -1084,6 +1084,18 @@ export async function uninstallFlatpak(id: string): Promise<string> {
   throw new Error("Uninstall is still running; refresh Flatpak in a moment.");
 }
 export async function launchAppImage(path: string): Promise<string> { return await invoke<string>("launch_appimage", { path }); }
+export async function updateFlatpaks(): Promise<string> {
+  const launch = await invoke<InstallActionLaunch>("update_flatpaks");
+  if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "App updates did not start.");
+  for (let i = 0; i < 240; i += 1) {
+    await new Promise((resolve) => window.setTimeout(resolve, 500));
+    const state = await fetchInstallStatus(launch.job);
+    if (!state || state.state === "running") continue;
+    if (state.state === "complete") return state.detail;
+    throw new Error(state.detail);
+  }
+  throw new Error("App updates are still running. Refresh status in a moment.");
+}
 export async function installFlatpak(appId: string): Promise<string> {
   const launch = await invoke<InstallActionLaunch>("install_flatpak", { appId });
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Install did not start.");

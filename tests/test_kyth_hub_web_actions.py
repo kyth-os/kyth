@@ -313,5 +313,21 @@ class HubWebCoverageTests(unittest.TestCase):
             self.assertNotIn("in the current Qt Hub today", text, f"{name} still points users at the retired Qt Hub")
 
 
+class HubWebUpdateActionTests(unittest.TestCase):
+    def test_updates_overview_can_apply_only_the_pending_flatpak_updates(self):
+        overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
+        live_data = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
+        privilege = (TAURI_SRC / "commands" / "privilege.rs").read_text(encoding="utf-8")
+        shared_privilege = (ROOT / "src" / "kyth-shared-rs" / "src" / "privileged.rs").read_text(encoding="utf-8")
+
+        self.assertIn("pending?.flatpak ?? 0", overview)
+        self.assertIn("updateFlatpaks", overview)
+        self.assertIn('run("apps", "Updating your apps…", updateApps)', overview)
+        self.assertIn('"update_flatpaks"', live_data)
+        self.assertIn('args(["update", "--user", "-y"])', MAIN_RS)
+        self.assertIn('"flatpak_update" => Ok(json!({ "operation": "flatpak_update" }))', privilege)
+        self.assertIn('vec!["/usr/bin/flatpak", "update", "--system", "-y"]', shared_privilege)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -39,6 +39,7 @@ pub(crate) struct PrivilegedPayload {
 /// never included in an error or job status message.
 fn validated_request(operation: &str, payload: &PrivilegedPayload) -> Result<Value, String> {
     match operation {
+        "flatpak_update" => Ok(json!({ "operation": "flatpak_update" })),
         "flatpak_uninstall" => {
             let app_id = payload
                 .app_id
@@ -318,6 +319,11 @@ pub(crate) fn flatpak_uninstall(app_id: &str) -> Result<String, String> {
             ..Default::default()
         },
     )?;
+    send_request(request)
+}
+
+pub(crate) fn flatpak_update() -> Result<String, String> {
+    let request = validated_request("flatpak_update", &PrivilegedPayload::default())?;
     send_request(request)
 }
 

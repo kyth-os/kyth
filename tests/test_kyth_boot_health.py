@@ -450,6 +450,7 @@ class SafeUpgradeTests(unittest.TestCase):
                 patch.object(safe_upgrade.os, "geteuid", return_value=0),
                 patch.object(safe_upgrade, "fetch_status_data", return_value=status),
                 patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
+                patch.object(safe_upgrade, "active_operation", return_value=None),
                 patch.object(safe_upgrade, "run", side_effect=fake_run),
             ):
                 result = safe_upgrade.upgrade(
@@ -532,6 +533,7 @@ class SafeUpgradeTests(unittest.TestCase):
                 patch.object(safe_upgrade.os, "geteuid", return_value=0),
                 patch.object(safe_upgrade, "fetch_status_data", return_value=status),
                 patch.object(safe_upgrade, "remote_digest_for_ref", return_value=DIGEST),
+                patch.object(safe_upgrade, "active_operation", return_value=None),
                 patch.object(
                     safe_upgrade,
                     "run",

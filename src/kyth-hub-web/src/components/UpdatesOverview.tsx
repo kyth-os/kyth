@@ -13,6 +13,7 @@ import {
   invokeApplyStaged,
   invokeBootcRollback,
   invokeBootcUpgrade,
+  updateFlatpaks,
   confirmUserAction,
   type BootcSnapshot,
   type UpdateHealthLive,
@@ -80,11 +81,8 @@ function UpdateCard({ icon, label, value, detail, tone }: {
 }
 
 function numericPending(pending: Record<string, string> | null): number {
-  if (!pending) return 0;
-  return Object.values(pending).reduce((total, value) => {
-    const parsed = Number(value);
-    return Number.isFinite(parsed) ? total + parsed : total;
-  }, 0);
+  const parsed = Number(pending?.flatpak ?? 0);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
 }
 
 export function UpdatesOverview() {
@@ -187,6 +185,16 @@ export function UpdatesOverview() {
     }
   }
 
+  async function updateApps(): Promise<string> {
+    try {
+      const detail = await updateFlatpaks();
+      await refresh();
+      return detail;
+    } catch (error) {
+      throw new Error(friendlyActionError("apps", error));
+    }
+  }
+
   async function apply(): Promise<string> {
     try {
       const detail = await invokeApplyStaged();
@@ -251,6 +259,9 @@ export function UpdatesOverview() {
     if (busy === "stage") {
       return { tone: "muted", icon: "↓", title: "Downloading and preparing your update", message: "KythOS is downloading the update and preparing it for the next restart. This may take a few minutes.", next: "Keep the Hub open until the update is ready.", progress: true };
     }
+    if (busy === "apps") {
+      return { tone: "muted", icon: "↓", title: "Updating your apps", message: "Your app updates are downloading and installing now. This may take a few minutes.", next: "Keep the Hub open until the update is complete.", progress: true };
+    }
     if (busy === "apply") {
       return { tone: "muted", icon: "↻", title: "Restarting to finish the update", message: "KythOS is restarting now. The update will finish installing during the restart.", next: "Save your work if anything else is open." };
     }
@@ -273,7 +284,7 @@ export function UpdatesOverview() {
       return { tone: "warn", icon: "↓", title: "A KythOS update is available", message: "A newer system version is ready to download. Your current system will keep working while it downloads.", next: "Choose “Download and stage”. We’ll tell you when a restart is needed." };
     }
     if (appUpdatesAvailable) {
-      return { tone: "warn", icon: "↓", title: "App updates are available", message: `${pendingCount} app update${pendingCount === 1 ? " is" : "s are"} waiting. Your KythOS system itself is current.`, next: "Update apps from the Apps page." };
+      return { tone: "warn", icon: "↓", title: "App updates are available", message: `${pendingCount} app update${pendingCount === 1 ? " is" : "s are"} waiting. Your KythOS system itself is current.`, next: "Choose “Update apps” to install them." };
     }
     if (!loaded) {
       return { tone: "muted", icon: "…", title: "Reading update status", message: "We’re checking this computer’s update status.", next: "Your next step will appear here shortly." };
@@ -322,6 +333,7 @@ export function UpdatesOverview() {
         <div className="updates-actions">
           <ActionButton label={busy === "check" ? "Checking…" : "Check for updates"} disabled={busy !== null} onClick={() => void run("check", "Checking for updates…", check)} />
           <ActionButton label={busy === "stage" ? "Downloading…" : "Download and stage"} disabled={busy !== null || blocked} onClick={() => void run("stage", "Downloading and staging…", stage)} />
+          {appUpdatesAvailable && <ActionButton label={busy === "apps" ? "Updating apps…" : "Update apps"} disabled={busy !== null} onClick={() => void run("apps", "Updating your apps…", updateApps)} />}
           {staged && <ActionButton label={busy === "apply" ? "Restarting…" : "Restart to apply"} disabled={busy !== null} onClick={() => void run("apply", "Applying the staged update…", apply)} />}
           {(updateStatus?.rollback || snapshot?.rollback) && <ActionButton label={busy === "rollback" ? "Rolling back…" : "Roll back"} disabled={busy !== null} onClick={() => void run("rollback", "Rolling back…", rollback)} />}
           <ActionButton label={busy === "refresh" ? "Refreshing…" : "Refresh status"} disabled={busy !== null} onClick={() => void run("refresh", "Refreshing update status…", refresh)} />
