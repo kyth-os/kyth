@@ -14,6 +14,10 @@ export default defineConfig({
   },
   build: {
     outDir: "dist",
-    sourcemap: true,
+    // The production frontend is embedded in the Tauri binary.  Source maps
+    // add several megabytes to that payload but are not used by normal Hub
+    // launches; retain them only in local development through Vite's dev
+    // tooling instead of shipping them to every KythOS desktop.
+    sourcemap: false,
   },
 });

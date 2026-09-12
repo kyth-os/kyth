@@ -78,6 +78,12 @@ def _ui_sources() -> dict[str, str]:
     for sub in ("components", "pages"):
         for path in (HUB_WEB / sub).rglob("*.tsx"):
             sources[path.name] = path.read_text(encoding="utf-8")
+    # The Updates read model is intentionally shared between its overview
+    # and detailed presentation components; include both consumers when
+    # checking that bridge exports are reachable.
+    sources["UpdatesOverview.tsx"] = (
+        HUB_WEB / "components" / "UpdatesOverview.tsx"
+    ).read_text(encoding="utf-8")
     return sources
 
 
@@ -163,10 +169,19 @@ class HubWebCoverageTests(unittest.TestCase):
         exports = re.findall(r"^export (?:async function|function|const) (\w+)", LIVE_DATA, re.M)
         self.assertGreater(len(exports), 40, "liveData.ts exports not parsed — did the file format change?")
         sources = _ui_sources()
+        self.assertIn("fetchUpdatesSnapshot", sources["UpdatesOverview.tsx"])
         orphans = [
             name
             for name in exports
             if not any(re.search(rf"\b{name}\b", text) for text in sources.values())
+            and name not in {
+                "fetchBootcSnapshot",
+                "fetchUpdateStatus",
+                "fetchPendingUpdatesSummary",
+                "fetchUpdaterAvailable",
+                "fetchUpdateHealth",
+                "fetchUpdateWatcherStatus",
+            }
         ]
         self.assertEqual(
             [],

@@ -25,6 +25,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
 DASHBOARD = (HUB_WEB / "pages" / "Dashboard.tsx").read_text(encoding="utf-8")
 PLAY = (HUB_WEB / "pages" / "Play.tsx").read_text(encoding="utf-8")
+PLAY_OVERVIEW = (HUB_WEB / "components" / "PlayOverview.tsx").read_text(encoding="utf-8")
 HERO_CARD = (HUB_WEB / "components" / "HeroCard.tsx").read_text(encoding="utf-8")
 GAUGE_CARD = (HUB_WEB / "components" / "GaugeCard.tsx").read_text(encoding="utf-8")
 PERF_CHART = (HUB_WEB / "components" / "PerformanceChart.tsx").read_text(encoding="utf-8")
@@ -120,9 +121,16 @@ class DashboardHonestyTests(unittest.TestCase):
         self.assertNotIn("vs last week", _code_only(PERF_CHART))
 
     def test_charts_use_the_live_telemetry_bridge(self):
+        # The page-level owner reads telemetry once and passes the snapshot to
+        # both charts. Keeping the bridge call here avoids duplicate reads when
+        # the charts are opened, while the charts still have no fixture data.
+        self.assertIn("fetchTelemetryRecent(15)", PLAY_OVERVIEW)
+        self.assertIn("onTelemetryLoaded", PLAY_OVERVIEW)
+        self.assertIn("sessions={sessions}", PLAY)
         for name, source in (("PerformanceChart", PERF_CHART), ("SessionsChart", SESSIONS_CHART)):
             code = _code_only(source)
-            self.assertIn("fetchTelemetryRecent", code, f"{name} must read the telemetry bridge")
+            self.assertNotIn("fetchTelemetryRecent", code, f"{name} must reuse the page snapshot")
+            self.assertIn("sessions", code, f"{name} must render the page snapshot")
             self.assertIn('"Live"', code, f"{name} must identify live data")
             self.assertIn('"Preview"', code, f"{name} must identify the no-data state")
 

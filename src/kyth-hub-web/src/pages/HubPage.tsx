@@ -18,15 +18,23 @@ export function HubPage({
   sections,
   sectionContent,
   showTabs = true,
+  defaultToFirstSection = false,
 }: {
   sections: HubSection[];
   sectionContent: Record<string, ComponentType<{ section: HubSection }>>;
   showTabs?: boolean;
+  /**
+   * Overview destinations stay lightweight until the user selects a detailed
+   * workspace.  Single-workspace pages such as Updates and VPN opt in so
+   * their only control surface remains visible without a tab click.
+   */
+  defaultToFirstSection?: boolean;
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("section");
-  const active = sections.find((s) => s.key === requested) ?? sections[0];
-  const Content = sectionContent[active.key];
+  const active = sections.find((s) => s.key === requested)
+    ?? (defaultToFirstSection ? sections[0] : null);
+  const Content = active ? sectionContent[active.key] : null;
 
   // replace, not push: tabbing within a destination shouldn't stack up
   // history entries the back button then has to walk out of.
@@ -34,8 +42,8 @@ export function HubPage({
 
   return (
     <div className="page-content" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      {showTabs && <HubTabs sections={sections} activeKey={active.key} onSelect={onSelect} />}
-      {Content ? <Content section={active} /> : null}
+      {showTabs && <HubTabs sections={sections} activeKey={active?.key ?? null} onSelect={onSelect} />}
+      {Content && active ? <Content section={active} /> : null}
     </div>
   );
 }

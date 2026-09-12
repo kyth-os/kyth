@@ -41,7 +41,7 @@ async function readPlay(): Promise<PlayReadings> {
     fetchControllersLive(),
     fetchCompatibilityGames(),
     fetchGamingPerfStatus(),
-    fetchTelemetryRecent(1),
+    fetchTelemetryRecent(15),
   ]);
   return { audit, launchers, controllers, compatibility, performance, sessions };
 }
@@ -70,7 +70,7 @@ function PlayCard({ icon, label, value, detail, status }: {
   );
 }
 
-export function PlayOverview() {
+export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessions: TelemetrySession[] | null) => void }) {
   const [readings, setReadings] = useState<PlayReadings>(emptyReadings);
   const [loaded, setLoaded] = useState(false);
   const [, setSearchParams] = useSearchParams();
@@ -81,11 +81,12 @@ export function PlayOverview() {
     readPlay().then((next) => {
       if (!cancelled) {
         setReadings(next);
+        onTelemetryLoaded?.(next.sessions);
         setLoaded(true);
       }
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [onTelemetryLoaded]);
 
   const installedLaunchers = readings.launchers?.filter((launcher) => launcher.installed) ?? null;
   const gameCount = installedLaunchers?.reduce((total, launcher) => total + (launcher.library_count ?? 0), 0) ?? null;

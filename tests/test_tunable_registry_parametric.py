@@ -6,6 +6,7 @@ existing swappiness pattern.
 """
 from __future__ import annotations
 
+import errno
 import tempfile
 import unittest
 from pathlib import Path
@@ -61,9 +62,14 @@ class TestTunableRegistryParametric(unittest.TestCase):
                         dest = tmp_path / f"99-kyth-{spec.name}.conf"
                     try:
                         result = generate_tunable(spec.name, save_cfg, dest=dest)
-                    except PermissionError:
-                        # some other-kind generators ignore dest and write to /etc (e.g. kwin_latency) — skip in unprivileged test
-                        continue
+                    except OSError as exc:
+                        # Some other-kind generators write their second output to /etc when
+                        # the generic dispatcher receives only one destination. That is a
+                        # valid production default, but unavailable in the read-only test
+                        # sandbox; continue only for the expected access errors.
+                        if exc.errno in (errno.EACCES, errno.EROFS):
+                            continue
+                        self.fail(f"generate_tunable {spec.name} raised {exc!r}")
                     except AttributeError:
                         # no generate_* (e.g. kargs has desired_kargs) — skip
                         continue
@@ -77,12 +83,15 @@ class TestTunableRegistryParametric(unittest.TestCase):
                         bal_cfg = dict(save_cfg)
                         bal_cfg["profile"] = "balanced"
                         dest2 = tmp_path / f"99-kyth-{spec.name}-bal.conf"
-                        try:
-                            generate_tunable(spec.name, bal_cfg, dest=dest2)
-                        except (PermissionError, AttributeError):
-                            pass
-                        except Exception as exc:
+                    try:
+                        generate_tunable(spec.name, bal_cfg, dest=dest2)
+                    except OSError as exc:
+                        if exc.errno not in (errno.EACCES, errno.EROFS):
                             self.fail(f"generate_tunable balanced {spec.name} raised {exc!r}")
+                    except AttributeError:
+                        pass
+                    except Exception as exc:
+                        self.fail(f"generate_tunable balanced {spec.name} raised {exc!r}")
 
                     try:
                         st = tunable_status(spec.name, conf=dest if dest.exists() else None)

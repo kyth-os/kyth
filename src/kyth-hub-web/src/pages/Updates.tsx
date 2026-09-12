@@ -17,6 +17,7 @@ export function Updates() {
       <HubPage
         sections={UPDATES_SECTIONS}
         showTabs={false}
+        defaultToFirstSection
         sectionContent={{
           Update: UpdatesSection,
         }}

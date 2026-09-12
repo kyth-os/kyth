@@ -1,13 +1,10 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
-  fetchBootcSnapshot,
+  fetchUpdatesSnapshot,
   fetchCollectAvailability,
-  fetchPendingUpdatesSummary,
   fetchUpdateHealth,
   fetchUpdateAvailabilityView,
-  fetchUpdateStatus,
-  fetchUpdaterAvailable,
   invokeBootcRollback,
   invokeBootcUpgrade,
   invokeApplyStaged,
@@ -52,13 +49,8 @@ export function UpdatesSection({ section }: { section: HubSection }) {
   const { status, busy, run } = useSectionAction();
 
   async function readUpdateState() {
-    return await Promise.all([
-      fetchBootcSnapshot(),
-      fetchUpdateStatus(),
-      fetchPendingUpdatesSummary(),
-      fetchUpdaterAvailable(),
-      fetchUpdateHealth(),
-    ]);
+    const next = await fetchUpdatesSnapshot();
+    return [next.snapshot, next.status, next.pending, next.updater, next.health] as const;
   }
 
   useEffect(() => {

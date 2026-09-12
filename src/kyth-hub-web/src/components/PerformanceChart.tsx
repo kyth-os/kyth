@@ -1,25 +1,10 @@
-import { useEffect, useState } from "react";
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { fetchTelemetryRecent, type TelemetrySession } from "../services/liveData";
-import { inTauriShell } from "../services/tauriEnv";
+import type { TelemetrySession } from "../services/liveData";
 
 // Dashboard FPS chart — now live. When telemetry.db is absent (dev checkout, no kyth-telem runs)
 // it shows Preview with no fake numbers. When data exists, it aggregates recent_sessions by day
 // and shows a Live badge.
-export function PerformanceChart() {
-  const [sessions, setSessions] = useState<TelemetrySession[] | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    fetchTelemetryRecent(15).then((rows) => {
-      if (!cancelled) {
-        setSessions(rows);
-        setLoaded(true);
-      }
-    });
-    return () => { cancelled = true; };
-  }, []);
-
+export function PerformanceChart({ sessions }: { sessions: TelemetrySession[] }) {
   const isLive = sessions !== null && sessions.length > 0;
   // Aggregate avg_fps by calendar day (last 7 days) — matches Python recent_sessions grouping.
   const data = (() => {
@@ -50,7 +35,7 @@ export function PerformanceChart() {
           <p className="card-title">Performance</p>
           <p className="card-copy" style={{ marginTop: 2 }}>Average FPS per day, last 7 days</p>
         </div>
-        <span className={`pill ${showLiveData ? "pill-ok" : "pill-dim"}`}>{showLiveData ? "Live" : loaded ? "Preview" : "…"}</span>
+        <span className={`pill ${showLiveData ? "pill-ok" : "pill-dim"}`}>{showLiveData ? "Live" : "Preview"}</span>
       </div>
       <div style={{ flex: 1, marginTop: 12, minHeight: 220 }}>
         {showLiveData ? (
@@ -81,16 +66,12 @@ export function PerformanceChart() {
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
             <p className="card-copy" style={{ fontSize: 12 }}>
-              {loaded
-                ? inTauriShell()
-                  ? "No sessions recorded yet — play a game and check back."
-                  : "Not in Tauri shell — chart will show live FPS once installed."
-                : "Loading…"}
+              No sessions recorded yet — play a game and check back.
             </p>
           </div>
         )}
       </div>
-      {!showLiveData && loaded && (
+      {!showLiveData && (
         <p className="card-copy" style={{ marginTop: 12, fontSize: 11.5 }}>
           No telemetry sessions with FPS data are available yet.
         </p>

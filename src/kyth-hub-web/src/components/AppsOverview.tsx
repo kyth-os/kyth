@@ -3,31 +3,27 @@ import { useSearchParams } from "react-router-dom";
 import {
   fetchAppStoreSnapshot,
   fetchFontsReady,
-  fetchInstalledFlatpaks,
   fetchNetworkSummary,
   type AppStoreSnapshot,
-  type InstalledFlatpak,
   type NetworkSummary,
 } from "../services/liveData";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
 type AppsReadings = {
   snapshot: AppStoreSnapshot | null;
-  installed: InstalledFlatpak[] | null;
   fonts: { ready: boolean; detail: string } | null;
   network: NetworkSummary | null;
 };
 
-const emptyReadings: AppsReadings = { snapshot: null, installed: null, fonts: null, network: null };
+const emptyReadings: AppsReadings = { snapshot: null, fonts: null, network: null };
 
 async function readApps(): Promise<AppsReadings> {
-  const [snapshot, installed, fonts, network] = await Promise.all([
+  const [snapshot, fonts, network] = await Promise.all([
     fetchAppStoreSnapshot(),
-    fetchInstalledFlatpaks(),
     fetchFontsReady(),
     fetchNetworkSummary(),
   ]);
-  return { snapshot, installed, fonts, network };
+  return { snapshot, fonts, network };
 }
 
 function AppsCard({ icon, label, value, detail, good }: { icon: string; label: string; value: string; detail: string; good: boolean | null }) {
@@ -52,7 +48,7 @@ export function AppsOverview() {
     return () => { cancelled = true; };
   }, []);
 
-  const installedCount = readings.snapshot?.installedCount ?? readings.installed?.length ?? null;
+  const installedCount = readings.snapshot?.installedCount ?? null;
   const updates = readings.snapshot?.updatesAvailable ?? null;
   const providers = readings.network?.cloudProviders.length ?? null;
   const hasReadings = Object.values(readings).some((value) => value !== null);

@@ -269,12 +269,19 @@ struct MokStatusResponse {
 
 /// Live Secure Boot + MOK enrollment (N40) — runs mokutil (5s each).
 #[tauri::command]
-fn mok_status() -> MokStatusResponse {
-    let s = kyth_shared::system::mok_verify::mok_status();
-    MokStatusResponse {
-        sb_state: s.sb_state,
-        enrolled: s.enrolled,
-    }
+async fn mok_status() -> MokStatusResponse {
+    tauri::async_runtime::spawn_blocking(|| {
+        let s = kyth_shared::system::mok_verify::mok_status();
+        MokStatusResponse {
+            sb_state: s.sb_state,
+            enrolled: s.enrolled,
+        }
+    })
+    .await
+    .unwrap_or(MokStatusResponse {
+        sb_state: "unknown".to_string(),
+        enrolled: "unknown".to_string(),
+    })
 }
 
 #[derive(serde::Serialize)]
@@ -874,33 +881,60 @@ struct BtrfsHealthResponse {
     detail: String,
 }
 #[tauri::command]
-fn btrfs_health() -> BtrfsHealthResponse {
-    let (status, detail) = kyth_shared::system::btrfs_status::btrfs_health_summary();
-    BtrfsHealthResponse { status, detail }
+async fn btrfs_health() -> BtrfsHealthResponse {
+    tauri::async_runtime::spawn_blocking(|| {
+        let (status, detail) = kyth_shared::system::btrfs_status::btrfs_health_summary();
+        BtrfsHealthResponse { status, detail }
+    })
+    .await
+    .unwrap_or(BtrfsHealthResponse {
+        status: "unknown".to_string(),
+        detail: "Btrfs health could not be read.".to_string(),
+    })
 }
 #[tauri::command]
-fn loaded_kernel_modules() -> Vec<String> {
-    kyth_shared::system::drivers::get_loaded_kernel_modules()
-        .into_iter()
-        .collect()
+async fn loaded_kernel_modules() -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        kyth_shared::system::drivers::get_loaded_kernel_modules()
+            .into_iter()
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 #[tauri::command]
-fn pci_devices_by_class(class: String) -> Vec<String> {
-    kyth_shared::system::drivers::get_pci_devices_by_class(&class)
+async fn pci_devices_by_class(class: String) -> Vec<String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        kyth_shared::system::drivers::get_pci_devices_by_class(&class)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
-fn controllers_detect() -> ControllersDetectResponse {
-    let d = kyth_shared::system::controllers::detect_controllers();
-    ControllersDetectResponse {
-        usb_controllers: d.usb_controllers,
-        input_nodes: d.input_nodes,
-        xone_dongle: d.xone_dongle,
-        xone_loaded: d.xone_loaded,
-        xpadneo_loaded: d.xpadneo_loaded,
-        hid_ps_loaded: d.hid_ps_loaded,
-        dualsense_found: d.dualsense_found,
-    }
+async fn controllers_detect() -> ControllersDetectResponse {
+    tauri::async_runtime::spawn_blocking(|| {
+        let d = kyth_shared::system::controllers::detect_controllers();
+        ControllersDetectResponse {
+            usb_controllers: d.usb_controllers,
+            input_nodes: d.input_nodes,
+            xone_dongle: d.xone_dongle,
+            xone_loaded: d.xone_loaded,
+            xpadneo_loaded: d.xpadneo_loaded,
+            hid_ps_loaded: d.hid_ps_loaded,
+            dualsense_found: d.dualsense_found,
+        }
+    })
+    .await
+    .unwrap_or(ControllersDetectResponse {
+        usb_controllers: Vec::new(),
+        input_nodes: Vec::new(),
+        xone_dongle: false,
+        xone_loaded: false,
+        xpadneo_loaded: false,
+        hid_ps_loaded: false,
+        dualsense_found: false,
+    })
 }
 #[derive(serde::Serialize)]
 struct ControllersDetectResponse {
@@ -931,15 +965,25 @@ struct HardwareViewSummaryResponse {
 }
 
 #[tauri::command]
-fn network_identity() -> NetworkIdentityResponse {
-    let n = kyth_shared::system::network_identity::get_network_identity();
-    NetworkIdentityResponse {
-        vpn_connected: n.vpn_connected,
-        vpn_name: n.vpn_name,
-        smb_mounts: n.smb_mounts,
-        cloud_providers: n.cloud_providers,
-        detail: n.detail,
-    }
+async fn network_identity() -> NetworkIdentityResponse {
+    tauri::async_runtime::spawn_blocking(|| {
+        let n = kyth_shared::system::network_identity::get_network_identity();
+        NetworkIdentityResponse {
+            vpn_connected: n.vpn_connected,
+            vpn_name: n.vpn_name,
+            smb_mounts: n.smb_mounts,
+            cloud_providers: n.cloud_providers,
+            detail: n.detail,
+        }
+    })
+    .await
+    .unwrap_or(NetworkIdentityResponse {
+        vpn_connected: false,
+        vpn_name: String::new(),
+        smb_mounts: 0,
+        cloud_providers: Vec::new(),
+        detail: "Network status could not be read.".to_string(),
+    })
 }
 #[derive(serde::Serialize)]
 struct NetworkIdentityResponse {
@@ -1021,8 +1065,10 @@ fn appimage_list() -> Vec<kyth_shared::system::software_catalog::AppImageEntry> 
 }
 
 #[tauri::command]
-fn installed_flatpaks() -> Vec<kyth_shared::system::software_catalog::InstalledFlatpak> {
-    kyth_shared::system::software_catalog::installed_flatpaks()
+async fn installed_flatpaks() -> Vec<kyth_shared::system::software_catalog::InstalledFlatpak> {
+    tauri::async_runtime::spawn_blocking(kyth_shared::system::software_catalog::installed_flatpaks)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1270,8 +1316,12 @@ fn compatibility_games() -> Vec<CompatibilityGameResponse> {
 }
 
 #[tauri::command]
-fn telemetry_recent(limit: Option<u32>) -> Vec<kyth_shared::system::telemetry::SessionRow> {
-    kyth_shared::system::telemetry::recent_sessions(limit.unwrap_or(15) as usize)
+async fn telemetry_recent(limit: Option<u32>) -> Vec<kyth_shared::system::telemetry::SessionRow> {
+    tauri::async_runtime::spawn_blocking(move || {
+        kyth_shared::system::telemetry::recent_sessions(limit.unwrap_or(15) as usize)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1379,8 +1429,10 @@ fn vpn_saved_profile() -> Option<VpnSavedProfile> {
 }
 
 #[tauri::command]
-fn desktop_stack_checks() -> Vec<kyth_shared::system::desktop_stack::StackCheck> {
-    kyth_shared::system::desktop_stack::desktop_stack_checks()
+async fn desktop_stack_checks() -> Vec<kyth_shared::system::desktop_stack::StackCheck> {
+    tauri::async_runtime::spawn_blocking(kyth_shared::system::desktop_stack::desktop_stack_checks)
+        .await
+        .unwrap_or_default()
 }
 
 /// Opens a prefilled `kyth-os/kyth` issue in the user's browser — the

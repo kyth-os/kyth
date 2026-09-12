@@ -15,6 +15,7 @@ export function Vpn() {
       <HubPage
         sections={VPN_SECTIONS}
         showTabs={false}
+        defaultToFirstSection
         sectionContent={{ VPN: VpnSection }}
       />
     </div>

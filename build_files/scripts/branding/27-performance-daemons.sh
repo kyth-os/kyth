@@ -51,8 +51,11 @@ test -x /usr/bin/kyth-privileged
 install -m 0644 /ctx/kyth-privileged.service /usr/lib/systemd/system/kyth-privileged.service
 systemctl enable kyth-privileged.service 2>/dev/null || true
 
-# tmpfs + persistent system cache dir
-mkdir -p /var/cache/kyth
+# Persistent directories required by the privileged service. ProtectSystem=strict
+# only permits its explicit ReadWritePaths when each path already exists in the
+# deployment, so a missing log directory otherwise prevents the service from
+# starting before it can accept a Hub action.
+install -d -m 0755 /var/cache/kyth /var/log/kyth
 # Ensure unit names match WantedBy installs (user units ship as kyth-probe.*)
 # (files above already use kyth-probe.service / .timer under user/)
 

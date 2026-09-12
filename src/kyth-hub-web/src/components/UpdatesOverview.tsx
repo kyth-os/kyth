@@ -1,12 +1,7 @@
 import { useEffect, useState } from "react";
 import {
-  fetchBootcSnapshot,
   fetchCollectAvailability,
-  fetchPendingUpdatesSummary,
-  fetchUpdateHealth,
-  fetchUpdateStatus,
-  fetchUpdaterAvailable,
-  fetchUpdateWatcherStatus,
+  fetchUpdatesSnapshot,
   setUpdateWatcherEnabled,
   checkForUpdatesNow,
   deferUpdateWatcher,
@@ -15,36 +10,19 @@ import {
   invokeBootcUpgrade,
   updateFlatpaks,
   confirmUserAction,
-  type BootcSnapshot,
-  type UpdateHealthLive,
-  type UpdateStatusLive,
+  type UpdatesSnapshot,
 } from "../services/liveData";
 import { ActionButton, useSectionAction } from "./SectionActions";
 import { hubAcceptanceMode, recordHubAcceptance } from "../services/acceptance";
 import { invoke } from "@tauri-apps/api/core";
 import { friendlyActionError, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityResult } from "./updateMessages";
 
-type UpdateReadings = {
-  snapshot: BootcSnapshot | null;
-  status: UpdateStatusLive | null;
-  pending: Record<string, string> | null;
-  updater: boolean | null;
-  health: UpdateHealthLive | null;
-  watcher: Awaited<ReturnType<typeof fetchUpdateWatcherStatus>>;
-};
+type UpdateReadings = UpdatesSnapshot;
 
 const emptyReadings: UpdateReadings = { snapshot: null, status: null, pending: null, updater: null, health: null, watcher: null };
 
 async function readUpdates(): Promise<UpdateReadings> {
-  const [snapshot, status, pending, updater, health, watcher] = await Promise.all([
-    fetchBootcSnapshot(),
-    fetchUpdateStatus(),
-    fetchPendingUpdatesSummary(),
-    fetchUpdaterAvailable(),
-    fetchUpdateHealth(),
-    fetchUpdateWatcherStatus(),
-  ]);
-  return { snapshot, status, pending, updater, health, watcher };
+  return await fetchUpdatesSnapshot();
 }
 
 type CardTone = "ok" | "warn" | "muted";
@@ -272,7 +250,16 @@ export function UpdatesOverview() {
       return { tone: "muted", icon: "↻", title: "Refreshing update status", message: "We’re reading the latest update information from this computer.", next: "The next step will appear here when the check finishes." };
     }
     if (status?.startsWith("Failed:")) {
-      return { tone: "warn", icon: "!", title: "The update could not be completed", message: status.replace(/^Failed:\s*/, ""), next: "Check your connection and try again." };
+      const failure = status.replace(/^Failed:\s*/, "");
+      const lowerFailure = failure.toLowerCase();
+      const next = lowerFailure.includes("registry") || lowerFailure.includes("timed out")
+        ? "Wait a moment, confirm that other sites load, then choose “Download and stage” again."
+        : lowerFailure.includes("free disk space")
+          ? "Free up some disk space, then choose “Download and stage” again."
+          : lowerFailure.includes("already in progress")
+            ? "Wait for the other update to finish, then refresh this page."
+            : "Choose “Download and stage” to try again. Your current system is still safe to use.";
+      return { tone: "warn", icon: "!", title: "The update could not be completed", message: failure, next };
     }
     if (staged) {
       return { tone: "warn", icon: "✓", title: "Update ready — restart to finish", message: "The update has been downloaded and installed safely for the next startup.", next: "Choose “Restart to apply” when you’re ready. Save any open work first." };

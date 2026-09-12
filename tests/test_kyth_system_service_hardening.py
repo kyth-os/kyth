@@ -7,7 +7,6 @@ import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PRIVILEGED_UNITS = (
-    "kyth-update-watcher.service",
     "kyth-proton-cachyos-update.service",
     "kyth-hw-setup.service",
     "kyth-probe.service",
@@ -54,6 +53,28 @@ class SudoEscalationHardeningTests(unittest.TestCase):
 
 
 class SystemServiceHardeningTests(unittest.TestCase):
+    def test_update_watcher_can_stage_from_the_host_mount_namespace(self) -> None:
+        """bootc cannot stage an atomic deployment from a private mount ns."""
+        body = (ROOT / "build_files" / "kyth-update-watcher.service").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("NoNewPrivileges=yes", body)
+        self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", body)
+        self.assertIn("PID 1's mount namespace", body)
+        for directive in (
+            "PrivateTmp=yes",
+            "ProtectSystem=",
+            "ProtectHome=",
+            "ProtectClock=",
+            "ProtectKernelTunables=",
+            "ProtectKernelModules=",
+            "ProtectControlGroups=",
+            "SystemCallFilter=",
+            "CapabilityBoundingSet=",
+        ):
+            with self.subTest(directive=directive):
+                self.assertNotIn(directive, body)
+
     def test_privileged_units_have_safe_process_baseline(self) -> None:
         required = (
             "UMask=0077",

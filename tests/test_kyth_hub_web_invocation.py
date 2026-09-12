@@ -109,6 +109,17 @@ class JustInvocationTests(unittest.TestCase):
             for claim in ("rolled back", "staged", "completed", "applied"):
                 self.assertNotIn(claim, code, f"{command} claims {claim!r} for a spawned window")
 
+    def test_manual_watcher_run_can_outlast_a_large_image_download(self):
+        """The Hub must not time out systemctl before the watcher does."""
+        body = re.search(
+            r"fn check_for_updates_now\(\)[^{]+\{(.*?)\n\}", MAIN_RS, re.S
+        )
+        self.assertIsNotNone(body)
+        self.assertIn("UPDATE_WATCHER_START_TIMEOUT", body.group(1))
+        self.assertIn(
+            "Duration::from_secs(2_500)", MAIN_RS,
+        )
+
     def test_recipe_runner_has_no_terminal_wrapper(self):
         self.assertNotIn("TERMINALS", JUST_RS)
         self.assertNotIn("KEEP_OPEN", JUST_RS)

@@ -117,6 +117,13 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertNotIn("/usr/lib/systemd/system/kyth-sched.service", body)
         self.assertNotIn("/usr/lib/systemd/system/kyth-telem.service", body)
 
+    def test_privileged_service_writable_paths_are_created_in_the_image(self) -> None:
+        """ProtectSystem=strict requires ReadWritePaths to exist before launch."""
+        body = (ROOT / "build_files/scripts/branding/27-performance-daemons.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("install -d -m 0755 /var/cache/kyth /var/log/kyth", body)
+
     def test_restart_limited_units_cap_start_burst(self) -> None:
         units = (
             ROOT / "build_files/kyth-batteryd.service",

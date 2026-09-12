@@ -42,12 +42,14 @@ pub(crate) struct HardwareResponse {
 }
 
 #[tauri::command]
-pub(crate) fn hardware_snapshot() -> HardwareResponse {
-    HardwareResponse {
+pub(crate) async fn hardware_snapshot() -> HardwareResponse {
+    tauri::async_runtime::spawn_blocking(|| HardwareResponse {
         gpu_line: kyth_shared::system::gpu::lspci_gpu_lines()
             .into_iter()
             .next(),
-    }
+    })
+    .await
+    .unwrap_or(HardwareResponse { gpu_line: None })
 }
 
 #[derive(Serialize)]
@@ -83,15 +85,19 @@ pub(crate) struct BootRuntimeCheckResponse {
 }
 
 #[tauri::command]
-pub(crate) fn boot_runtime_checks() -> Vec<BootRuntimeCheckResponse> {
-    kyth_shared::system::boot_runtime::boot_runtime_checks()
-        .into_iter()
-        .map(|check| BootRuntimeCheckResponse {
-            name: check.name,
-            passed: check.passed,
-            detail: check.detail,
-        })
-        .collect()
+pub(crate) async fn boot_runtime_checks() -> Vec<BootRuntimeCheckResponse> {
+    tauri::async_runtime::spawn_blocking(|| {
+        kyth_shared::system::boot_runtime::boot_runtime_checks()
+            .into_iter()
+            .map(|check| BootRuntimeCheckResponse {
+                name: check.name,
+                passed: check.passed,
+                detail: check.detail,
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[derive(Serialize)]

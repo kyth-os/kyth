@@ -6,7 +6,7 @@ import {
   uninstallFlatpak, makeAppImageExecutable, importAppImage, fetchStarterPacks,
   fetchKaliStatus, fetchSecHostTools, createKaliBox, exportKaliApps,
   removeKaliBox, enterKaliTerminal, installSecHostTool, uninstallSecHostTool,
-  launchSecHostTool, type AppStoreSnapshot, type FamiliarApp, type AppImageEntry,
+  launchSecHostTool, invalidateSharedReads, type AppStoreSnapshot, type FamiliarApp, type AppImageEntry,
   type AppStreamApp, type StarterPack, type InstalledFlatpak, type SecHostTool,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
@@ -101,7 +101,12 @@ export function AppStoreSection({ section }: { section: HubSection }) {
     const timer = window.setTimeout(async () => { setCatalogSearching(true); const apps = await searchAppStream(q); if (!cancelled) { setCatalog(apps ?? []); setCatalogSearching(false); } }, 250);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [catalogQuery]);
-  async function refreshInstalled(): Promise<void> { const [nextSnapshot, nextInstalled] = await Promise.all([fetchAppStoreSnapshot(), fetchInstalledFlatpaks()]); if (nextSnapshot) setSnapshot(nextSnapshot); if (nextInstalled) setInstalled(nextInstalled); }
+  async function refreshInstalled(): Promise<void> {
+    invalidateSharedReads("installed-flatpaks", "pending-updates", "probe:flatpak-apps", "probe:flatpak-updates");
+    const [nextSnapshot, nextInstalled] = await Promise.all([fetchAppStoreSnapshot(), fetchInstalledFlatpaks()]);
+    if (nextSnapshot) setSnapshot(nextSnapshot);
+    if (nextInstalled) setInstalled(nextInstalled);
+  }
   async function install(id: string): Promise<string> { const job = await installFlatpak(id); for (let i = 0; i < 60; i += 1) { await new Promise((resolve) => window.setTimeout(resolve, 500)); const state = await fetchInstallStatus(job); if (!state || state.state === "running") continue; if (state.state === "complete") return state.detail; throw new Error(state.detail); } throw new Error("Installation is still running; refresh Apps in a moment."); }
   async function installPack(pack: StarterPack): Promise<string> { for (const app of pack.apps) await install(app.id); await refreshInstalled(); return `${pack.name} apps installed.`; }
   async function installAndRefresh(id: string): Promise<string> { const result = await install(id); await refreshInstalled(); return result; }

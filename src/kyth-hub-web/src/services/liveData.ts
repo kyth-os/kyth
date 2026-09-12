@@ -1,6 +1,44 @@
 import { invoke } from "@tauri-apps/api/core";
 import { inTauriShell } from "./tauriEnv";
 
+// Several surfaces present the same fact (for example, an overview card and
+// a detailed workspace).  A Tauri invoke is not automatically shared, so
+// without this small cache one navigation could start the same `bootc` or
+// `flatpak` process more than once.  Keep this deliberately local rather
+// than adding a client-state dependency: callers still receive the typed
+// result they expect, while concurrent readers receive one in-flight job.
+type SharedRead = {
+  value?: unknown;
+  expiresAt: number;
+  pending?: Promise<unknown>;
+};
+
+const sharedReads = new Map<string, SharedRead>();
+
+async function sharedRead<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const current = sharedReads.get(key);
+  if (current?.pending) return current.pending as Promise<T>;
+  if (current && current.expiresAt > now) return current.value as T;
+
+  const pending = load().then(
+    (value) => {
+      sharedReads.set(key, { value, expiresAt: Date.now() + ttlMs });
+      return value;
+    },
+    (error) => {
+      if (sharedReads.get(key)?.pending === pending) sharedReads.delete(key);
+      throw error;
+    },
+  );
+  sharedReads.set(key, { expiresAt: 0, pending });
+  return pending;
+}
+
+export function invalidateSharedReads(...keys: string[]): void {
+  for (const key of keys) sharedReads.delete(key);
+}
+
 // Real backend data, read through the Tauri shell's bridge commands (see
 // src-tauri/src/main.rs, which calls straight into the kyth-shared Rust
 // crate — src/kyth-shared-rs — no subprocess). Every read here returns
@@ -176,12 +214,14 @@ interface ProbeBridgeResponse<T = unknown> {
  * reshape; this is just the shared plumbing. */
 async function fetchProbeSection<T>(key: string): Promise<T | null> {
   if (!inTauriShell()) return null;
-  try {
-    const raw = await invoke<ProbeBridgeResponse<T>>("probe_backend", { section: key });
-    return raw.data ?? null;
-  } catch {
-    return null;
-  }
+  return sharedRead(`probe:${key}`, 10_000, async () => {
+    try {
+      const raw = await invoke<ProbeBridgeResponse<T>>("probe_backend", { section: key });
+      return raw.data ?? null;
+    } catch {
+      return null;
+    }
+  });
 }
 
 export async function fetchUpdateChannel(): Promise<string | null> {
@@ -315,21 +355,23 @@ function deploymentFrom(entry: BootcStatusJsonEntry | undefined): BootcDeploymen
 
 export async function fetchBootcSnapshot(): Promise<BootcSnapshot | null> {
   if (!inTauriShell()) return null;
-  try {
-    const [statusRaw, channelRaw] = await Promise.all([
-      invoke<ProbeBridgeResponse>("probe_backend", { section: "bootc-status-data" }),
-      invoke<ProbeBridgeResponse<string>>("probe_backend", { section: "bootc-branch" }),
-    ]);
-    const data = statusRaw.data as unknown as BootcStatusJson | null;
-    if (!data) return null;
-    return {
-      channel: channelRaw.data ? (CHANNEL_DISPLAY[channelRaw.data] ?? channelRaw.data) : null,
-      booted: deploymentFrom(data.status?.booted),
-      rollback: deploymentFrom(data.status?.rollback),
-    };
-  } catch {
-    return null;
-  }
+  return sharedRead("bootc-snapshot", 10_000, async () => {
+    try {
+      const [statusRaw, channelRaw] = await Promise.all([
+        invoke<ProbeBridgeResponse>("probe_backend", { section: "bootc-status-data" }),
+        invoke<ProbeBridgeResponse<string>>("probe_backend", { section: "bootc-branch" }),
+      ]);
+      const data = statusRaw.data as unknown as BootcStatusJson | null;
+      if (!data) return null;
+      return {
+        channel: channelRaw.data ? (CHANNEL_DISPLAY[channelRaw.data] ?? channelRaw.data) : null,
+        booted: deploymentFrom(data.status?.booted),
+        rollback: deploymentFrom(data.status?.rollback),
+      };
+    } catch {
+      return null;
+    }
+  });
 }
 
 // kernel-flavor and nvidia-detect are both plain scalars already in
@@ -570,7 +612,19 @@ async function waitUpdateJob(job: string): Promise<string> {
 
 async function waitUpdateLaunch(launch: UpdateActionLaunch): Promise<string> {
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Update action did not start.");
-  return await waitUpdateJob(launch.job);
+  const detail = await waitUpdateJob(launch.job);
+  invalidateSharedReads(
+    "updates-snapshot",
+    "bootc-snapshot",
+    "pending-updates",
+    "update-status",
+    "update-health",
+    "update-watcher-status",
+    "probe:bootc-status-data",
+    "probe:bootc-branch",
+    "probe:flatpak-updates",
+  );
+  return detail;
 }
 
 async function runHubAction(recipe: string): Promise<string> {
@@ -818,7 +872,9 @@ export async function fetchVpnSavedProfile(): Promise<VpnSavedProfile | null> {
 // Updates unified — bootc/flatpak/firmware summary
 export async function fetchPendingUpdatesSummary(): Promise<Record<string,string> | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<Record<string,string>>("pending_updates_summary"); } catch { return null; }
+  return sharedRead("pending-updates", 15_000, async () => {
+    try { return await invoke<Record<string,string>>("pending_updates_summary"); } catch { return null; }
+  });
 }
 
 // PipeWire quantum presets (N32)
@@ -849,19 +905,51 @@ export async function fetchRecoveryStatus(): Promise<RecoveryStatus | null> {
 export interface UpdateStatusLive { booted?: string | null; staged: boolean; rollback: boolean; remote_digest?: string | null; blocked_reason?: string | null; retry_cmd?: string | null; check_state: string; detail: string; }
 export async function fetchUpdateStatus(): Promise<UpdateStatusLive | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<UpdateStatusLive>("update_status"); } catch { return null; }
+  return sharedRead("update-status", 10_000, async () => {
+    try { return await invoke<UpdateStatusLive>("update_status"); } catch { return null; }
+  });
 }
 
 export interface UpdateHealthLive { status: string; pending_digest: string; last_healthy_digest: string; failures: number; quarantined: number; detail: string; }
 export async function fetchUpdateHealth(): Promise<UpdateHealthLive | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<UpdateHealthLive>("update_health"); } catch { return null; }
+  return sharedRead("update-health", 10_000, async () => {
+    try { return await invoke<UpdateHealthLive>("update_health"); } catch { return null; }
+  });
 }
 
 export interface UpdateWatcherStatus { available: boolean; enabled: boolean; active: boolean; }
 export async function fetchUpdateWatcherStatus(): Promise<UpdateWatcherStatus | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<UpdateWatcherStatus>("update_watcher_status"); } catch { return null; }
+  return sharedRead("update-watcher-status", 10_000, async () => {
+    try { return await invoke<UpdateWatcherStatus>("update_watcher_status"); } catch { return null; }
+  });
+}
+
+export interface UpdatesSnapshot {
+  snapshot: BootcSnapshot | null;
+  status: UpdateStatusLive | null;
+  pending: Record<string, string> | null;
+  updater: boolean | null;
+  health: UpdateHealthLive | null;
+  watcher: UpdateWatcherStatus | null;
+}
+
+// One page-level owner for UpdatesOverview and UpdatesSection.  The two
+// surfaces intentionally keep their own presentation state, but they must
+// never launch separate bootc/firmware/Flatpak reads for the same entry.
+export async function fetchUpdatesSnapshot(): Promise<UpdatesSnapshot> {
+  return sharedRead("updates-snapshot", 10_000, async () => {
+    const [snapshot, status, pending, updater, health, watcher] = await Promise.all([
+      fetchBootcSnapshot(),
+      fetchUpdateStatus(),
+      fetchPendingUpdatesSummary(),
+      fetchUpdaterAvailable(),
+      fetchUpdateHealth(),
+      fetchUpdateWatcherStatus(),
+    ]);
+    return { snapshot, status, pending, updater, health, watcher };
+  });
 }
 export async function setUpdateWatcherEnabled(enabled: boolean): Promise<string> {
   if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
@@ -934,12 +1022,14 @@ export interface TelemetrySession {
 
 export async function fetchTelemetryRecent(limit = 7): Promise<TelemetrySession[] | null> {
   if (!inTauriShell()) return null;
-  try {
-    const rows = await invoke<TelemetrySession[]>("telemetry_recent", { limit });
-    return rows;
-  } catch {
-    return null;
-  }
+  return sharedRead(`telemetry:${limit}`, 10_000, async () => {
+    try {
+      const rows = await invoke<TelemetrySession[]>("telemetry_recent", { limit });
+      return rows;
+    } catch {
+      return null;
+    }
+  });
 }
 
 export interface CompatibilityGame {
@@ -1061,7 +1151,9 @@ export interface InstalledFlatpak { id: string; name: string; version: string; b
 interface InstallActionLaunch { job: string; state: "running"; detail: string; }
 export async function fetchInstalledFlatpaks(): Promise<InstalledFlatpak[] | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<InstalledFlatpak[]>("installed_flatpaks"); } catch { return null; }
+  return sharedRead("installed-flatpaks", 15_000, async () => {
+    try { return await invoke<InstalledFlatpak[]>("installed_flatpaks"); } catch { return null; }
+  });
 }
 export async function makeAppImageExecutable(path: string): Promise<string> {
   return await invoke<string>("make_appimage_executable", { path });
@@ -1091,7 +1183,10 @@ export async function updateFlatpaks(): Promise<string> {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await fetchInstallStatus(launch.job);
     if (!state || state.state === "running") continue;
-    if (state.state === "complete") return state.detail;
+    if (state.state === "complete") {
+      invalidateSharedReads("installed-flatpaks", "pending-updates", "probe:flatpak-apps", "probe:flatpak-updates");
+      return state.detail;
+    }
     throw new Error(state.detail);
   }
   throw new Error("App updates are still running. Refresh status in a moment.");

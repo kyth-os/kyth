@@ -15,19 +15,18 @@ SyslogIdentifier=kyth-update-watcher
 User=root
 UMask=0077
 NoNewPrivileges=yes
-PrivateTmp=yes
-ProtectSystem=strict
-ProtectHome=read-only
-ProtectClock=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectControlGroups=yes
+# bootc performs the deployment in PID 1's mount namespace and writes the
+# staged deployment plus Kyth's durable update status under /var/lib/kyth.
+# Mount-namespace hardening (PrivateTmp/ProtectSystem/ProtectHome and the
+# ProtectKernel* family) prevents that handoff before bootc can stage an
+# image, reported as: "Ensuring mountns: Reading /proc/1/ns/mnt: Permission
+# denied".  Keep this one fixed-root updater outside those mount restrictions;
+# its executable, argv, user, and timer are all image-owned and it cannot
+# accept user input.
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
-SystemCallFilter=@system-service
 SystemCallArchitectures=native
-CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CacheDirectory=kyth
 CacheDirectoryMode=0700

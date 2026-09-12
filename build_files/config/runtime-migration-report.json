@@ -1158,15 +1158,6 @@
     },
     {
       "migration_priority": 3,
-      "name": "web_server",
-      "owner": "fixture::src/kyth-welcome/kyth_welcome/services/web_server.py",
-      "path": "src/kyth-welcome/kyth_welcome/services/web_server.py",
-      "runtime_authority": "source-only",
-      "runtime_scope": "test-fixture",
-      "status": "explicitly-not-ported"
-    },
-    {
-      "migration_priority": 3,
       "name": "welcome",
       "owner": "fixture::src/kyth-welcome/kyth_welcome/services/welcome.py",
       "path": "src/kyth-welcome/kyth_welcome/services/welcome.py",
@@ -2513,7 +2504,7 @@
     },
     "active_entries": 184,
     "active_python_entries": 0,
-    "entries": 861,
+    "entries": 860,
     "p0_open_entries": 0,
     "status_by_active_entry": {
       "done-native": 184

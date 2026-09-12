@@ -88,7 +88,9 @@ test("Dashboard wrappers are present and used by the page", () => {
 test("Updates wrappers are present and used by the section", () => {
   for (const wrapper of updateWrappers) {
     assert.match(service, new RegExp(`export async function ${wrapper}\\b`), wrapper);
-    assert.match(updates, new RegExp(`\\b${wrapper}\\b`), wrapper);
+    // UpdatesOverview and UpdatesSection share one page-level snapshot
+    // owner; the low-level reads therefore live behind fetchUpdatesSnapshot.
+    assert.match(`${updates}\n${updatesOverview}`, new RegExp(`\\b(?:${wrapper}|fetchUpdatesSnapshot)\\b`), wrapper);
   }
 });
 
@@ -110,7 +112,13 @@ test("Updates overview reconciles a live check into the cards", () => {
 test("Updates overview exposes the automatic watcher controls", () => {
   for (const wrapper of ["fetchUpdateWatcherStatus", "setUpdateWatcherEnabled", "checkForUpdatesNow", "deferUpdateWatcher"]) {
     assert.match(service, new RegExp(`export (?:async )?function ${wrapper}\\b`), wrapper);
-    assert.match(updatesOverview, new RegExp(`\\b${wrapper}\\b`), wrapper);
+    assert.match(
+      updatesOverview,
+      wrapper === "fetchUpdateWatcherStatus"
+        ? /fetchUpdatesSnapshot/
+        : new RegExp(`\\b${wrapper}\\b`),
+      wrapper,
+    );
   }
   assert.match(updatesOverview, /Defer automatic updates/);
   assert.match(updatesOverview, /Disable automatic updates|Enable automatic updates/);
@@ -123,6 +131,10 @@ test("Updates overview gives a plain-language next step", () => {
   assert.match(updatesOverview, /Choose “Restart to apply”/);
   assert.doesNotMatch(updatesOverview, /<ActionStatus/);
   assert.match(updateMessages, /We couldn't reach the update service/);
+  assert.match(updateMessages, /couldn't reach the update registry before the check timed out/);
+  assert.match(updateMessages, /current system has not changed/);
+  assert.match(updatesOverview, /Free up some disk space/);
+  assert.match(updatesOverview, /confirm that other sites load/);
   assert.match(updateMessages, /The update is downloaded and ready/);
   assert.match(updateMessages, /No changes were made/);
 });

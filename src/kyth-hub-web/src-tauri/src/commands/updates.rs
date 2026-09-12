@@ -7,6 +7,10 @@ use serde::{Deserialize, Serialize};
 
 static HUB_ACTION_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
 static UPDATE_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+// The watcher can stage a large image. Keep this longer than its systemd
+// TimeoutStartSec (2400s), otherwise the Hub kills `systemctl start` after
+// five minutes and reports a failure while the watcher is still working.
+const UPDATE_WATCHER_START_TIMEOUT: Duration = Duration::from_secs(2_500);
 
 fn hub_action_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
     HUB_ACTION_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -519,7 +523,7 @@ pub(crate) fn check_for_updates_now() -> Result<UpdateActionLaunch, String> {
         .into_iter()
         .map(String::from)
         .collect(),
-        Duration::from_secs(300),
+        UPDATE_WATCHER_START_TIMEOUT,
     )
 }
 

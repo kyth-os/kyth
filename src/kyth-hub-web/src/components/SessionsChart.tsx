@@ -1,22 +1,7 @@
-import { useEffect, useState } from "react";
 import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
-import { fetchTelemetryRecent, type TelemetrySession } from "../services/liveData";
-import { inTauriShell } from "../services/tauriEnv";
+import type { TelemetrySession } from "../services/liveData";
 
-export function SessionsChart() {
-  const [sessions, setSessions] = useState<TelemetrySession[] | null>(null);
-  const [loaded, setLoaded] = useState(false);
-  useEffect(() => {
-    let cancelled = false;
-    fetchTelemetryRecent(15).then((rows) => {
-      if (!cancelled) {
-        setSessions(rows);
-        setLoaded(true);
-      }
-    });
-    return () => { cancelled = true; };
-  }, []);
-
+export function SessionsChart({ sessions }: { sessions: TelemetrySession[] }) {
   const isLive = sessions !== null && sessions.length > 0;
   const data = (() => {
     if (!isLive || !sessions) return [];
@@ -46,7 +31,7 @@ export function SessionsChart() {
           <p className="card-title">Gaming sessions</p>
           <p className="card-copy" style={{ marginTop: 2 }}>Sessions per day, last 7 days</p>
         </div>
-        <span className={`pill ${showLiveData ? "pill-ok" : "pill-dim"}`}>{showLiveData ? "Live" : loaded ? "Preview" : "…"}</span>
+        <span className={`pill ${showLiveData ? "pill-ok" : "pill-dim"}`}>{showLiveData ? "Live" : "Preview"}</span>
       </div>
       <div style={{ flex: 1, marginTop: 12, minHeight: 160 }}>
         {showLiveData ? (
@@ -74,16 +59,12 @@ export function SessionsChart() {
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 160 }}>
             <p className="card-copy" style={{ fontSize: 12 }}>
-              {loaded
-                ? inTauriShell()
-                  ? "No sessions recorded yet."
-                  : "Not in Tauri shell — chart will show your sessions once installed."
-                : "Loading…"}
+              No sessions recorded yet.
             </p>
           </div>
         )}
       </div>
-      {!showLiveData && loaded && (
+      {!showLiveData && (
         <p className="card-copy" style={{ marginTop: 12, fontSize: 11.5 }}>
           No telemetry sessions are available yet.
         </p>

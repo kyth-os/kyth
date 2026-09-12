@@ -17392,30 +17392,6 @@
     },
     {
       "current_implementation": "python",
-      "cutover": "replace installed web_server entry point after parity gates",
-      "function_inventory": [],
-      "installed_implementation": "not-installed",
-      "migration_priority": 3,
-      "name": "web_server",
-      "owner": "fixture::src/kyth-welcome/kyth_welcome/services/web_server.py",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "src/kyth-welcome/kyth_welcome/services/web_server.py",
-      "priority": 1,
-      "reason": "retired Python/Qt Hub source retained only for compatibility fixtures; not installed in the supported image",
-      "resolved_target": "src/kyth-welcome/kyth_welcome/services/web_server.py",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
-      "rollback": "restore previous installed web_server entry point",
-      "runtime_active": false,
-      "runtime_authority": "source-only",
-      "runtime_scope": "test-fixture",
-      "status": "explicitly-not-ported",
-      "surface": "python-runtime"
-    },
-    {
-      "current_implementation": "python",
       "cutover": "replace installed welcome entry point after parity gates",
       "function_inventory": [],
       "installed_implementation": "not-installed",

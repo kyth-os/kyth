@@ -10,7 +10,7 @@ export function HubTabs({
   onSelect,
 }: {
   sections: HubSection[];
-  activeKey: string;
+  activeKey: string | null;
   onSelect: (key: string) => void;
 }) {
   return (
