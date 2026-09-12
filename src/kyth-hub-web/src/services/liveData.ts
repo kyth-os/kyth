@@ -1179,12 +1179,16 @@ export async function launchAppImage(path: string): Promise<string> { return awa
 export async function updateFlatpaks(): Promise<string> {
   const launch = await invoke<InstallActionLaunch>("update_flatpaks");
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "App updates did not start.");
-  for (let i = 0; i < 240; i += 1) {
+  // The backend runs an unbounded `flatpak update --user` followed by a
+  // privileged system update with a 900s daemon timeout, so a large or
+  // multi-app update can legitimately run for many minutes — mirror
+  // waitUpdateJob's hour-long bound rather than giving up early.
+  for (let i = 0; i < 7200; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await fetchInstallStatus(launch.job);
     if (!state || state.state === "running") continue;
     if (state.state === "complete") {
-      invalidateSharedReads("installed-flatpaks", "pending-updates", "probe:flatpak-apps", "probe:flatpak-updates");
+      invalidateSharedReads("updates-snapshot", "installed-flatpaks", "pending-updates", "probe:flatpak-apps", "probe:flatpak-updates");
       return state.detail;
     }
     throw new Error(state.detail);

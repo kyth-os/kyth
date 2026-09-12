@@ -102,6 +102,22 @@ test("Updates actions use the native job bridge instead of just recipes", () => 
   assert.doesNotMatch(updates, /RecipeButton recipe="(?:apply-staged|update-health)"/);
 });
 
+test("App updates poll long enough for the unbounded backend flatpak job and refresh the snapshot cache", () => {
+  const fn = service.match(/export async function updateFlatpaks\(\)[\s\S]*?\n}/)?.[0] ?? "";
+  assert.notEqual(fn, "", "updateFlatpaks not found");
+  // update_flatpaks runs an unbounded `flatpak update --user` plus a
+  // privileged system update with a 900s daemon timeout; the poll loop must
+  // outlast that, not give up after ~2 minutes (240 * 500ms).
+  const iterations = Number(fn.match(/for \(let i = 0; i < (\d+); i \+= 1\)/)?.[1] ?? 0);
+  assert.ok(iterations >= 3600, `updateFlatpaks poll bound (${iterations} * 500ms) is too short for a real app update`);
+  assert.match(fn, /invalidateSharedReads\([^)]*"updates-snapshot"/, "updateFlatpaks must invalidate updates-snapshot so refresh() after the update isn't served a stale cached count");
+});
+
+test("Backend flatpak update is bounded so a hung mirror can't wedge the job forever", () => {
+  assert.match(rust, /fn update_flatpaks\b[\s\S]*?run_bounded_command/, "update_flatpaks must run the user flatpak update through run_bounded_command, not a raw .output() call");
+  assert.match(rust, /fn update_flatpaks\b[\s\S]*?ErrorKind::TimedOut/, "a timeout from run_bounded_command must be reported as a timeout, not misreported as \"Could not start Flatpak\"");
+});
+
 test("Updates overview reconciles a live check into the cards", () => {
   assert.match(updatesOverview, /fetchCollectAvailability\(null, false\)/);
   assert.match(updatesOverview, /check_state: availability\.state/);

@@ -1185,12 +1185,21 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
         .insert(job.clone(), ("running".into(), pending_detail.clone()));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
-        let user_result = match std::process::Command::new("flatpak")
-            .args(["update", "--user", "-y"])
-            .output()
-        {
+        let mut user_command = std::process::Command::new("flatpak");
+        user_command.args(["update", "--user", "-y"]);
+        // Unbounded flatpak calls can hang on a stalled mirror; bound it to
+        // the same 900s the privileged daemon allows its own flatpak update
+        // (kyth-shared-rs/src/privileged.rs OPERATION_TIMEOUT) so a hang here
+        // surfaces as a timeout instead of leaving the job "running" forever.
+        let user_result = match kyth_shared::system::process::run_bounded_command(
+            user_command,
+            std::time::Duration::from_secs(900),
+        ) {
             Ok(output) if output.status.success() => Ok(()),
             Ok(output) => Err(commands::process::bounded_text(&output.stderr)),
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+                Err("Updating your apps took too long and was stopped.".to_string())
+            }
             Err(error) => Err(format!("Could not start Flatpak: {error}")),
         };
         let system_result = commands::privilege::flatpak_update().map(|_| ());
