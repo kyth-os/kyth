@@ -10,6 +10,8 @@ WELCOME = ROOT / "src" / "kyth-welcome"
 
 def python_entry_points() -> list[pathlib.Path]:
     """Extensionless Python executables must not remain beside the launcher."""
+    if not WELCOME.is_dir():
+        return []
     found = []
     for candidate in sorted(WELCOME.iterdir()):
         if not candidate.is_file() or candidate.suffix:
