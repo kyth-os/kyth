@@ -67,10 +67,6 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(installer["runtime_authority"], "source-only")
         self.assertEqual(installer["runtime_scope"], "test-fixture")
         self.assertFalse(installer["runtime_active"])
-        welcome = next(item for item in entries if item["path"] == "src/kyth-welcome/kyth_welcome/core_base.py")
-        self.assertEqual(welcome["runtime_authority"], "source-only")
-        self.assertEqual(welcome["runtime_scope"], "test-fixture")
-        self.assertFalse(welcome["runtime_active"])
 
     def test_active_runtime_report_is_current(self):
         checker = load_checker()
@@ -81,9 +77,9 @@ class InventoryTest(unittest.TestCase):
         # installer authority is active.
         self.assertEqual(report["summary"]["p0_open_entries"], 0)
         self.assertEqual(report["p0_open"], [])
-        self.assertEqual(report["summary"]["active_entries"], 184)
+        self.assertEqual(report["summary"]["active_entries"], 183)
         self.assertEqual(report["summary"]["active_python_entries"], 0)
-        self.assertEqual(report["summary"]["superseded_entries"], 137)
+        self.assertEqual(report["summary"]["superseded_entries"], 127)
         self.assertFalse(
             [item for item in report["active_python"] if item["runtime_authority"] == "python-installer"]
         )
@@ -125,13 +121,6 @@ class InventoryTest(unittest.TestCase):
             {"native::kyth-tunable", "native::kyth-tunable-rs"},
         )
         self.assertIn("native::kyth-tunable-rs", {item["owner"] for item in tunables})
-
-    def test_uninstalled_legacy_hub_privilege_fixture_is_not_an_active_authority(self):
-        entries = load_inventory()["entries"]
-        privileged = next(item for item in entries if item["path"] == "src/kyth-welcome/kyth_welcome/services/privileged.py")
-        self.assertEqual(privileged["status"], "explicitly-not-ported")
-        self.assertEqual(privileged["installed_implementation"], "not-installed")
-        self.assertTrue(privileged["owner"].startswith("fixture::"))
 
     def test_superseded_tunable_modules_are_inactive_fixtures(self):
         checker = load_checker()

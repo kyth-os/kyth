@@ -216,18 +216,16 @@ implementation; no normal user path starts `kyth-welcome`.
 ### Phase 4 — Retire the Python/Qt UI package
 
 Status: complete (2026-09-02); the Python/Qt Hub UI source, entry point,
-page registry, KRunner generator, UI-only tests, Qt smoke CI job, and the
-standalone Python/Qt VPN UI are gone. Remaining Python service modules are
-explicitly transitional and are not the Hub UI.
+page registry, KRunner generator, UI-only tests, Qt smoke CI job,
+standalone Python/Qt VPN UI, and the remaining retired service tree are gone.
 
 - [x] Stop installing the Python Hub UI package and its Python console entry
   point; retain only the Tauri launcher desktop metadata.
 - [x] Delete the `src/kyth-welcome/kyth_welcome` UI pages, page registry,
   Qt-only Hub shell, and UI-only tests after replacement coverage was recorded.
 - [x] Remove the CI-only PySide6 Hub smoke job and obsolete UI quality checks.
-- [x] Keep only transitional Python service modules needed by independent
-  helpers; strict Hub service ownership is complete and remaining helper
-  cleanup is tracked in Phase 7.
+- [x] Remove the remaining retired Python service tree and its compatibility
+  tests after native ownership was verified.
 - [x] Update support, developer, architecture, and parity documentation so
   the old UI is not presented as a supported fallback.
 
@@ -247,11 +245,10 @@ Model investigation is bounded and optional: without a valid local model and
 VPN/SAML, the privileged socket daemon, and network-share execution are
 Rust-owned at their action boundaries; the former standalone Python/Qt VPN and
 root-boundary fixtures were removed in P2.
-The retained `src/kyth-welcome` service package is source-only compatibility
-material and is not copied into the Hub builder or installed in the supported
-image; its active privilege boundary is the native Rust service and Tauri
-command layer. The Hub launcher, desktop metadata, embedded catalog, and all
-normal launch paths are now owned by Rust/React source trees.
+The retired Python service package is not present in the source tree or Hub
+builder, and is not installed in the supported image. The Hub launcher,
+desktop metadata, embedded catalog, and all normal launch paths are owned by
+the Rust/React source trees.
 
 - [x] Port the live probe collector and cache writer behind `kyth-probe.service`
   to the shared Rust crate, with bounded commands, atomic writes, and null-on-

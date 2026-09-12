@@ -90,7 +90,7 @@ class QualityContractsTests(unittest.TestCase):
     def test_critical_modules_have_explicit_thresholds(self):
         gate = (ROOT / "build_files/config/coverage-floors.json").read_text()
         for module in (
-            "installer_service.py", "recovery.py", "privileged.py", "updates.py",
+            "installer_service.py", "recovery.py",
             "windows_installer.py", "thirdparty.py", "user_polish.py", "vm_acceptance.py",
         ):
             self.assertIn(module, gate)
@@ -110,27 +110,20 @@ class QualityContractsTests(unittest.TestCase):
         self.assertTrue(budgets.is_file())
 
     def test_retired_python_hub_ui_is_absent(self):
-        package_root = ROOT / "src/kyth-welcome/kyth_welcome"
-        self.assertFalse((ROOT / "src/kyth-welcome/kyth-welcome").exists())
-        self.assertFalse((package_root / "app.py").exists())
-        self.assertFalse((package_root / "page_registry.py").exists())
-        self.assertFalse((package_root / "windows.py").exists())
-        metadata = (ROOT / "src/kyth-welcome/pyproject.toml").read_text()
-        self.assertNotIn("PySide6", metadata)
-        self.assertNotIn("kyth_welcome.app", metadata)
-
-    def test_transitional_package_contains_no_hub_pages(self):
-        package_root = ROOT / "src/kyth-welcome/kyth_welcome"
-        self.assertEqual(
-            {path.name for path in package_root.glob("page_*.py")},
-            set(),
-        )
-        wizard_dir = package_root / "wizard"
         self.assertFalse(
-            wizard_dir.is_dir()
-            and any(path.name != "__pycache__" for path in wizard_dir.iterdir())
+            any(path.is_file() for path in (ROOT / "src/kyth-welcome").rglob("*"))
         )
-        self.assertTrue((package_root / "services").is_dir())
+        self.assertFalse((ROOT / "fuzz/kyth_welcome_fuzzer.py").exists())
+        self.assertFalse((ROOT / ".github/workflows/fuzzing.yml").exists())
+        metadata = (ROOT / "pyproject.toml").read_text()
+        self.assertNotIn('"src/kyth-welcome"', metadata)
+        self.assertNotIn('"build_files/kyth-welcome"', metadata)
+
+    def test_retired_python_hub_package_has_no_source_files(self):
+        self.assertFalse(
+            any(path.is_file() for path in (ROOT / "src/kyth-welcome").rglob("*"))
+        )
+        self.assertFalse((ROOT / "src/kyth-welcome/pyproject.toml").exists())
 
 if __name__ == "__main__":
     unittest.main()

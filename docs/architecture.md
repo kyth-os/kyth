@@ -41,10 +41,9 @@ shell for first-run setup, update controls, hardware status, gaming setup,
 software installation, network/storage helpers, diagnostics, and repair actions.
 The installed probe collector, Guardian extended sweep, update watcher,
 telemetry writer, VPN workflow, privileged socket daemon, and network-share
-executor are native Rust authorities. `build_files/kyth-welcome/` remains a
-source-only transitional service package outside the System Hub UI; the
-obsolete Python privileged daemon and standalone VPN/build fixtures were
-removed in P2.
+executor are native Rust authorities. The retired Python/Qt Hub service tree
+and its source-only tests were removed after the cutover; no Python Hub
+fallback is packaged or used by the System Hub.
 
 ### Runtime Helpers
 

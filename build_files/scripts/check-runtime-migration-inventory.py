@@ -127,9 +127,7 @@ NATIVE_BINARIES = NATIVE_BINARIES | {
 PACKAGED_NATIVE_LAUNCHERS = NATIVE_BINARIES | {"kyth-launch-installer"}
 NOT_PORTED = {"rclone@"}
 NOT_PORTED_PATHS = {
-    "src/kyth-welcome/kyth_welcome/services/privileged.py",
-    # The source file is retained so older-image rollback trees remain
-    # inspectable. The installed name is now a symlink to kyth-tunable-rs.
+    # The installed name is now a symlink to kyth-tunable-rs.
     "build_files/kyth-tunable",
 }
 REVIEWED_EXTERNAL_INTERFACES = {
@@ -158,7 +156,7 @@ DAEMON_NAMES = {
 SHELL_HELPER_LAUNCHERS = {
     "kyth-perf-report-common.sh", "kyth-report-common.sh",
 }
-SOURCE_ALIAS_LAUNCHERS = {"kyth-hub-web", "kyth-welcome"}
+SOURCE_ALIAS_LAUNCHERS = {"kyth-hub-web"}
 NATIVE_RECIPE_FILES = {"native.just"}
 # Phase 0 reachability audit (2026-09-07): 92 kyth_shared modules whose entire
 # runtime surface is superseded by the native tunable dispatcher
@@ -514,9 +512,7 @@ def runtime_metadata(
     if surface == "installer-runtime":
         authority, scope, active, priority = "source-only", "test-fixture", False, 3
     elif surface == "python-runtime":
-        if rel(path).startswith("src/kyth-welcome/"):
-            authority, scope, active, priority = "source-only", "test-fixture", False, 3
-        elif name in NATIVE_REPLACED_MODULES:
+        if name in NATIVE_REPLACED_MODULES:
             authority, scope, active, priority = "python-shared-package", "test-fixture", False, 3
         else:
             authority, scope, active, priority = "python-shared-package", "standalone", True, 2
@@ -789,7 +785,7 @@ def discover() -> list[dict]:
                         unit["owner"],
                     )
             items.append(unit)
-    for root, surface in ((ROOT / "src/kyth_shared", "python-runtime"), (ROOT / "src/kyth-welcome", "python-runtime"), (ROOT / "src/kyth-installer", "installer-runtime")):
+    for root, surface in ((ROOT / "src/kyth_shared", "python-runtime"), (ROOT / "src/kyth-installer", "installer-runtime")):
         for path in sorted(root.rglob("*.py")):
             items.append(entry(
                 path,

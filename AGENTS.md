@@ -55,7 +55,7 @@ just install-git-hooks            # one-time: wires .githooks/
 Single test (mirrors `just test`):
 
 ```bash
-PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer \
+PYTHONPATH=build_files/kyth_shared:build_files/kyth-installer \
   python3 -m unittest tests.test_kyth_probe_cache -v
 ```
 
@@ -96,11 +96,11 @@ Fedora Kinoite / Universal Blue base
   logic follows that pattern; state-mutating modules must be idempotent and
   transactional (fully apply or fully roll back). Probe collector, Guardian
   core, and update watcher are native Rust in `src/kyth-shared-rs/`.
-- `src/kyth-hub-web/` is the supported System Hub UI. The Python/Qt Hub in
-  `build_files/kyth-welcome/` (sources migrating to `src/kyth-welcome/`) is
-  transitional; retired VPN/SAML client, network-share helper, and privileged
-  socket daemon fixtures were removed in P2 — do not treat them as active
-  Python authorities.
+- `src/kyth-hub-web/` is the supported System Hub UI. The retired Python/Qt
+  Hub source tree and its compatibility tests were removed after the Rust/Tauri
+  cutover. Retired VPN/SAML client, network-share helper, and privileged socket
+  daemon fixtures were also removed — do not reintroduce them as Python
+  authorities.
 - `build_files/kyth-installer/` is the local-only installer driving
   `bootc install to-disk`: `plan_*.py` computes, `partition_ops*.py`/`disk/`
   executes, `recovery.py`/`assurance.py` verifies. High-risk area: add tests
@@ -108,7 +108,7 @@ Fedora Kinoite / Universal Blue base
 - `build_files/just/kyth.just` imports domain `*.just` files shipped as
   `ujust` recipes in the OS (distinct from the repo-root `Justfile`).
 - `tests/` is flat, one file per module/feature; `PYTHONPATH` must include
-  `kyth_shared`, `kyth-welcome`, and `kyth-installer`.
+  `kyth_shared` and `kyth-installer` for the remaining source-level fixtures.
 
 ## Branches & channels
 
@@ -146,13 +146,10 @@ docs/                   # architecture, security, hardware, validation docs
 
 ## Dev rules
 
-- **QThread lifecycle:** workers subclass `TrackedThread`
-  (`src/kyth-welcome/kyth_welcome/services/runtime.py`,
-  canonical `src/kyth_shared/kyth_shared/desktop/qt_threads.py`), implement
-  `cancel`/`stop`, and are stopped + `wait()`ed on teardown (`atexit` +
-  `aboutToQuit`). Threads running critical work set `BLOCKS_CLOSE = True`;
-  query running threads before closing the main window. Prevents segfaults
-  from threads outliving interpreter teardown.
+- **Native Hub lifecycle:** keep long-running work in the Rust/Tauri command
+  boundary, make cancellation explicit, and ensure spawned tasks are joined or
+  detached with a bounded shutdown policy before the shell exits. Do not add
+  Python/Qt worker lifecycles to the supported Hub.
 - **Unbounded logging:** cap `QTextEdit` logs
   (e.g. `document().setMaximumBlockCount(5000)`) when streaming long output.
 - **Probe cache:** reuse expensive probes (`bootc status`, `flatpak list`,

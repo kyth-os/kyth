@@ -44,7 +44,7 @@ for test_file in sorted(pathlib.Path("tests").glob("test_*.py")):
 """
         env = dict(__import__("os").environ)
         # Propagate src/build_files pythonpath for bare python subprocess (pyproject pythonpath is pytest-only).
-        for p in ("src/kyth_shared", "src/kyth-installer", "src/kyth-welcome", "build_files/kyth_shared", "build_files/kyth-welcome", "build_files/kyth-installer"):
+        for p in ("src/kyth_shared", "src/kyth-installer", "build_files/kyth_shared", "build_files/kyth-installer"):
             abs_p = str(ROOT / p)
             env["PYTHONPATH"] = abs_p + (":" + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
         result = subprocess.run(

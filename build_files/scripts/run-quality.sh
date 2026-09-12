@@ -30,7 +30,7 @@ if ! "${quality_python}" -m coverage --version >/dev/null 2>&1 ||
 fi
 echo "==> Python correctness"
 # --config pins the root ruff.toml explicitly instead of relying on directory
-# walk-up discovery. build_files/{kyth-installer,kyth-welcome,kyth_shared} each
+# walk-up discovery. build_files/{kyth-installer,kyth_shared} each
 # carry a pyproject.toml with no [tool.ruff] table; ruff is supposed to skip
 # those and keep walking up to this repo's root ruff.toml, but that discovery
 # step observably flaked between runs on identical input (clean vs. the full
@@ -67,8 +67,8 @@ if [[ "${1:-}" == "--fast" ]]; then
   echo "==> Python coverage skipped (--fast) — measured + gated by CI instead"
 else
   echo "==> Python coverage"
-  PYTHONPATH=src/kyth_shared:src/kyth-welcome:src/kyth-installer:build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage erase
-  PYTHONPATH=src/kyth_shared:src/kyth-welcome:src/kyth-installer:build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer "${quality_python}" -m coverage run -m unittest discover -s tests -b
+  PYTHONPATH=src/kyth_shared:src/kyth-installer:build_files/kyth_shared:build_files/kyth-installer "${quality_python}" -m coverage erase
+  PYTHONPATH=src/kyth_shared:src/kyth-installer:build_files/kyth_shared:build_files/kyth-installer "${quality_python}" -m coverage run -m unittest discover -s tests -b
   "${quality_python}" -m coverage report -m
   "${quality_python}" -m coverage json
   if [[ "${1:-}" == "--changed-only" ]]; then

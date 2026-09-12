@@ -1,8 +1,7 @@
-"""Shared utilities used by both kyth-installer and kyth-welcome.
+"""Shared utilities used by the installer and repository tooling.
 
-These are small, pure-Python helpers with no Qt dependencies that both
-sub-projects need in identical form. Keeping them here prevents drift
-(e.g. one codebase handling IEC units and the other not).
+These are small, pure-Python helpers with no Qt dependencies. Keeping them
+here prevents drift between the installer and build/test tooling.
 """
 
 from __future__ import annotations
@@ -115,4 +114,3 @@ class NetStatsTracker:
 
 from .apps import load_app_db, suggest_app
 from .system_probe import SystemProbe
-

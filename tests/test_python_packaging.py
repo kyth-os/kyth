@@ -15,7 +15,6 @@ class PythonPackagingTests(unittest.TestCase):
         expected = {
             "build_files/kyth_shared": "kyth-shared",
             "build_files/kyth-installer": "kyth-installer",
-            "build_files/kyth-welcome": "kyth-hub-services",
         }
 
         for relative, project_name in expected.items():
@@ -41,7 +40,6 @@ class PythonPackagingTests(unittest.TestCase):
     def test_app_packages_publish_console_entry_points(self):
         shared = self._metadata("build_files/kyth_shared")
         installer = self._metadata("build_files/kyth-installer")
-        welcome = self._metadata("build_files/kyth-welcome")
 
         self.assertEqual(
             shared["project"]["scripts"]["kyth-ai-dev"],
@@ -76,7 +74,6 @@ class PythonPackagingTests(unittest.TestCase):
             installer["project"]["scripts"]["kyth-partition-install"],
             "kyth_installer.partition_cli:main",
         )
-        self.assertNotIn("scripts", welcome["project"])
 
     def test_image_builds_install_only_the_native_installer_runtime(self):
         dockerfile = (ROOT / "Dockerfile").read_text()
@@ -108,14 +105,12 @@ class PythonPackagingTests(unittest.TestCase):
         self.assertNotIn("kyth-partition-install.sh", helper_build)
         self.assertNotIn("/usr/lib/kyth-installer", installer_build)
         self.assertNotIn("/usr/lib/kyth-welcome", helper_build)
-        self.assertNotIn("PySide6", (ROOT / "src/kyth-welcome/pyproject.toml").read_text())
 
     def test_runtime_scripts_do_not_mutate_import_paths(self):
         offenders = []
         runtime_roots = [
             ROOT / "build_files",
             ROOT / "build_files/kyth-installer/kyth_installer",
-            ROOT / "build_files/kyth-welcome/kyth_welcome",
         ]
         for runtime_root in runtime_roots:
             for script in runtime_root.rglob("*"):
@@ -249,15 +244,13 @@ class PythonPackagingTests(unittest.TestCase):
 
         self.assertEqual(direct_callers, ["accounts.py"])
 
-    def test_welcome_bounded_commands_use_service_adapter(self):
-        welcome_root = ROOT / "build_files/kyth-welcome/kyth_welcome"
-        direct_callers = []
-        for module in welcome_root.rglob("*.py"):
-            text = module.read_text()
-            if "subprocess.run(" in text or "subprocess.check_output(" in text:
-                direct_callers.append(str(module.relative_to(welcome_root)))
-
-        self.assertEqual(direct_callers, [])
+    def test_retired_python_hub_tree_is_not_packaged(self):
+        self.assertFalse(
+            any(path.is_file() for path in (ROOT / "src/kyth-welcome").rglob("*"))
+        )
+        root_metadata = (ROOT / "pyproject.toml").read_text()
+        self.assertNotIn('"src/kyth-welcome"', root_metadata)
+        self.assertNotIn('"build_files/kyth-welcome"', root_metadata)
 
 
 if __name__ == "__main__":

@@ -18,8 +18,8 @@ implementations or the Rust runtime dispatcher, and no queued Python package
 modules. The Python queue is now a reachability-derived set: it includes only
 modules reached from surviving Python console entry points, direct build/
 acceptance harnesses, or documented dynamic-dispatch tables. Unreachable
-package files are retained as explicitly classified compatibility fixtures,
-not presented as open migration work. Phase 3 remains blocked on the Hub
+package files are retained only as explicitly classified compatibility
+fixtures; they are not open migration work. Phase 3 remains blocked on the Hub
 plan's post-cutover observation window, but that gate does not exempt shell
 functions from the Rust ownership target.
 
@@ -48,14 +48,15 @@ blanket rule in `check-runtime-migration-inventory.py`:
 
 ```python
 elif surface == "python-runtime":
-    if rel(path).startswith("src/kyth-welcome/"):
+    # Historical rule; the retired Hub package has since been removed.
+    if path_belonged_to_retired_hub(path):
         ...source-only...
     else:
         authority, scope, active, priority = "python-shared-package", "standalone", True, 2
 ```
 
-Every `.py` file under `src/kyth_shared/kyth_shared/` that wasn't in
-`kyth-welcome` was stamped active/queued, regardless of whether anything still
+Every `.py` file under `src/kyth_shared/kyth_shared/` that wasn't part of the
+retired Hub package was stamped active/queued, regardless of whether anything still
 called it. The checker now builds a transitive AST import closure from the
 surviving Python console scripts and scans direct `build_files/scripts` harness
 imports. The native `kyth-hardware-policy` boundary owns the former
@@ -241,7 +242,7 @@ migration work — don't try to fix these mid-launcher-port:
 `just lint` fails on root-owned leftover dirs under `tmp/` from an old podman
 test run; `just validate`/`just test` fail immediately because
 `.venv-gui/bin/python` is missing the `pytest` module (use
-`PYTHONPATH=build_files/kyth_shared:build_files/kyth-welcome:build_files/kyth-installer
+`PYTHONPATH=build_files/kyth_shared:build_files/kyth-installer
 python3 -m unittest discover -s tests` directly instead, per CLAUDE.md); and
 `just validate`'s perf gate is failing >20% over its recorded baseline
 regardless of code changes — the tracked baseline is developer-machine data,
@@ -376,7 +377,7 @@ Python modules retained as source-only parity fixtures:
   `build_files/config/kyth-user-polish.service`,
   `build_files/scripts/branding/19-user-comfort-polish.sh`,
   `build_files/kyth-scripts/kyth-user-polish.desktop`,
-  `src/kyth-welcome/kyth_welcome/services/repair.py:28`,
+  the retired Hub repair service,
   `check-runtime-migration-inventory.py:126` (name must move into
   `NATIVE_BINARIES`), and `test_python_packaging.py`'s
   `test_diagnostic_entry_points_are_native_rust_binaries` `entry_points`
@@ -676,8 +677,9 @@ and installed behavior.
   the Phase 5 owner review. Existing entries must be resolved as Rust-owned,
   build-only/declarative, or a documented external interface with an explicit
   reason that Kyth cannot own the behavior.
-- `src/kyth-welcome/` Python, which is already classified source-only/
-  test-fixture and is not an installed runtime authority.
+- The retired Python/Qt Hub package was removed in P2. Remaining Python
+  compatibility fixtures are classified individually as source-only or
+  explicitly-not-ported and are not installed runtime authorities.
 - Pure build-time image assembly and declarative metadata are not required to
   become Rust binaries when they contain no runtime policy or execution logic.
   They remain audited inventory entries and must not hide runtime behavior.

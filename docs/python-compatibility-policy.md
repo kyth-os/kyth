@@ -1,19 +1,18 @@
 # Final-image Python compatibility policy
 
-Status: temporary compatibility layer; not a supported runtime authority.
+Status: retired source fixtures only; not a supported runtime authority.
 
-The Rust migration has removed Python from the supported policy/execution
-paths, but the final image still installs `build_files/kyth_shared` as a
-transitional package. This is intentional until the promoted-image gates in
-the Rust migration completion plan close.
+The Rust migration removed Python from the supported policy, execution, and
+Hub UI paths. The final image does not install the Python compatibility
+packages. The remaining source files are kept only where they still provide
+build/test parity evidence for a native implementation and are not part of
+the shipped application.
 
 ## Allowed uses while the gate is open
 
 The installed Python material may be used only for:
 
-* rollback and parity fixtures for a previously deployed image;
-* the compatibility `kyth-tunable` dispatcher while its Rust symlink/native
-  registry rollout is observed across stable and testing images; and
+* parity tests for a previously deployed native implementation; and
 * build-time or test-time tooling that is not an installed runtime authority.
 
 The package's historical console-script names are not evidence of Python
@@ -31,17 +30,16 @@ ledger before it is exposed.
 
 ## Removal gate
 
-Remove the final-image package installation from `Dockerfile` only after all
-of the following are evidenced on a promoted image:
+Delete remaining source fixtures only after all of the following are evidenced
+on a promoted image:
 
 1. the native recipe ledger has no open owner assessments, or each remaining
    name has an explicit reviewed retirement decision;
-2. the Rust tunable dispatcher owns every installed tunable symlink and the
-   compatibility dispatcher is not selected for a supported name;
+2. the Rust tunable dispatcher owns every installed tunable symlink;
 3. exact-image tests show that units, desktop launchers, `ujust`, and Tauri
    commands resolve to native owners without Python imports;
-4. rollback/parity fixtures have been archived or moved out of the supported
-   image; and
+4. rollback/parity fixtures have been archived or moved out of the source
+   checkout; and
 5. the post-cutover observation window records no supported-path regression.
 
 Until that gate closes, deleting the package would make rollback evidence and

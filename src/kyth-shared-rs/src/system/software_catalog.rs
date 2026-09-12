@@ -1,4 +1,4 @@
-//! Static App Store catalogs — ports `src/kyth-welcome/services/software_catalogs.py`.
+//! Static App Store catalogs owned by the native shared crate.
 //! Pure data, no I/O, no root. The Python page composes these into the
 //! "Starter Packs" / "Familiar Apps" choosers; the web Hub reads the same
 //! lists via `starter_packs` / `familiar_apps` Tauri commands so a single

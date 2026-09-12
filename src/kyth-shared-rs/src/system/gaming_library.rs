@@ -1,5 +1,5 @@
 //! Gaming library scan — read-only, ports the library-scan part of
-//! `src/kyth-welcome/page_gaming_library.py` + `kyth_shared.gaming`.
+//! Native gaming-library data formerly assembled by the retired Python Hub.
 //! Lists which launchers are installed and how many library entries each
 //! has, by inspecting `~/.steam`, Heroic `~/.config/heroic`, Lutris
 //! `~/.local/share/lutris`, and Bottles `~/.local/share/bottles` — all
