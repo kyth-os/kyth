@@ -1,31 +1,14 @@
-//! Port of `kyth_shared.system.updater` — fetch JSON metadata for latest release.
-
-use std::time::Duration;
+//! Port of `kyth_shared.system.updater` — is an updater entry point installed?
 
 pub fn updater_available() -> bool {
-    // Check if updater binary exists
-    std::path::Path::new("/usr/bin/kyth-updater").exists()
-        || std::path::Path::new("/usr/bin/kyth-full-update").exists()
-}
-
-fn run_with_timeout(cmd: &[String], timeout: Duration) -> Option<(i32, String)> {
-    if cmd.is_empty() {
-        return None;
-    }
-    let output = super::process::run_bounded(cmd, timeout).ok()?;
-    Some((
-        output.status.code().unwrap_or(-1),
-        String::from_utf8_lossy(&output.stdout).to_string(),
-    ))
-}
-
-pub fn fetch_updater_metadata() -> Option<String> {
-    // Simplified: run updater --check or just return none
-    run_with_timeout(
-        &["kyth-updater".to_string(), "--check".to_string()],
-        Duration::from_secs(10),
-    )
-    .and_then(|(code, out)| if code == 0 { Some(out) } else { None })
+    // kyth-full-update is the only updater entry point this build ever
+    // installs (build_files/scripts/branding/36-misc-utility-installs.sh);
+    // it execs into kyth-runtime apply-update. There is no separate
+    // kyth-updater binary — a prior "kyth-updater --check" fallback here
+    // referenced a name nothing in the build ever installs and had no
+    // caller anywhere in the tree; removed rather than left as a dead,
+    // permanently-false path. See tests/test_hub_command_reachability.py.
+    std::path::Path::new("/usr/bin/kyth-full-update").exists()
 }
 
 #[cfg(test)]
