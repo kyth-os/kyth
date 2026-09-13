@@ -54,7 +54,7 @@ RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/regi
     --mount=type=cache,id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target \
     cargo build --release --locked && \
     cp target/release/kyth-hub-shell /build/kyth-hub-shell && \
-    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-runtime --bin kyth-build-support --bin kyth-ai-dev --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries --bin kyth-welcome-launch --bin kyth-safe-upgrade --bin kyth-bootc-guard --bin kyth-finalize-staged --bin kyth-btrfs-maint --bin kyth-ai-perfd --bin kyth-perf-gate-rs --bin kyth-doctor --bin kyth-health-check --bin kyth-smoke-check --bin kyth-resume-check --bin kyth-nvidia-status --bin kyth-controller-check --bin kyth-creator-check --bin kyth-exe-compat --bin kyth-snapshot-timeline --bin kyth-print-check --bin kyth-windows-verify --bin kyth-vm-acceptance-guest --bin kyth-tunable-rs --bin kyth-game-boost --bin kyth-configure-session --bin kyth-set-resolution --bin kyth-set-kickoff-icon --bin kyth-greeter-compositor --bin kyth-config-apply --bin kyth-apply-scx-preset --bin kyth-apply-explorer --bin kyth-apply-desktop-layout --bin kyth-apply-display-hdr --bin kyth-apply-input --bin kyth-apply-network --bin kyth-apply-pipewire-latency --bin kyth-apply-plasma --bin kyth-apply-quicksettings --bin kyth-apply-rgb --bin kyth-apply-role-preset --bin kyth-apply-scaling --bin kyth-apply-tailscale --bin kyth-apply-vrr --bin kyth-apply-window-snap --bin kyth-driver-switch --bin kyth-kali-desktop-fixup --bin kyth-ntfs-repair --bin kyth-performance-mode --bin kyth-refresh-boot-splash-initramfs --bin kyth-refresh-taskbar-pins --bin kyth-report-issue --bin kyth-session-snapshot --bin kyth-setup-devcontainer --bin kyth-setup-transfer --bin kyth-vscode-wallet --bin kyth-web-app-categorize --bin kyth-storage-sense --bin kyth-duperemove --bin kyth-batteryd --bin kyth-cloud-mount --bin kyth-save-sync --bin kyth-backup --bin kyth-game-launch --bin kyth-dynamic-lock --bin kyth-proton-cachyos-update --bin kyth-rclone-update --bin kyth-sched --bin kyth-user-polish --bin kyth-exe-handler) && \
+    (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-runtime --bin kyth-build-support --bin kyth-ai-dev --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries --bin kyth-welcome-launch --bin kyth-safe-upgrade --bin kyth-bootc-guard --bin kyth-finalize-staged --bin kyth-btrfs-maint --bin kyth-ai-perfd --bin kyth-perf-gate-rs --bin kyth-doctor --bin kyth-health-check --bin kyth-smoke-check --bin kyth-resume-check --bin kyth-nvidia-status --bin kyth-controller-check --bin kyth-creator-check --bin kyth-exe-compat --bin kyth-snapshot-timeline --bin kyth-print-check --bin kyth-vm-acceptance-guest --bin kyth-tunable-rs --bin kyth-game-boost --bin kyth-configure-session --bin kyth-set-resolution --bin kyth-set-kickoff-icon --bin kyth-greeter-compositor --bin kyth-config-apply --bin kyth-apply-scx-preset --bin kyth-apply-explorer --bin kyth-apply-desktop-layout --bin kyth-apply-display-hdr --bin kyth-apply-input --bin kyth-apply-network --bin kyth-apply-pipewire-latency --bin kyth-apply-plasma --bin kyth-apply-quicksettings --bin kyth-apply-rgb --bin kyth-apply-role-preset --bin kyth-apply-scaling --bin kyth-apply-tailscale --bin kyth-apply-vrr --bin kyth-apply-window-snap --bin kyth-driver-switch --bin kyth-kali-desktop-fixup --bin kyth-ntfs-repair --bin kyth-performance-mode --bin kyth-refresh-boot-splash-initramfs --bin kyth-refresh-taskbar-pins --bin kyth-report-issue --bin kyth-session-snapshot --bin kyth-setup-devcontainer --bin kyth-setup-transfer --bin kyth-vscode-wallet --bin kyth-web-app-categorize --bin kyth-storage-sense --bin kyth-duperemove --bin kyth-batteryd --bin kyth-cloud-mount --bin kyth-save-sync --bin kyth-backup --bin kyth-game-launch --bin kyth-dynamic-lock --bin kyth-proton-cachyos-update --bin kyth-rclone-update --bin kyth-sched --bin kyth-user-polish --bin kyth-exe-handler) && \
     (cd /build/kyth-shared-rs && cargo build --release --locked --bin kyth-boot-health) && \
     cp /build/kyth-shared-rs/target/release/kyth-boot-health /build/kyth-boot-health && \
     (cd /build/kyth-shared-rs && cargo build --release --locked --bin kyth-hardware-policy) && \
@@ -140,7 +140,6 @@ RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/regi
     cp /build/kyth-shared-rs/target/release/kyth-exe-compat /build/kyth-exe-compat && \
     cp /build/kyth-shared-rs/target/release/kyth-snapshot-timeline /build/kyth-snapshot-timeline && \
     cp /build/kyth-shared-rs/target/release/kyth-print-check /build/kyth-print-check && \
-    cp /build/kyth-shared-rs/target/release/kyth-windows-verify /build/kyth-windows-verify && \
     cp /build/kyth-shared-rs/target/release/kyth-vm-acceptance-guest /build/kyth-vm-acceptance-guest && \
     cp /build/kyth-shared-rs/target/release/kyth-tunable-rs /build/kyth-tunable-rs && \
     cp /build/kyth-shared-rs/target/release/kyth-game-boost /build/kyth-game-boost
@@ -388,7 +387,15 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-creator-check /usr/bin/kyth
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-exe-compat /usr/bin/kyth-exe-compat
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-snapshot-timeline /usr/bin/kyth-snapshot-timeline
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-print-check /usr/bin/kyth-print-check
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-windows-verify /usr/bin/kyth-windows-verify
+# kyth-windows-verify has no standalone binary: it is one of the 94 tunable
+# names in build_files/config/tunables.toml, and the tunable dispatcher (run
+# in the final RUN block below) creates it as a symlink to kyth-tunable-rs,
+# which dispatches to the same windows_verify::verify() logic by argv0. A
+# standalone --bin used to be COPY'd to this exact path here; because COPY
+# writes through an existing symlink into its target rather than replacing
+# it, once the dispatcher had already run once and left this path pointing
+# at kyth-tunable-rs, that COPY silently overwrote kyth-tunable-rs's own
+# binary content with the windows-verify binary's bytes.
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-vm-acceptance-guest /usr/bin/kyth-vm-acceptance-guest
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-configure-session /usr/bin/kyth-configure-session
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-set-resolution /usr/bin/kyth-set-resolution
@@ -430,5 +437,5 @@ RUN --mount=type=bind,source=build_files,target=/ctx \
     fi && \
     SECUREBOOT_SIGNING_REQUESTED=${SECUREBOOT_SIGNING_REQUESTED} bash /ctx/scripts/secureboot.sh && \
     bash /ctx/scripts/branding.sh && \
-    bash /ctx/scripts/sysconfig/tunable/01-tunable-dispatcher.sh && \
+    bash /ctx/scripts/tunable-dispatcher.sh && \
     bash /ctx/scripts/plymouth-initramfs.sh

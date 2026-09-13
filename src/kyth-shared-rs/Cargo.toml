@@ -119,10 +119,6 @@ name = "kyth-print-check"
 path = "src/print_check_bin.rs"
 
 [[bin]]
-name = "kyth-windows-verify"
-path = "src/windows_verify_bin.rs"
-
-[[bin]]
 name = "kyth-vm-acceptance-guest"
 path = "src/vm_acceptance_guest_bin.rs"
 

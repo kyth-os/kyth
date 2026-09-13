@@ -205,15 +205,19 @@ class PythonPackagingTests(unittest.TestCase):
                 # build_files/kyth-sched-arbiter must not trip this.
                 self.assertNotIn(f"build_files/{entry_point}", staged)
 
-    def test_tunable_dispatcher_uses_native_subset_before_static_sysconfig(self):
+    def test_tunable_dispatcher_is_native_and_runs_once_after_all_binaries_are_copied(self):
         dockerfile = (ROOT / "Dockerfile").read_text()
         cargo = (ROOT / "src/kyth-shared-rs/Cargo.toml").read_text()
-        dispatcher = (
-            ROOT / "build_files/scripts/sysconfig/tunable/01-tunable-dispatcher.sh"
-        ).read_text()
+        dispatcher = (ROOT / "build_files/scripts/tunable-dispatcher.sh").read_text()
 
         self.assertIn('name = "kyth-tunable-rs"', cargo)
         self.assertNotIn('name = "kyth-tunable"', cargo)
+        # kyth-windows-verify must not be its own --bin: it is one of the 94
+        # registry tunables and is installed solely as a dispatcher symlink.
+        # A standalone binary here previously collided with that symlink
+        # target (see build_files/scripts/tunable-dispatcher.sh's header).
+        self.assertNotIn('name = "kyth-windows-verify"', cargo)
+        self.assertNotIn("/build/kyth-windows-verify /usr/bin/kyth-windows-verify", dockerfile)
         native_copy = dockerfile.index(
             "COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable-rs /usr/bin/kyth-tunable-rs"
         )
@@ -230,9 +234,22 @@ class PythonPackagingTests(unittest.TestCase):
         self.assertIn("ln -sfn kyth-tunable-rs /usr/bin/kyth-tunable", dispatcher)
         self.assertIn('ln -sf kyth-tunable-rs "/usr/bin/kyth-${t}"', dispatcher)
         self.assertNotIn('ln -sf kyth-tunable "/usr/bin/kyth-${t}"', dispatcher)
+
+        # The dispatcher must run from outside build_files/scripts/sysconfig/
+        # so sysconfig-static.sh's generic fragment sweep (run_fragments) does
+        # not also pick it up and run it a second time, early, before most
+        # `COPY --from=hub-web-builder` binaries exist. It must be invoked
+        # explicitly exactly once, in the final RUN block, after branding.
+        self.assertFalse(
+            (ROOT / "build_files/scripts/sysconfig/tunable").exists()
+        )
+        self.assertEqual(
+            dockerfile.count("bash /ctx/scripts/tunable-dispatcher.sh"),
+            1,
+        )
         self.assertLess(
             dockerfile.index("bash /ctx/scripts/branding.sh"),
-            dockerfile.index("bash /ctx/scripts/sysconfig/tunable/01-tunable-dispatcher.sh"),
+            dockerfile.index("bash /ctx/scripts/tunable-dispatcher.sh"),
         )
 
     def test_shared_modules_use_the_command_runner(self):

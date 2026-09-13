@@ -14091,36 +14091,6 @@
     },
     {
       "current_implementation": "shell",
-      "cutover": "replace installed 01-tunable-dispatcher.sh entry point after parity gates",
-      "function_inventory": [
-        {
-          "name": "__main__",
-          "owner": "fixture::build_files/scripts/sysconfig/tunable/01-tunable-dispatcher.sh",
-          "ownership": "build-only"
-        }
-      ],
-      "installed_implementation": "not-installed",
-      "migration_priority": 3,
-      "name": "01-tunable-dispatcher.sh",
-      "owner": "fixture::build_files/scripts/sysconfig/tunable/01-tunable-dispatcher.sh",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/scripts/sysconfig/tunable/01-tunable-dispatcher.sh",
-      "priority": 0,
-      "reason": "build/test shell script, not installed runtime authority",
-      "resolved_target": "build_files/scripts/sysconfig/tunable/01-tunable-dispatcher.sh",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "build-time",
-      "rollback": "restore previous installed 01-tunable-dispatcher.sh entry point",
-      "runtime_active": false,
-      "runtime_authority": "build-only",
-      "runtime_scope": "build",
-      "status": "not-applicable",
-      "surface": "shell-script"
-    },
-    {
-      "current_implementation": "shell",
       "cutover": "replace installed thirdparty.sh entry point after parity gates",
       "function_inventory": [
         {
@@ -14173,6 +14143,36 @@
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "build-time",
       "rollback": "restore previous installed umu.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
+      "cutover": "replace installed tunable-dispatcher.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/tunable-dispatcher.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "tunable-dispatcher.sh",
+      "owner": "fixture::build_files/scripts/tunable-dispatcher.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/tunable-dispatcher.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/tunable-dispatcher.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed tunable-dispatcher.sh entry point",
       "runtime_active": false,
       "runtime_authority": "build-only",
       "runtime_scope": "build",
