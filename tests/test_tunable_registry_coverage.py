@@ -46,13 +46,10 @@ NATIVE_MODULES = {
 }
 
 # Non-tunable modules matching the filename heuristic that are covered by
-# other means (facades over ported helpers, deprecated shims, dispatchers).
-EXEMPT = {
-    # Re-export facade over atomic_io (ported as atomic_io.rs).
-    "gaming_scan_atomic",
-    # Deprecated shim delegating to memory_tune (ported).
-    "zram",
-}
+# other means. (Removed 2026-09: the zram deprecated shim and the
+# gaming_scan_atomic re-export facade were deleted; their logic lives in
+# memory_tune and atomic_io respectively.)
+EXEMPT: set[str] = set()
 
 
 def tunable_candidates() -> list[str]:

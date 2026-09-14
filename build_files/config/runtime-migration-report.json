@@ -871,15 +871,6 @@
     },
     {
       "migration_priority": 3,
-      "name": "gaming_scan_atomic",
-      "owner": "fixture::src/kyth_shared/kyth_shared/gaming_scan_atomic.py",
-      "path": "src/kyth_shared/kyth_shared/gaming_scan_atomic.py",
-      "runtime_authority": "source-only",
-      "runtime_scope": "test-fixture",
-      "status": "explicitly-not-ported"
-    },
-    {
-      "migration_priority": 3,
       "name": "gaming_snapshot",
       "owner": "fixture::src/kyth_shared/kyth_shared/gaming_snapshot.py",
       "path": "src/kyth_shared/kyth_shared/gaming_snapshot.py",
@@ -1642,15 +1633,6 @@
       "runtime_authority": "source-only",
       "runtime_scope": "test-fixture",
       "status": "explicitly-not-ported"
-    },
-    {
-      "migration_priority": 3,
-      "name": "zram",
-      "owner": "fixture::src/kyth_shared/kyth_shared/zram.py",
-      "path": "src/kyth_shared/kyth_shared/zram.py",
-      "runtime_authority": "source-only",
-      "runtime_scope": "test-fixture",
-      "status": "explicitly-not-ported"
     }
   ],
   "summary": {
@@ -1666,7 +1648,7 @@
     },
     "active_entries": 183,
     "active_python_entries": 0,
-    "entries": 767,
+    "entries": 765,
     "p0_open_entries": 0,
     "status_by_active_entry": {
       "done-native": 183

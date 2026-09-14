@@ -14,6 +14,35 @@ where
     regex.replace_all(&text, replacement).into_owned()
 }
 
+/// Hostname candidates to redact. Python uses `socket.gethostname()`
+/// unconditionally; $HOSTNAME is additionally honored when set because a
+/// container override can carry a sensitive name the kernel does not know.
+/// Redacting both is fail-safe: at worst an extra token is masked.
+fn hostnames_to_redact() -> Vec<String> {
+    let mut names = Vec::new();
+    if let Ok(value) = std::env::var("HOSTNAME") {
+        if value.len() > 2 {
+            names.push(value);
+        }
+    }
+    let mut buffer = vec![0 as libc::c_char; 256];
+    let ok = unsafe { libc::gethostname(buffer.as_mut_ptr(), buffer.len()) } == 0;
+    if ok {
+        let length = buffer
+            .iter()
+            .position(|byte| *byte == 0)
+            .unwrap_or(buffer.len());
+        if let Ok(host) =
+            String::from_utf8(buffer[..length].iter().map(|byte| *byte as u8).collect())
+        {
+            if !names.contains(&host) {
+                names.push(host);
+            }
+        }
+    }
+    names
+}
+
 pub fn scrub_logs(text: &str) -> String {
     let private_key = Regex::new(
         r"(?s)-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----",
@@ -119,13 +148,13 @@ pub fn scrub_logs(text: &str) -> String {
         .into_owned();
 
     // The Python implementation uses the current hostname and USER as final
-    // fallbacks. Keep those privacy guarantees without spawning a command.
-    if let Ok(value) = std::env::var("HOSTNAME") {
-        if value.len() > 2 {
-            let escaped = regex::escape(&value);
-            if let Ok(pattern) = Regex::new(&format!(r"\b{escaped}\b")) {
-                text = pattern.replace_all(&text, "[hostname]").into_owned();
-            }
+    // fallbacks. Python resolves the hostname via gethostname(2), which
+    // always works; reading only $HOSTNAME would silently skip hostname
+    // redaction under systemd units where that variable is unset.
+    for host in hostnames_to_redact() {
+        let escaped = regex::escape(&host);
+        if let Ok(pattern) = Regex::new(&format!(r"\b{escaped}\b")) {
+            text = pattern.replace_all(&text, "[hostname]").into_owned();
         }
     }
     for key in ["USER", "USERNAME"] {
@@ -196,5 +225,80 @@ mod tests {
     fn preserves_non_sensitive_text() {
         let scrubbed = scrub_logs("plain status: ok\nvalue=42");
         assert_eq!(scrubbed, "plain status: ok\nvalue=42");
+    }
+
+    /// Byte-parity with the Python scrubber over the shared corpus in
+    /// tests/fixtures/scrub_corpus.json (asserted identically from
+    /// tests/test_diagnostics_scrub_parity.py). A redaction rule changed on
+    /// one side without the other fails here.
+    #[test]
+    fn matches_shared_parity_corpus() {
+        let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/scrub_corpus.json");
+        let raw = std::fs::read_to_string(&path).expect("scrub corpus fixture exists");
+        let document: serde_json::Value =
+            serde_json::from_str(&raw).expect("fixture is valid JSON");
+        for case in document["cases"].as_array().expect("cases is an array") {
+            let name = case["name"].as_str().unwrap_or("?");
+            let input = case["input"].as_str().expect("input is text");
+            let expected = case["expected"].as_str().expect("expected is text");
+            let scrubbed = scrub_logs(input);
+            assert_eq!(scrubbed, expected, "parity case diverged: {name}");
+            for token in case["must_not_contain"]
+                .as_array()
+                .expect("tokens is an array")
+            {
+                let token = token.as_str().expect("token is text");
+                assert!(
+                    !scrubbed.contains(token),
+                    "secret leaked in {name}: {token}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn hostname_env_is_redacted() {
+        let prior = std::env::var("HOSTNAME").ok();
+        std::env::set_var("HOSTNAME", "parity-host-xyz");
+        let scrubbed = scrub_logs("serving parity-host-xyz today");
+        match prior {
+            Some(value) => std::env::set_var("HOSTNAME", value),
+            None => std::env::remove_var("HOSTNAME"),
+        }
+        assert!(!scrubbed.contains("parity-host-xyz"));
+    }
+
+    #[test]
+    fn kernel_hostname_is_redacted_without_env() {
+        let prior = std::env::var("HOSTNAME").ok();
+        std::env::remove_var("HOSTNAME");
+        let names = super::hostnames_to_redact();
+        let scrubbed = scrub_logs(&format!("serving {} today", names.join(" ")));
+        match prior {
+            Some(value) => std::env::set_var("HOSTNAME", value),
+            None => std::env::remove_var("HOSTNAME"),
+        }
+        assert!(!names.is_empty(), "test machine has no hostname");
+        for name in &names {
+            assert!(!scrubbed.contains(name), "hostname leaked: {name}");
+        }
+    }
+
+    #[test]
+    fn username_env_is_redacted() {
+        let prior_user = std::env::var("USER").ok();
+        let prior_username = std::env::var("USERNAME").ok();
+        std::env::set_var("USER", "parity-user");
+        std::env::remove_var("USERNAME");
+        let scrubbed = scrub_logs("ran as parity-user today");
+        match prior_user {
+            Some(value) => std::env::set_var("USER", value),
+            None => std::env::remove_var("USER"),
+        }
+        if let Some(value) = prior_username {
+            std::env::set_var("USERNAME", value);
+        }
+        assert!(!scrubbed.contains("parity-user"));
     }
 }
