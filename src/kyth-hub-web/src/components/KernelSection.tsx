@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchKernelFlavor, runPrivilegedAction } from "../services/liveData";
+import { cancelPrivilegedAction, fetchKernelFlavor, runPrivilegedAction } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
@@ -50,6 +50,9 @@ export function KernelSection({ section }: { section: HubSection }) {
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
           {(["cachy", "fedora"] as const).map((target) => <ActionButton key={target} label={busy === `kernel-${target}` ? "Staging…" : `Switch to ${FLAVOR_LABEL[target]}`} disabled={busy !== null || flavor === target} onClick={() => run(`kernel-${target}`, `Staging ${target} kernel…`, () => runPrivilegedAction("kernel_switch", { flavor: target }))} />)}
+          {(busy?.startsWith("kernel-") ?? false) && (
+            <ActionButton label="Cancel" onClick={() => run("cancel-kernel", "Cancelling…", cancelPrivilegedAction)} />
+          )}
         </div>
         <ActionStatus status={status} />
       </div>

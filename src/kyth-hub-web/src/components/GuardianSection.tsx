@@ -5,6 +5,7 @@ import {
   dismissGuardianRecommendation,
   invokeGuardianExecute,
   runGuardianCheck,
+  cancelGuardianCheck,
   waitGuardianCheck,
   runGuardianControl,
   relativeTime,
@@ -175,6 +176,9 @@ export function GuardianSection({ section }: { section: HubSection }) {
             <ActionButton label={busy === "guardian-disable" ? "Disabling…" : "Disable Guardian"} disabled={busy !== null} onClick={() => run("guardian-disable", "Disabling Guardian…", () => controlGuardian("disable"))} />
             <ActionButton label={busy === "guardian-autofix-on" ? "Enabling…" : "Enable safe auto-fix"} disabled={busy !== null} onClick={() => run("guardian-autofix-on", "Enabling safe automatic fixes…", () => controlGuardian("autofix-on"))} />
             <ActionButton label={busy === "guardian-autofix-off" ? "Disabling…" : "Disable auto-fix"} disabled={busy !== null} onClick={() => run("guardian-autofix-off", "Disabling automatic fixes…", () => controlGuardian("autofix-off"))} />
+            {(busy?.startsWith("guardian-") ?? false) && (
+              <ActionButton label="Cancel" onClick={() => run("cancel-guardian", "Cancelling…", cancelGuardianCheck)} />
+            )}
           </div>
         </div>
       ) : (

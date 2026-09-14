@@ -8,7 +8,9 @@ import {
   fetchRecoveryStatus,
   fetchSnapshotCount,
   fetchSnapshotTimeline,
-  fetchInstallStatus,
+  waitInstallJob,
+  cancelInstall,
+  cancelUpdateJob,
   fetchMigrationReadiness,
   installFlatpak,
   openBackupApp,
@@ -50,16 +52,8 @@ export function RepairSection({ section }: { section: HubSection }) {
   const { status, busy, run } = useSectionAction();
 
   async function installBackup(): Promise<string> {
-    const job = await installFlatpak("org.gnome.World.PikaBackup");
-    for (let i = 0; i < 120; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await fetchInstallStatus(job);
-      if (!state || state.state === "running") continue;
-      if (state.state === "complete") return "Pika Backup installed.";
-      if (state.state === "cancelled") return "Cancelled.";
-      throw new Error(state.detail);
-    }
-    throw new Error("Pika Backup is still installing; check Apps for progress.");
+    const detail = await waitInstallJob(await installFlatpak("org.gnome.World.PikaBackup"));
+    return detail === "Cancelled." ? detail : "Pika Backup installed.";
   }
 
   useEffect(() => {
@@ -196,6 +190,9 @@ export function RepairSection({ section }: { section: HubSection }) {
             disabled={busy !== null || !hasRollback}
             onClick={() => run("rollback", "Rolling back…", invokeBootcRollback)}
           />
+          {busy === "rollback" && (
+            <ActionButton label="Cancel" onClick={() => run("cancel-rollback", "Cancelling…", cancelUpdateJob)} />
+          )}
           <RecipeButton recipe="update-health" label="Update health report" busy={busy} run={run} />
           <RecipeButton recipe="resume-check" label="Check suspend/resume" busy={busy} run={run} />
           <RecipeButton recipe="device-info" label="Collect device info" busy={busy} run={run} />
@@ -232,6 +229,9 @@ export function RepairSection({ section }: { section: HubSection }) {
           <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Pika Backup keeps versioned copies of your home folder on a USB drive or network location. Kyth does not choose or delete backup data for you.</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
             <ActionButton label={busy === "install-backup" ? "Installing…" : "Install Pika Backup"} disabled={busy !== null} onClick={() => run("install-backup", "Installing Pika Backup…", installBackup)} />
+            {busy === "install-backup" && (
+              <ActionButton label="Cancel" onClick={() => run("cancel-install", "Cancelling…", cancelInstall)} />
+            )}
             <ActionButton label={busy === "open-backup" ? "Opening…" : "Open Pika Backup"} disabled={busy !== null} onClick={() => run("open-backup", "Opening Pika Backup…", openBackupApp)} />
           </div>
         </div>

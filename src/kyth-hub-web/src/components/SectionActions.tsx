@@ -1,6 +1,6 @@
 import { useState } from "react";
 
-import { confirmUserAction, runHubRecipeAction } from "../services/liveData";
+import { cancelHubAction, confirmUserAction, runHubRecipeAction } from "../services/liveData";
 
 /** Shared "run a mutating system action, then say what happened" helper.
  *
@@ -72,9 +72,17 @@ export function RecipeButton({
   busy: string | null;
   run: (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
 }) {
+  if (busy === recipe) {
+    return (
+      <ActionButton
+        label="Cancel"
+        onClick={() => run(`cancel-${recipe}`, "Cancelling…", cancelHubAction)}
+      />
+    );
+  }
   return (
     <ActionButton
-      label={busy === recipe ? `Starting ${recipe}…` : label}
+      label={label}
       disabled={busy !== null}
       onClick={() =>
         confirmUserAction(`Run ${recipe}? It may change system state or open a privileged prompt.`) &&

@@ -8,6 +8,7 @@ import {
   invokeBootcRollback,
   invokeBootcUpgrade,
   invokeApplyStaged,
+  cancelUpdateJob,
   relativeTime,
   type BootcSnapshot,
   type UpdateAvailabilityView,
@@ -239,6 +240,9 @@ export function UpdatesSection({ section }: { section: HubSection }) {
             disabled={busy !== null || !(snapshot?.rollback || updateStatus?.rollback)}
             onClick={() => run("rollback", "Rolling back…", rollback)}
           />
+          {["upgrade", "rollback", "apply-staged"].includes(busy ?? "") && (
+            <ActionButton label="Cancel" onClick={() => run("cancel-update", "Cancelling…", cancelUpdateJob)} />
+          )}
         </div>
         <ActionStatus status={status} />
       </div>

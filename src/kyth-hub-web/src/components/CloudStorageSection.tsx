@@ -7,6 +7,7 @@ import {
   fetchNetworkSummaryLive,
   openCloudStorageApp,
   runCloudSync,
+  cancelJob,
   type CloudSyncRemote,
   type NetworkSummary,
 } from "../services/liveData";
@@ -75,6 +76,9 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
                   <span style={{ flex: 1, minWidth: 220 }}><strong>{remote.name}</strong> ({REMOTE_LABEL[remote.service] ?? remote.service}) → {remote.folder}
                     {remote.last_sync !== null && (<> · {remote.last_ok === false ? "last sync failed" : "last sync completed"}</>)}</span>
                   <ActionButton label={busy === `sync-${remote.name}` ? "Syncing…" : "Sync now"} disabled={busy !== null} onClick={() => run(`sync-${remote.name}`, `Syncing ${remote.name}…`, () => runCloudSync(remote.name))} />
+                  {(busy?.startsWith("sync-") ?? false) && (
+                    <ActionButton label="Cancel" onClick={() => run("cancel-sync", "Cancelling…", cancelJob)} />
+                  )}
                 </div>
               ))}
             </div>

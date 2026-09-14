@@ -132,13 +132,18 @@ export async function runGuardianCheck(investigate = false): Promise<string> {
   return guardianJob(await invoke<GuardianActionLaunch>("guardian_check", { investigate }));
 }
 export async function waitGuardianCheck(job: string): Promise<string> {
-  for (let i = 0; i < 180; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    const state = await invoke<InstallStatus>("guardian_check_status", { job });
-    if (state.state === "running") continue;
-    return resolveTerminalJob(state);
+  trackJob("guardian", job);
+  try {
+    for (let i = 0; i < 180; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      const state = await invoke<InstallStatus>("guardian_check_status", { job });
+      if (state.state === "running") continue;
+      return resolveTerminalJob(state);
+    }
+    throw new Error("Guardian is still running; refresh the page in a moment.");
+  } finally {
+    untrackJob("guardian", job);
   }
-  throw new Error("Guardian is still running; refresh the page in a moment.");
 }
 
 /** Terminal job-state resolution shared by every poller below: "complete"
@@ -150,6 +155,25 @@ function resolveTerminalJob(state: InstallStatus): string {
   throw new Error(state.detail);
 }
 
+/** Domains with at most one Hub-tracked job in flight. Launch wrappers
+ * register their job id on entry and clear it on settle, so a section's
+ * Cancel button can stop the actual running backend job without every
+ * action having to thread job ids through its presentation state. Two
+ * concurrent jobs in one domain is a misuse bug, not a supported state:
+ * the second launch wins the slot while the first still runs to its
+ * (bounded) timeout. */
+export type JobDomain = "guardian" | "privileged" | "hub-action" | "update" | "job" | "install" | "security" | "gaming";
+
+const inFlightJobs = new Map<JobDomain, string>();
+
+function trackJob(domain: JobDomain, job: string): void {
+  inFlightJobs.set(domain, job);
+}
+
+function untrackJob(domain: JobDomain, job: string): void {
+  if (inFlightJobs.get(domain) === job) inFlightJobs.delete(domain);
+}
+
 /** Cancel a running backend job. Each domain owns a status/cancel command
  * pair over the same bounded store; cancelling kills the underlying process
  * (socket-I/O jobs are marked and their late finish is dropped instead). */
@@ -159,14 +183,20 @@ async function cancelBackendJob(command: string, job: string): Promise<string> {
   return state.state === "cancelled" ? "Cancelled." : state.detail;
 }
 
-export const cancelGuardianCheck = (job: string): Promise<string> => cancelBackendJob("guardian_check_cancel", job);
-export const cancelPrivilegedAction = (job: string): Promise<string> => cancelBackendJob("privileged_action_cancel", job);
-export const cancelHubAction = (job: string): Promise<string> => cancelBackendJob("hub_action_cancel", job);
-export const cancelUpdateJob = (job: string): Promise<string> => cancelBackendJob("update_job_cancel", job);
-export const cancelJob = (job: string): Promise<string> => cancelBackendJob("cancel_job", job);
-export const cancelInstall = (job: string): Promise<string> => cancelBackendJob("install_cancel", job);
-export const cancelSecurityJob = (job: string): Promise<string> => cancelBackendJob("security_job_cancel", job);
-export const cancelGamingJob = (job: string): Promise<string> => cancelBackendJob("gaming_job_cancel", job);
+async function cancelTracked(domain: JobDomain, command: string): Promise<string> {
+  const job = inFlightJobs.get(domain);
+  if (!job) return "Nothing to cancel.";
+  return cancelBackendJob(command, job);
+}
+
+export const cancelGuardianCheck = (): Promise<string> => cancelTracked("guardian", "guardian_check_cancel");
+export const cancelPrivilegedAction = (): Promise<string> => cancelTracked("privileged", "privileged_action_cancel");
+export const cancelHubAction = (): Promise<string> => cancelTracked("hub-action", "hub_action_cancel");
+export const cancelUpdateJob = (): Promise<string> => cancelTracked("update", "update_job_cancel");
+export const cancelJob = (): Promise<string> => cancelTracked("job", "cancel_job");
+export const cancelInstall = (): Promise<string> => cancelTracked("install", "install_cancel");
+export const cancelSecurityJob = (): Promise<string> => cancelTracked("security", "security_job_cancel");
+export const cancelGamingJob = (): Promise<string> => cancelTracked("gaming", "gaming_job_cancel");
 export async function runGuardianControl(action: string): Promise<string> {
   if (!confirmUserAction(`Change Guardian setting: ${action}?`)) return "Cancelled.";
   const job = guardianJob(await invoke<GuardianActionLaunch>("guardian_control", { action }));
@@ -210,13 +240,18 @@ export async function runPrivilegedAction(operation: string, payload: Privileged
   const launch = await invoke<PrivilegedActionLaunch>("privileged_action", { operation, payload });
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Privileged operation did not start.");
   const job = launch.job;
-  for (let i = 0; i < 1800; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    const state = await invoke<InstallStatus>("privileged_action_status", { job });
-    if (state.state === "running") continue;
-    return resolveTerminalJob(state);
+  trackJob("privileged", job);
+  try {
+    for (let i = 0; i < 1800; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      const state = await invoke<InstallStatus>("privileged_action_status", { job });
+      if (state.state === "running") continue;
+      return resolveTerminalJob(state);
+    }
+    throw new Error("Privileged operation is still running; check the system status shortly.");
+  } finally {
+    untrackJob("privileged", job);
   }
-  throw new Error("Privileged operation is still running; check the system status shortly.");
 }
 
 // Mirrors kyth_shared.system.bootc_policy.branch_display_name() — small
@@ -610,13 +645,18 @@ export async function fetchJustList(): Promise<JustRecipe[] | null> {
 // used by the Rust shell for sudo, so there is no terminal window to find or
 // explain to a new user.
 async function waitJustJob(job: string): Promise<string> {
-  for (let i = 0; i < 1800; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    const state = await invoke<InstallStatus>("hub_action_status", { job });
-    if (state.state === "running") continue;
-    return resolveTerminalJob(state);
+  trackJob("hub-action", job);
+  try {
+    for (let i = 0; i < 1800; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      const state = await invoke<InstallStatus>("hub_action_status", { job });
+      if (state.state === "running") continue;
+      return resolveTerminalJob(state);
+    }
+    throw new Error("This action is still running; check the status here again in a moment.");
+  } finally {
+    untrackJob("hub-action", job);
   }
-  throw new Error("This action is still running; check the status here again in a moment.");
 }
 
 async function waitHubActionLaunch(launch: HubActionLaunch): Promise<string> {
@@ -628,13 +668,18 @@ export interface UpdateActionLaunch { job: string; state: "running"; detail: str
 
 async function waitUpdateJob(job: string): Promise<string> {
   // Upgrade downloads can legitimately take an hour on a slow connection.
-  for (let i = 0; i < 7200; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    const state = await invoke<InstallStatus>("update_job_status", { job });
-    if (state.state === "running") continue;
-    return resolveTerminalJob(state);
+  trackJob("update", job);
+  try {
+    for (let i = 0; i < 7200; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      const state = await invoke<InstallStatus>("update_job_status", { job });
+      if (state.state === "running") continue;
+      return resolveTerminalJob(state);
+    }
+    throw new Error("The update is still running; refresh the Updates page in a moment.");
+  } finally {
+    untrackJob("update", job);
   }
-  throw new Error("The update is still running; refresh the Updates page in a moment.");
 }
 
 async function waitUpdateLaunch(launch: UpdateActionLaunch): Promise<string> {
@@ -787,13 +832,18 @@ export async function fetchCloudSyncRemotes(): Promise<CloudSyncRemote[] | null>
   try { return await invoke<CloudSyncRemote[]>("cloud_sync_remotes"); } catch { return null; }
 }
 async function waitHubJob(job: string, limit = 7200): Promise<string> {
-  for (let i = 0; i < limit; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    const state = await invoke<InstallStatus>("job_status", { job }).catch(() => null);
-    if (!state || state.state === "running") continue;
-    return resolveTerminalJob(state);
+  trackJob("job", job);
+  try {
+    for (let i = 0; i < limit; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      const state = await invoke<InstallStatus>("job_status", { job }).catch(() => null);
+      if (!state || state.state === "running") continue;
+      return resolveTerminalJob(state);
+    }
+    throw new Error("This action is still running; check back in a moment.");
+  } finally {
+    untrackJob("job", job);
   }
-  throw new Error("This action is still running; check back in a moment.");
 }
 export async function runCloudSync(remote: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Cloud sync is available from the installed Kyth Hub.");
@@ -1231,6 +1281,24 @@ export async function fetchInstallStatus(id: string): Promise<InstallStatus | nu
   try { return await invoke<InstallStatus>("install_status", { job: id }); } catch { return null; }
 }
 
+/** Shared install-job waiter for the App Store, Repair, and Work Setup
+ * sections. Registers the job in the install domain so its Cancel button
+ * stops the actual running backend job. */
+export async function waitInstallJob(job: string, limit = 120): Promise<string> {
+  trackJob("install", job);
+  try {
+    for (let i = 0; i < limit; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 500));
+      const state = await fetchInstallStatus(job);
+      if (!state || state.state === "running") continue;
+      return resolveTerminalJob(state);
+    }
+    throw new Error("Installation is still running; refresh Apps in a moment.");
+  } finally {
+    untrackJob("install", job);
+  }
+}
+
 // ---------------------------------------------------------------------
 // Security tab: Kali distrobox lifecycle + host-side (Flatpak) tools grid.
 // Kali create/export/remove run as background jobs (security_job_status),
@@ -1252,13 +1320,18 @@ export async function fetchSecHostTools(): Promise<SecHostTool[] | null> {
 }
 
 async function pollSecurityJob(job: string, maxIterations: number): Promise<string> {
-  for (let i = 0; i < maxIterations; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 3000));
-    const state = await invoke<InstallStatus>("security_job_status", { job }).catch(() => null);
-    if (!state || state.state === "running") continue;
-    return resolveTerminalJob(state);
+  trackJob("security", job);
+  try {
+    for (let i = 0; i < maxIterations; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 3000));
+      const state = await invoke<InstallStatus>("security_job_status", { job }).catch(() => null);
+      if (!state || state.state === "running") continue;
+      return resolveTerminalJob(state);
+    }
+    throw new Error("Still running; check back in a moment.");
+  } finally {
+    untrackJob("security", job);
   }
-  throw new Error("Still running; check back in a moment.");
 }
 interface SecurityActionLaunch { job: string; state: "running"; detail: string; }
 function securityJob(launch: SecurityActionLaunch): string { if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Security action did not start."); return launch.job; }
@@ -1304,13 +1377,18 @@ export async function fetchGamingTools(): Promise<GamingTool[] | null> {
 }
 
 async function pollGamingJob(job: string, maxIterations: number): Promise<string> {
-  for (let i = 0; i < maxIterations; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 3000));
-    const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
-    if (!state || state.state === "running") continue;
-    return resolveTerminalJob(state);
+  trackJob("gaming", job);
+  try {
+    for (let i = 0; i < maxIterations; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 3000));
+      const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
+      if (!state || state.state === "running") continue;
+      return resolveTerminalJob(state);
+    }
+    throw new Error("Still running; check back in a moment.");
+  } finally {
+    untrackJob("gaming", job);
   }
-  throw new Error("Still running; check back in a moment.");
 }
 interface GamingActionLaunch { job: string; state: "running"; detail: string; }
 function gamingJob(launch: GamingActionLaunch): string { if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Gaming action did not start."); return launch.job; }
@@ -1347,13 +1425,18 @@ export async function fetchScxStatus(): Promise<ScxStatus | null> {
 }
 export async function setScxScheduler(scheduler: "rusty" | "stop"): Promise<string> {
   const job = await invoke<string>("scx_set_scheduler", { scheduler });
-  for (let i = 0; i < 20; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 1500));
-    const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
-    if (!state || state.state === "running") continue;
-    return resolveTerminalJob(state);
+  trackJob("gaming", job);
+  try {
+    for (let i = 0; i < 20; i += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1500));
+      const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
+      if (!state || state.state === "running") continue;
+      return resolveTerminalJob(state);
+    }
+    throw new Error("Still running; check back in a moment.");
+  } finally {
+    untrackJob("gaming", job);
   }
-  throw new Error("Still running; check back in a moment.");
 }
 
 export interface GameProfile { profile: string; hdr: boolean }

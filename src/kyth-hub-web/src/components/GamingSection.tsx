@@ -9,6 +9,7 @@ import {
   fetchGamingTools,
   installGamingTool,
   uninstallGamingTool,
+  cancelGamingJob,
   launchGamingTool,
   fixDiscordScreenshare,
   fixObsPipewire,
@@ -71,6 +72,11 @@ function GamingToolGrid({ busy, run }: { busy: string | null; run: SectionRun })
           </div>
         ))}
       </div>
+      {(busy?.startsWith("gt-") ?? false) && (
+        <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+          <button onClick={() => run("cancel-gaming", "Cancelling…", cancelGamingJob)} style={gamingBtnStyle}>Cancel</button>
+        </div>
+      )}
     </div>
   );
 }
@@ -245,6 +251,9 @@ function SchedExtCard({ busy, run }: { busy: string | null; run: SectionRun }) {
         <button disabled={busy !== null} onClick={() => run("scx-stop", "Stopping sched-ext…", async () => { const result = await setScxScheduler("stop"); await refresh(); return result; })} style={gamingBtnStyle}>
           {busy === "scx-stop" ? "Stopping…" : "Stop scx"}
         </button>
+        {(busy?.startsWith("scx-") ?? false) && (
+          <button onClick={() => run("cancel-scx", "Cancelling…", cancelGamingJob)} style={gamingBtnStyle}>Cancel</button>
+        )}
       </div>
     </div>
   );

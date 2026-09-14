@@ -5,8 +5,10 @@ import {
   fetchNetworkSummary,
   fetchPrinterDiscover,
   fetchInstalledFlatpaks,
-  fetchInstallStatus,
+  waitInstallJob,
   installFlatpak,
+  cancelJob,
+  cancelInstall,
   openM365App,
   createM365Shortcuts,
   fetchPstFiles,
@@ -72,16 +74,10 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
   }, [focusId]);
 
   async function installWorkApp(id: string, name: string): Promise<string> {
-    const job = await installFlatpak(id);
-    for (let i = 0; i < 120; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await fetchInstallStatus(job);
-      if (!state || state.state === "running") continue;
-      if (state.state === "complete") { setInstalled((current) => [...new Set([...current, id])]); return `${name} installed.`; }
-      if (state.state === "cancelled") return "Cancelled.";
-      throw new Error(state.detail);
-    }
-    throw new Error(`${name} is still installing; refresh Apps in a moment.`);
+    const detail = await waitInstallJob(await installFlatpak(id));
+    if (detail === "Cancelled.") return detail;
+    setInstalled((current) => [...new Set([...current, id])]);
+    return `${name} installed.`;
   }
 
   const formatFocus = (seconds: number) => `${Math.floor(seconds / 60).toString().padStart(2, "0")}:${(seconds % 60).toString().padStart(2, "0")}`;
@@ -100,6 +96,9 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
         <p className="work-setup-copy">Set up the tools you use for documents, meetings, printing, and focused work.</p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {[ ["org.libreoffice.LibreOffice", "LibreOffice"], ["eu.betterbird.Betterbird", "Betterbird"] ].map(([id, name]) => installed.includes(id) ? <span key={id} className="pill pill-ok">{name} installed</span> : <ActionButton key={id} label={busy === `install-${id}` ? `Installing ${name}…` : `Install ${name}`} disabled={busy !== null} onClick={() => run(`install-${id}`, `Installing ${name}…`, () => installWorkApp(id, name))} />)}
+          {(busy?.startsWith("install-") ?? false) && (
+            <ActionButton label="Cancel" onClick={() => run("cancel-install", "Cancelling…", cancelInstall)} />
+          )}
           <RecipeButton recipe="install-ms-fonts" label="Install Office fonts" busy={busy} run={run} />
           <RecipeButton recipe="setup-printer" label="Set up a printer" busy={busy} run={run} />
           <ActionButton
@@ -129,7 +128,7 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
             <ActionButton label={busy === "pst-scan" ? "Scanning…" : "Find Outlook archives"} disabled={busy !== null} onClick={() => run("pst-scan", "Scanning for Outlook archives…", async () => { const files = await fetchPstFiles(); setPstFiles(files); return files ? `${files.length} archive(s) found.` : "Archive scanning is unavailable outside the Hub shell."; })} />
           </div>
-          {pstFiles && (pstFiles.length ? <div style={{ display: "grid", gap: 6, marginTop: 10 }}>{pstFiles.map((path) => <div key={path} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><span className="card-copy" style={{ flex: 1, fontSize: 12 }}>{path}</span><ActionButton label={busy === `pst-${path}` ? "Converting…" : "Convert"} disabled={busy !== null} onClick={() => run(`pst-${path}`, "Converting Outlook archive…", () => convertPst(path))} /></div>)}</div> : <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>No archives found in Documents, Downloads, local app data, or mounted user drives.</p>)}
+          {pstFiles && (pstFiles.length ? <div style={{ display: "grid", gap: 6, marginTop: 10 }}>{pstFiles.map((path) => <div key={path} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><span className="card-copy" style={{ flex: 1, fontSize: 12 }}>{path}</span><ActionButton label={busy === `pst-${path}` ? "Converting…" : "Convert"} disabled={busy !== null} onClick={() => run(`pst-${path}`, "Converting Outlook archive…", () => convertPst(path))} /></div>)}{(busy?.startsWith("pst-") ?? false) && <div><ActionButton label="Cancel" onClick={() => run("cancel-pst", "Cancelling…", cancelJob)} /></div>}</div> : <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>No archives found in Documents, Downloads, local app data, or mounted user drives.</p>)}
         </div>
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
           <p className="work-setup-copy" style={{ fontWeight: 700 }}>Focus session</p>

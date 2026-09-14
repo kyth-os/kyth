@@ -228,7 +228,7 @@ test("core workflow sections retain their read, action, and refresh paths", () =
   for (const [name, source, wrappers] of [
     ["Guardian", guardian, ["fetchGuardianSnapshot", "runGuardianCheck", "runGuardianControl"]],
     ["Hardware", hardware, ["fetchHardwareSnapshot", "fetchHardwareViewSummary", "fetchLoadedKernelModules"]],
-    ["Applications", apps, ["fetchAppStoreSnapshot", "searchAppStream", "installFlatpak", "fetchInstallStatus", "fetchInstalledFlatpaks"]],
+    ["Applications", apps, ["fetchAppStoreSnapshot", "searchAppStream", "installFlatpak", "waitInstallJob", "fetchInstalledFlatpaks"]],
     ["Gaming", gaming, ["fetchGamingLibrary", "fetchGamingSliceAvailable", "fetchProtonDbMany", "fetchAntiCheatTable"]],
   ]) {
     for (const wrapper of wrappers) assert.match(source, new RegExp(`\\b${wrapper}\\b`), `${name}: ${wrapper}`);
