@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-use kyth_shared::system::jobs::{JobStore, JobTimeoutClass, timeout_for};
+use kyth_shared::system::jobs::{timeout_for, JobStore, JobTimeoutClass};
 
 static HUB_ACTION_JOBS: OnceLock<JobStore> = OnceLock::new();
 static UPDATE_JOBS: OnceLock<JobStore> = OnceLock::new();
@@ -307,9 +307,8 @@ fn start_update_job(
         if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
             command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
         }
-        let result = kyth_shared::system::process::run_bounded_command_cancel(
-            command, timeout, &cancel,
-        );
+        let result =
+            kyth_shared::system::process::run_bounded_command_cancel(command, timeout, &cancel);
         let (state, detail) = match result {
             Ok(output) => {
                 let mut detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -368,11 +367,7 @@ pub(crate) fn run_hub_action(action: HubAction) -> Result<HubActionLaunch, Strin
     start_hub_action_job(action)
 }
 
-fn update_store_status(
-    store: &JobStore,
-    job: String,
-    not_found: &str,
-) -> crate::InstallStatus {
+fn update_store_status(store: &JobStore, job: String, not_found: &str) -> crate::InstallStatus {
     let (state, detail) = store.status(&job).unwrap_or((
         kyth_shared::system::jobs::STATE_UNKNOWN.into(),
         not_found.into(),

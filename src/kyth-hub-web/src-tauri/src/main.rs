@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::{Mutex, OnceLock};
 
-use kyth_shared::system::jobs::{JobStore, JobTimeoutClass, timeout_for};
+use kyth_shared::system::jobs::{timeout_for, JobStore, JobTimeoutClass};
 
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};

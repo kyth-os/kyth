@@ -325,12 +325,10 @@ pub(crate) fn flatpak_update() -> Result<String, String> {
 
 #[tauri::command]
 pub(crate) fn privileged_action_status(job: String) -> crate::InstallStatus {
-    let (state, detail) = jobs()
-        .status(&job)
-        .unwrap_or((
-            kyth_shared::system::jobs::STATE_UNKNOWN.into(),
-            "Privileged job not found.".into(),
-        ));
+    let (state, detail) = jobs().status(&job).unwrap_or((
+        kyth_shared::system::jobs::STATE_UNKNOWN.into(),
+        "Privileged job not found.".into(),
+    ));
     crate::InstallStatus {
         id: job,
         state,

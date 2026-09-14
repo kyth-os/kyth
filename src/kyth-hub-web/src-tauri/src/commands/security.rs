@@ -9,8 +9,8 @@
 //! `security_container`'s module doc for why the Python progress-bar
 //! parser wasn't ported.
 
+use kyth_shared::system::jobs::{timeout_for, JobTimeoutClass};
 use std::process::Command;
-use kyth_shared::system::jobs::{JobTimeoutClass, timeout_for};
 
 use serde::Serialize;
 

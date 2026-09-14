@@ -12,8 +12,8 @@ use serde::Serialize;
 
 use kyth_shared::system::gaming_per_game;
 use kyth_shared::system::gaming_perf::{self, ProfileGoal};
-use kyth_shared::system::jobs::{JobTimeoutClass, timeout_for};
 use kyth_shared::system::gaming_tools::{self, GAMING_TOOLS};
+use kyth_shared::system::jobs::{timeout_for, JobTimeoutClass};
 
 use super::job::{failure_detail, spawn_argv_job, start_job};
 

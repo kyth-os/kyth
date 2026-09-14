@@ -490,10 +490,7 @@ pub(crate) fn vpn_connect(
                         .lock()
                         .ok()
                         .filter(|guard| {
-                            matches!(
-                                guard.0.as_str(),
-                                "failed" | "disconnected" | "complete"
-                            )
+                            matches!(guard.0.as_str(), "failed" | "disconnected" | "complete")
                         })
                         .map(|_| id.clone())
                 })

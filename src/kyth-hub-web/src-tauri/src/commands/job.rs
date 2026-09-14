@@ -7,8 +7,8 @@
 //! a live percentage — see `security_container`'s module doc for why.
 
 use std::process::{Command, Output};
-use std::sync::{Arc, OnceLock};
 use std::sync::atomic::AtomicBool;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use kyth_shared::system::jobs::JobStore;
@@ -46,9 +46,10 @@ fn finish_job(job: String, state: &str, detail: String) {
 }
 
 fn install_status(job: String, fallback: &str) -> crate::InstallStatus {
-    let (state, detail) = jobs()
-        .status(&job)
-        .unwrap_or((kyth_shared::system::jobs::STATE_UNKNOWN.into(), fallback.into()));
+    let (state, detail) = jobs().status(&job).unwrap_or((
+        kyth_shared::system::jobs::STATE_UNKNOWN.into(),
+        fallback.into(),
+    ));
     crate::InstallStatus {
         id: job,
         state,
