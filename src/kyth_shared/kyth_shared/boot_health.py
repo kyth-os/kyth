@@ -1,4 +1,11 @@
-"""Digest-aware boot health, quarantine, and rollout-ring policy."""
+"""Digest-aware boot health, quarantine, and rollout-ring policy.
+
+Compatibility implementation: the native ``kyth-boot-health`` binary owns
+these transitions at runtime (atomic writes, rollback execution). This
+module keeps a field-for-field compatible copy for offline tooling, the
+``kyth-boot-health`` console-script shim, and tests — do not extend it
+independently; change the Rust transitions first, then mirror here.
+"""
 from __future__ import annotations
 
 import argparse
@@ -44,6 +51,14 @@ class BootHealthState:
     rollout_ring: str = "follow-image"
     updated_at: int = 0
     quarantined: Mapping[str, QuarantineRecord] = field(default_factory=dict)
+    # Cumulative failure counts below the quarantine threshold, keyed by
+    # digest. The top-level `failures` field only tracks the streak for the
+    # *current* digest, so two bad deployments booted alternately used to
+    # reset each other's counter forever and neither ever quarantined. These
+    # per-digest counts survive interleaved boots; a digest quarantines once
+    # its own total reaches the threshold. Cleared for a digest when it
+    # marks healthy or its quarantine is explicitly cleared.
+    failures_by_digest: Mapping[str, int] = field(default_factory=dict)
     # Digest a rollback was already attempted for — set unconditionally
     # (success or failure) the first time a digest crosses the quarantine
     # threshold, so a rollback target that's itself unhealthy can never
@@ -64,6 +79,9 @@ class BootHealthState:
                 errs.append(f"quarantined {d} failures {r.failures} < threshold")
             if d != r.digest:
                 errs.append(f"quarantined key {d} != record.digest {r.digest}")
+        for d, count in self.failures_by_digest.items():
+            if not isinstance(count, int) or count < 0:
+                errs.append(f"failures_by_digest {d} invalid count {count!r}")
         return errs
 
     def to_dict(self) -> dict[str, object]:
@@ -87,14 +105,22 @@ class BootHealthState:
                     continue
                 if parsed.digest == digest:
                     quarantined[digest] = parsed
+        counts: dict[str, int] = {}
+        raw_counts = value.get("failures_by_digest", {})
+        if isinstance(raw_counts, dict):
+            for digest, count in raw_counts.items():
+                # bool is an int subclass — reject it so a corrupt document
+                # cannot smuggle True in as a failure count of 1.
+                if isinstance(digest, str) and type(count) is int and count >= 0:
+                    counts[digest] = count
         fields = cls.__dataclass_fields__
         values = {
             key: value[key]
             for key in fields
-            if key in value and key != "quarantined"
+            if key in value and key not in ("quarantined", "failures_by_digest")
         }
         try:
-            return cls(**values, quarantined=quarantined)
+            return cls(**values, quarantined=quarantined, failures_by_digest=counts)
         except (TypeError, ValueError):
             return cls()
 
@@ -203,14 +229,26 @@ def record_failure(
     timestamp = int(time.time()) if now is None else now
     same_deployment = state.current_digest == digest
     failures = state.failures if same_deployment else 0
-    if not (same_deployment and state.last_failure_boot_id == boot_id):
+    # Dedupe re-reports of the same boot so one boot counts once no matter
+    # how many times its failure is recorded.
+    count_this_boot = not (same_deployment and state.last_failure_boot_id == boot_id)
+    if count_this_boot:
         failures += 1
+    # Per-digest totals survive interleaved boots: alternating between two
+    # bad deployments no longer resets either counter. The top-level
+    # `failures` streak above still resets on digest change for display.
+    digest_failures = state.failures_by_digest.get(digest, 0)
+    if count_this_boot:
+        digest_failures += 1
+    failures_by_digest = dict(state.failures_by_digest)
+    if count_this_boot:
+        failures_by_digest[digest] = digest_failures
     quarantined = dict(state.quarantined)
-    if failures >= threshold:
+    if digest_failures >= threshold:
         previous = quarantined.get(digest)
         quarantined[digest] = QuarantineRecord(
             digest=digest,
-            failures=failures,
+            failures=digest_failures,
             reason=reason,
             first_failed_at=previous.first_failed_at if previous else timestamp,
             last_failed_at=timestamp,
@@ -228,16 +266,21 @@ def record_failure(
         rollout_ring=state.rollout_ring,
         updated_at=timestamp,
         quarantined=quarantined,
+        failures_by_digest=failures_by_digest,
         # BootHealthState's own field comment: rollback_attempted_for is set
         # unconditionally the first time a digest crosses the quarantine
         # threshold so a rollback target that's itself unhealthy can never
         # ping-pong with the digest that triggered it. This is a from-scratch
         # constructor call, not replace(state, ...), so every field the
         # dataclass defines has to be carried forward explicitly here or it
-        # silently reverts to its default ("") — discarding that memory on
+        # silently reverts to its default — discarding rollback memory on
         # the very next failure recorded for *any* digest, including ones
-        # unrelated to the rollback this field is tracking.
+        # unrelated to the rollback this field is tracking. This must stay
+        # field-for-field aligned with the native kyth-boot-health
+        # record_failure, which is the authoritative reference.
         rollback_attempted_for=state.rollback_attempted_for,
+        last_rollback_error=state.last_rollback_error,
+        last_rollback_at=state.last_rollback_at,
     )
 
 
@@ -249,6 +292,10 @@ def mark_healthy(
 ) -> BootHealthState:
     quarantined = dict(state.quarantined)
     quarantined.pop(digest, None)
+    # A healthy boot forgives the digest: its sub-threshold counter resets
+    # so a future failure starts from zero rather than resuming an old tally.
+    failures_by_digest = dict(state.failures_by_digest)
+    failures_by_digest.pop(digest, None)
     recovered_digest = ""
     if state.current_digest != digest and state.current_digest in state.quarantined:
         recovered_digest = state.current_digest
@@ -267,7 +314,13 @@ def mark_healthy(
         rollout_ring=state.rollout_ring,
         updated_at=recovery_at,
         quarantined=quarantined,
+        failures_by_digest=failures_by_digest,
+        # Same from-scratch-constructor hazard as record_failure above:
+        # rollback history is forensic evidence, not per-digest health, so a
+        # healthy boot must not wipe it. Aligned with native mark_healthy.
         rollback_attempted_for=state.rollback_attempted_for,
+        last_rollback_error=state.last_rollback_error,
+        last_rollback_at=state.last_rollback_at,
     )
 
 
@@ -296,6 +349,10 @@ def clear_quarantine(
 ) -> BootHealthState:
     quarantined = dict(state.quarantined)
     quarantined.pop(digest, None)
+    # An explicit admin un-quarantine also resets the digest's tally so the
+    # next failure starts from zero rather than instantly re-quarantining.
+    failures_by_digest = dict(state.failures_by_digest)
+    failures_by_digest.pop(digest, None)
     return replace(
         state,
         status=(
@@ -304,6 +361,7 @@ def clear_quarantine(
             else state.status
         ),
         quarantined=quarantined,
+        failures_by_digest=failures_by_digest,
         updated_at=int(time.time()) if now is None else now,
     )
 

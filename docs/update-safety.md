@@ -32,8 +32,10 @@ enough.
 5. A healthy boot records the exact digest as known-good. A failed boot records
    the boot ID and reason, then greenboot retries the boot.
 6. After three unhealthy boots, KythOS quarantines the failed digest. The
-   automatic updater and guarded manual update paths will not download or
-   stage that digest again.
+   count is per digest (`failures_by_digest` in `boot-health.json`), so
+   alternating between two broken deployments cannot reset either tally.
+   The automatic updater and guarded manual update paths will not download
+   or stage that digest again.
 
 ### Rollback is KythOS's own code, not greenboot's boot counter
 

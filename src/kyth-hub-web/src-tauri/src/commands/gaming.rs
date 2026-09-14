@@ -12,6 +12,7 @@ use serde::Serialize;
 
 use kyth_shared::system::gaming_per_game;
 use kyth_shared::system::gaming_perf::{self, ProfileGoal};
+use kyth_shared::system::jobs::{JobTimeoutClass, timeout_for};
 use kyth_shared::system::gaming_tools::{self, GAMING_TOOLS};
 
 use super::job::{failure_detail, spawn_argv_job, start_job};
@@ -63,7 +64,7 @@ pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaun
     spawn_argv_job(
         job.clone(),
         argv,
-        Duration::from_secs(600),
+        timeout_for(JobTimeoutClass::ToolInstall),
         move |result| match result {
             Ok(output) if output.status.success() => {
                 ("complete".to_string(), format!("{name} installed."))
@@ -100,7 +101,7 @@ pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<GamingActionLa
     spawn_argv_job(
         job.clone(),
         argv,
-        Duration::from_secs(120),
+        timeout_for(JobTimeoutClass::QuickRemove),
         move |result| match result {
             Ok(output) if output.status.success() => {
                 ("complete".to_string(), format!("{name} uninstalled."))
@@ -134,9 +135,17 @@ pub(crate) fn gaming_job_status(job: String) -> crate::InstallStatus {
     super::job::job_status(job)
 }
 
+#[tauri::command]
+pub(crate) fn gaming_job_cancel(job: String) -> crate::InstallStatus {
+    super::job::cancel_job(job)
+}
+
 /// One-shot Flatpak permission repairs — bounded, `--user`-scoped, no sudo.
 /// Fast enough to run synchronously rather than as a background job, same
-/// as `apply_pipewire_quantum`/`apply_plasma_preset`.
+/// as `apply_pipewire_quantum`/`apply_plasma_preset`. The 10s bound below
+/// is the one intentional exception to the `JobTimeoutClass` tiers: a
+/// synchronous UI-blocking call must stay well under every background tier.
+/// (See the tier contract on `kyth_shared::system::jobs::timeout_for`.)
 fn run_capture_fix(action: &str, argv: Vec<String>) -> Result<String, String> {
     let mut command = Command::new(&argv[0]);
     command.args(&argv[1..]);
@@ -230,7 +239,7 @@ pub(crate) fn scx_set_scheduler(scheduler: String) -> Result<String, String> {
     spawn_argv_job(
         job.clone(),
         argv,
-        Duration::from_secs(30),
+        timeout_for(JobTimeoutClass::SchedulerApply),
         |result| match result {
             Ok(output) if output.status.success() => {
                 ("complete".to_string(), "sched-ext updated.".to_string())

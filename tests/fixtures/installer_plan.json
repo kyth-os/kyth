@@ -1,0 +1,47 @@
+{
+  "report": {
+    "valid": true,
+    "mode": "guided",
+    "disk": "/dev/nvme0n1",
+    "target_partition": "/dev/nvme0n1p3",
+    "efi_partition": "/dev/nvme0n1p1",
+    "will_create_partition": true,
+    "will_shrink_filesystem": true,
+    "required_bytes": 34359738368,
+    "available_bytes": 68719476736,
+    "is_gpt": true,
+    "needs_bios_boot": false,
+    "errors": [],
+    "warnings": ["Windows partition will shrink"]
+  },
+  "plan": {
+    "request": {
+      "disk": "/dev/nvme0n1",
+      "install_mode": "guided",
+      "target_partition": "/dev/nvme0n1p3",
+      "resize_partition": "/dev/nvme0n1p3",
+      "resize_gib": 64,
+      "free_region_start": 0,
+      "free_region_end": 0,
+      "efi_partition": "/dev/nvme0n1p1",
+      "hostname": "kyth",
+      "timezone": "UTC",
+      "locale": "en_US.UTF-8",
+      "keymap": "us",
+      "username": "pat",
+      "password_hash": "",
+      "kernel": "fedora",
+      "mok_password": ""
+    },
+    "storage": {
+      "mode": "guided",
+      "disk": "/dev/nvme0n1",
+      "target_partition": "/dev/nvme0n1p3"
+    },
+    "source_ref": "ghcr.io/kyth-os/kyth:latest",
+    "target_ref": "ostree-image-signed:docker://ghcr.io/kyth-os/kyth:latest",
+    "source_digest": "sha256:abc",
+    "source_kind": "network",
+    "source_verified": true
+  }
+}

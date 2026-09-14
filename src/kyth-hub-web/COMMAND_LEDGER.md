@@ -39,6 +39,7 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
 | `invokeBootcRollback` | `bootc_rollback` | none | `string` | mutate | covered |
 | `invokeApplyStaged` | `apply_staged` | none | `string` | mutate | covered |
 | update job polling | `update_job_status` | `{ job }` | `InstallStatus` | read | covered |
+| `cancelUpdateJob` | `update_job_cancel` | `{ job }` | `InstallStatus` | mutate | covered |
 | `fetchUpdateHealth` | `update_health` | none | `UpdateHealthLive` | read | covered |
 | `healthReport` | `update_health` | none | `UpdateHealthLive` | check | covered |
 
@@ -118,6 +119,19 @@ its `key` against a fixed 2-entry set (`compatdata`, `shadercache`) rather
 than accepting a caller-supplied path. `security_job_status` and
 `gaming_job_status` both poll the same shared job store in
 `commands/job.rs`.
+
+Every background job lives in a bounded `kyth-shared-rs::system::jobs`
+store (256 entries, 1h terminal TTL, insertion-order eviction) instead of
+a grow-forever map. Each status command has a cancel pair
+(`cancel_job`, `hub_action_cancel`, `update_job_cancel`,
+`privileged_action_cancel`, `install_cancel`, `guardian_check_cancel`,
+`security_job_cancel`, `gaming_job_cancel`): cancelling kills the
+underlying child within one poll tick and the job reads `cancelled`, which
+the frontend resolves as "Cancelled." rather than an error. Socket-I/O
+jobs (privileged actions) and library-call jobs (Bottles launch) cannot be
+killed mid-flight, so cancelling marks them and their late finish is
+dropped. VPN runtimes are capped at 16 tracked entries with terminal-state
+reaping; focus sessions reap exited children on insert.
 
 The Gaming tab's overlay/sched-ext/profile-builder commands
 (`gaming_perf_status`, `scx_status`, `scx_set_scheduler`,

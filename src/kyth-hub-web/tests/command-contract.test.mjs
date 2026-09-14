@@ -76,6 +76,14 @@ const rustCommands = [
   "defer_update_watcher",
   "run_hub_action",
   "hub_action_status",
+  "hub_action_cancel",
+  "update_job_cancel",
+  "cancel_job",
+  "privileged_action_cancel",
+  "install_cancel",
+  "guardian_check_cancel",
+  "security_job_cancel",
+  "gaming_job_cancel",
 ];
 
 test("Dashboard wrappers are present and used by the page", () => {
@@ -153,6 +161,25 @@ test("Updates overview gives a plain-language next step", () => {
   assert.match(updatesOverview, /confirm that other sites load/);
   assert.match(updateMessages, /The update is downloaded and ready/);
   assert.match(updateMessages, /No changes were made/);
+});
+
+test("cancel commands pair every job status command and resolve in the pollers", () => {
+  for (const command of [
+    "cancel_job",
+    "hub_action_cancel",
+    "update_job_cancel",
+    "privileged_action_cancel",
+    "install_cancel",
+    "guardian_check_cancel",
+    "security_job_cancel",
+    "gaming_job_cancel",
+  ]) {
+    assert.match(service, new RegExp(`"${command}"`), `${command} needs a frontend cancel wrapper`);
+  }
+  // A cancelled job is user intent, not a backend error: every poller must
+  // resolve it instead of looping to its timeout or throwing it as a failure.
+  assert.match(service, /"cancelled"\) return "Cancelled\."/, "cancelled jobs must resolve friendly");
+  assert.ok(!/state\.state === "failed" \|\| state\.state === "unknown"\) throw/.test(service), "pollers must route terminal states through resolveTerminalJob");
 });
 
 test("ledger commands are registered in the Tauri handler", () => {

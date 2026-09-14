@@ -10,7 +10,7 @@
 //! parser wasn't ported.
 
 use std::process::Command;
-use std::time::Duration;
+use kyth_shared::system::jobs::{JobTimeoutClass, timeout_for};
 
 use serde::Serialize;
 
@@ -42,7 +42,7 @@ pub(crate) fn kali_create(tier: String) -> Result<SecurityActionLaunch, String> 
     spawn_argv_job(
         job.clone(),
         argv,
-        Duration::from_secs(1800),
+        timeout_for(JobTimeoutClass::ExtendedWork),
         move |result| match result {
             Ok(output) if output.status.success() => (
                 "complete".to_string(),
@@ -73,7 +73,7 @@ pub(crate) fn kali_export() -> Result<SecurityActionLaunch, String> {
     spawn_argv_job(
         job.clone(),
         argv,
-        Duration::from_secs(300),
+        timeout_for(JobTimeoutClass::ContainerScan),
         |result| {
             match result {
         Ok(output) if output.status.code() == Some(2) => (
@@ -112,7 +112,7 @@ pub(crate) fn kali_remove() -> Result<SecurityActionLaunch, String> {
     spawn_argv_job(
         job.clone(),
         argv,
-        Duration::from_secs(120),
+        timeout_for(JobTimeoutClass::QuickRemove),
         |result| match result {
             Ok(output) if output.status.success() => {
                 ("complete".to_string(), "Kali box removed.".to_string())
@@ -146,6 +146,11 @@ pub(crate) fn kali_enter_terminal() -> Result<String, String> {
 #[tauri::command]
 pub(crate) fn security_job_status(job: String) -> crate::InstallStatus {
     super::job::job_status(job)
+}
+
+#[tauri::command]
+pub(crate) fn security_job_cancel(job: String) -> crate::InstallStatus {
+    super::job::cancel_job(job)
 }
 
 #[derive(Serialize)]
@@ -192,7 +197,7 @@ pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityAction
     spawn_argv_job(
         job.clone(),
         argv,
-        Duration::from_secs(600),
+        timeout_for(JobTimeoutClass::ToolInstall),
         move |result| match result {
             Ok(output) if output.status.success() => {
                 ("complete".to_string(), format!("{name} installed."))
@@ -229,7 +234,7 @@ pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActi
     spawn_argv_job(
         job.clone(),
         argv,
-        Duration::from_secs(120),
+        timeout_for(JobTimeoutClass::QuickRemove),
         move |result| match result {
             Ok(output) if output.status.success() => {
                 ("complete".to_string(), format!("{name} uninstalled."))

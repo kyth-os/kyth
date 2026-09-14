@@ -135,11 +135,38 @@ export async function waitGuardianCheck(job: string): Promise<string> {
   for (let i = 0; i < 180; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await invoke<InstallStatus>("guardian_check_status", { job });
-    if (state.state === "complete") return state.detail;
-    if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
+    if (state.state === "running") continue;
+    return resolveTerminalJob(state);
   }
   throw new Error("Guardian is still running; refresh the page in a moment.");
 }
+
+/** Terminal job-state resolution shared by every poller below: "complete"
+ * returns detail, a user-cancelled job returns a friendly non-error, and
+ * anything else throws so useSectionAction reports the failure. */
+function resolveTerminalJob(state: InstallStatus): string {
+  if (state.state === "complete") return state.detail;
+  if (state.state === "cancelled") return "Cancelled.";
+  throw new Error(state.detail);
+}
+
+/** Cancel a running backend job. Each domain owns a status/cancel command
+ * pair over the same bounded store; cancelling kills the underlying process
+ * (socket-I/O jobs are marked and their late finish is dropped instead). */
+async function cancelBackendJob(command: string, job: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Cancelling is available from the installed Kyth Hub.");
+  const state = await invoke<InstallStatus>(command, { job });
+  return state.state === "cancelled" ? "Cancelled." : state.detail;
+}
+
+export const cancelGuardianCheck = (job: string): Promise<string> => cancelBackendJob("guardian_check_cancel", job);
+export const cancelPrivilegedAction = (job: string): Promise<string> => cancelBackendJob("privileged_action_cancel", job);
+export const cancelHubAction = (job: string): Promise<string> => cancelBackendJob("hub_action_cancel", job);
+export const cancelUpdateJob = (job: string): Promise<string> => cancelBackendJob("update_job_cancel", job);
+export const cancelJob = (job: string): Promise<string> => cancelBackendJob("cancel_job", job);
+export const cancelInstall = (job: string): Promise<string> => cancelBackendJob("install_cancel", job);
+export const cancelSecurityJob = (job: string): Promise<string> => cancelBackendJob("security_job_cancel", job);
+export const cancelGamingJob = (job: string): Promise<string> => cancelBackendJob("gaming_job_cancel", job);
 export async function runGuardianControl(action: string): Promise<string> {
   if (!confirmUserAction(`Change Guardian setting: ${action}?`)) return "Cancelled.";
   const job = guardianJob(await invoke<GuardianActionLaunch>("guardian_control", { action }));
@@ -186,8 +213,8 @@ export async function runPrivilegedAction(operation: string, payload: Privileged
   for (let i = 0; i < 1800; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await invoke<InstallStatus>("privileged_action_status", { job });
-    if (state.state === "complete") return state.detail;
-    if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
+    if (state.state === "running") continue;
+    return resolveTerminalJob(state);
   }
   throw new Error("Privileged operation is still running; check the system status shortly.");
 }
@@ -586,8 +613,8 @@ async function waitJustJob(job: string): Promise<string> {
   for (let i = 0; i < 1800; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await invoke<InstallStatus>("hub_action_status", { job });
-    if (state.state === "complete") return state.detail;
-    if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
+    if (state.state === "running") continue;
+    return resolveTerminalJob(state);
   }
   throw new Error("This action is still running; check the status here again in a moment.");
 }
@@ -604,8 +631,8 @@ async function waitUpdateJob(job: string): Promise<string> {
   for (let i = 0; i < 7200; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await invoke<InstallStatus>("update_job_status", { job });
-    if (state.state === "complete") return state.detail;
-    if (state.state === "failed" || state.state === "unknown") throw new Error(state.detail);
+    if (state.state === "running") continue;
+    return resolveTerminalJob(state);
   }
   throw new Error("The update is still running; refresh the Updates page in a moment.");
 }
@@ -764,8 +791,7 @@ async function waitHubJob(job: string, limit = 7200): Promise<string> {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await invoke<InstallStatus>("job_status", { job }).catch(() => null);
     if (!state || state.state === "running") continue;
-    if (state.state === "complete") return state.detail;
-    throw new Error(state.detail);
+    return resolveTerminalJob(state);
   }
   throw new Error("This action is still running; check back in a moment.");
 }
@@ -895,7 +921,7 @@ export async function fetchDeploymentHistory(): Promise<DeploymentInfo[] | null>
 }
 
 // Recovery status — staged/rollback/quarantined single view (Repair)
-export interface RecoveryStatus { has_staged: boolean; has_rollback: boolean; quarantined_digest: string; quarantine_detail: string; watcher_staged: boolean; clear_quarantine_cmd: string; banner: string; }
+export interface RecoveryStatus { has_staged: boolean; has_rollback: boolean; quarantined_digest: string; quarantine_detail: string; watcher_staged: boolean; clear_quarantine_cmd: string; last_rollback_error: string; banner: string; }
 export async function fetchRecoveryStatus(): Promise<RecoveryStatus | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<RecoveryStatus>("recovery_status"); } catch { return null; }
@@ -1137,7 +1163,7 @@ export async function fetchFamiliarApps(): Promise<FamiliarApp[] | null> {
 
 export interface AppStreamApp { id: string; name: string; summary: string; icon_url: string }
 export interface AppImageEntry { name: string; path: string; executable: boolean }
-export interface InstallStatus { id: string; state: "running" | "complete" | "failed" | "unknown"; detail: string }
+export interface InstallStatus { id: string; state: "running" | "complete" | "failed" | "unknown" | "cancelled"; detail: string }
 export async function searchAppStream(query: string): Promise<AppStreamApp[] | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<AppStreamApp[]>("appstream_search", { query }); } catch { return null; }
@@ -1230,8 +1256,7 @@ async function pollSecurityJob(job: string, maxIterations: number): Promise<stri
     await new Promise((resolve) => window.setTimeout(resolve, 3000));
     const state = await invoke<InstallStatus>("security_job_status", { job }).catch(() => null);
     if (!state || state.state === "running") continue;
-    if (state.state === "complete") return state.detail;
-    throw new Error(state.detail);
+    return resolveTerminalJob(state);
   }
   throw new Error("Still running; check back in a moment.");
 }
@@ -1283,8 +1308,7 @@ async function pollGamingJob(job: string, maxIterations: number): Promise<string
     await new Promise((resolve) => window.setTimeout(resolve, 3000));
     const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
     if (!state || state.state === "running") continue;
-    if (state.state === "complete") return state.detail;
-    throw new Error(state.detail);
+    return resolveTerminalJob(state);
   }
   throw new Error("Still running; check back in a moment.");
 }
@@ -1327,8 +1351,7 @@ export async function setScxScheduler(scheduler: "rusty" | "stop"): Promise<stri
     await new Promise((resolve) => window.setTimeout(resolve, 1500));
     const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
     if (!state || state.state === "running") continue;
-    if (state.state === "complete") return state.detail;
-    throw new Error(state.detail);
+    return resolveTerminalJob(state);
   }
   throw new Error("Still running; check back in a moment.");
 }
@@ -1409,7 +1432,7 @@ export interface ExeHandlerInspection {
   sha256_prefix: string | null;
   auto_bottles: boolean;
 }
-export interface ExeHandlerJob { job: string; state: "running" | "complete" | "failed" | "unknown"; detail: string; }
+export interface ExeHandlerJob { job: string; state: "running" | "complete" | "failed" | "unknown" | "cancelled"; detail: string; }
 
 export async function takePendingExeHandler(): Promise<string | null> {
   if (!inTauriShell()) return null;

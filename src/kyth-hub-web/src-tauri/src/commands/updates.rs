@@ -1,23 +1,24 @@
-use std::collections::HashMap;
 use std::process::Command;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
-static HUB_ACTION_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
-static UPDATE_JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+use kyth_shared::system::jobs::{JobStore, JobTimeoutClass, timeout_for};
+
+static HUB_ACTION_JOBS: OnceLock<JobStore> = OnceLock::new();
+static UPDATE_JOBS: OnceLock<JobStore> = OnceLock::new();
 // The watcher can stage a large image. Keep this longer than its systemd
 // TimeoutStartSec (2400s), otherwise the Hub kills `systemctl start` after
 // five minutes and reports a failure while the watcher is still working.
 const UPDATE_WATCHER_START_TIMEOUT: Duration = Duration::from_secs(2_500);
 
-fn hub_action_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
-    HUB_ACTION_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+fn hub_action_jobs() -> &'static JobStore {
+    HUB_ACTION_JOBS.get_or_init(JobStore::default)
 }
 
-fn update_jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
-    UPDATE_JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+fn update_jobs() -> &'static JobStore {
+    UPDATE_JOBS.get_or_init(JobStore::default)
 }
 
 #[derive(Serialize)]
@@ -218,13 +219,7 @@ fn start_hub_action_job(action: HubAction) -> Result<HubActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    hub_action_jobs()
-        .lock()
-        .map_err(|_| "Hub action job store is unavailable".to_string())?
-        .insert(
-            job.clone(),
-            ("running".into(), format!("Running {recipe}…")),
-        );
+    let cancel = hub_action_jobs().start(&job, format!("Running {recipe}…"));
     let job_for_thread = job.clone();
     let recipe_for_thread = recipe.to_string();
     std::thread::spawn(move || {
@@ -240,8 +235,11 @@ fn start_hub_action_job(action: HubAction) -> Result<HubActionLaunch, String> {
         if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
             command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
         }
-        let result =
-            kyth_shared::system::process::run_bounded_command(command, Duration::from_secs(900));
+        let result = kyth_shared::system::process::run_bounded_command_cancel(
+            command,
+            timeout_for(JobTimeoutClass::HubAction),
+            &cancel,
+        );
         let (state, detail) = match result {
             Ok(output) => {
                 let state = if output.status.success() {
@@ -259,9 +257,7 @@ fn start_hub_action_job(action: HubAction) -> Result<HubActionLaunch, String> {
                 format!("Could not start {recipe_for_thread}: {error}"),
             ),
         };
-        if let Ok(mut store) = hub_action_jobs().lock() {
-            store.insert(job_for_thread, (state, detail));
-        }
+        hub_action_jobs().finish(&job_for_thread, &state, detail);
     });
     Ok(HubActionLaunch {
         job,
@@ -296,13 +292,7 @@ fn start_update_job(
             .unwrap_or_default()
             .as_nanos()
     );
-    update_jobs()
-        .lock()
-        .map_err(|_| "update job store is unavailable".to_string())?
-        .insert(
-            job.clone(),
-            ("running".into(), format!("{operation} is running…")),
-        );
+    let cancel = update_jobs().start(&job, format!("{operation} is running…"));
     let job_for_thread = job.clone();
     let operation_for_thread = operation.to_string();
     std::thread::spawn(move || {
@@ -317,7 +307,9 @@ fn start_update_job(
         if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
             command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
         }
-        let result = kyth_shared::system::process::run_bounded_command(command, timeout);
+        let result = kyth_shared::system::process::run_bounded_command_cancel(
+            command, timeout, &cancel,
+        );
         let (state, detail) = match result {
             Ok(output) => {
                 let mut detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -362,9 +354,7 @@ fn start_update_job(
                 format!("{operation_for_thread} could not complete: {error}"),
             ),
         };
-        if let Ok(mut store) = update_jobs().lock() {
-            store.insert(job_for_thread, (state, detail));
-        }
+        update_jobs().finish(&job_for_thread, &state, detail);
     });
     Ok(UpdateActionLaunch {
         job,
@@ -378,18 +368,33 @@ pub(crate) fn run_hub_action(action: HubAction) -> Result<HubActionLaunch, Strin
     start_hub_action_job(action)
 }
 
-#[tauri::command]
-pub(crate) fn hub_action_status(job: String) -> crate::InstallStatus {
-    let (state, detail) = hub_action_jobs()
-        .lock()
-        .ok()
-        .and_then(|store| store.get(&job).cloned())
-        .unwrap_or(("unknown".into(), "Hub action job not found.".into()));
+fn update_store_status(
+    store: &JobStore,
+    job: String,
+    not_found: &str,
+) -> crate::InstallStatus {
+    let (state, detail) = store.status(&job).unwrap_or((
+        kyth_shared::system::jobs::STATE_UNKNOWN.into(),
+        not_found.into(),
+    ));
     crate::InstallStatus {
         id: job,
         state,
         detail,
     }
+}
+
+#[tauri::command]
+pub(crate) fn hub_action_status(job: String) -> crate::InstallStatus {
+    update_store_status(hub_action_jobs(), job, "Hub action job not found.")
+}
+
+/// Cancel a running Hub action: its recipe process is killed within one
+/// poll tick and the job reads `cancelled` from then on.
+#[tauri::command]
+pub(crate) fn hub_action_cancel(job: String) -> crate::InstallStatus {
+    hub_action_jobs().cancel(&job);
+    update_store_status(hub_action_jobs(), job, "Hub action job not found.")
 }
 
 #[tauri::command]
@@ -403,7 +408,7 @@ pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
             .into_iter()
             .map(String::from)
             .collect(),
-        Duration::from_secs(3600),
+        timeout_for(JobTimeoutClass::LongTransfer),
     )
 }
 
@@ -415,7 +420,7 @@ pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
             .into_iter()
             .map(String::from)
             .collect(),
-        Duration::from_secs(300),
+        timeout_for(JobTimeoutClass::UpdateMutating),
     )
 }
 
@@ -436,7 +441,11 @@ pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, 
         .map(String::from)
         .collect::<Vec<_>>();
     argv.push(operation);
-    start_update_job("Switch channel", argv, Duration::from_secs(300))
+    start_update_job(
+        "Switch channel",
+        argv,
+        timeout_for(JobTimeoutClass::UpdateMutating),
+    )
 }
 
 #[tauri::command]
@@ -450,7 +459,7 @@ pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
             .into_iter()
             .map(String::from)
             .collect(),
-        Duration::from_secs(300),
+        timeout_for(JobTimeoutClass::UpdateMutating),
     )
 }
 
@@ -468,7 +477,7 @@ fn systemd_unit_is(unit: &str, state: &str) -> bool {
         "--quiet".to_string(),
         unit.to_string(),
     ];
-    kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(5))
+    kyth_shared::system::process::run_bounded(&argv, timeout_for(JobTimeoutClass::Probe))
         .map(|output| output.status.success())
         .unwrap_or(false)
 }
@@ -505,7 +514,7 @@ pub(crate) fn set_update_watcher_enabled(enabled: bool) -> Result<UpdateActionLa
         .into_iter()
         .map(String::from)
         .collect(),
-        Duration::from_secs(300),
+        timeout_for(JobTimeoutClass::UpdateMutating),
     )
 }
 
@@ -541,22 +550,21 @@ pub(crate) fn defer_update_watcher() -> Result<UpdateActionLaunch, String> {
         .into_iter()
         .map(String::from)
         .collect(),
-        Duration::from_secs(300),
+        timeout_for(JobTimeoutClass::UpdateMutating),
     )
 }
 
 #[tauri::command]
 pub(crate) fn update_job_status(job: String) -> crate::InstallStatus {
-    let (state, detail) = update_jobs()
-        .lock()
-        .ok()
-        .and_then(|store| store.get(&job).cloned())
-        .unwrap_or(("unknown".into(), "Update job not found.".into()));
-    crate::InstallStatus {
-        id: job,
-        state,
-        detail,
-    }
+    update_store_status(update_jobs(), job, "Update job not found.")
+}
+
+/// Cancel a running update job: its process is killed within one poll tick
+/// and the job reads `cancelled` from then on.
+#[tauri::command]
+pub(crate) fn update_job_cancel(job: String) -> crate::InstallStatus {
+    update_jobs().cancel(&job);
+    update_store_status(update_jobs(), job, "Update job not found.")
 }
 
 #[tauri::command]

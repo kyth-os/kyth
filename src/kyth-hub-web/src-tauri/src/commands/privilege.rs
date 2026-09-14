@@ -1,15 +1,16 @@
-use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixStream;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-static JOBS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
+use kyth_shared::system::jobs::JobStore;
 
-fn jobs() -> &'static Mutex<HashMap<String, (String, String)>> {
-    JOBS.get_or_init(|| Mutex::new(HashMap::new()))
+static JOBS: OnceLock<JobStore> = OnceLock::new();
+
+fn jobs() -> &'static JobStore {
+    JOBS.get_or_init(JobStore::default)
 }
 
 /// Typed frontend payload for the allowlisted privileged operations. Fields
@@ -233,13 +234,10 @@ pub(crate) fn privileged_action(
             .unwrap_or_default()
             .as_nanos()
     );
-    jobs()
-        .lock()
-        .map_err(|_| "privileged job store is unavailable".to_string())?
-        .insert(
-            job.clone(),
-            ("running".into(), format!("Running {operation}…")),
-        );
+    // The privileged worker only does socket I/O against the root-owned
+    // service, so there is no child to kill: cancelling marks the job and
+    // its late finish becomes a no-op.
+    jobs().start(&job, format!("Running {operation}…"));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let result = send_request(request);
@@ -247,9 +245,7 @@ pub(crate) fn privileged_action(
             Ok(detail) => ("complete", detail),
             Err(detail) => ("failed", detail),
         };
-        if let Ok(mut store) = jobs().lock() {
-            store.insert(job_for_thread, (state.into(), detail));
-        }
+        jobs().finish(&job_for_thread, state, detail);
     });
     Ok(PrivilegedActionLaunch {
         job,
@@ -330,15 +326,25 @@ pub(crate) fn flatpak_update() -> Result<String, String> {
 #[tauri::command]
 pub(crate) fn privileged_action_status(job: String) -> crate::InstallStatus {
     let (state, detail) = jobs()
-        .lock()
-        .ok()
-        .and_then(|store| store.get(&job).cloned())
-        .unwrap_or(("unknown".into(), "Privileged job not found.".into()));
+        .status(&job)
+        .unwrap_or((
+            kyth_shared::system::jobs::STATE_UNKNOWN.into(),
+            "Privileged job not found.".into(),
+        ));
     crate::InstallStatus {
         id: job,
         state,
         detail,
     }
+}
+
+/// Dismiss a running privileged job. The in-flight socket request still
+/// completes against the root service, but its result no longer updates UI
+/// state once cancelled.
+#[tauri::command]
+pub(crate) fn privileged_action_cancel(job: String) -> crate::InstallStatus {
+    jobs().cancel(&job);
+    privileged_action_status(job)
 }
 
 #[cfg(test)]

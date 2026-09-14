@@ -1,9 +1,11 @@
-//! Read-only port of `kyth_shared.boot_health`.
-//!
-//! The Python module remains authoritative for state transitions, atomic
-//! writes, and rollback execution.  This module owns the small read/policy
-//! surface Rust consumers need: decoding the on-disk state, finding the
-//! newest quarantine, and evaluating image rollout rings.
+//! Native owner of `kyth_shared.boot_health` state transitions alongside the
+//! `kyth-boot-health` binary, which owns atomic writes and rollback
+//! execution at runtime. The Python module keeps a transition-compatible
+//! implementation for offline tooling and tests; the two must stay
+//! field-for-field aligned (see the `failures_by_digest` parity tests).
+//! This module owns the read/policy surface Rust consumers need: decoding
+//! the on-disk state, finding the newest quarantine, recording failures,
+//! and evaluating image rollout rings.
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -39,6 +41,12 @@ pub struct BootHealthState {
     pub rollout_ring: String,
     pub updated_at: i64,
     pub quarantined: HashMap<String, QuarantineRecord>,
+    /// Cumulative failure counts below the quarantine threshold, keyed by
+    /// digest. Mirrors Python's `failures_by_digest`: the top-level
+    /// `failures` streak resets when the digest changes, but these totals
+    /// survive interleaved boots so alternating bad deployments still
+    /// quarantine at the threshold.
+    pub failures_by_digest: HashMap<String, i64>,
     pub rollback_attempted_for: String,
     pub last_rollback_error: String,
     pub last_rollback_at: i64,
@@ -59,6 +67,7 @@ impl Default for BootHealthState {
             rollout_ring: "follow-image".into(),
             updated_at: 0,
             quarantined: HashMap::new(),
+            failures_by_digest: HashMap::new(),
             rollback_attempted_for: String::new(),
             last_rollback_error: String::new(),
             last_rollback_at: 0,
@@ -88,6 +97,11 @@ impl BootHealthState {
                     "quarantined key {digest} != record.digest {}",
                     record.digest
                 ));
+            }
+        }
+        for (digest, count) in &self.failures_by_digest {
+            if *count < 0 {
+                errors.push(format!("failures_by_digest {digest} invalid count {count}"));
             }
         }
         errors
@@ -155,6 +169,9 @@ pub fn state_from_json(text: &str) -> BootHealthState {
         return BootHealthState::default();
     };
     state.quarantined = quarantined;
+    // Drop corrupt tallies the way Python's from_dict does; a negative
+    // count must never satisfy a threshold comparison.
+    state.failures_by_digest.retain(|_, count| *count >= 0);
     state
 }
 
@@ -206,12 +223,22 @@ pub fn record_failure(
 ) -> BootHealthState {
     let same_deployment = state.current_digest == digest;
     let mut failures = if same_deployment { state.failures } else { 0 };
-    if !(same_deployment && state.last_failure_boot_id == boot_id) {
+    let count_this_boot = !(same_deployment && state.last_failure_boot_id == boot_id);
+    if count_this_boot {
         failures += 1;
     }
 
+    // Per-digest totals survive interleaved boots; the `failures` streak
+    // above still resets on digest change for display.
+    let mut failures_by_digest = state.failures_by_digest.clone();
+    let digest_failures =
+        failures_by_digest.get(digest).copied().unwrap_or(0) + i64::from(count_this_boot);
+    if count_this_boot {
+        failures_by_digest.insert(digest.into(), digest_failures);
+    }
+
     let mut quarantined = state.quarantined.clone();
-    if failures >= threshold {
+    if digest_failures >= threshold {
         let first_failed_at = quarantined
             .get(digest)
             .map_or(now, |record| record.first_failed_at);
@@ -219,7 +246,7 @@ pub fn record_failure(
             digest.into(),
             QuarantineRecord {
                 digest: digest.into(),
-                failures,
+                failures: digest_failures,
                 reason: reason.into(),
                 first_failed_at,
                 last_failed_at: now,
@@ -251,6 +278,7 @@ pub fn record_failure(
         rollout_ring: state.rollout_ring.clone(),
         updated_at: now,
         quarantined,
+        failures_by_digest,
         rollback_attempted_for: state.rollback_attempted_for.clone(),
         last_rollback_error: state.last_rollback_error.clone(),
         last_rollback_at: state.last_rollback_at,
@@ -261,6 +289,9 @@ pub fn record_failure(
 pub fn mark_healthy(state: &BootHealthState, digest: &str, now: i64) -> BootHealthState {
     let mut quarantined = state.quarantined.clone();
     quarantined.remove(digest);
+    // A healthy boot forgives the digest: its sub-threshold tally resets.
+    let mut failures_by_digest = state.failures_by_digest.clone();
+    failures_by_digest.remove(digest);
     let recovered_digest = if state.current_digest != digest
         && state.quarantined.contains_key(&state.current_digest)
     {
@@ -302,6 +333,7 @@ pub fn mark_healthy(state: &BootHealthState, digest: &str, now: i64) -> BootHeal
         rollout_ring: state.rollout_ring.clone(),
         updated_at: now,
         quarantined,
+        failures_by_digest,
         rollback_attempted_for: state.rollback_attempted_for.clone(),
         last_rollback_error: state.last_rollback_error.clone(),
         last_rollback_at: state.last_rollback_at,
@@ -327,6 +359,9 @@ pub fn note_rollback_attempted(
 pub fn clear_quarantine(state: &BootHealthState, digest: &str, now: i64) -> BootHealthState {
     let mut updated = state.clone();
     updated.quarantined.remove(digest);
+    // An explicit admin un-quarantine resets the tally so the next failure
+    // starts from zero rather than instantly re-quarantining.
+    updated.failures_by_digest.remove(digest);
     if updated.current_digest == digest && updated.status == "quarantined" {
         updated.status = "unhealthy".into();
     }
@@ -395,6 +430,15 @@ mod tests {
     }
 
     #[test]
+    fn reads_python_written_tallies_and_drops_negative_ones() {
+        let text = r#"{"schema_version":1,"status":"unhealthy","current_digest":"sha256:a","failures":1,"last_failure_boot_id":"boot-1","failures_by_digest":{"sha256:a":1,"sha256:b":-2}}"#;
+        let state = state_from_json(text);
+        assert_eq!(state.failures_by_digest.get("sha256:a"), Some(&1));
+        assert!(!state.failures_by_digest.contains_key("sha256:b"));
+        assert!(state.invariants().is_empty());
+    }
+
+    #[test]
     fn invalid_schema_and_file_are_empty() {
         assert_eq!(
             state_from_json(r#"{"schema_version": 2}"#),
@@ -447,6 +491,59 @@ mod tests {
         let cleared = clear_quarantine(&recovered, first, 6);
         assert_eq!(cleared.status, "recovered");
         assert!(!cleared.quarantined.contains_key(first));
+    }
+
+    #[test]
+    fn alternating_digests_quarantine_each_at_threshold() {
+        let (first, second) = ("sha256:first", "sha256:second");
+        let mut state = BootHealthState::default();
+        for round in 0..3 {
+            for (digest, boot) in [
+                (first, format!("a-{round}")),
+                (second, format!("b-{round}")),
+            ] {
+                state = record_failure(&state, digest, &boot, "failed", 3, round);
+            }
+        }
+        assert!(state.quarantined.contains_key(first));
+        assert!(state.quarantined.contains_key(second));
+        assert_eq!(state.quarantined[first].failures, 3);
+        assert_eq!(state.quarantined[second].failures, 3);
+    }
+
+    #[test]
+    fn failure_and_recovery_preserve_rollback_history() {
+        let digest = "sha256:aaa";
+        let mut state = BootHealthState::default();
+        state = note_rollback_attempted(&state, digest, Some("exit 1"), 10);
+        state = record_failure(&state, "sha256:other", "boot-1", "failed", 3, 11);
+        assert_eq!(state.rollback_attempted_for, digest);
+        assert_eq!(state.last_rollback_error, "exit 1");
+        assert_eq!(state.last_rollback_at, 10);
+        let recovered = mark_healthy(&state, "sha256:other", 12);
+        assert_eq!(recovered.rollback_attempted_for, digest);
+        assert_eq!(recovered.last_rollback_error, "exit 1");
+        assert_eq!(recovered.last_rollback_at, 10);
+    }
+
+    #[test]
+    fn healthy_and_clear_forgive_digest_tally() {
+        let digest = "sha256:aaa";
+        let mut state = BootHealthState::default();
+        for (index, boot) in ["boot-1", "boot-2"].into_iter().enumerate() {
+            state = record_failure(&state, digest, boot, "failed", 3, index as i64);
+        }
+        let forgiven = mark_healthy(&state, digest, 3);
+        assert!(!forgiven.failures_by_digest.contains_key(digest));
+
+        let mut state = BootHealthState::default();
+        for (index, boot) in ["boot-1", "boot-2", "boot-3"].into_iter().enumerate() {
+            state = record_failure(&state, digest, boot, "failed", 3, index as i64);
+        }
+        assert!(state.quarantined.contains_key(digest));
+        let cleared = clear_quarantine(&state, digest, 4);
+        assert!(!cleared.failures_by_digest.contains_key(digest));
+        assert!(cleared.invariants().is_empty());
     }
 
     #[test]

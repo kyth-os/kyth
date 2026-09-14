@@ -56,6 +56,7 @@ export function RepairSection({ section }: { section: HubSection }) {
       const state = await fetchInstallStatus(job);
       if (!state || state.state === "running") continue;
       if (state.state === "complete") return "Pika Backup installed.";
+      if (state.state === "cancelled") return "Cancelled.";
       throw new Error(state.detail);
     }
     throw new Error("Pika Backup is still installing; check Apps for progress.");
@@ -125,6 +126,9 @@ export function RepairSection({ section }: { section: HubSection }) {
 
           {recovery?.quarantine_detail && (
             <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>{recovery.quarantine_detail}</p>
+          )}
+          {recovery?.last_rollback_error && (
+            <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Automatic rollback did not complete: {recovery.last_rollback_error}</p>
           )}
           {btrfs?.detail && <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>{btrfs.detail}</p>}
           {memory?.detail && <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>{memory.detail}</p>}

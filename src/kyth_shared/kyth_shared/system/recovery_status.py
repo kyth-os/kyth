@@ -34,6 +34,8 @@ class RecoveryStatus:
     watcher_staged: bool = False
     # Ready-to-paste retry for Hub banner
     clear_quarantine_cmd: str = ""
+    # Why the machine is still on the broken digest after a rollback attempt.
+    last_rollback_error: str = ""
 
 
 # S2: truth table central — staged × rollback × quarantined → banner/retry
@@ -73,8 +75,10 @@ def get_recovery_status() -> RecoveryStatus:
     quarantined = ""
     detail = ""
     clear_cmd = ""
+    rollback_error = ""
     try:
         state = read_boot_health()
+        rollback_error = state.last_rollback_error
         # surface the most recent quarantined digest if any
         if state.quarantined:
             # pick newest by last_failed_at
@@ -101,4 +105,5 @@ def get_recovery_status() -> RecoveryStatus:
         quarantine_detail=detail,
         watcher_staged=watcher_staged,
         clear_quarantine_cmd=clear_cmd,
+        last_rollback_error=rollback_error,
     )

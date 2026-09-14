@@ -16,6 +16,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
 use std::sync::{Mutex, OnceLock};
 
+use kyth_shared::system::jobs::{JobStore, JobTimeoutClass, timeout_for};
+
 use serde::{Deserialize, Serialize};
 use tauri::{Emitter, Manager};
 
@@ -32,13 +34,16 @@ struct PendingPage(Mutex<Option<String>>);
 /// deep links so a filename can never be interpreted as a Hub route.
 struct PendingExeHandler(Mutex<Option<String>>);
 
-static APP_INSTALLS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
-fn app_installs() -> &'static Mutex<HashMap<String, (String, String)>> {
-    APP_INSTALLS.get_or_init(|| Mutex::new(HashMap::new()))
+/// Bounded job stores (cap + TTL eviction + cancellation); see
+/// `kyth_shared::system::jobs` for the contract that replaced the previous
+/// grow-forever `HashMap` stores.
+static APP_INSTALLS: OnceLock<JobStore> = OnceLock::new();
+fn app_installs() -> &'static JobStore {
+    APP_INSTALLS.get_or_init(JobStore::default)
 }
-static GUARDIAN_CHECKS: OnceLock<Mutex<HashMap<String, (String, String)>>> = OnceLock::new();
-fn guardian_checks() -> &'static Mutex<HashMap<String, (String, String)>> {
-    GUARDIAN_CHECKS.get_or_init(|| Mutex::new(HashMap::new()))
+static GUARDIAN_CHECKS: OnceLock<JobStore> = OnceLock::new();
+fn guardian_checks() -> &'static JobStore {
+    GUARDIAN_CHECKS.get_or_init(JobStore::default)
 }
 
 static FOCUS_SESSIONS: OnceLock<Mutex<HashMap<String, Child>>> = OnceLock::new();
@@ -147,10 +152,7 @@ fn guardian_check(investigate: bool) -> Result<GuardianActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    guardian_checks().lock().unwrap().insert(
-        job.clone(),
-        ("running".into(), "Guardian check is running…".into()),
-    );
+    guardian_checks().start(&job, "Guardian check is running…".into());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let action = if investigate { "investigate" } else { "check" };
@@ -162,10 +164,7 @@ fn guardian_check(investigate: bool) -> Result<GuardianActionLaunch, String> {
             Ok(output) => ("failed", commands::process::bounded_text(&output.stderr)),
             Err(error) => ("failed", format!("Could not start Guardian: {error}")),
         };
-        guardian_checks()
-            .lock()
-            .unwrap()
-            .insert(job_for_thread, (state.into(), detail));
+        guardian_checks().finish(&job_for_thread, state, detail);
     });
     Ok(GuardianActionLaunch {
         job,
@@ -176,17 +175,23 @@ fn guardian_check(investigate: bool) -> Result<GuardianActionLaunch, String> {
 
 #[tauri::command]
 fn guardian_check_status(job: String) -> InstallStatus {
-    let (state, detail) = guardian_checks()
-        .lock()
-        .unwrap()
-        .get(&job)
-        .cloned()
-        .unwrap_or(("unknown".into(), "Guardian job not found.".into()));
+    let (state, detail) = guardian_checks().status(&job).unwrap_or((
+        kyth_shared::system::jobs::STATE_UNKNOWN.into(),
+        "Guardian job not found.".into(),
+    ));
     InstallStatus {
         id: job,
         state,
         detail,
     }
+}
+
+/// Cancel a running Guardian check. The helper itself is already
+/// time-bounded; cancelling stops the UI from tracking it further.
+#[tauri::command]
+fn guardian_check_cancel(job: String) -> InstallStatus {
+    guardian_checks().cancel(&job);
+    guardian_check_status(job)
 }
 
 #[tauri::command]
@@ -205,10 +210,7 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    guardian_checks().lock().unwrap().insert(
-        job.clone(),
-        ("running".into(), format!("Running Guardian {action}…")),
-    );
+    guardian_checks().start(&job, format!("Running Guardian {action}…"));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let result = commands::process::output("/usr/bin/kyth-guardian", args);
@@ -219,16 +221,14 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
             Ok(output) => ("failed", commands::process::bounded_text(&output.stderr)),
             Err(error) => ("failed", format!("Could not start Guardian: {error}")),
         };
-        guardian_checks().lock().unwrap().insert(
-            job_for_thread,
-            (
-                state.into(),
-                if detail.is_empty() {
-                    "Guardian control complete.".into()
-                } else {
-                    detail
-                },
-            ),
+        guardian_checks().finish(
+            &job_for_thread,
+            state,
+            if detail.is_empty() {
+                "Guardian control complete.".into()
+            } else {
+                detail
+            },
         );
     });
     Ok(GuardianActionLaunch {
@@ -602,7 +602,7 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
     commands::job::spawn_argv_job(
         job.clone(),
         argv,
-        std::time::Duration::from_secs(3600),
+        timeout_for(JobTimeoutClass::LongTransfer),
         move |result| match result {
             Ok(output) if output.status.success() => (
                 "complete".to_string(),
@@ -793,7 +793,7 @@ fn convert_pst(path: String) -> Result<String, String> {
     commands::job::spawn_argv_job(
         job.clone(),
         argv,
-        std::time::Duration::from_secs(1800),
+        timeout_for(JobTimeoutClass::ExtendedWork),
         |result| match result {
             Ok(output) if output.status.success() => (
                 "complete".to_string(),
@@ -834,10 +834,19 @@ fn focus_start(minutes: u32) -> Result<String, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    focus_sessions()
+    let mut sessions = focus_sessions()
         .lock()
-        .map_err(|_| "focus session store is unavailable".to_string())?
-        .insert(id.clone(), child);
+        .map_err(|_| "focus session store is unavailable".to_string())?;
+    // Reap sessions whose `sleep` already exited without a focus_stop call:
+    // otherwise every unstopped session leaks a map entry (and an unwaited
+    // child) for the life of the Hub process.
+    sessions.retain(|_, existing| {
+        existing
+            .try_wait()
+            .map(|status| status.is_none())
+            .unwrap_or(false)
+    });
+    sessions.insert(id.clone(), child);
     Ok(id)
 }
 
@@ -1087,36 +1096,36 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             .as_nanos()
     );
     let pending_detail = format!("Uninstalling {app_id}…");
-    app_installs()
-        .lock()
-        .unwrap()
-        .insert(job.clone(), ("running".into(), pending_detail.clone()));
+    let cancel = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let result: Result<(bool, String), String> = if scope == "system" {
             privileged_flatpak_uninstall(&app_id).map(|detail| (true, detail))
         } else {
-            std::process::Command::new("flatpak")
-                .args(["uninstall", "--user", "-y", &app_id])
-                .output()
-                .map(|output| {
-                    if output.status.success() {
-                        (true, format!("Uninstalled {app_id}."))
-                    } else {
-                        (false, commands::process::bounded_text(&output.stderr))
-                    }
-                })
-                .map_err(|err| err.to_string())
+            // A stalled mirror must surface as a timeout, not a forever
+            // "running" job: bound like every other Hub recipe action.
+            let mut command = std::process::Command::new("flatpak");
+            command.args(["uninstall", "--user", "-y", &app_id]);
+            kyth_shared::system::process::run_bounded_command_cancel(
+                command,
+                timeout_for(JobTimeoutClass::HubAction),
+                &cancel,
+            )
+            .map(|output| {
+                if output.status.success() {
+                    (true, format!("Uninstalled {app_id}."))
+                } else {
+                    (false, commands::process::bounded_text(&output.stderr))
+                }
+            })
+            .map_err(|err| err.to_string())
         };
         let (state, detail) = match result {
             Ok((true, detail)) => ("complete", detail),
             Ok((false, detail)) => ("failed", detail),
             Err(err) => ("failed", format!("Could not uninstall Flatpak: {err}")),
         };
-        app_installs()
-            .lock()
-            .unwrap()
-            .insert(job_for_thread, (state.into(), detail));
+        app_installs().finish(&job_for_thread, state, detail);
     });
     Ok(InstallActionLaunch {
         job,
@@ -1179,21 +1188,18 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
             .as_nanos()
     );
     let pending_detail = "Updating your apps…".to_string();
-    app_installs()
-        .lock()
-        .unwrap()
-        .insert(job.clone(), ("running".into(), pending_detail.clone()));
+    let cancel = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let mut user_command = std::process::Command::new("flatpak");
         user_command.args(["update", "--user", "-y"]);
-        // Unbounded flatpak calls can hang on a stalled mirror; bound it to
-        // the same 900s the privileged daemon allows its own flatpak update
-        // (kyth-shared-rs/src/privileged.rs OPERATION_TIMEOUT) so a hang here
-        // surfaces as a timeout instead of leaving the job "running" forever.
-        let user_result = match kyth_shared::system::process::run_bounded_command(
+        // A stalled mirror must surface as a timeout, not a forever
+        // "running" job; the tier matches the privileged daemon's own
+        // flatpak bound (kyth-shared-rs/src/privileged.rs OPERATION_TIMEOUT).
+        let user_result = match kyth_shared::system::process::run_bounded_command_cancel(
             user_command,
-            std::time::Duration::from_secs(900),
+            timeout_for(JobTimeoutClass::HubAction),
+            &cancel,
         ) {
             Ok(output) if output.status.success() => Ok(()),
             Ok(output) => Err(commands::process::bounded_text(&output.stderr)),
@@ -1218,10 +1224,7 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
                 format!("Your apps could not be updated: {user_error}; system-wide updates: {system_error}"),
             ),
         };
-        app_installs()
-            .lock()
-            .unwrap()
-            .insert(job_for_thread, (state.into(), detail));
+        app_installs().finish(&job_for_thread, state, detail);
     });
     Ok(InstallActionLaunch {
         job,
@@ -1241,15 +1244,18 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             .as_nanos()
     );
     let pending_detail = format!("Installing {app_id}…");
-    app_installs()
-        .lock()
-        .unwrap()
-        .insert(job.clone(), ("running".into(), pending_detail.clone()));
+    let cancel = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
-        let result = std::process::Command::new("flatpak")
-            .args(["install", "--user", "-y", "flathub", &app_id])
-            .output();
+        // Unbounded `.output()` hangs on a stalled mirror with no way to
+        // cancel; run bounded and cancellable like the other install paths.
+        let mut command = std::process::Command::new("flatpak");
+        command.args(["install", "--user", "-y", "flathub", &app_id]);
+        let result = kyth_shared::system::process::run_bounded_command_cancel(
+            command,
+            timeout_for(JobTimeoutClass::HubAction),
+            &cancel,
+        );
         let (state, detail) = match result {
             Ok(output) if output.status.success() => {
                 ("complete", "Installation complete.".to_string())
@@ -1257,10 +1263,7 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             Ok(output) => ("failed", commands::process::bounded_text(&output.stderr)),
             Err(err) => ("failed", format!("Could not start Flatpak: {err}")),
         };
-        app_installs()
-            .lock()
-            .unwrap()
-            .insert(job_for_thread, (state.into(), detail));
+        app_installs().finish(&job_for_thread, state, detail);
     });
     Ok(InstallActionLaunch {
         job,
@@ -1271,17 +1274,23 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
 
 #[tauri::command]
 fn install_status(job: String) -> InstallStatus {
-    let (state, detail) = app_installs()
-        .lock()
-        .unwrap()
-        .get(&job)
-        .cloned()
-        .unwrap_or(("unknown".into(), "Installation job not found.".into()));
+    let (state, detail) = app_installs().status(&job).unwrap_or((
+        kyth_shared::system::jobs::STATE_UNKNOWN.into(),
+        "Installation job not found.".into(),
+    ));
     InstallStatus {
         id: job,
         state,
         detail,
     }
+}
+
+/// Cancel a running install job: its process is killed within one poll tick
+/// and the job reads `cancelled` from then on.
+#[tauri::command]
+fn install_cancel(job: String) -> InstallStatus {
+    app_installs().cancel(&job);
+    install_status(job)
 }
 
 #[tauri::command]
@@ -1648,10 +1657,9 @@ fn exe_handler_start_bottles(
             .as_nanos()
     );
     let pending_detail = "Preparing an isolated Bottles environment…".to_string();
-    app_installs()
-        .lock()
-        .unwrap()
-        .insert(job.clone(), ("running".into(), pending_detail.clone()));
+    // launch_in_bottles is a library call, not a child process: cancelling
+    // marks the job and its late finish becomes a no-op.
+    app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let home = std::env::var_os("HOME")
@@ -1665,10 +1673,7 @@ fn exe_handler_start_bottles(
                 ),
                 Err(error) => ("failed", error.message),
             };
-        app_installs()
-            .lock()
-            .unwrap()
-            .insert(job_for_thread, (state.into(), detail));
+        app_installs().finish(&job_for_thread, state, detail);
     });
     Ok(InstallActionLaunch {
         job,
@@ -1761,9 +1766,11 @@ fn main() {
             guardian_snapshot,
             guardian_check,
             guardian_check_status,
+            guardian_check_cancel,
             guardian_control,
             commands::privilege::privileged_action,
             commands::privilege::privileged_action_status,
+            commands::privilege::privileged_action_cancel,
             acceptance_record,
             acceptance_mode,
             acceptance_degraded_dashboard,
@@ -1783,6 +1790,7 @@ fn main() {
             install_flatpak,
             update_flatpaks,
             install_status,
+            install_cancel,
             protondb_lookup_many,
             anti_cheat_table,
             compatibility_games,
@@ -1797,6 +1805,7 @@ fn main() {
             commands::updates::just_list,
             commands::updates::run_hub_action,
             commands::updates::hub_action_status,
+            commands::updates::hub_action_cancel,
             commands::updates::bootc_upgrade,
             commands::updates::bootc_rollback,
             commands::updates::bootc_switch_branch,
@@ -1864,6 +1873,7 @@ fn main() {
             commands::security::kali_remove,
             commands::security::kali_enter_terminal,
             commands::security::security_job_status,
+            commands::security::security_job_cancel,
             commands::security::sec_host_tools,
             commands::security::sec_host_tool_install,
             commands::security::sec_host_tool_uninstall,
@@ -1873,6 +1883,7 @@ fn main() {
             commands::gaming::gaming_tool_uninstall,
             commands::gaming::gaming_tool_launch,
             commands::gaming::gaming_job_status,
+            commands::gaming::gaming_job_cancel,
             commands::gaming::fix_discord_screenshare,
             commands::gaming::fix_obs_pipewire,
             commands::gaming::open_game_folder,
@@ -1883,12 +1894,14 @@ fn main() {
             commands::gaming::save_per_game_profile,
             commands::updates::apply_staged,
             commands::updates::update_job_status,
+            commands::updates::update_job_cancel,
             commands::updates::update_health,
             commands::updates::update_watcher_status,
             commands::updates::set_update_watcher_enabled,
             commands::updates::check_for_updates_now,
             commands::updates::defer_update_watcher,
             commands::job::job_status,
+            commands::job::cancel_job,
             open_m365_app,
             create_m365_shortcuts,
             pst_files,

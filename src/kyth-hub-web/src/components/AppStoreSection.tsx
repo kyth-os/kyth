@@ -107,7 +107,7 @@ export function AppStoreSection({ section }: { section: HubSection }) {
     if (nextSnapshot) setSnapshot(nextSnapshot);
     if (nextInstalled) setInstalled(nextInstalled);
   }
-  async function install(id: string): Promise<string> { const job = await installFlatpak(id); for (let i = 0; i < 60; i += 1) { await new Promise((resolve) => window.setTimeout(resolve, 500)); const state = await fetchInstallStatus(job); if (!state || state.state === "running") continue; if (state.state === "complete") return state.detail; throw new Error(state.detail); } throw new Error("Installation is still running; refresh Apps in a moment."); }
+  async function install(id: string): Promise<string> { const job = await installFlatpak(id); for (let i = 0; i < 60; i += 1) { await new Promise((resolve) => window.setTimeout(resolve, 500)); const state = await fetchInstallStatus(job); if (!state || state.state === "running") continue; if (state.state === "complete") return state.detail; if (state.state === "cancelled") return "Cancelled."; throw new Error(state.detail); } throw new Error("Installation is still running; refresh Apps in a moment."); }
   async function installPack(pack: StarterPack): Promise<string> { for (const app of pack.apps) await install(app.id); await refreshInstalled(); return `${pack.name} apps installed.`; }
   async function installAndRefresh(id: string): Promise<string> { const result = await install(id); await refreshInstalled(); return result; }
 

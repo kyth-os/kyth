@@ -78,6 +78,7 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
       const state = await fetchInstallStatus(job);
       if (!state || state.state === "running") continue;
       if (state.state === "complete") { setInstalled((current) => [...new Set([...current, id])]); return `${name} installed.`; }
+      if (state.state === "cancelled") return "Cancelled.";
       throw new Error(state.detail);
     }
     throw new Error(`${name} is still installing; refresh Apps in a moment.`);

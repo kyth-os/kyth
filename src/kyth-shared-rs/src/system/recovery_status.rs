@@ -8,6 +8,11 @@ pub struct RecoveryStatus {
     pub quarantine_detail: String,
     pub watcher_staged: bool,
     pub clear_quarantine_cmd: String,
+    /// A failed automatic rollback's stderr/exit, so the Repair page can say
+    /// *why* the machine is still on the broken digest instead of only that a
+    /// rollback was attempted. Empty when the last attempt succeeded or none
+    /// has run.
+    pub last_rollback_error: String,
 }
 
 pub fn recovery_banner(s: &RecoveryStatus) -> String {
@@ -74,6 +79,7 @@ pub fn get_recovery_status() -> RecoveryStatus {
         quarantine_detail: detail,
         watcher_staged: has_staged,
         clear_quarantine_cmd: clear_cmd,
+        last_rollback_error: state.last_rollback_error.clone(),
     }
 }
 
@@ -89,6 +95,7 @@ mod tests {
             quarantine_detail: String::new(),
             watcher_staged: true,
             clear_quarantine_cmd: String::new(),
+            last_rollback_error: String::new(),
         };
         assert_eq!(recovery_banner(&s), "reboot to apply staged");
     }
@@ -101,6 +108,7 @@ mod tests {
             quarantine_detail: String::new(),
             watcher_staged: false,
             clear_quarantine_cmd: String::new(),
+            last_rollback_error: String::new(),
         };
         assert_eq!(recovery_banner(&s), "quarantined — clear-quarantine retry");
     }

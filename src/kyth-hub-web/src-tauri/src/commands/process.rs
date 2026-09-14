@@ -1,5 +1,4 @@
 use std::process::Output;
-use std::time::Duration;
 
 /// Common error type for helper-process launches from Tauri commands.
 #[derive(Debug)]
@@ -24,7 +23,12 @@ pub(crate) fn output(program: &str, args: &[&str]) -> Result<Output, CommandErro
     let argv = std::iter::once(program.to_string())
         .chain(args.iter().map(|arg| (*arg).to_string()))
         .collect::<Vec<_>>();
-    kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(900)).map_err(|error| {
+    // Single-sourced with every other Hub recipe action so a tier change
+    // cannot leave this helper behind on its own magic number.
+    let bound = kyth_shared::system::jobs::timeout_for(
+        kyth_shared::system::jobs::JobTimeoutClass::HubAction,
+    );
+    kyth_shared::system::process::run_bounded(&argv, bound).map_err(|error| {
         if error.kind() == std::io::ErrorKind::NotFound {
             CommandError::Spawn(error)
         } else {

@@ -14,6 +14,11 @@ use crate::InstallStatus;
 
 static JOBS: OnceLock<Mutex<HashMap<String, Arc<VpnRuntime>>>> = OnceLock::new();
 
+/// Upper bound on tracked VPN runtimes. Connects are rare user actions, so
+/// this cap is generous headroom, not a tight budget: it only stops an
+/// unbounded accumulate-across-the-process-lifetime leak.
+const MAX_VPN_JOBS: usize = 16;
+
 fn jobs() -> &'static Mutex<HashMap<String, Arc<VpnRuntime>>> {
     JOBS.get_or_init(|| Mutex::new(HashMap::new()))
 }
@@ -469,10 +474,36 @@ pub(crate) fn vpn_connect(
         username,
         interface: Mutex::new("portal".into()),
     });
-    jobs()
-        .lock()
-        .map_err(|_| "VPN job store is unavailable".to_string())?
-        .insert(job.clone(), runtime.clone());
+    {
+        let mut store = jobs()
+            .lock()
+            .map_err(|_| "VPN job store is unavailable".to_string())?;
+        // Disconnect keeps its final status for the UI poller, so entries
+        // are only reaped here: past this cap, drop runtimes that already
+        // reached a terminal state. Live connections are never evicted.
+        if store.len() >= MAX_VPN_JOBS {
+            let reaped: Vec<String> = store
+                .iter()
+                .filter_map(|(id, runtime)| {
+                    runtime
+                        .status
+                        .lock()
+                        .ok()
+                        .filter(|guard| {
+                            matches!(
+                                guard.0.as_str(),
+                                "failed" | "disconnected" | "complete"
+                            )
+                        })
+                        .map(|_| id.clone())
+                })
+                .collect();
+            for id in reaped {
+                store.remove(&id);
+            }
+        }
+        store.insert(job.clone(), runtime.clone());
+    }
     start_process(runtime, app, job.clone(), command);
     Ok(job)
 }

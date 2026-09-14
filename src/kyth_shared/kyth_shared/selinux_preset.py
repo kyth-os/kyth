@@ -38,7 +38,10 @@ def save_selinux(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p=selinux_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     lines=["# Kyth SELinux preset, offline\n"]
-    lines.append(f'permissive = {cfg.get("permissive",[])}')
+    # TOML strings require double quotes: the old f-string rendered the
+    # Python repr (single quotes), which tomllib refuses to parse back.
+    permissive=", ".join(f'"{x}"' for x in cfg.get("permissive", []))
+    lines.append(f"permissive = [{permissive}]")
     lines.append("[booleans]")
     for k,v in cfg.get("booleans", {}).items():
         lines.append(f'{k} = {str(bool(v)).lower()}')

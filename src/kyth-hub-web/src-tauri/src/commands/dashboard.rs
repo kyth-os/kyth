@@ -108,6 +108,7 @@ pub(crate) struct RecoveryStatusResponse {
     pub(crate) quarantine_detail: String,
     pub(crate) watcher_staged: bool,
     pub(crate) clear_quarantine_cmd: String,
+    pub(crate) last_rollback_error: String,
     pub(crate) banner: String,
 }
 
@@ -122,6 +123,7 @@ pub(crate) fn recovery_status() -> RecoveryStatusResponse {
         quarantine_detail: status.quarantine_detail,
         watcher_staged: status.watcher_staged,
         clear_quarantine_cmd: status.clear_quarantine_cmd,
+        last_rollback_error: status.last_rollback_error,
         banner,
     }
 }

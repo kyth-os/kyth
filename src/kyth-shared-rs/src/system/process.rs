@@ -6,6 +6,7 @@
 use std::fs;
 use std::io::{self, Write};
 use std::process::{Command, Output, Stdio};
+use std::sync::atomic::AtomicBool;
 use std::time::{Duration, Instant};
 
 /// Run an already-validated argv with captured output and a hard wall-clock
@@ -55,7 +56,20 @@ pub fn run_bounded_with_input(
     }
 }
 
-pub fn run_bounded_command(mut command: Command, timeout: Duration) -> io::Result<Output> {
+pub fn run_bounded_command(command: Command, timeout: Duration) -> io::Result<Output> {
+    run_bounded_command_cancel(command, timeout, &AtomicBool::new(false))
+}
+
+/// Same as [`run_bounded_command`], but a worker thread can abort early by
+/// setting `cancel`: the child is killed within one poll tick and the call
+/// returns an `Interrupted` error instead of blocking until `timeout`.
+/// Backs Hub job cancellation in `system::jobs::JobStore`.
+pub fn run_bounded_command_cancel(
+    mut command: Command,
+    timeout: Duration,
+    cancel: &AtomicBool,
+) -> io::Result<Output> {
+    use std::sync::atomic::Ordering::Relaxed;
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -64,6 +78,14 @@ pub fn run_bounded_command(mut command: Command, timeout: Duration) -> io::Resul
     loop {
         match child.try_wait()? {
             Some(_) => return child.wait_with_output(),
+            None if cancel.load(Relaxed) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(io::Error::new(
+                    io::ErrorKind::Interrupted,
+                    "command was cancelled",
+                ));
+            }
             None if started.elapsed() <= timeout => std::thread::sleep(Duration::from_millis(25)),
             None => {
                 let _ = child.kill();
@@ -375,6 +397,28 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn cancellable_runner_kills_a_stalled_child_within_one_tick() {
+        use std::sync::atomic::Ordering::Relaxed;
+        use std::sync::Arc;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let flag = cancel.clone();
+        let started = Instant::now();
+        let handle = std::thread::spawn(move || {
+            let mut command = Command::new("sh");
+            command.args(["-c", "sleep 30"]);
+            run_bounded_command_cancel(command, Duration::from_secs(30), &flag).unwrap_err()
+        });
+        std::thread::sleep(Duration::from_millis(100));
+        cancel.store(true, Relaxed);
+        let error = handle.join().unwrap();
+        assert_eq!(error.kind(), std::io::ErrorKind::Interrupted);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "cancel must beat the 30s timeout"
+        );
     }
 
     #[test]
