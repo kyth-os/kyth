@@ -174,6 +174,19 @@ pub fn scrub_logs(text: &str) -> String {
 mod tests {
     use super::scrub_logs;
 
+    /// Serializes the tests that mutate process-global environment variables.
+    /// Rust runs `#[test]` functions on threads in one process, so one test's
+    /// `set_var("HOSTNAME", …)` races with another's `remove_var("HOSTNAME")`
+    /// and `scrub_logs` can observe the wrong value (CI failure 34830418072:
+    /// `hostname_env_is_redacted` saw HOSTNAME removed mid-test).
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn lock_env() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
     #[test]
     fn redacts_credentials_and_structured_secrets() {
         let report = concat!(
@@ -259,6 +272,7 @@ mod tests {
 
     #[test]
     fn hostname_env_is_redacted() {
+        let _guard = lock_env();
         let prior = std::env::var("HOSTNAME").ok();
         std::env::set_var("HOSTNAME", "parity-host-xyz");
         let scrubbed = scrub_logs("serving parity-host-xyz today");
@@ -271,6 +285,7 @@ mod tests {
 
     #[test]
     fn kernel_hostname_is_redacted_without_env() {
+        let _guard = lock_env();
         let prior = std::env::var("HOSTNAME").ok();
         std::env::remove_var("HOSTNAME");
         let names = super::hostnames_to_redact();
@@ -287,6 +302,7 @@ mod tests {
 
     #[test]
     fn username_env_is_redacted() {
+        let _guard = lock_env();
         let prior_user = std::env::var("USER").ok();
         let prior_username = std::env::var("USERNAME").ok();
         std::env::set_var("USER", "parity-user");
