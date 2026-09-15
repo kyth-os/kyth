@@ -1021,7 +1021,7 @@ export async function fetchPlasmaPresets(): Promise<string[] | null> {
   try { return await invoke<string[]>("plasma_presets"); } catch { return null; }
 }
 
-// Update availability check (Hub-side 45s deadline, issue #164)
+// Update availability check (Hub-side 90s deadline, issue #164)
 export interface AvailabilityStatusLive { state: string; detail: string; flatpak_count: number; flatpak_detail: string; staged: boolean; manifest_raw: string; blocked_reason: string; }
 /** Run the user-requested availability check without hiding an invoke error.
  * The explicit button press needs to tell the page why it could not run so

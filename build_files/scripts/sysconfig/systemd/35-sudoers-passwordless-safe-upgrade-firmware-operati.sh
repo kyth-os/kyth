@@ -17,6 +17,7 @@ install -m 0440 /dev/stdin /etc/sudoers.d/kyth-upgrade <<'SUDOEOF'
 %wheel ALL=(root) NOPASSWD: /usr/libexec/kyth-finalize-staged reboot
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard status
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard status-json
+%wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard check
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard switch-latest
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard switch-testing
 %wheel ALL=(root) NOPASSWD: /usr/bin/kyth-bootc-guard switch-latest-cachy

@@ -1,8 +1,8 @@
-//! Port of `kyth_shared.system.update_availability` — Hub-side 45s deadline.
+//! Native Hub availability check with a bounded 90s deadline.
 
 use std::time::{Duration, Instant};
 
-pub const AVAILABILITY_TIMEOUT: Duration = Duration::from_secs(45);
+pub const AVAILABILITY_TIMEOUT: Duration = Duration::from_secs(90);
 
 #[derive(Debug, Clone)]
 pub struct AvailabilityStatus {
@@ -46,23 +46,12 @@ pub fn availability_view(
     )
 }
 
-pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> AvailabilityStatus {
+pub fn collect_availability(_branch: Option<&str>, use_cached: bool) -> AvailabilityStatus {
     let deadline = Instant::now() + AVAILABILITY_TIMEOUT;
-    // Do this cheap local check before either the registry or Flatpak probe.
-    // Otherwise an offline machine burns a remote timeout before we know to
-    // skip network-backed work.
-    let network_offline = matches!(
-        run_nmcli_state().as_deref(),
-        Some("disconnected") | Some("asleep") | Some("unknown")
-    );
     // staged takes precedence — no registry call needed
     let staged = crate::system::bootc::has_staged_update();
     if staged {
-        let (flatpak_count, flatpak_detail) = if network_offline {
-            (0, String::new())
-        } else {
-            flatpak_updates_count_until(use_cached, deadline)
-        };
+        let (flatpak_count, flatpak_detail) = flatpak_updates_count_until(use_cached, deadline);
         return AvailabilityStatus {
             state: "staged".to_string(),
             detail: "A staged image is ready to boot.".to_string(),
@@ -74,41 +63,26 @@ pub fn collect_availability(branch: Option<&str>, use_cached: bool) -> Availabil
         };
     }
 
-    if network_offline {
-        return error_status("Network is unavailable; retry when connected.");
-    }
-
-    let b = branch
-        .map(str::to_string)
-        .or_else(crate::system::bootc::current_branch)
-        .unwrap_or_else(|| "latest".to_string());
-    let status_data = crate::system::probe::read_section("bootc-status-data")
-        .or_else(|| crate::system::bootc_query::fetch_status_data());
-    let Some(status_data) = status_data else {
-        return error_status("Could not read bootc status.");
-    };
-
+    // The check follows the image reference already tracked by the
+    // deployment. The old independent skopeo/tag probe could time out or
+    // disagree with bootc, and NetworkManager's "unknown" state is not proof
+    // that the host cannot reach the registry.
     let remaining = deadline.saturating_duration_since(Instant::now());
-    let registry_timeout = remaining.min(crate::system::registry::REGISTRY_INSPECT_TIMEOUT);
-    let registry = crate::system::registry::check_registry_update_with_timeout(
-        &status_data,
-        &b,
-        crate::system::bootc_policy::REGISTRY,
-        registry_timeout,
-    );
-    if registry.state == "error" {
-        let mut status = error_status(registry.detail);
-        status.manifest_raw = String::from_utf8_lossy(&registry.manifest_raw).to_string();
-        return status;
-    }
+    let check_output = match crate::system::bootc_query::update_check(remaining) {
+        Ok(output) => output,
+        Err(detail) => return error_status(detail),
+    };
+    let Some(state) = crate::system::bootc_query::update_check_state(&check_output) else {
+        return error_status("Could not determine the result of the bootc update check.");
+    };
     let (flatpak_count, flatpak_detail) = flatpak_updates_count_until(use_cached, deadline);
     AvailabilityStatus {
-        state: registry.state,
-        detail: registry.detail,
+        state: state.to_string(),
+        detail: check_output,
         flatpak_count,
         flatpak_detail,
         staged: false,
-        manifest_raw: String::from_utf8_lossy(&registry.manifest_raw).to_string(),
+        manifest_raw: String::new(),
         blocked_reason: String::new(),
     }
 }
@@ -170,19 +144,6 @@ fn flatpak_updates_count_until(use_cached: bool, deadline: Instant) -> (i32, Str
                 .unwrap_or_else(|| "Flatpak update check unavailable.".to_string()),
         )
     }
-}
-
-fn run_nmcli_state() -> Option<String> {
-    let argv = ["nmcli", "-t", "-f", "STATE", "general"]
-        .into_iter()
-        .map(String::from)
-        .collect::<Vec<_>>();
-    let output = super::process::run_bounded(&argv, Duration::from_secs(2)).ok()?;
-    output.status.success().then(|| {
-        String::from_utf8_lossy(&output.stdout)
-            .trim()
-            .to_lowercase()
-    })
 }
 
 #[cfg(test)]

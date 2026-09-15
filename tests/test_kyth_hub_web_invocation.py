@@ -115,6 +115,20 @@ class JustInvocationTests(unittest.TestCase):
         self.assertIn('"collect_availability"', LIVE_DATA)
         self.assertNotIn("check_for_updates_now", MAIN_RS)
 
+    def test_manual_update_check_uses_bootc_read_only_guard(self):
+        """The Hub check must share bootc's registry client and root boundary."""
+        self.assertIn('"check" => kyth_shared::system::bootc_guard::check()', ALL_RUST_SOURCE)
+        self.assertIn('"upgrade", "--check"', ALL_RUST_SOURCE)
+        sudoers = (
+            ROOT
+            / "build_files"
+            / "scripts"
+            / "sysconfig"
+            / "systemd"
+            / "35-sudoers-passwordless-safe-upgrade-firmware-operati.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("kyth-bootc-guard check", sudoers)
+
     def test_recipe_runner_has_no_terminal_wrapper(self):
         self.assertNotIn("TERMINALS", JUST_RS)
         self.assertNotIn("KEEP_OPEN", JUST_RS)

@@ -31,6 +31,36 @@ pub fn status(json: bool) -> Result<String, String> {
     Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
 }
 
+/// Check the tracked image for an update without downloading image layers or
+/// changing the staged deployment. This is bootc's registry-aware path, so
+/// the Hub does not need a separate skopeo client or transport configuration.
+pub fn check() -> Result<String, String> {
+    let output = run(
+        "/usr/bin/bootc",
+        &["upgrade", "--check"],
+        Duration::from_secs(90),
+    )?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let detail = if stdout.is_empty() {
+        stderr.clone()
+    } else if stderr.is_empty() {
+        stdout
+    } else {
+        format!("{stdout}\n{stderr}")
+    };
+    if output.status.success() {
+        Ok(detail)
+    } else if detail.is_empty() {
+        Err(format!(
+            "bootc update check failed (exit code {}).",
+            output.status.code().unwrap_or(-1)
+        ))
+    } else {
+        Err(detail)
+    }
+}
+
 pub fn switch(channel: &str) -> Result<String, String> {
     let reference = match channel {
         "latest" => "ghcr.io/kyth-os/kyth:latest",

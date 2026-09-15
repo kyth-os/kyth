@@ -70,6 +70,58 @@ fn status_commands(json_mode: bool) -> Vec<Vec<String>> {
     }
 }
 
+/// Run the fixed, read-only bootc update check from the Hub process.
+///
+/// The Tauri webview is normally unprivileged, while bootc must inspect the
+/// host sysroot as root. The guard is explicitly allowlisted in sudoers and
+/// accepts no caller-provided image reference or arguments.
+pub fn update_check(timeout: Duration) -> Result<String, String> {
+    let command = if effective_uid() == 0 {
+        vec!["/usr/bin/kyth-bootc-guard".to_string(), "check".to_string()]
+    } else {
+        vec![
+            "sudo".to_string(),
+            "-n".to_string(),
+            "/usr/bin/kyth-bootc-guard".to_string(),
+            "check".to_string(),
+        ]
+    };
+    let output = super::process::run_bounded(&command, timeout)
+        .map_err(|error| format!("Could not run the bootc update check: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let detail = if stdout.is_empty() {
+        stderr.clone()
+    } else if stderr.is_empty() {
+        stdout
+    } else {
+        format!("{stdout}\n{stderr}")
+    };
+    if output.status.success() {
+        Ok(detail)
+    } else if detail.is_empty() {
+        Err(format!(
+            "bootc update check failed (exit code {}).",
+            output.status.code().unwrap_or(-1)
+        ))
+    } else {
+        Err(detail)
+    }
+}
+
+/// Convert bootc's stable check messages into the Hub availability state.
+/// Unknown successful output is rejected rather than shown as up to date.
+pub fn update_check_state(output: &str) -> Option<&'static str> {
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("update available for:") {
+        Some("available")
+    } else if lower.contains("no changes in:") || lower.contains("no changes") {
+        Some("uptodate")
+    } else {
+        None
+    }
+}
+
 fn effective_uid() -> u32 {
     std::fs::read_to_string("/proc/self/status")
         .ok()
@@ -311,5 +363,26 @@ mod tests {
             image_digest(&v, "staged"),
             Some(("1234567890ab".into(), "1234567890abcdef".into()))
         );
+    }
+
+    #[test]
+    fn update_check_state_accepts_bootc_available_output() {
+        assert_eq!(
+            update_check_state("Update available for: ghcr.io/kyth-os/kyth:testing"),
+            Some("available")
+        );
+    }
+
+    #[test]
+    fn update_check_state_accepts_bootc_no_changes_output() {
+        assert_eq!(
+            update_check_state("No changes in: ghcr.io/kyth-os/kyth:testing"),
+            Some("uptodate")
+        );
+    }
+
+    #[test]
+    fn update_check_state_rejects_unknown_success_output() {
+        assert_eq!(update_check_state("Checking complete."), None);
     }
 }
