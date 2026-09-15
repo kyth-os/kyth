@@ -22,11 +22,15 @@ export function friendlyAvailabilityResult(state: string, staged: boolean, detai
 export function friendlyActionError(action: string, error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
   const lower = detail.toLowerCase();
+
   if (lower.includes("timed out") || lower.includes("timeout") || lower.includes("network") || lower.includes("unavailable")) {
     if (action === "stage") {
       return "KythOS couldn't reach the update registry before the check timed out. Your current system has not changed.";
     }
     return "We couldn't reach the update service. Check your internet connection and try again.";
+  }
+  if (action === "check") {
+    return "We couldn't check for updates. Check your connection and try again.";
   }
   if (action === "stage") {
     if (lower.includes("not enough free disk space") || lower.includes("no space left")) {

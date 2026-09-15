@@ -16,7 +16,7 @@ const SWITCHABLE_CHANNELS = [
 // value has to be mapped back before it can mark a button as current.
 const TAG_FOR_CHANNEL: Record<string, string> = { stable: "latest", testing: "testing" };
 
-// "This PC > Update channel" — same bootc-branch read as UpdatesSection,
+// "This PC > Update channel" — same bootc-branch read as the Updates page,
 // framed as the channel switcher state rather than the deployment view.
 export function ChannelsSection({ section }: { section: HubSection }) {
   const [channel, setChannel] = useState<string | null>(null);

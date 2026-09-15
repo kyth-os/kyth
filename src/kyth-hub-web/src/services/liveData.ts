@@ -691,7 +691,6 @@ async function waitUpdateLaunch(launch: UpdateActionLaunch): Promise<string> {
     "pending-updates",
     "update-status",
     "update-health",
-    "update-watcher-status",
     "probe:bootc-status-data",
     "probe:bootc-branch",
     "probe:flatpak-updates",
@@ -706,17 +705,6 @@ async function runHubAction(recipe: string): Promise<string> {
 
 export async function runHubRecipeAction(recipe: string): Promise<string> {
   return await runHubAction(recipe);
-}
-
-// Update card view-model — the Rust port of the Qt Update page's
-// "what should this card say" logic. UpdatesSection feeds it the live
-// update_status + collect_availability reads rather than recomputing the
-// copy in TS. The sibling branch_display_name command stays unwrapped on
-// purpose: CHANNEL_DISPLAY above is the one authority for channel labels.
-export interface UpdateAvailabilityView { card_style: string; icon_text: string; icon_style: string; title: string; body: string; update_btn_visible: boolean; restart_btn_visible: boolean; }
-export async function fetchUpdateAvailabilityView(args: { staged: boolean; check_state: string; flatpak_count: number; check_ts: string; check_ts_details: string; staged_ts?: string | null }): Promise<UpdateAvailabilityView | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<UpdateAvailabilityView>("update_availability_view", args); } catch { return null; }
 }
 
 // Mok verify — live mokutil Secure Boot + enrollment (N40)
@@ -994,50 +982,25 @@ export async function fetchUpdateHealth(): Promise<UpdateHealthLive | null> {
   });
 }
 
-export interface UpdateWatcherStatus { available: boolean; enabled: boolean; active: boolean; }
-export async function fetchUpdateWatcherStatus(): Promise<UpdateWatcherStatus | null> {
-  if (!inTauriShell()) return null;
-  return sharedRead("update-watcher-status", 10_000, async () => {
-    try { return await invoke<UpdateWatcherStatus>("update_watcher_status"); } catch { return null; }
-  });
-}
-
 export interface UpdatesSnapshot {
   snapshot: BootcSnapshot | null;
   status: UpdateStatusLive | null;
   pending: Record<string, string> | null;
-  updater: boolean | null;
   health: UpdateHealthLive | null;
-  watcher: UpdateWatcherStatus | null;
 }
 
-// One page-level owner for UpdatesOverview and UpdatesSection.  The two
-// surfaces intentionally keep their own presentation state, but they must
-// never launch separate bootc/firmware/Flatpak reads for the same entry.
+// One page-level owner for the Updates read model. All update facts are
+// loaded together so the page cannot render a mix of old and new states.
 export async function fetchUpdatesSnapshot(): Promise<UpdatesSnapshot> {
   return sharedRead("updates-snapshot", 10_000, async () => {
-    const [snapshot, status, pending, updater, health, watcher] = await Promise.all([
+    const [snapshot, status, pending, health] = await Promise.all([
       fetchBootcSnapshot(),
       fetchUpdateStatus(),
       fetchPendingUpdatesSummary(),
-      fetchUpdaterAvailable(),
       fetchUpdateHealth(),
-      fetchUpdateWatcherStatus(),
     ]);
-    return { snapshot, status, pending, updater, health, watcher };
+    return { snapshot, status, pending, health };
   });
-}
-export async function setUpdateWatcherEnabled(enabled: boolean): Promise<string> {
-  if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
-  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("set_update_watcher_enabled", { enabled }));
-}
-export async function checkForUpdatesNow(): Promise<string> {
-  if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
-  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("check_for_updates_now"));
-}
-export async function deferUpdateWatcher(): Promise<string> {
-  if (!inTauriShell()) throw new Error("The automatic update controls require the installed Hub.");
-  return await waitUpdateLaunch(await invoke<UpdateActionLaunch>("defer_update_watcher"));
 }
 
 // Process helpers — live session + ansi + disk bytes
@@ -1058,11 +1021,17 @@ export async function fetchPlasmaPresets(): Promise<string[] | null> {
   try { return await invoke<string[]>("plasma_presets"); } catch { return null; }
 }
 
-// Update availability collect (Hub-side 45s deadline, issue #164)
+// Update availability check (Hub-side 45s deadline, issue #164)
 export interface AvailabilityStatusLive { state: string; detail: string; flatpak_count: number; flatpak_detail: string; staged: boolean; manifest_raw: string; blocked_reason: string; }
-export async function fetchCollectAvailability(branch?: string | null, useCached = true): Promise<AvailabilityStatusLive | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<AvailabilityStatusLive>("collect_availability", { branch: branch ?? null, useCached }); } catch { return null; }
+/** Run the user-requested availability check without hiding an invoke error.
+ * The explicit button press needs to tell the page why it could not run so
+ * the user gets a useful next step instead of a misleading shell message. */
+export async function checkForUpdates(): Promise<AvailabilityStatusLive> {
+  if (!inTauriShell()) throw new Error("Update checking is available from the installed Kyth Hub.");
+  return await invoke<AvailabilityStatusLive>("collect_availability", {
+    branch: null,
+    useCached: false,
+  });
 }
 
 // Drives — live `lsblk -J` blockdevices (Move In's "Rescan drives"). The
@@ -1199,11 +1168,6 @@ export async function fetchDesktopStackChecks(): Promise<DesktopStackCheck[] | n
   if (!inTauriShell()) return null;
   try { return await invoke<DesktopStackCheck[]>("desktop_stack_checks"); } catch { return null; }
 }
-export async function fetchUpdaterAvailable(): Promise<boolean | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<boolean>("updater_available"); } catch { return null; }
-}
-
 // "Windows app -> Flatpak" chooser backing the App Store search box.
 export interface FamiliarApp { windows_name: string; description: string; flatpak_id: string }
 export async function fetchFamiliarApps(): Promise<FamiliarApp[] | null> {

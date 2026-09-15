@@ -32,16 +32,13 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
 | `fetchBootcSnapshot` | `probe_backend` | `section: "bootc-branch"` | `ProbeBridgeResponse<string>` | read | covered |
 | `fetchUpdateStatus` | `update_status` | none | `UpdateStatusLive` | read | covered |
 | `fetchPendingUpdatesSummary` | `pending_updates_summary` | none | `Record<string, string>` | read | covered |
-| `fetchUpdaterAvailable` | `updater_available` | none | `boolean` | read | covered |
 | `checkForUpdates` | `collect_availability` | `{ branch: null, useCached: false }` | `AvailabilityStatusLive` | check | covered |
-| `checkForUpdates` | `update_availability_view` | availability view model | `UpdateAvailabilityView` | read | covered |
 | `invokeBootcUpgrade` | `bootc_upgrade` | none | `string` | mutate | covered |
 | `invokeBootcRollback` | `bootc_rollback` | none | `string` | mutate | covered |
 | `invokeApplyStaged` | `apply_staged` | none | `string` | mutate | covered |
 | update job polling | `update_job_status` | `{ job }` | `InstallStatus` | read | covered |
 | `cancelUpdateJob` | `update_job_cancel` | `{ job }` | `InstallStatus` | mutate | covered |
 | `fetchUpdateHealth` | `update_health` | none | `UpdateHealthLive` | read | covered |
-| `healthReport` | `update_health` | none | `UpdateHealthLive` | check | covered |
 
 ## Baseline gaps exposed by this ledger
 

@@ -33,14 +33,16 @@ export function ActionButton({
   label,
   onClick,
   disabled = false,
+  primary = false,
 }: {
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  primary?: boolean;
 }) {
   return (
     <button
-      className="action-button"
+      className={`action-button${primary ? " action-button-primary" : ""}`}
       onClick={onClick}
       disabled={disabled}
     >

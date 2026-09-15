@@ -4,7 +4,7 @@ import type { HubSection } from "../data/hubSections";
 // Shared shell for every HubPage section that has real content behind it
 // (see HubPage.tsx's sectionContent) — icon/title/description header plus a
 // Live/Preview badge, with the body left to the caller. Factored out once
-// UpdatesSection and ControllersSection turned out to be pixel-identical
+// ControllersSection and other live sections share the same shell
 // except for their data and body — new sections should use this rather
 // than reintroducing a sixth copy of the header markup.
 export function LiveSectionCard({

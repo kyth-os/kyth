@@ -109,6 +109,10 @@ fn inspect_raw(ref_name: &str, timeout: Duration) -> Result<Vec<u8>, String> {
         "inspect",
         "--raw",
         "--no-creds",
+        "--retry-times",
+        "3",
+        "--retry-delay",
+        "2s",
         &format!("docker://{ref_name}"),
     ]
     .into_iter()

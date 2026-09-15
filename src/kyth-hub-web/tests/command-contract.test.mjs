@@ -9,7 +9,6 @@ const root = resolve(here, "..");
 const service = await readFile(resolve(root, "src/services/liveData.ts"), "utf8");
 const dashboard = await readFile(resolve(root, "src/pages/Dashboard.tsx"), "utf8");
 const guardianHistory = await readFile(resolve(root, "src/components/GuardianHistoryCard.tsx"), "utf8");
-const updates = await readFile(resolve(root, "src/components/UpdatesSection.tsx"), "utf8");
 const updatesOverview = await readFile(resolve(root, "src/components/UpdatesOverview.tsx"), "utf8");
 const updateMessages = await readFile(resolve(root, "src/components/updateMessages.ts"), "utf8");
 const guardian = await readFile(resolve(root, "src/components/GuardianSection.tsx"), "utf8");
@@ -42,10 +41,8 @@ const updateWrappers = [
   "fetchBootcSnapshot",
   "fetchUpdateStatus",
   "fetchPendingUpdatesSummary",
-  "fetchUpdaterAvailable",
   "fetchUpdateHealth",
-  "fetchCollectAvailability",
-  "fetchUpdateAvailabilityView",
+  "checkForUpdates",
   "invokeBootcUpgrade",
   "invokeBootcRollback",
   "invokeApplyStaged",
@@ -61,19 +58,13 @@ const rustCommands = [
   "recovery_status",
   "update_status",
   "pending_updates_summary",
-  "updater_available",
   "collect_availability",
-  "update_availability_view",
   "current_update_channel",
   "bootc_upgrade",
   "bootc_rollback",
   "apply_staged",
   "update_job_status",
   "update_health",
-  "update_watcher_status",
-  "set_update_watcher_enabled",
-  "check_for_updates_now",
-  "defer_update_watcher",
   "run_hub_action",
   "hub_action_status",
   "hub_action_cancel",
@@ -93,12 +84,10 @@ test("Dashboard wrappers are present and used by the page", () => {
   }
 });
 
-test("Updates wrappers are present and used by the section", () => {
+test("Updates wrappers are present and used by the page", () => {
   for (const wrapper of updateWrappers) {
     assert.match(service, new RegExp(`export async function ${wrapper}\\b`), wrapper);
-    // UpdatesOverview and UpdatesSection share one page-level snapshot
-    // owner; the low-level reads therefore live behind fetchUpdatesSnapshot.
-    assert.match(`${updates}\n${updatesOverview}`, new RegExp(`\\b(?:${wrapper}|fetchUpdatesSnapshot)\\b`), wrapper);
+    assert.match(updatesOverview, new RegExp(`\\b(?:${wrapper}|fetchUpdatesSnapshot)\\b`), wrapper);
   }
 });
 
@@ -106,8 +95,8 @@ test("Updates actions use the native job bridge instead of just recipes", () => 
   for (const command of ["bootc_upgrade", "bootc_rollback", "apply_staged"]) {
     assert.match(updatesRust, new RegExp(`fn ${command}\\b[\\s\\S]*?start_update_job`), command);
   }
-  assert.match(updates, /invokeApplyStaged/);
-  assert.doesNotMatch(updates, /RecipeButton recipe="(?:apply-staged|update-health)"/);
+  assert.match(updatesOverview, /invokeApplyStaged/);
+  assert.doesNotMatch(updatesOverview, /RecipeButton recipe="(?:apply-staged|update-health)"/);
 });
 
 test("App updates poll long enough for the unbounded backend flatpak job and refresh the snapshot cache", () => {
@@ -126,39 +115,41 @@ test("Backend flatpak update is bounded so a hung mirror can't wedge the job for
   assert.match(rust, /fn update_flatpaks\b[\s\S]*?ErrorKind::TimedOut/, "a timeout from run_bounded_command must be reported as a timeout, not misreported as \"Could not start Flatpak\"");
 });
 
-test("Updates overview reconciles a live check into the cards", () => {
-  assert.match(updatesOverview, /fetchCollectAvailability\(null, false\)/);
+test("Updates page reconciles the explicit check into the read model", () => {
+  assert.match(service, /export async function checkForUpdates\b/);
+  const check = service.match(/export async function checkForUpdates\(\)[\s\S]*?\n}/)?.[0] ?? "";
+  assert.match(check, /"collect_availability"/);
+  assert.match(check, /useCached: false/);
+  assert.doesNotMatch(check, /catch/);
+  assert.match(updatesOverview, /checkForUpdates\(\)/);
   assert.match(updatesOverview, /check_state: availability\.state/);
   assert.match(updatesOverview, /blocked_reason: availability\.blocked_reason \|\| null/);
   assert.match(updatesOverview, /flatpak: String\(availability\.flatpak_count\)/);
 });
 
-test("Updates overview exposes the automatic watcher controls", () => {
-  for (const wrapper of ["fetchUpdateWatcherStatus", "setUpdateWatcherEnabled", "checkForUpdatesNow", "deferUpdateWatcher"]) {
-    assert.match(service, new RegExp(`export (?:async )?function ${wrapper}\\b`), wrapper);
-    assert.match(
-      updatesOverview,
-      wrapper === "fetchUpdateWatcherStatus"
-        ? /fetchUpdatesSnapshot/
-        : new RegExp(`\\b${wrapper}\\b`),
-      wrapper,
-    );
-  }
-  assert.match(updatesOverview, /Defer automatic updates/);
-  assert.match(updatesOverview, /Disable automatic updates|Enable automatic updates/);
+test("Updates page has one action owner and no duplicate legacy section", async () => {
+  const page = await readFile(resolve(root, "src/pages/Updates.tsx"), "utf8");
+  assert.doesNotMatch(page, /UpdatesSection|HubPage|Detailed update tools/);
+  assert.doesNotMatch(updatesOverview, /update-watcher|Check now|Refresh status/);
+  assert.match(updatesOverview, /const canStage = !staged && \(/);
+  assert.match(updatesOverview, /lastAction === "check" \|\| lastAction === "stage"/);
+  assert.doesNotMatch(updatesOverview, /disabled=\{busy !== null \|\| blocked\}/, "a failed check must not disable the safe staging retry");
 });
 
-test("Updates overview gives a plain-language next step", () => {
+test("Updates page gives plain-language next steps", () => {
   assert.match(updatesOverview, /updates-guidance/);
+  assert.match(updatesOverview, /const \[lastAction, setLastAction\]/);
+  assert.match(updatesOverview, /lastAction === "stage"/);
+  assert.match(updatesOverview, /lastAction === "apps"/);
   assert.match(updatesOverview, /Downloading and preparing your update/);
   assert.match(updatesOverview, /Update ready — restart to finish/);
   assert.match(updatesOverview, /Choose “Restart to apply”/);
-  assert.doesNotMatch(updatesOverview, /<ActionStatus/);
+  assert.match(updatesOverview, /<ActionStatus/);
   assert.match(updateMessages, /We couldn't reach the update service/);
   assert.match(updateMessages, /couldn't reach the update registry before the check timed out/);
   assert.match(updateMessages, /current system has not changed/);
   assert.match(updatesOverview, /Free up some disk space/);
-  assert.match(updatesOverview, /confirm that other sites load/);
+  assert.match(updatesOverview, /Your current system is still safe to use/);
   assert.match(updateMessages, /The update is downloaded and ready/);
   assert.match(updateMessages, /No changes were made/);
 });
@@ -233,7 +224,7 @@ test("core workflow sections retain their read, action, and refresh paths", () =
   ]) {
     for (const wrapper of wrappers) assert.match(source, new RegExp(`\\b${wrapper}\\b`), `${name}: ${wrapper}`);
   }
-  assert.match(updates, /Refresh status/);
+  assert.match(updatesOverview, /Download and stage/);
   assert.match(guardian, /controlGuardian/);
   assert.match(apps, /installAndRefresh/);
 });

@@ -35,8 +35,8 @@ HUB_ROUTES = json.loads(
 
 # The mutating wrappers, and the section each one belongs to.
 MUTATING_WRAPPERS = {
-    "invokeBootcUpgrade": "UpdatesSection.tsx",
-    "invokeBootcRollback": "UpdatesSection.tsx",
+    "invokeBootcUpgrade": "UpdatesOverview.tsx",
+    "invokeBootcRollback": "UpdatesOverview.tsx",
     "invokeBootcSwitchBranch": "ChannelsSection.tsx",
     "invokeGuardianExecute": "GuardianSection.tsx",
     "invokeOpenFeedbackIssue": "FeedbackSection.tsx",
@@ -178,9 +178,7 @@ class HubWebCoverageTests(unittest.TestCase):
                 "fetchBootcSnapshot",
                 "fetchUpdateStatus",
                 "fetchPendingUpdatesSummary",
-                "fetchUpdaterAvailable",
                 "fetchUpdateHealth",
-                "fetchUpdateWatcherStatus",
             }
         ]
         self.assertEqual(
@@ -213,7 +211,8 @@ class HubWebCoverageTests(unittest.TestCase):
 
     def test_every_section_key_has_a_component(self):
         # HubPage renders nothing for a key with no component, which reads
-        # as a blank tab rather than an error.
+        # as a blank tab rather than an error. Updates is intentionally a
+        # single page-level workflow and no longer has a second section.
         keys = [
             section["key"]
             for destination in HUB_ROUTES["destinations"]
@@ -223,6 +222,11 @@ class HubWebCoverageTests(unittest.TestCase):
         wired = set()
         for page in ("Play.tsx", "Apps.tsx", "ThisPc.tsx", "MoveIn.tsx", "Vpn.tsx", "Updates.tsx"):
             text = (HUB_WEB / "pages" / page).read_text(encoding="utf-8")
+            if page == "Updates.tsx":
+                self.assertIn("UpdatesOverview", text)
+                self.assertNotIn("UpdatesSection", text)
+                wired.add("Update")
+                continue
             block = re.search(r"sectionContent=\{\{(.*?)\}\}", text, re.S)
             self.assertIsNotNone(block, f"{page} has no sectionContent map")
             # Not line-anchored: a formatter collapsing the map onto one
@@ -337,7 +341,7 @@ class HubWebUpdateActionTests(unittest.TestCase):
 
         self.assertIn("pending?.flatpak ?? 0", overview)
         self.assertIn("updateFlatpaks", overview)
-        self.assertIn('run("apps", "Updating your apps…", updateApps)', overview)
+        self.assertIn('startAction("apps", "Updating your apps…", updateApps)', overview)
         self.assertIn('"update_flatpaks"', live_data)
         self.assertIn('args(["update", "--user", "-y"])', MAIN_RS)
         self.assertIn('"flatpak_update" => Ok(json!({ "operation": "flatpak_update" }))', privilege)

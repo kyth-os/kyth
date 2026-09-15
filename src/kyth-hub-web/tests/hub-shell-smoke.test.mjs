@@ -71,6 +71,17 @@ test("every Hub section component constructs without throwing (SSR render)", asy
     const failures = [];
     for (const [page, sections] of Object.entries(pageSectionArrays)) {
       assert.ok(Array.isArray(sections) && sections.length > 0, `${page}'s section array is empty — hubSections.ts import broke`);
+      if (page === "Updates.tsx") {
+        try {
+          const mod = await server.ssrLoadModule("/src/components/UpdatesOverview.tsx");
+          assert.equal(typeof mod.UpdatesOverview, "function", "UpdatesOverview export is missing");
+          renderToStaticMarkup(React.createElement(mod.UpdatesOverview));
+          rendered += 1;
+        } catch (err) {
+          failures.push(`Updates.tsx -> UpdatesOverview ("Update"): ${err instanceof Error ? err.stack : err}`);
+        }
+        continue;
+      }
       for (const { key, component } of await wiredSections(page)) {
         const section = sections.find((candidate) => candidate.key === key);
         assert.ok(section, `${page} wires "${key}" to ${component} but hubSections.ts has no matching entry`);

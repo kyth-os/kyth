@@ -28,7 +28,10 @@ class HubWebPerformanceTests(unittest.TestCase):
         for page in ("Apps.tsx", "MoveIn.tsx", "Play.tsx", "ThisPc.tsx"):
             source = (WEB_SRC / "pages" / page).read_text(encoding="utf-8")
             self.assertNotIn("defaultToFirstSection", source, page)
-        for page in ("Updates.tsx", "Vpn.tsx"):
+        # Updates is a single page-level workflow and no longer mounts a
+        # HubPage workspace, so only the dedicated VPN page opts into a
+        # default section.
+        for page in ("Vpn.tsx",):
             source = (WEB_SRC / "pages" / page).read_text(encoding="utf-8")
             self.assertIn("defaultToFirstSection", source, page)
 

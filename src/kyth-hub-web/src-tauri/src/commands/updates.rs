@@ -8,10 +8,6 @@ use kyth_shared::system::jobs::{timeout_for, JobStore, JobTimeoutClass};
 
 static HUB_ACTION_JOBS: OnceLock<JobStore> = OnceLock::new();
 static UPDATE_JOBS: OnceLock<JobStore> = OnceLock::new();
-// The watcher can stage a large image. Keep this longer than its systemd
-// TimeoutStartSec (2400s), otherwise the Hub kills `systemctl start` after
-// five minutes and reports a failure while the watcher is still working.
-const UPDATE_WATCHER_START_TIMEOUT: Duration = Duration::from_secs(2_500);
 
 fn hub_action_jobs() -> &'static JobStore {
     HUB_ACTION_JOBS.get_or_init(JobStore::default)
@@ -458,97 +454,6 @@ pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
     )
 }
 
-#[derive(Serialize)]
-pub(crate) struct UpdateWatcherStatusResponse {
-    pub(crate) available: bool,
-    pub(crate) enabled: bool,
-    pub(crate) active: bool,
-}
-
-fn systemd_unit_is(unit: &str, state: &str) -> bool {
-    let argv = vec![
-        "systemctl".to_string(),
-        state.to_string(),
-        "--quiet".to_string(),
-        unit.to_string(),
-    ];
-    kyth_shared::system::process::run_bounded(&argv, timeout_for(JobTimeoutClass::Probe))
-        .map(|output| output.status.success())
-        .unwrap_or(false)
-}
-
-#[tauri::command]
-pub(crate) fn update_watcher_status() -> UpdateWatcherStatusResponse {
-    let available = std::path::Path::new("/usr/bin/systemctl").exists()
-        || std::path::Path::new("/bin/systemctl").exists();
-    UpdateWatcherStatusResponse {
-        available,
-        enabled: available && systemd_unit_is("kyth-update-watcher.timer", "is-enabled"),
-        active: available && systemd_unit_is("kyth-update-watcher.timer", "is-active"),
-    }
-}
-
-#[tauri::command]
-pub(crate) fn set_update_watcher_enabled(enabled: bool) -> Result<UpdateActionLaunch, String> {
-    let action = if enabled { "enable" } else { "disable" };
-    let operation = if enabled {
-        "Enable automatic updates"
-    } else {
-        "Disable automatic updates"
-    };
-    start_update_job(
-        operation,
-        vec![
-            "sudo",
-            "-A",
-            "systemctl",
-            action,
-            "--now",
-            "kyth-update-watcher.timer",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect(),
-        timeout_for(JobTimeoutClass::UpdateMutating),
-    )
-}
-
-#[tauri::command]
-pub(crate) fn check_for_updates_now() -> Result<UpdateActionLaunch, String> {
-    start_update_job(
-        "Check for updates now",
-        vec![
-            "sudo",
-            "-A",
-            "systemctl",
-            "start",
-            "kyth-update-watcher.service",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect(),
-        UPDATE_WATCHER_START_TIMEOUT,
-    )
-}
-
-#[tauri::command]
-pub(crate) fn defer_update_watcher() -> Result<UpdateActionLaunch, String> {
-    start_update_job(
-        "Defer automatic updates",
-        vec![
-            "sudo",
-            "-A",
-            "systemctl",
-            "stop",
-            "kyth-update-watcher.timer",
-        ]
-        .into_iter()
-        .map(String::from)
-        .collect(),
-        timeout_for(JobTimeoutClass::UpdateMutating),
-    )
-}
-
 #[tauri::command]
 pub(crate) fn update_job_status(job: String) -> crate::InstallStatus {
     update_store_status(update_jobs(), job, "Update job not found.")
@@ -565,45 +470,6 @@ pub(crate) fn update_job_cancel(job: String) -> crate::InstallStatus {
 #[tauri::command]
 pub(crate) fn branch_display_name(tag: Option<String>) -> String {
     kyth_shared::system::bootc_policy::branch_display_name(tag.as_deref())
-}
-
-#[derive(Serialize)]
-pub(crate) struct UpdateAvailabilityViewResponse {
-    pub(crate) card_style: String,
-    pub(crate) icon_text: String,
-    pub(crate) icon_style: String,
-    pub(crate) title: String,
-    pub(crate) body: String,
-    pub(crate) update_btn_visible: bool,
-    pub(crate) restart_btn_visible: bool,
-}
-
-#[tauri::command]
-pub(crate) fn update_availability_view(
-    staged: bool,
-    check_state: String,
-    flatpak_count: u32,
-    check_ts: String,
-    check_ts_details: String,
-    staged_ts: Option<String>,
-) -> UpdateAvailabilityViewResponse {
-    let view = kyth_shared::system::bootc_policy::update_availability_view(
-        staged,
-        &check_state,
-        flatpak_count,
-        &check_ts,
-        &check_ts_details,
-        staged_ts.as_deref(),
-    );
-    UpdateAvailabilityViewResponse {
-        card_style: view.card_style,
-        icon_text: view.icon_text,
-        icon_style: view.icon_style,
-        title: view.title,
-        body: view.body,
-        update_btn_visible: view.update_btn_visible,
-        restart_btn_visible: view.restart_btn_visible,
-    }
 }
 
 #[tauri::command]
@@ -711,11 +577,6 @@ pub(crate) async fn current_update_channel() -> Option<String> {
         .await
         .ok()
         .flatten()
-}
-
-#[tauri::command]
-pub(crate) fn updater_available() -> bool {
-    kyth_shared::system::updater::updater_available()
 }
 
 #[derive(Serialize)]
