@@ -120,7 +120,10 @@ pub fn write_cache_file(path: &Path, document: &Value) -> std::io::Result<()> {
         .open(&lock)?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
-        match rustix::fs::flock(&lock_file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+        match rustix::fs::flock(
+            &lock_file,
+            rustix::fs::FlockOperation::NonBlockingLockExclusive,
+        ) {
             Ok(()) => break,
             Err(rustix::io::Errno::WOULDBLOCK) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(50));
