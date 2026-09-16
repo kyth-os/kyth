@@ -172,15 +172,12 @@ fn start_process(
                 Err(_) => break,
             }
         }
-        let exit_success = runtime
+        let exit_status = runtime
             .child
             .lock()
             .ok()
-            .and_then(|mut slot| {
-                slot.as_mut()
-                    .and_then(|child| child.wait().ok().map(|exit| exit.success()))
-            })
-            .unwrap_or(false);
+            .and_then(|mut slot| slot.as_mut().and_then(|child| child.wait().ok()));
+        let exit_success = exit_status.map(|status| status.success()).unwrap_or(false);
         if runtime.generation.load(Ordering::SeqCst) != generation {
             return;
         }
@@ -304,15 +301,7 @@ fn handle_saml_callback(
         );
         let cookie = response.ok().and_then(|output| {
             let text = String::from_utf8_lossy(&output.stdout);
-            let boundary = text.rfind("\r\n\r\n").or_else(|| text.rfind("\n\n"));
-            let (headers, body) = boundary.map_or((text.as_ref(), ""), |index| {
-                let split = if text[index..].starts_with("\r\n") {
-                    4
-                } else {
-                    2
-                };
-                (&text[..index], &text[index + split..])
-            });
+            let (headers, body) = kyth_shared::system::vpn_saml::split_http_response(&text);
             kyth_shared::system::vpn_saml::parse_saml_acs_response(headers, body)
         });
         if let Some(window) = app.get_webview_window(&label) {

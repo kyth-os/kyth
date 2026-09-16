@@ -86,8 +86,14 @@ pub fn build_initial_command(
         "--os".into(),
         os_emulation.into(),
         "--script".into(),
-        "/usr/libexec/kyth-vpnc-script".into(),
+        "/etc/vpnc/vpnc-script".into(),
     ];
+    if protocol == "gp" {
+        // GlobalProtect deployments with a single portal+gateway host require
+        // separate portal- and gateway-stage credentials; going straight to
+        // the gateway skips the portal round-trip and its second prompt.
+        argv.extend(["--usergroup".into(), "gateway".into()]);
+    }
     if !password.is_empty() {
         argv.push("--passwd-on-stdin".into());
     }
@@ -131,7 +137,7 @@ pub fn build_reconnect_command(
         "--os".into(),
         os_emulation.into(),
         "--script".into(),
-        "/usr/libexec/kyth-vpnc-script".into(),
+        "/etc/vpnc/vpnc-script".into(),
     ];
     if password_mode {
         argv.extend([
@@ -384,6 +390,22 @@ fn form_encode(value: &str) -> String {
         .collect()
 }
 
+/// Split a `curl --include` response into (headers, body) on the first blank
+/// line. The GlobalProtect ACS cookie arrives as a response header, not in
+/// the body, so this must find the header/body boundary itself rather than
+/// the last blank line in the text — a body that happens to contain a blank
+/// line later on must not be mistaken for part of the headers.
+pub fn split_http_response(raw: &str) -> (&str, &str) {
+    match raw
+        .find("\r\n\r\n")
+        .map(|index| (index, 4))
+        .or_else(|| raw.find("\n\n").map(|index| (index, 2)))
+    {
+        Some((index, split)) => (&raw[..index], &raw[index + split..]),
+        None => (raw, ""),
+    }
+}
+
 pub fn parse_saml_acs_response(headers: &str, body: &str) -> Option<String> {
     let names = [
         "prelogin-cookie",
@@ -445,6 +467,7 @@ pub fn replay_saml_command(
             "--silent".into(),
             "--show-error".into(),
             "--fail-with-body".into(),
+            "--include".into(),
             "--max-time".into(),
             "30".into(),
             "--connect-timeout".into(),
@@ -498,6 +521,34 @@ mod tests {
     }
 
     #[test]
+    fn gp_initial_command_targets_the_gateway_directly() {
+        // Single-host GlobalProtect deployments require a separate
+        // credential for each of the portal and gateway prelogin stages;
+        // starting at the gateway avoids the portal round-trip entirely.
+        let command =
+            build_initial_command("https://vpn.example/gp", "gp", "win", "pat", "secret").unwrap();
+        let usergroup_index = command
+            .argv
+            .iter()
+            .position(|arg| arg == "--usergroup")
+            .expect("gp initial command should set --usergroup");
+        assert_eq!(command.argv[usergroup_index + 1], "gateway");
+    }
+
+    #[test]
+    fn non_gp_initial_command_has_no_usergroup() {
+        let command = build_initial_command(
+            "https://vpn.example/ac",
+            "anyconnect",
+            "win",
+            "pat",
+            "secret",
+        )
+        .unwrap();
+        assert!(!command.argv.iter().any(|arg| arg == "--usergroup"));
+    }
+
+    #[test]
     fn saml_cookie_and_acs_response_are_parsed() {
         assert_eq!(
             parse_gp_saml_cookie("portal-userauthcookie=abc&saml-username=pat"),
@@ -537,6 +588,22 @@ mod tests {
         )
         .unwrap();
         assert!(argv.contains(&"@-".into()));
+        assert!(
+            argv.contains(&"--include".into()),
+            "the GlobalProtect cookie arrives as a response header, so curl must be told to print them: {argv:?}"
+        );
         assert_eq!(input, b"SAMLResponse=token");
+    }
+
+    #[test]
+    fn split_http_response_separates_headers_from_a_body_that_reuses_the_same_boundary() {
+        let raw = "HTTP/1.1 200 OK\r\nprelogin-cookie: abc\r\n\r\n<html>ok</html>\r\n\r\nmore";
+        let (headers, body) = split_http_response(raw);
+        assert_eq!(headers, "HTTP/1.1 200 OK\r\nprelogin-cookie: abc");
+        assert_eq!(body, "<html>ok</html>\r\n\r\nmore");
+        assert_eq!(
+            parse_saml_acs_response(headers, body),
+            Some("prelogin-cookie=abc&saml-username=".into())
+        );
     }
 }
