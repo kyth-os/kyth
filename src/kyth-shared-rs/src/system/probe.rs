@@ -9,10 +9,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
-struct ProbeCacheLock(PathBuf);
+/// Holds an advisory `flock` on the cache lock file for the caller's scope.
+/// Unlike a `create_new` marker file, the kernel releases this lock the
+/// moment the holding file descriptor closes — including on SIGKILL/SIGABRT
+/// — so a crashed writer can never leave the next run permanently unable to
+/// acquire it.
+struct ProbeCacheLock(std::fs::File);
 impl Drop for ProbeCacheLock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.0);
+        let _ = rustix::fs::flock(&self.0, rustix::fs::FlockOperation::NonBlockingUnlock);
     }
 }
 
@@ -109,23 +114,21 @@ pub fn write_cache_file(path: &Path, document: &Value) -> std::io::Result<()> {
             .and_then(|extension| extension.to_str())
             .unwrap_or("cache")
     ));
+    let lock_file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open(&lock)?;
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    let _guard = loop {
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&lock)
-        {
-            Ok(_) => break ProbeCacheLock(lock.clone()),
-            Err(error)
-                if error.kind() == std::io::ErrorKind::AlreadyExists
-                    && std::time::Instant::now() < deadline =>
-            {
+    loop {
+        match rustix::fs::flock(&lock_file, rustix::fs::FlockOperation::NonBlockingLockExclusive) {
+            Ok(()) => break,
+            Err(rustix::io::Errno::WOULDBLOCK) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(50));
             }
-            Err(error) => return Err(error),
+            Err(error) => return Err(error.into()),
         }
-    };
+    }
+    let _guard = ProbeCacheLock(lock_file);
     let tmp = parent.join(format!(
         ".probe-{}-{}.json",
         std::process::id(),
@@ -373,7 +376,12 @@ pub fn read_section_in(key: &str, paths: &[PathBuf]) -> Option<Value> {
         let Some(ts) = entry_obj.get("ts").and_then(Value::as_f64) else {
             continue;
         };
-        let Some(data) = entry_obj.get("data") else {
+        // A cached `null` means the collector had nothing to report (e.g. a
+        // failed `bootc status --json`), not a real value — callers such as
+        // `check_update_status()` chain `.or_else(fetch_status_data)` on this
+        // result to retry live, and a `Some(Value::Null)` here would defeat
+        // that fallback for the section's entire TTL window.
+        let Some(data) = entry_obj.get("data").filter(|value| !value.is_null()) else {
             continue;
         };
         let age = now - ts;
@@ -465,6 +473,19 @@ mod tests {
             read_section_in("bootc-branch", &[path]),
             Some(json!("testing"))
         );
+    }
+
+    #[test]
+    fn a_cached_null_is_treated_as_a_miss_so_callers_can_fall_back_to_a_live_query() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe-cache.json");
+        let now = now_unix();
+        let doc = json!({
+            "version": 2, "generated_at": now,
+            "sections": { "bootc-status-data": { "ts": now, "data": null } },
+        });
+        fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
+        assert_eq!(read_section_in("bootc-status-data", &[path]), None);
     }
 
     #[test]
@@ -572,5 +593,21 @@ mod tests {
             written["sections"]["network-summary"]["data"]["vpn_connected"],
             false
         );
+    }
+
+    /// A prior writer killed by SIGKILL/SIGABRT (e.g. a systemd unit hitting
+    /// its timeout) leaves its lock file on disk with no flock held on it.
+    /// The next run must still succeed instead of treating the leftover file
+    /// as evidence that a writer is still active.
+    #[test]
+    fn write_cache_file_recovers_from_a_stale_unlocked_lock_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe-cache.json");
+        let lock = path.with_extension("json.lock");
+        std::fs::write(&lock, b"").unwrap();
+        let document = json!({"sections": {"bootc-branch": {"ts": 1.0, "data": "testing"}}});
+        write_cache_file(&path, &document).unwrap();
+        let written = load_cache_file(&path).unwrap();
+        assert_eq!(written["sections"]["bootc-branch"]["data"], "testing");
     }
 }

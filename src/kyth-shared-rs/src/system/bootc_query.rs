@@ -139,9 +139,17 @@ pub fn holds_sysroot_lock(cmdline: &str) -> bool {
     if text.contains("ostree admin finalize-staged") {
         return true;
     }
-    Regex::new(r"(?:^|[\s/])bootc\s+(upgrade|switch|rollback|reset)(?:\s|$)")
-        .map(|pattern| pattern.is_match(text))
-        .unwrap_or(false)
+    let Some(captures) = Regex::new(r"(?:^|[\s/])bootc\s+(upgrade|switch|rollback|reset)(?:\s|$)")
+        .ok()
+        .and_then(|pattern| pattern.captures(text))
+    else {
+        return false;
+    };
+    // `bootc upgrade --check` only queries the registry; it stages nothing
+    // and must not be mistaken for the mutating `upgrade` that does. Treating
+    // it as a lock-holder starves every concurrent status read (page loads,
+    // kyth-probe) of data for as long as the check is in flight.
+    !(&captures[1] == "upgrade" && text.contains("--check"))
 }
 
 pub fn active_operation() -> Option<String> {
@@ -354,6 +362,12 @@ mod tests {
         assert!(holds_sysroot_lock("123 /usr/bin/bootc upgrade"));
         assert!(holds_sysroot_lock("/usr/bin/ostree admin finalize-staged"));
         assert!(!holds_sysroot_lock("/usr/bin/bootc status --json"));
+    }
+
+    #[test]
+    fn lock_detection_treats_a_read_only_upgrade_check_as_no_lock() {
+        assert!(!holds_sysroot_lock("/usr/bin/bootc upgrade --check"));
+        assert!(holds_sysroot_lock("/usr/bin/bootc upgrade"));
     }
 
     #[test]
