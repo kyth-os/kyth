@@ -352,7 +352,8 @@ fn open_saml_window(app: &AppHandle, job: &str, gateway: &str, saml_url: &str) {
     let callback_gateway = gateway.to_string();
     let init_script = r#"(function(){
       function submitToKyth(form){
-        if(!form || form.__kythVpnCaptured)return false;
+        if(!form)return false;
+        if(form.__kythVpnCaptured)return true;
         var action=form.getAttribute('action')||form.action||'';
         if(!/\/SAML20\/SP\/ACS(?:[/?#]|$)/i.test(action))return false;
         var fd; try{fd=new FormData(form)}catch(e){return false};
