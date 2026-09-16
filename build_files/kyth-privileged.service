@@ -10,6 +10,8 @@ User=root
 Group=wheel
 RuntimeDirectory=kyth
 RuntimeDirectoryMode=0750
+LogsDirectory=kyth
+LogsDirectoryMode=0750
 UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
@@ -22,7 +24,6 @@ RestrictAddressFamilies=AF_UNIX
 RestrictSUIDSGID=yes
 CapabilityBoundingSet=
 ReadWritePaths=/run/kyth
-ReadWritePaths=/var/log/kyth
 TimeoutStartSec=10
 
 [Install]

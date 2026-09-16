@@ -355,15 +355,19 @@ fn audit(uid: u32, operation: &str, ok: bool, detail: &str) {
 fn wheel_gid() -> Result<u32, String> {
     let groups = fs::read_to_string("/etc/group")
         .map_err(|error| format!("could not read groups: {error}"))?;
+    parse_wheel_gid(&groups)
+}
+
+fn parse_wheel_gid(groups: &str) -> Result<u32, String> {
     groups
         .lines()
         .find_map(|line| {
             let mut fields = line.split(':');
-            (fields.next() == Some("wheel"))
-                .then(|| fields.next())
-                .flatten()?
-                .parse()
-                .ok()
+            if fields.next() != Some("wheel") {
+                return None;
+            }
+            fields.next()?; // password placeholder
+            fields.next()?.parse().ok()
         })
         .ok_or_else(|| "wheel group is unavailable".to_string())
 }
@@ -543,7 +547,19 @@ pub fn serve() -> Result<(), String> {
 mod tests {
     use serde_json::json;
 
-    use super::{redact_request_detail, validate_request};
+    use super::{parse_wheel_gid, redact_request_detail, validate_request};
+
+    #[test]
+    fn wheel_gid_reads_third_field_not_password_placeholder() {
+        let groups = "root:x:0:\nwheel:x:10:phendrick\nusers:x:100:\n";
+        assert_eq!(parse_wheel_gid(groups), Ok(10));
+    }
+
+    #[test]
+    fn wheel_gid_errors_when_group_missing() {
+        let groups = "root:x:0:\nusers:x:100:\n";
+        assert!(parse_wheel_gid(groups).is_err());
+    }
 
     #[test]
     fn only_fixed_operations_are_constructed() {
