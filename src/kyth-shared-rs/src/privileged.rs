@@ -7,7 +7,7 @@
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
-use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -525,13 +525,11 @@ pub fn serve() -> Result<(), String> {
             io::Error::last_os_error()
         ));
     }
-    let chmod_result = unsafe { libc::fchmod(fd, 0o660) };
-    if chmod_result != 0 {
-        return Err(format!(
-            "could not set socket mode: {}",
-            io::Error::last_os_error()
-        ));
-    }
+    // fchmod(2) on a UNIX-domain socket fd does not update the mode of the
+    // bound pathname's directory entry on Linux; the mode must be set via
+    // the path instead.
+    fs::set_permissions(SOCKET, fs::Permissions::from_mode(0o660))
+        .map_err(|error| format!("could not set socket mode: {error}"))?;
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
