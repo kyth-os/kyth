@@ -4,10 +4,53 @@
 //! format_elapsed/eta/progress.
 
 use std::fs;
-use std::io::{self, Write};
-use std::process::{Command, Output, Stdio};
+use std::io::{self, Read, Write};
+use std::process::{Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::AtomicBool;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
+
+/// Drain a child's stdout/stderr on background threads as soon as it's
+/// spawned. A pipe's kernel buffer is a few tens of KB; a command that
+/// writes past that (e.g. `ps -eo pid=,args=` on a host with hundreds of
+/// processes) blocks in `write()` until something reads. Every caller here
+/// only reads after `try_wait()` sees the child has exited, so an
+/// unattended child that outgrows the buffer can never exit — it sits
+/// blocked until the timeout kills it. Spawning readers up front avoids
+/// that deadlock regardless of how much output the command produces.
+fn spawn_pipe_readers(
+    child: &mut std::process::Child,
+) -> (JoinHandle<Vec<u8>>, JoinHandle<Vec<u8>>) {
+    let mut stdout = child.stdout.take();
+    let mut stderr = child.stderr.take();
+    let stdout_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = stdout.as_mut() {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        if let Some(pipe) = stderr.as_mut() {
+            let _ = pipe.read_to_end(&mut buf);
+        }
+        buf
+    });
+    (stdout_reader, stderr_reader)
+}
+
+fn collect_output(
+    status: ExitStatus,
+    stdout_reader: JoinHandle<Vec<u8>>,
+    stderr_reader: JoinHandle<Vec<u8>>,
+) -> Output {
+    Output {
+        status,
+        stdout: stdout_reader.join().unwrap_or_default(),
+        stderr: stderr_reader.join().unwrap_or_default(),
+    }
+}
 
 /// Run an already-validated argv with captured output and a hard wall-clock
 /// limit. It never invokes a shell and kills a child that outlives its bound.
@@ -36,13 +79,14 @@ pub fn run_bounded_with_input(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+    let (stdout_reader, stderr_reader) = spawn_pipe_readers(&mut child);
     if let Some(mut stdin) = child.stdin.take() {
         stdin.write_all(input)?;
     }
     let started = Instant::now();
     loop {
         match child.try_wait()? {
-            Some(_) => return child.wait_with_output(),
+            Some(status) => return Ok(collect_output(status, stdout_reader, stderr_reader)),
             None if started.elapsed() <= timeout => std::thread::sleep(Duration::from_millis(25)),
             None => {
                 let _ = child.kill();
@@ -74,10 +118,11 @@ pub fn run_bounded_command_cancel(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
+    let (stdout_reader, stderr_reader) = spawn_pipe_readers(&mut child);
     let started = Instant::now();
     loop {
         match child.try_wait()? {
-            Some(_) => return child.wait_with_output(),
+            Some(status) => return Ok(collect_output(status, stdout_reader, stderr_reader)),
             None if cancel.load(Relaxed) => {
                 let _ = child.kill();
                 let _ = child.wait();
@@ -387,6 +432,30 @@ mod tests {
         .unwrap();
         assert!(output.status.success());
         assert_eq!(output.stdout, b"ok");
+    }
+
+    /// A child writing more than a pipe's kernel buffer (tens of KB) blocks
+    /// in `write()` until something reads. If nothing drains stdout until
+    /// after `try_wait()` reports the child has exited, that child can never
+    /// exit — real-world case: `ps -eo pid=,args=` on a host with hundreds
+    /// of processes, called from `bootc_query::active_operation()` on every
+    /// probe run. This must finish well under the command's own timeout,
+    /// not by surviving on a raised limit.
+    #[test]
+    fn bounded_runner_drains_output_larger_than_a_pipe_buffer_without_deadlocking() {
+        let started = Instant::now();
+        let output = run_bounded(
+            &["sh".into(), "-c".into(), "yes x | head -c 1000000".into()],
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout.len(), 1_000_000);
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "took {:?}, should complete almost immediately once pipes are drained",
+            started.elapsed()
+        );
     }
 
     #[test]

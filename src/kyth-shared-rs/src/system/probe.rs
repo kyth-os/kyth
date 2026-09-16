@@ -613,4 +613,48 @@ mod tests {
         let written = load_cache_file(&path).unwrap();
         assert_eq!(written["sections"]["bootc-branch"]["data"], "testing");
     }
+
+    /// A prior writer killed mid-write (SIGKILL/SIGABRT) never releases its
+    /// flock explicitly. This must still not block the next writer: the
+    /// kernel drops the lock the instant the dead process's file descriptors
+    /// close, which happens on any exit path, including a signal.
+    #[test]
+    fn write_cache_file_recovers_from_a_lock_held_by_a_crashed_process() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe-cache.json");
+        let lock = path.with_extension("json.lock");
+        std::fs::create_dir_all(dir.path()).unwrap();
+
+        // SAFETY: the child only locks a file descriptor and calls _exit,
+        // never touching Rust state shared with the parent or the test
+        // harness's other threads. It opens the lock file itself, after the
+        // fork, so its file descriptor is its own open file description —
+        // exactly like a real crashed process, and unlike an fd inherited
+        // from the parent, which would keep the flock alive past the
+        // child's exit because the parent still holds that same
+        // description open.
+        let pid = unsafe { libc::fork() };
+        assert!(pid >= 0, "fork failed");
+        if pid == 0 {
+            let lock_file = std::fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .open(&lock)
+                .expect("child failed to open lock file");
+            rustix::fs::flock(&lock_file, rustix::fs::FlockOperation::LockExclusive)
+                .expect("child failed to acquire flock");
+            unsafe { libc::_exit(0) };
+        }
+        let mut status = 0;
+        assert!(unsafe { libc::waitpid(pid, &mut status, 0) } == pid);
+        assert_eq!(
+            status, 0,
+            "child failed to acquire the flock before exiting"
+        );
+
+        let document = json!({"sections": {"bootc-branch": {"ts": 1.0, "data": "testing"}}});
+        write_cache_file(&path, &document).unwrap();
+        let written = load_cache_file(&path).unwrap();
+        assert_eq!(written["sections"]["bootc-branch"]["data"], "testing");
+    }
 }

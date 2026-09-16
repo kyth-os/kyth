@@ -10,8 +10,13 @@ fn run(program: &str, args: &[&str], timeout: Duration) -> Result<Output, String
         .map_err(|error| format!("{program} could not run: {error}"))
 }
 
+/// Read the current deployment status. This is a pure read: unlike
+/// `switch()`, it must never remount `/boot` read-write. The remount was
+/// pure overhead here — status never writes to `/boot` — and under
+/// `kyth-probe.service`'s syscall-filtered sandbox the `mount` binary it
+/// spawned segfaulted instead of failing cleanly, coredumping on every
+/// probe run.
 pub fn status(json: bool) -> Result<String, String> {
-    crate::system::boot_finalize::prepare_boot()?;
     let args = if json {
         vec!["status", "--json"]
     } else {
