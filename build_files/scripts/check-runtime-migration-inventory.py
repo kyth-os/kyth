@@ -241,6 +241,120 @@ PYTHON_MODULE_ROOT = PYTHON_PACKAGE / "kyth_shared"
 PYTHON_PACKAGE_METADATA = PYTHON_PACKAGE / "pyproject.toml"
 
 
+# Install evidence for shell scripts: a script stamped "build-only" must not
+# actually ship in the image. These roots are where install/copy/exec lines
+# that place files into /usr or /etc live (Dockerfile layers, build
+# fragments, just recipes, disk/installer configs). Unit Exec= lines count
+# too — including heredoc-generated units inside fragments.
+INSTALL_EVIDENCE_ROOTS = (
+    ROOT / "Dockerfile",
+    ROOT / "build_files/scripts",
+    ROOT / "build_files/just",
+    ROOT / "disk_config",
+    ROOT / "installer",
+)
+_INSTALL_LINE = re.compile(r"(?<![A-Za-z0-9_.-])(install|cp|COPY|mv|ln)(?![A-Za-z0-9_.-])")
+_NAME_TOKEN = re.compile(r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_@.+-]+)(?![A-Za-z0-9_.-])")
+
+
+def installed_script_evidence() -> dict[str, dict[str, bool]]:
+    """Map installed shell-script basename to install evidence.
+
+    Returns ``{basename: {"system": bool}}`` where ``system`` is True when the
+    script lands in a system location (``/usr/libexec``, a systemd unit
+    ``Exec=``, ``/etc/systemd``) rather than a user path (``/usr/bin``).
+    Only lines that actually place or launch files count; full-line comments
+    are skipped so prose mentions never qualify.
+    """
+    evidence: dict[str, dict[str, bool]] = {}
+    files: list[Path] = []
+    for root in INSTALL_EVIDENCE_ROOTS:
+        if root.is_file():
+            files.append(root)
+        elif root.is_dir():
+            files.extend(
+                path
+                for path in root.rglob("*")
+                if path.is_file() and path.stat().st_size < 500_000
+            )
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            if "/usr/bin/" not in line and "/usr/libexec/" not in line and "/etc/systemd/" not in line:
+                continue
+            if not (_INSTALL_LINE.search(line) or "Exec" in line):
+                continue
+            system = (
+                "/usr/libexec/" in line
+                or "/etc/systemd/" in line
+                or bool(re.search(r"Exec\w*=", line))
+            )
+            for name in _NAME_TOKEN.findall(line):
+                if name in evidence:
+                    evidence[name]["system"] = evidence[name]["system"] or system
+                else:
+                    evidence[name] = {"system": system}
+    return evidence
+
+
+INSTALLED_SCRIPTS = installed_script_evidence()
+
+
+def native_binary_ships(name: str) -> bool:
+    """Check whether the Dockerfile builds and copies a native binary of this name.
+
+    A shell source can share a binary's basename (e.g. the retained
+    `kyth-finalize-staged` fixture) while the image actually ships the cargo
+    build — the native COPY layer lands on top of the fragment install. In
+    that case the shell file is a fixture, not the runtime authority.
+    """
+    try:
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    return bool(
+        re.search(rf"--bin\s+{re.escape(name)}(?![A-Za-z0-9_.-])", dockerfile)
+        or re.search(
+            rf"(?:cp|COPY)[^\n]*{re.escape(name)}[^\n]*",
+            dockerfile,
+        )
+    )
+
+
+def native_delegate_target(path: Path) -> str | None:
+    """Return the native binary a shell shim delegates to, if it is just that.
+
+    A delegating shim has exactly one `exec` of a fixed `/usr/bin/` native
+    binary (`game-performance` -> `kyth-game-launch`); env-prefix wrappers
+    like `zink-run` (`exec "$@"`) or scripts with real logic do not qualify.
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None
+    commands = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    execs = [line for line in commands if line == "exec" or line.startswith("exec ")]
+    if len(execs) != 1:
+        return None
+    match = re.match(
+        r"exec\s+(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*/usr/bin/([A-Za-z0-9_@.+-]+)(?:\s|$)",
+        execs[0],
+    )
+    if not match or match.group(1) not in NATIVE_BINARIES:
+        return None
+    return match.group(1)
+
+
 def python_module_name(path: Path) -> str | None:
     """Return the import name for a shared-package source file."""
     try:
@@ -470,6 +584,14 @@ def function_inventory(
 
 
 def risk_for(name: str, kind: str, path: Path) -> str:
+    if name in INSTALLED_SCRIPTS and (
+        "/scripts/" in f"/{rel(path)}" or path.parts[:2] == ("build_files", "scripts")
+    ):
+        # Installed at runtime: never "build-time". System locations (libexec,
+        # unit Exec=) run privileged; /usr/bin shims run as the user.
+        if INSTALLED_SCRIPTS[name]["system"]:
+            return "privileged-writer"
+        return "user-session-writer"
     if "/scripts/" in f"/{rel(path)}" or path.parts[:2] == ("build_files", "scripts"):
         return "build-time"
     if name in {"kyth-vm-acceptance-guest", "kyth-scx-loader"}:
@@ -521,7 +643,13 @@ def runtime_metadata(
     elif surface == "ujust-recipe":
         authority, scope, active, priority = "shell-orchestration", "user-session", True, 2
     elif surface == "shell-script":
-        authority, scope, active, priority = "build-only", "build", False, 3
+        installed = INSTALLED_SCRIPTS.get(name)
+        if installed is not None:
+            authority = "shell-orchestration"
+            scope = "system-service" if installed["system"] else "user-session"
+            active, priority = True, 2
+        else:
+            authority, scope, active, priority = "build-only", "build", False, 3
     elif surface == "systemd-unit":
         commands = " ".join(exec_start or [])
         if "kyth-installerd" in commands:
@@ -578,8 +706,20 @@ def entry(
     kind = implementation or launcher_kind(path)
     is_tunable_alias = surface == "launcher" and path.is_symlink() and path.resolve() == ROOT / "build_files/kyth-tunable"
     if surface == "shell-script":
-        status = "not-applicable"
-        reason = "build/test shell script, not installed runtime authority"
+        installed = INSTALLED_SCRIPTS.get(item_name)
+        delegate = native_delegate_target(path) if installed else None
+        if item_name in NATIVE_BINARIES and native_binary_ships(item_name):
+            status = "done-native"
+            reason = f"native {item_name} binary ships in the image; shell source is a retained fixture"
+        elif delegate is not None:
+            status = "done-native"
+            reason = f"installed shim delegates to native {delegate}"
+        elif installed is not None:
+            status = "queued"
+            reason = "installed shell script owns runtime behavior; no native owner yet"
+        else:
+            status = "not-applicable"
+            reason = "build/test shell script, not installed runtime authority"
     elif surface == "launcher" and item_name in SHELL_HELPER_LAUNCHERS:
         status = "not-applicable"
         reason = "sourceable diagnostic helper; runtime authority is the Rust report dispatcher"
@@ -637,6 +777,12 @@ def entry(
         "function_inventory": [],
         **({"reason": reason} if reason else {}),
     }
+    if surface == "shell-script" and status == "done-native":
+        delegate_owner = native_delegate_target(path)
+        if delegate_owner is not None:
+            result["owner"] = f"native::{delegate_owner}"
+        elif item_name in NATIVE_BINARIES and native_binary_ships(item_name):
+            result["owner"] = f"native::{item_name}"
     metadata = runtime_metadata(path, surface=surface, name=item_name, kind=kind, status=status)
     result.update(metadata)
     if surface == "python-runtime" and item_name in NATIVE_REPLACED_MODULES:

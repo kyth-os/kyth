@@ -77,13 +77,19 @@ class InventoryTest(unittest.TestCase):
         # installer authority is active.
         self.assertEqual(report["summary"]["p0_open_entries"], 0)
         self.assertEqual(report["p0_open"], [])
-        self.assertEqual(report["summary"]["active_entries"], 183)
+        self.assertEqual(report["summary"]["active_entries"], 191)
         self.assertEqual(report["summary"]["active_python_entries"], 0)
         self.assertEqual(report["summary"]["superseded_entries"], 127)
         self.assertFalse(
             [item for item in report["active_python"] if item["runtime_authority"] == "python-installer"]
         )
-        self.assertFalse([item for item in document["entries"] if item["status"] == "queued"])
+        # Installed shell scripts with no native owner stay queued and
+        # visible; nothing else may sit in the migration queue.
+        queued = [item for item in document["entries"] if item["status"] == "queued"]
+        self.assertTrue(queued)
+        for item in queued:
+            self.assertEqual(item["surface"], "shell-script", item["path"])
+            self.assertEqual(item["runtime_authority"], "shell-orchestration", item["path"])
 
     def test_frontend_and_python_boundaries_are_clean(self):
         checker = load_checker()
@@ -276,11 +282,41 @@ class InventoryTest(unittest.TestCase):
         entries = load_inventory()["entries"]
         scripts = [item for item in entries if item["surface"] == "shell-script"]
         self.assertGreater(len(scripts), 0)
+        checker = load_checker()
         for item in scripts:
-            self.assertEqual(item["runtime_authority"], "build-only", item["path"])
-            self.assertEqual(item["status"], "not-applicable", item["path"])
-            self.assertFalse(item["runtime_active"], item["path"])
+            if Path(item["path"]).name in checker.INSTALLED_SCRIPTS:
+                # Installed scripts own runtime behavior and stay visible
+                # until a native owner replaces them (queued) or the image
+                # already ships the native build (done-native shim/fixture).
+                self.assertIn(item["status"], {"queued", "done-native"}, item["path"])
+                self.assertTrue(item["runtime_active"], item["path"])
+            else:
+                self.assertEqual(item["runtime_authority"], "build-only", item["path"])
+                self.assertEqual(item["status"], "not-applicable", item["path"])
+                self.assertFalse(item["runtime_active"], item["path"])
             self.assertTrue(item["function_inventory"], item["path"])
+
+    def test_installed_shell_scripts_are_all_known(self):
+        # The install-evidence detector must agree with the committed
+        # inventory: every queued shell-script entry is installed, and every
+        # installed shell script is either queued or native-owned (shim or
+        # same-name native binary). No silent third state.
+        entries = load_inventory()["entries"]
+        checker = load_checker()
+        by_path = {item["path"]: item for item in entries if item["surface"] == "shell-script"}
+        queued = {Path(path).name for path, item in by_path.items() if item["status"] == "queued"}
+        self.assertEqual(queued, set(checker.INSTALLED_SCRIPTS) & {
+            Path(path).name for path in by_path
+        } - {
+            Path(path).name for path, item in by_path.items()
+            if item["status"] == "done-native"
+        })
+        for name in checker.INSTALLED_SCRIPTS:
+            # Only shell sources have shell-script entries; native binaries
+            # show up in install evidence too and are covered elsewhere.
+            matches = [item for path, item in by_path.items() if Path(path).name == name]
+            for item in matches:
+                self.assertIn(item["status"], {"queued", "done-native"}, item["path"])
 
     def test_tunable_registry_covers_all_python_aliases(self):
         rust = (ROOT / "src/kyth-shared-rs/src/system/tunable_registry.rs").read_text(encoding="utf-8")

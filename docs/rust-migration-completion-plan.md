@@ -726,7 +726,12 @@ remains deferred until those promoted-image gates close.
 Reconciled status: item 3 is complete for source-level owner assignment and
 risk ordering; item 4 has route/argument/ID/guard parity coverage with
 exact-image behavior still pending; item 9 has classified compatibility
-material while deletion remains gated by the observation window.
+material while deletion remains gated by the observation window. The
+install-evidence rule (`INSTALLED_SCRIPTS`) additionally tracks 7 installed
+shell scripts with no native owner as queued shell-orchestration entries
+instead of stamping every shell source build-only; `kyth-finalize-staged`
+is correctly native-owned (the image ships the cargo binary over the
+retained shell fixture).
 
 - [x] **2 — assign/retire unowned recipes:** all 202 recipes are now accounted
   for by an explicit Rust dispatcher route, an explicit retirement, or an
