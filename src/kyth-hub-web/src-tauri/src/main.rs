@@ -874,7 +874,8 @@ fn open_move_files_app() -> Result<String, String> {
 #[tauri::command]
 fn open_network_shares_app() -> Result<String, String> {
     kyth_shared::system::process::spawn_detached(
-        std::process::Command::new("/usr/bin/kyth-welcome-launch").args(["--page", "Network Shares"]),
+        std::process::Command::new("/usr/bin/kyth-welcome-launch")
+            .args(["--page", "Network Shares"]),
     )
     .map_err(|error| format!("could not open Network Shares: {error}"))?;
     Ok("Opened the full Network Shares workflow.".to_string())
@@ -1157,7 +1158,7 @@ fn launch_appimage(path: String) -> Result<String, String> {
             "AppImage is not a discovered executable in an allowed user directory".to_string(),
         );
     }
-    kyth_shared::system::process::spawn_detached(std::process::Command::new(&path))
+    kyth_shared::system::process::spawn_detached(&mut std::process::Command::new(&path))
         .map(|_| "AppImage launched.".to_string())
         .map_err(|err| format!("could not launch AppImage: {err}"))
 }

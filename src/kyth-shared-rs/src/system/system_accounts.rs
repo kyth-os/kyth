@@ -5,7 +5,7 @@
 //! `plugdev` system group and the `plasmalogin` greeter account exist, fix
 //! database modes, and prepare `/var/lib/plasmalogin`.
 
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::time::Duration;
 

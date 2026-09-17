@@ -29,17 +29,6 @@ fn read_link(path: &Path) -> Option<String> {
         .map(|target| target.to_string_lossy().into_owned())
 }
 
-fn place_symlink(link: &Path, target: &str) -> bool {
-    if read_link(link).as_deref() == Some(target) {
-        return false;
-    }
-    if let Some(parent) = link.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::remove_file(link);
-    std::os::unix::fs::symlink(target, link).is_ok()
-}
-
 /// Run the migration against `etc`/`lib` roots. The `run` closure executes
 /// argv and returns stdout on success; production passes [`systemctl_output`]
 /// while tests pass a stub so no live systemd state is touched.
