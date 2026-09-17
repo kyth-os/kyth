@@ -333,10 +333,10 @@ fn smb_mount(share: String) -> Result<String, String> {
     }
 
     let argv = kyth_shared::system::smb::smb_mount_command(share);
-    std::process::Command::new(&argv[0])
-        .args(&argv[1..])
-        .spawn()
-        .map_err(|error| format!("could not start the desktop share mount: {error}"))?;
+    kyth_shared::system::process::spawn_detached(
+        std::process::Command::new(&argv[0]).args(&argv[1..]),
+    )
+    .map_err(|error| format!("could not start the desktop share mount: {error}"))?;
     Ok(format!("Mount request sent for {share}."))
 }
 
@@ -623,19 +623,20 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
 
 #[tauri::command]
 fn open_backup_app() -> Result<String, String> {
-    std::process::Command::new("flatpak")
-        .args(["run", "org.gnome.World.PikaBackup"])
-        .spawn()
-        .map_err(|error| format!("could not open Pika Backup: {error}"))?;
+    kyth_shared::system::process::spawn_detached(
+        std::process::Command::new("flatpak").args(["run", "org.gnome.World.PikaBackup"]),
+    )
+    .map_err(|error| format!("could not open Pika Backup: {error}"))?;
     Ok("Opened Pika Backup.".to_string())
 }
 
 #[tauri::command]
 fn open_cloud_storage_app() -> Result<String, String> {
-    std::process::Command::new("/usr/bin/kyth-welcome-launch")
-        .args(["--page", "Cloud Storage"])
-        .spawn()
-        .map_err(|error| format!("could not open Cloud Storage: {error}"))?;
+    kyth_shared::system::process::spawn_detached(
+        std::process::Command::new("/usr/bin/kyth-welcome-launch")
+            .args(["--page", "Cloud Storage"]),
+    )
+    .map_err(|error| format!("could not open Cloud Storage: {error}"))?;
     Ok("Opened the full Cloud Storage workflow.".to_string())
 }
 
@@ -657,9 +658,7 @@ fn m365_app(name: &str) -> Option<(&'static str, &'static str)> {
 #[tauri::command]
 fn open_m365_app(name: String) -> Result<String, String> {
     let (url, _) = m365_app(&name).ok_or_else(|| "unknown Microsoft 365 app".to_string())?;
-    std::process::Command::new("xdg-open")
-        .arg(url)
-        .spawn()
+    kyth_shared::system::process::spawn_detached(std::process::Command::new("xdg-open").arg(url))
         .map_err(|error| format!("could not open {name}: {error}"))?;
     Ok(format!("Opened {name}."))
 }
@@ -865,19 +864,19 @@ fn focus_stop(id: String) -> Result<String, String> {
 
 #[tauri::command]
 fn open_move_files_app() -> Result<String, String> {
-    std::process::Command::new("/usr/bin/kyth-welcome-launch")
-        .args(["--page", "Move Files"])
-        .spawn()
-        .map_err(|error| format!("could not open Move Files: {error}"))?;
+    kyth_shared::system::process::spawn_detached(
+        std::process::Command::new("/usr/bin/kyth-welcome-launch").args(["--page", "Move Files"]),
+    )
+    .map_err(|error| format!("could not open Move Files: {error}"))?;
     Ok("Opened the full Windows migration workflow.".to_string())
 }
 
 #[tauri::command]
 fn open_network_shares_app() -> Result<String, String> {
-    std::process::Command::new("/usr/bin/kyth-welcome-launch")
-        .args(["--page", "Network Shares"])
-        .spawn()
-        .map_err(|error| format!("could not open Network Shares: {error}"))?;
+    kyth_shared::system::process::spawn_detached(
+        std::process::Command::new("/usr/bin/kyth-welcome-launch").args(["--page", "Network Shares"]),
+    )
+    .map_err(|error| format!("could not open Network Shares: {error}"))?;
     Ok("Opened the full Network Shares workflow.".to_string())
 }
 #[tauri::command]
@@ -1158,8 +1157,7 @@ fn launch_appimage(path: String) -> Result<String, String> {
             "AppImage is not a discovered executable in an allowed user directory".to_string(),
         );
     }
-    std::process::Command::new(&path)
-        .spawn()
+    kyth_shared::system::process::spawn_detached(std::process::Command::new(&path))
         .map(|_| "AppImage launched.".to_string())
         .map_err(|err| format!("could not launch AppImage: {err}"))
 }
@@ -1477,9 +1475,7 @@ fn open_feedback_issue(title: String, body: String) -> Result<String, String> {
         &body,
         None,
     );
-    std::process::Command::new("xdg-open")
-        .arg(&url)
-        .spawn()
+    kyth_shared::system::process::spawn_detached(std::process::Command::new("xdg-open").arg(&url))
         .map_err(|err| format!("could not open browser: {err}"))?;
     Ok("Opened a prefilled issue in your browser.".to_string())
 }
@@ -1605,12 +1601,12 @@ fn exe_handler_set_auto_bottles(enabled: bool) -> Result<(), String> {
 #[tauri::command]
 fn exe_handler_open_flathub(search_term: String) -> Result<(), String> {
     let query: String = url::form_urlencoded::byte_serialize(search_term.as_bytes()).collect();
-    Command::new("xdg-open")
-        .arg(format!("https://flathub.org/apps/search?q={query}"))
+    let mut open = Command::new("xdg-open");
+    open.arg(format!("https://flathub.org/apps/search?q={query}"))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
+        .stderr(std::process::Stdio::null());
+    kyth_shared::system::process::spawn_detached(&mut open)
         .map(|_| ())
         .map_err(|error| format!("Could not open Flathub: {error}"))
 }
@@ -1630,12 +1626,12 @@ fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
 #[tauri::command]
 fn exe_handler_launch_flatpak(app_id: String) -> Result<(), String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
-    Command::new("flatpak")
-        .args(["run", "--user", &app_id])
+    let mut run = Command::new("flatpak");
+    run.args(["run", "--user", &app_id])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
+        .stderr(std::process::Stdio::null());
+    kyth_shared::system::process::spawn_detached(&mut run)
         .map(|_| ())
         .map_err(|error| format!("Could not launch the Linux application: {error}"))
 }

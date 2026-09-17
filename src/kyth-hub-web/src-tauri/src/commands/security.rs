@@ -136,9 +136,7 @@ pub(crate) fn kali_enter_terminal() -> Result<String, String> {
     let terminal = security_container::detect_terminal()
         .ok_or_else(|| "Could not find a terminal emulator to open.".to_string())?;
     let argv = security_container::kali_enter_argv(terminal, DEFAULT_KALI_BOX);
-    Command::new(&argv[0])
-        .args(&argv[1..])
-        .spawn()
+    kyth_shared::system::process::spawn_detached(Command::new(&argv[0]).args(&argv[1..]))
         .map_err(|err| format!("could not open a terminal: {err}"))?;
     Ok("Opened a Kali terminal.".to_string())
 }
@@ -256,9 +254,9 @@ pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActi
 #[tauri::command]
 pub(crate) fn sec_host_tool_launch(flatpak_id: String) -> Result<String, String> {
     let tool = validated_sec_tool(&flatpak_id)?;
-    Command::new("flatpak")
-        .args(["run", tool.flatpak])
-        .spawn()
-        .map_err(|err| format!("could not launch {}: {err}", tool.name))?;
+    kyth_shared::system::process::spawn_detached(
+        Command::new("flatpak").args(["run", tool.flatpak]),
+    )
+    .map_err(|err| format!("could not launch {}: {err}", tool.name))?;
     Ok(format!("{} launched.", tool.name))
 }

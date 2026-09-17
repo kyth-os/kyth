@@ -31,7 +31,7 @@ ensure_node() {
 	fi
 }
 
-# kyth_shared.memory_tune is the single writer of zram sizing policy. It
+# kyth-memory-tune is the single writer of zram sizing policy. It
 # writes this plain key=value file alongside zram-generator.conf's
 # math-expression syntax specifically so this script never has to parse that
 # expression grammar (a format this project owns the writer of, but the

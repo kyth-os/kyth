@@ -306,6 +306,50 @@ def installed_script_evidence() -> dict[str, dict[str, bool]]:
 INSTALLED_SCRIPTS = installed_script_evidence()
 
 
+# Install lines that place a build_files/ payload into the image runtime
+# (`install ... /ctx/<src> /usr/...` in fragments). The installed NAME is
+# what runs, and it can differ from the source basename (`kyth-scx-loader`
+# ships as `scx_loader`) or lack the `kyth-` prefix entirely
+# (`game-performance`, `zink-run`). Returns {installed_name: source_relpath}.
+_INSTALL_DEST = re.compile(r"install\s+(?:(?:-\S+|\d+)\s+)*/ctx/(\S+)\s+(/usr/(?:bin|libexec)/\S+)")
+
+
+def installed_launcher_sources() -> dict[str, str]:
+    found: dict[str, str] = {}
+    root = ROOT / "build_files/scripts"
+    if not root.is_dir():
+        return found
+    for path in root.rglob("*"):
+        if not (path.is_file() and path.stat().st_size < 500_000):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for line in text.splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            for match in _INSTALL_DEST.finditer(line):
+                source, dest = match.group(1), match.group(2)
+                candidate = ROOT / "build_files" / source
+                if candidate.is_file():
+                    found[Path(dest).name] = f"build_files/{source}"
+    return found
+
+
+INSTALLED_LAUNCHERS = installed_launcher_sources()
+
+
+# Installed env-prefix launch wrappers kept intentionally in shell: they add
+# fixed environment around caller-supplied argv (`exec "$@"`), so there is no
+# fixed native call to port — only a deliberate external interface to document.
+RETAINED_SHELL_INTERFACES = {
+    "zink-run": "intentional env-prefix launch wrapper around caller argv; no fixed native call to port",
+    "low-latency-run": "intentional env-prefix launch wrapper around caller argv; no fixed native call to port",
+}
+
+
 def native_binary_ships(name: str) -> bool:
     """Check whether the Dockerfile builds and copies a native binary of this name.
 
@@ -735,6 +779,16 @@ def entry(
     elif item_name in NOT_PORTED:
         status = "explicitly-not-ported"
         reason = "documented third-party or declarative build/runtime exception"
+    elif surface == "launcher" and item_name in RETAINED_SHELL_INTERFACES:
+        status = "explicitly-not-ported"
+        reason = RETAINED_SHELL_INTERFACES[item_name]
+    elif (
+        surface == "launcher"
+        and (item_name in INSTALLED_LAUNCHERS or item_name in INSTALLED_SCRIPTS)
+        and native_delegate_target(path) is not None
+    ):
+        status = "done-native"
+        reason = f"installed shim delegates to native {native_delegate_target(path)}"
     elif (
         implementation == "rust"
         or (
@@ -783,6 +837,10 @@ def entry(
             result["owner"] = f"native::{delegate_owner}"
         elif item_name in NATIVE_BINARIES and native_binary_ships(item_name):
             result["owner"] = f"native::{item_name}"
+    if surface == "launcher" and status == "done-native":
+        delegate_owner = native_delegate_target(path)
+        if delegate_owner is not None and item_name not in PACKAGED_NATIVE_LAUNCHERS:
+            result["owner"] = f"native::{delegate_owner}"
     metadata = runtime_metadata(path, surface=surface, name=item_name, kind=kind, status=status)
     result.update(metadata)
     if surface == "python-runtime" and item_name in NATIVE_REPLACED_MODULES:
@@ -857,9 +915,19 @@ def entry(
 def discover() -> list[dict]:
     items: list[dict] = []
     reachable_python_modules = python_reachable_modules()
-    for path in sorted(ROOT.glob("build_files/kyth-*")):
-        if path.suffix not in UNIT_SUFFIXES:
-            items.append(entry(path, surface="launcher"))
+    # Launcher entries are keyed by installed name: the running name can
+    # differ from the source basename (`kyth-scx-loader` ships as
+    # `scx_loader`) or lack the `kyth-` prefix (`game-performance`).
+    launcher_sources: dict[str, str | None] = {
+        rel(path): None
+        for path in sorted(ROOT.glob("build_files/kyth-*"))
+        if path.suffix not in UNIT_SUFFIXES
+    }
+    for installed_name, source_rel in INSTALLED_LAUNCHERS.items():
+        # Installed name wins: it is what actually runs in the image.
+        launcher_sources[source_rel] = installed_name
+    for source_rel, name_override in sorted(launcher_sources.items()):
+        items.append(entry(ROOT / source_rel, surface="launcher", name=name_override))
     for path in sorted((ROOT / "build_files").rglob("*")):
         if path.is_file() and path.suffix in UNIT_SUFFIXES:
             unit = entry(path, surface="systemd-unit")

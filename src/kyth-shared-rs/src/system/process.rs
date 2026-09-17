@@ -65,6 +65,18 @@ fn kill_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
+/// Launch a GUI or otherwise long-lived child without blocking the caller
+/// and without leaking a zombie: a background thread reaps the exit status
+/// whenever the child exits. For bounded work with captured output, use the
+/// `run_bounded*` runners instead.
+pub fn spawn_detached(command: &mut Command) -> io::Result<()> {
+    let mut child = command.spawn()?;
+    std::thread::spawn(move || {
+        let _ = child.wait();
+    });
+    Ok(())
+}
+
 /// Run an already-validated argv with captured output and a hard wall-clock
 /// limit. It never invokes a shell and kills a child that outlives its bound.
 pub fn run_bounded(argv: &[String], timeout: Duration) -> io::Result<Output> {

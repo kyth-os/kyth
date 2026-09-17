@@ -15,7 +15,7 @@ MemoryMax=1792M
 CPUQuota=50%
 PrivateTmp=yes
 # PrivateUsers and NoNewPrivileges deliberately absent: this runs per-user (WantedBy=
-# default.target in the user manager) and guardian.py's remediation path
+# default.target in the user manager) and the Guardian's remediation path
 # escalates via `sudo -A systemctl restart bluetooth.service`. NNP blocks
 # the kernel from honoring sudo's setuid bit at exec for a non-root caller
 # outright, and PrivateUsers remaps this user's real UID to an unprivileged

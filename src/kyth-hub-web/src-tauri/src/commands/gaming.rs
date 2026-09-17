@@ -123,10 +123,10 @@ pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<GamingActionLa
 #[tauri::command]
 pub(crate) fn gaming_tool_launch(flatpak_id: String) -> Result<String, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
-    Command::new(tool.launch[0])
-        .args(&tool.launch[1..])
-        .spawn()
-        .map_err(|err| format!("could not launch {}: {err}", tool.name))?;
+    kyth_shared::system::process::spawn_detached(
+        Command::new(tool.launch[0]).args(&tool.launch[1..]),
+    )
+    .map_err(|err| format!("could not launch {}: {err}", tool.name))?;
     Ok(format!("{} launched.", tool.name))
 }
 
@@ -185,9 +185,7 @@ pub(crate) fn open_game_folder(key: String) -> Result<String, String> {
     if !std::path::Path::new(&expanded).exists() {
         return Err(format!("Folder not found yet: {expanded}"));
     }
-    Command::new("xdg-open")
-        .arg(&expanded)
-        .spawn()
+    kyth_shared::system::process::spawn_detached(Command::new("xdg-open").arg(&expanded))
         .map_err(|err| format!("could not open {expanded}: {err}"))?;
     Ok(format!("Opened {expanded}"))
 }

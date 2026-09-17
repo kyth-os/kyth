@@ -316,10 +316,19 @@ fn installer_stream(
 ) -> Result<(), String> {
     let value = connection(&state)?;
     let stop = Arc::new(AtomicBool::new(false));
-    *stream_state
-        .0
-        .lock()
-        .map_err(|_| "installer stream state unavailable".to_string())? = Some(stop.clone());
+    {
+        let mut guard = stream_state
+            .0
+            .lock()
+            .map_err(|_| "installer stream state unavailable".to_string())?;
+        // A re-subscribe must retire the previous thread first: it would
+        // otherwise keep looping on read timeouts and emit duplicate
+        // installer-event streams.
+        if let Some(previous) = guard.take() {
+            previous.store(true, Ordering::Relaxed);
+        }
+        *guard = Some(stop.clone());
+    }
     std::thread::spawn(move || {
         if let Err(error) = start_socket_stream(app.clone(), value, stop) {
             let _ = app.emit("installer-stream-error", error);
