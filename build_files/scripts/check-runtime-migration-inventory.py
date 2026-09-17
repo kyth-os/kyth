@@ -124,6 +124,11 @@ NATIVE_BINARIES = NATIVE_BINARIES | {
 NATIVE_BINARIES = NATIVE_BINARIES | {
     "kyth-installer-shell", "kyth-installer-native", "kyth-installer-exec", "kyth-installerd",
 }
+NATIVE_BINARIES = NATIVE_BINARIES | {
+    "kyth-migrate-display-manager", "kyth-nxm-handler", "kyth-enable-bluetooth",
+    "kyth-fix-system-accounts", "kyth-network-fallback",
+    "kyth-selinux-relabel-home", "kyth-selinux-relabel-home-full",
+}
 PACKAGED_NATIVE_LAUNCHERS = NATIVE_BINARIES | {"kyth-launch-installer"}
 NOT_PORTED = {"rclone@"}
 NOT_PORTED_PATHS = {

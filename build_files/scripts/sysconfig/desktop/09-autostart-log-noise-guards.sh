@@ -71,7 +71,8 @@ WantedBy=sysinit.target
 SYSACCOUNTUNITEOF
 
 install -d -m 0755 /usr/libexec
-install -m 0755 /ctx/sysconfig/kyth-fix-system-accounts /usr/libexec/kyth-fix-system-accounts
+# kyth-fix-system-accounts is a native binary (COPY layer); the retained
+# shell source stays in the tree only as a rollback fixture.
 systemctl enable kyth-system-accounts.service 2>/dev/null || true
 
 # input-remapper.service is the single owner of preset autoloading. The RPM's

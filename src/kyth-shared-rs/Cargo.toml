@@ -342,6 +342,34 @@ path = "src/memory_tune_bin.rs"
 name = "kyth-sysctl-compose"
 path = "src/sysctl_compose_bin.rs"
 
+[[bin]]
+name = "kyth-migrate-display-manager"
+path = "src/migrate_display_manager_bin.rs"
+
+[[bin]]
+name = "kyth-nxm-handler"
+path = "src/nxm_handler_bin.rs"
+
+[[bin]]
+name = "kyth-enable-bluetooth"
+path = "src/enable_bluetooth_bin.rs"
+
+[[bin]]
+name = "kyth-fix-system-accounts"
+path = "src/fix_system_accounts_bin.rs"
+
+[[bin]]
+name = "kyth-network-fallback"
+path = "src/network_fallback_bin.rs"
+
+[[bin]]
+name = "kyth-selinux-relabel-home"
+path = "src/selinux_relabel_home_bin.rs"
+
+[[bin]]
+name = "kyth-selinux-relabel-home-full"
+path = "src/selinux_relabel_home_full_bin.rs"
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

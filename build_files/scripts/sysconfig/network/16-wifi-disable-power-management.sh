@@ -52,7 +52,8 @@ done < <(nmcli -t -f UUID,TYPE connection show 2>/dev/null || true)
 NMDISPEOF
 
 install -d -m 0755 /usr/libexec
-install -m 0755 /ctx/sysconfig/kyth-network-fallback /usr/libexec/kyth-network-fallback
+# kyth-network-fallback is a native binary (COPY layer); the retained shell
+# source stays in the tree only as a rollback fixture.
 
 write_config /etc/xdg/autostart/kyth-network-fallback.desktop <<'NETFALLBACKDESKTOPEOF'
 [Desktop Entry]

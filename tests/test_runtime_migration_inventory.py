@@ -84,9 +84,8 @@ class InventoryTest(unittest.TestCase):
             [item for item in report["active_python"] if item["runtime_authority"] == "python-installer"]
         )
         # Installed shell scripts with no native owner stay queued and
-        # visible; nothing else may sit in the migration queue.
+        # visible; once ported, the queue is empty and this loop is vacuous.
         queued = [item for item in document["entries"] if item["status"] == "queued"]
-        self.assertTrue(queued)
         for item in queued:
             self.assertEqual(item["surface"], "shell-script", item["path"])
             self.assertEqual(item["runtime_authority"], "shell-orchestration", item["path"])

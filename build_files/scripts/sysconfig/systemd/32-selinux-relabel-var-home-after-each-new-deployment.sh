@@ -96,8 +96,8 @@ WantedBy=multi-user.target
 RELABELFULLEOF
 
 install -d -m 0755 /usr/libexec
-install -m 0755 /ctx/sysconfig/kyth-selinux-relabel-home /usr/libexec/kyth-selinux-relabel-home
-install -m 0755 /ctx/sysconfig/kyth-selinux-relabel-home-full /usr/libexec/kyth-selinux-relabel-home-full
+# Both relabel helpers are native binaries (COPY layer); the retained shell
+# sources stay in the tree only as rollback fixtures.
 
 systemctl enable kyth-selinux-relabel-home.service 2>/dev/null || true
 systemctl enable kyth-selinux-relabel-home-full.service 2>/dev/null || true

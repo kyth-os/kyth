@@ -21,7 +21,8 @@ ACTION=="add", SUBSYSTEM=="rfkill", ATTR{type}=="bluetooth", RUN+="/usr/sbin/rfk
 BTUDEVEOF
 
 install -d -m 0755 /usr/libexec
-install -m 0755 /ctx/sysconfig/kyth-enable-bluetooth /usr/libexec/kyth-enable-bluetooth
+# kyth-enable-bluetooth is a native binary (COPY layer); the retained shell
+# source stays in the tree only as a rollback fixture.
 
 write_config /usr/lib/systemd/system/kyth-bluetooth-enable.service <<'BTENABLEUNITEOF'
 [Unit]

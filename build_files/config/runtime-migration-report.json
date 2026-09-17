@@ -1651,8 +1651,7 @@
     "entries": 768,
     "p0_open_entries": 0,
     "status_by_active_entry": {
-      "done-native": 185,
-      "queued": 7
+      "done-native": 192
     },
     "superseded_entries": 127
   },

@@ -60,7 +60,8 @@ ln -s /dev/null /etc/systemd/system/sddm.service
 # survives even though the new image no longer ships sddm). Install a one-shot
 # that runs before the greeter on every boot and re-applies the PLM wiring.
 install -d -m 0755 /usr/libexec
-install -m 0755 /ctx/sysconfig/kyth-migrate-display-manager /usr/libexec/kyth-migrate-display-manager 2>/dev/null || install -m 0755 "$(dirname "${BASH_SOURCE[0]}")/kyth-migrate-display-manager" /usr/libexec/kyth-migrate-display-manager
+# kyth-migrate-display-manager is a native binary (COPY layer); the retained
+# shell source stays in the tree only as a rollback fixture.
 cat >/usr/lib/systemd/system/kyth-migrate-display-manager.service <<'MIGRATESERVICEEOF'
 [Unit]
 Description=Migrate stale display-manager from SDDM to Plasma Login Manager

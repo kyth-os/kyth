@@ -13117,20 +13117,20 @@
       "function_inventory": [
         {
           "name": "__main__",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-enable-bluetooth",
-          "ownership": "shell"
+          "owner": "native::kyth-enable-bluetooth",
+          "ownership": "native"
         }
       ],
-      "installed_implementation": "shell",
+      "installed_implementation": "rust",
       "migration_priority": 2,
       "name": "kyth-enable-bluetooth",
-      "owner": "fixture::build_files/scripts/sysconfig/kyth-enable-bluetooth",
+      "owner": "native::kyth-enable-bluetooth",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/sysconfig/kyth-enable-bluetooth",
-      "priority": 1,
-      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "priority": 0,
+      "reason": "native kyth-enable-bluetooth binary ships in the image; shell source is a retained fixture",
       "resolved_target": "build_files/scripts/sysconfig/kyth-enable-bluetooth",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "privileged-writer",
@@ -13138,7 +13138,7 @@
       "runtime_active": true,
       "runtime_authority": "shell-orchestration",
       "runtime_scope": "system-service",
-      "status": "queued",
+      "status": "done-native",
       "surface": "shell-script"
     },
     {
@@ -13177,30 +13177,30 @@
       "function_inventory": [
         {
           "name": "append_missing_name",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-fix-system-accounts",
-          "ownership": "shell"
+          "owner": "native::kyth-fix-system-accounts",
+          "ownership": "native"
         },
         {
           "name": "ensure_group_line",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-fix-system-accounts",
-          "ownership": "shell"
+          "owner": "native::kyth-fix-system-accounts",
+          "ownership": "native"
         },
         {
           "name": "ensure_passwd_line",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-fix-system-accounts",
-          "ownership": "shell"
+          "owner": "native::kyth-fix-system-accounts",
+          "ownership": "native"
         }
       ],
-      "installed_implementation": "shell",
+      "installed_implementation": "rust",
       "migration_priority": 2,
       "name": "kyth-fix-system-accounts",
-      "owner": "fixture::build_files/scripts/sysconfig/kyth-fix-system-accounts",
+      "owner": "native::kyth-fix-system-accounts",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/sysconfig/kyth-fix-system-accounts",
-      "priority": 1,
-      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "priority": 0,
+      "reason": "native kyth-fix-system-accounts binary ships in the image; shell source is a retained fixture",
       "resolved_target": "build_files/scripts/sysconfig/kyth-fix-system-accounts",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "privileged-writer",
@@ -13208,7 +13208,7 @@
       "runtime_active": true,
       "runtime_authority": "shell-orchestration",
       "runtime_scope": "system-service",
-      "status": "queued",
+      "status": "done-native",
       "surface": "shell-script"
     },
     {
@@ -13217,20 +13217,20 @@
       "function_inventory": [
         {
           "name": "__main__",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-migrate-display-manager",
-          "ownership": "shell"
+          "owner": "native::kyth-migrate-display-manager",
+          "ownership": "native"
         }
       ],
-      "installed_implementation": "shell",
+      "installed_implementation": "rust",
       "migration_priority": 2,
       "name": "kyth-migrate-display-manager",
-      "owner": "fixture::build_files/scripts/sysconfig/kyth-migrate-display-manager",
+      "owner": "native::kyth-migrate-display-manager",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/sysconfig/kyth-migrate-display-manager",
-      "priority": 1,
-      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "priority": 0,
+      "reason": "native kyth-migrate-display-manager binary ships in the image; shell source is a retained fixture",
       "resolved_target": "build_files/scripts/sysconfig/kyth-migrate-display-manager",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "privileged-writer",
@@ -13238,7 +13238,7 @@
       "runtime_active": true,
       "runtime_authority": "shell-orchestration",
       "runtime_scope": "system-service",
-      "status": "queued",
+      "status": "done-native",
       "surface": "shell-script"
     },
     {
@@ -13247,25 +13247,25 @@
       "function_inventory": [
         {
           "name": "connected",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-network-fallback",
-          "ownership": "shell"
+          "owner": "native::kyth-network-fallback",
+          "ownership": "native"
         },
         {
           "name": "connecting",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-network-fallback",
-          "ownership": "shell"
+          "owner": "native::kyth-network-fallback",
+          "ownership": "native"
         }
       ],
-      "installed_implementation": "shell",
+      "installed_implementation": "rust",
       "migration_priority": 2,
       "name": "kyth-network-fallback",
-      "owner": "fixture::build_files/scripts/sysconfig/kyth-network-fallback",
+      "owner": "native::kyth-network-fallback",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/sysconfig/kyth-network-fallback",
-      "priority": 1,
-      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "priority": 0,
+      "reason": "native kyth-network-fallback binary ships in the image; shell source is a retained fixture",
       "resolved_target": "build_files/scripts/sysconfig/kyth-network-fallback",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "privileged-writer",
@@ -13273,7 +13273,7 @@
       "runtime_active": true,
       "runtime_authority": "shell-orchestration",
       "runtime_scope": "system-service",
-      "status": "queued",
+      "status": "done-native",
       "surface": "shell-script"
     },
     {
@@ -13282,20 +13282,20 @@
       "function_inventory": [
         {
           "name": "__main__",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-nxm-handler",
-          "ownership": "shell"
+          "owner": "native::kyth-nxm-handler",
+          "ownership": "native"
         }
       ],
-      "installed_implementation": "shell",
+      "installed_implementation": "rust",
       "migration_priority": 2,
       "name": "kyth-nxm-handler",
-      "owner": "fixture::build_files/scripts/sysconfig/kyth-nxm-handler",
+      "owner": "native::kyth-nxm-handler",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/sysconfig/kyth-nxm-handler",
-      "priority": 1,
-      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "priority": 0,
+      "reason": "native kyth-nxm-handler binary ships in the image; shell source is a retained fixture",
       "resolved_target": "build_files/scripts/sysconfig/kyth-nxm-handler",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "privileged-writer",
@@ -13303,7 +13303,7 @@
       "runtime_active": true,
       "runtime_authority": "shell-orchestration",
       "runtime_scope": "system-service",
-      "status": "queued",
+      "status": "done-native",
       "surface": "shell-script"
     },
     {
@@ -13312,20 +13312,20 @@
       "function_inventory": [
         {
           "name": "__main__",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-selinux-relabel-home",
-          "ownership": "shell"
+          "owner": "native::kyth-selinux-relabel-home",
+          "ownership": "native"
         }
       ],
-      "installed_implementation": "shell",
+      "installed_implementation": "rust",
       "migration_priority": 2,
       "name": "kyth-selinux-relabel-home",
-      "owner": "fixture::build_files/scripts/sysconfig/kyth-selinux-relabel-home",
+      "owner": "native::kyth-selinux-relabel-home",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/sysconfig/kyth-selinux-relabel-home",
-      "priority": 1,
-      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "priority": 0,
+      "reason": "native kyth-selinux-relabel-home binary ships in the image; shell source is a retained fixture",
       "resolved_target": "build_files/scripts/sysconfig/kyth-selinux-relabel-home",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "privileged-writer",
@@ -13333,7 +13333,7 @@
       "runtime_active": true,
       "runtime_authority": "shell-orchestration",
       "runtime_scope": "system-service",
-      "status": "queued",
+      "status": "done-native",
       "surface": "shell-script"
     },
     {
@@ -13342,20 +13342,20 @@
       "function_inventory": [
         {
           "name": "__main__",
-          "owner": "fixture::build_files/scripts/sysconfig/kyth-selinux-relabel-home-full",
-          "ownership": "shell"
+          "owner": "native::kyth-selinux-relabel-home-full",
+          "ownership": "native"
         }
       ],
-      "installed_implementation": "shell",
+      "installed_implementation": "rust",
       "migration_priority": 2,
       "name": "kyth-selinux-relabel-home-full",
-      "owner": "fixture::build_files/scripts/sysconfig/kyth-selinux-relabel-home-full",
+      "owner": "native::kyth-selinux-relabel-home-full",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/sysconfig/kyth-selinux-relabel-home-full",
-      "priority": 1,
-      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "priority": 0,
+      "reason": "native kyth-selinux-relabel-home-full binary ships in the image; shell source is a retained fixture",
       "resolved_target": "build_files/scripts/sysconfig/kyth-selinux-relabel-home-full",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "privileged-writer",
@@ -13363,7 +13363,7 @@
       "runtime_active": true,
       "runtime_authority": "shell-orchestration",
       "runtime_scope": "system-service",
-      "status": "queued",
+      "status": "done-native",
       "surface": "shell-script"
     },
     {

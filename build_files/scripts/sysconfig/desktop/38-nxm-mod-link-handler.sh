@@ -9,7 +9,8 @@ source "../../lib/config-helpers.sh"
 # (Vortex, Mod Organizer 2).  Register a system-wide handler so Firefox and
 # Chrome pass these URIs to kyth-nxm-handler, which routes them to the
 # user's installed mod manager (Vortex in Bottles preferred, then MO2).
-install -m 0755 /ctx/sysconfig/kyth-nxm-handler /usr/bin/kyth-nxm-handler
+# kyth-nxm-handler is a native binary (COPY layer); the retained shell
+# source stays in the tree only as a rollback fixture.
 
 write_config /usr/share/applications/kyth-nxm-handler.desktop <<'NXMDESKEOF'
 [Desktop Entry]
