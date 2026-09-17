@@ -261,21 +261,39 @@ pub(crate) struct PrivilegedActionLaunch {
     pub(crate) detail: String,
 }
 
+/// Machine-readable tag for privileged-daemon failures. The Hub frontend
+/// routes on this tag first, so any local-daemon failure — whatever its
+/// human wording — can never be misread as "check your internet connection".
+/// The tag survives embedding in composed messages ("...need attention:
+/// [privileged] ...") and is never shown: the frontend replaces the whole
+/// detail with a helper message.
+pub(crate) const PRIVILEGED_ERROR_TAG: &str = "[privileged]";
+
+fn tag_privileged(detail: String) -> String {
+    format!("{PRIVILEGED_ERROR_TAG} {detail}")
+}
+
 pub(crate) fn send_request(request: Value) -> Result<String, String> {
     let mut stream = UnixStream::connect("/run/kyth/privileged.sock")
-        .map_err(|_| "privileged service is unavailable".to_string())?;
+        .map_err(|_| tag_privileged("privileged service is unavailable".to_string()))?;
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(910)))
-        .map_err(|error| format!("could not configure privileged service timeout: {error}"))?;
+        .map_err(|error| {
+            tag_privileged(format!(
+                "could not configure privileged service timeout: {error}"
+            ))
+        })?;
     stream
         .write_all(format!("{request}\n").as_bytes())
-        .map_err(|error| format!("could not contact privileged service: {error}"))?;
+        .map_err(|error| {
+            tag_privileged(format!("could not contact privileged service: {error}"))
+        })?;
     let mut response = String::new();
     BufReader::new(stream)
         .read_line(&mut response)
-        .map_err(|error| format!("could not read privileged service: {error}"))?;
+        .map_err(|error| tag_privileged(format!("could not read privileged service: {error}")))?;
     let value: Value = serde_json::from_str(&response)
-        .map_err(|error| format!("invalid privileged service response: {error}"))?;
+        .map_err(|error| tag_privileged(format!("invalid privileged service response: {error}")))?;
     if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         let detail = value
             .get("detail")
@@ -289,8 +307,8 @@ pub(crate) fn send_request(request: Value) -> Result<String, String> {
             .get("detail")
             .and_then(Value::as_str)
             .unwrap_or("privileged operation failed");
-        Err(kyth_shared::privileged::redact_request_detail(
-            &request, detail,
+        Err(tag_privileged(
+            kyth_shared::privileged::redact_request_detail(&request, detail),
         ))
     }
 }

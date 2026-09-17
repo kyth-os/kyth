@@ -18,6 +18,7 @@ const gaming = await readFile(resolve(root, "src/components/GamingSection.tsx"),
 const actions = await readFile(resolve(root, "src/components/SectionActions.tsx"), "utf8");
 const rust = await readFile(resolve(root, "src-tauri/src/main.rs"), "utf8");
 const updatesRust = await readFile(resolve(root, "src-tauri/src/commands/updates.rs"), "utf8");
+const privilegeRust = await readFile(resolve(root, "src-tauri/src/commands/privilege.rs"), "utf8");
 const parity = await readFile(resolve(root, "PARITY.md"), "utf8");
 
 async function sourceFiles(directory) {
@@ -157,26 +158,33 @@ test("Updates page gives plain-language next steps", () => {
 test("Privileged-helper outage is not reported as a network problem", () => {
   // A dead kyth-privileged daemon surfaces as "privileged service is
   // unavailable", which also matches the generic "unavailable" network
-  // branch. The helper branch must come first so users get the real fix
-  // (update + restart) instead of "check your internet connection".
-  const helperBranch = updateMessages.indexOf("privileged service");
-  assert.ok(helperBranch !== -1, "updateMessages must name the privileged helper failure");
-  assert.ok(
-    helperBranch < updateMessages.indexOf("We couldn't reach the update service"),
-    "privileged-helper branch must win over the network message",
-  );
-  // Same ordering guarantee inside the action-error mapper (the second half
-  // of the file): the "apps" failure from a dead daemon must not fall
-  // through to the network branch either.
-  const actionMapper = updateMessages.slice(updateMessages.indexOf("export function friendlyActionError"));
-  const actionHelper = actionMapper.indexOf("privileged service");
-  assert.ok(actionHelper !== -1, "friendlyActionError must name the privileged helper failure");
-  assert.ok(
-    actionHelper < actionMapper.indexOf("We couldn't reach the update service"),
-    "friendlyActionError helper branch must win over the network message",
-  );
-  assert.match(updateMessages, /update helper isn't running/);
-  assert.match(updatesOverview, /system helper/);
+  // branch. The backend tags every daemon-client failure with
+  // "[privileged]" and the mappers route on the tag first, so the message
+  // stays correct whatever the human wording becomes. The legacy
+  // "privileged service" substring branch covers old backends without tags.
+  assert.match(privilegeRust, /PRIVILEGED_ERROR_TAG: &str = "\[privileged\]"/);
+  assert.match(privilegeRust, /tag_privileged\(/);
+  for (const [mapper, label] of [
+    [updateMessages.slice(0, updateMessages.indexOf("export function friendlyActionError")), "friendlyAvailabilityDetail"],
+    [updateMessages.slice(updateMessages.indexOf("export function friendlyActionError")), "friendlyActionError"],
+  ]) {
+    const tagBranch = mapper.indexOf("[privileged]");
+    assert.ok(tagBranch !== -1, `${label} must route on the [privileged] tag`);
+    assert.ok(
+      tagBranch < mapper.indexOf("We couldn't reach the update service"),
+      `${label} tag branch must win over the network message`,
+    );
+    const legacyBranch = mapper.indexOf("privileged service");
+    assert.ok(legacyBranch !== -1, `${label} must keep the legacy substring branch`);
+    assert.ok(
+      legacyBranch < mapper.indexOf("We couldn't reach the update service"),
+      `${label} legacy branch must win over the network message`,
+    );
+  }
+  assert.match(updateMessages, /helper service isn't running/);
+  assert.match(updateMessages, /system update helper isn't running/);
+  assert.match(updatesOverview, /helper service isn't running/);
+  assert.match(updatesOverview, /system update helper isn't running/);
 });
 
 test("cancel commands pair every job status command and resolve in the pollers", () => {
