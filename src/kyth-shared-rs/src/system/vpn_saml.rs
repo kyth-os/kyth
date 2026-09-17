@@ -267,6 +267,28 @@ fn hex(value: u8) -> Option<u8> {
     }
 }
 
+/// Which handoff the SAML sign-in window produced. The loopback callback
+/// carries either a ready `cookie` (connect immediately) or the captured
+/// ACS `url`+`body` form (replay once, then connect). Anything else means
+/// the page completed without yielding credentials — historically a silent
+/// no-op that left the Hub stuck on "sign-in required" forever.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SamlCallbackKind {
+    Cookie,
+    FormPost,
+    Empty,
+}
+
+pub fn classify_saml_callback(has_cookie: bool, has_form_post: bool) -> SamlCallbackKind {
+    if has_cookie {
+        SamlCallbackKind::Cookie
+    } else if has_form_post {
+        SamlCallbackKind::FormPost
+    } else {
+        SamlCallbackKind::Empty
+    }
+}
+
 pub fn parse_gp_saml_cookie(cookie: &str) -> (String, String, String) {
     let raw = cookie.trim();
     if raw.is_empty() {
@@ -546,6 +568,66 @@ mod tests {
         )
         .unwrap();
         assert!(!command.argv.iter().any(|arg| arg == "--usergroup"));
+    }
+
+    #[test]
+    fn tunnel_setup_uses_the_upstream_vpnc_script() {
+        // Regression pin for the GlobalProtect fix: the kyth-vpnc-script
+        // stub never configured the tunnel interface, routes, or DNS, so a
+        // "connected" openconnect left the machine offline. Both builders
+        // must point at the real upstream script openconnect ships with.
+        let initial =
+            build_initial_command("https://vpn.example/gp", "gp", "win", "pat", "secret").unwrap();
+        let script_index = initial
+            .argv
+            .iter()
+            .position(|arg| arg == "--script")
+            .expect("initial command should set --script");
+        assert_eq!(initial.argv[script_index + 1], "/etc/vpnc/vpnc-script");
+        assert!(
+            !initial
+                .argv
+                .iter()
+                .any(|arg| arg.contains("kyth-vpnc-script")),
+            "must not use the stub script: {:?}",
+            initial.argv
+        );
+        let reconnect = build_reconnect_command(
+            "https://vpn.example/gp",
+            "gp",
+            "win",
+            "gateway",
+            "portal-userauthcookie=abc&saml-username=pat",
+            "pat",
+        )
+        .unwrap();
+        let script_index = reconnect
+            .argv
+            .iter()
+            .position(|arg| arg == "--script")
+            .expect("reconnect command should set --script");
+        assert_eq!(reconnect.argv[script_index + 1], "/etc/vpnc/vpnc-script");
+        assert!(
+            !reconnect
+                .argv
+                .iter()
+                .any(|arg| arg.contains("kyth-vpnc-script")),
+            "must not use the stub script: {:?}",
+            reconnect.argv
+        );
+    }
+
+    #[test]
+    fn saml_callback_routing_covers_all_three_cases() {
+        use super::classify_saml_callback;
+        use super::SamlCallbackKind::*;
+        // Cookie wins even when a form is also present.
+        assert_eq!(classify_saml_callback(true, true), Cookie);
+        assert_eq!(classify_saml_callback(true, false), Cookie);
+        assert_eq!(classify_saml_callback(false, true), FormPost);
+        // Neither: the page finished without credentials. This used to be a
+        // silent return that left the Hub stuck forever.
+        assert_eq!(classify_saml_callback(false, false), Empty);
     }
 
     #[test]

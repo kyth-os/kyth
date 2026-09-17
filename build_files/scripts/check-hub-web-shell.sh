@@ -31,6 +31,9 @@ echo "== kyth-hub-web: frontend build =="
 echo "== kyth-hub-web: frontend/Rust contract tests =="
 (cd "$hub_web" && npm run test:contracts)
 
+echo "== kyth-hub-web: VPN SAML handoff regression =="
+(cd "$hub_web" && npm run test:vpn-handoff)
+
 echo "== kyth-hub-web: headless section construction smoke =="
 (cd "$hub_web" && npm run test:smoke)
 

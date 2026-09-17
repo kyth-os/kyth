@@ -277,11 +277,23 @@ fn handle_saml_callback(
             start_reconnect(app, job, cookie);
             return;
         }
-        let (Some(action_url), Some(body)) =
-            (callback_value(&url, "url"), callback_value(&url, "body"))
-        else {
+        let form = callback_value(&url, "url").zip(callback_value(&url, "body"));
+        if kyth_shared::system::vpn_saml::classify_saml_callback(false, form.is_some())
+            == kyth_shared::system::vpn_saml::SamlCallbackKind::Empty
+        {
+            // The page finished without yielding credentials. This used to
+            // be a silent return that left the Hub stuck on "sign-in
+            // required" with no way forward.
+            if let Ok(runtime) = get_job(&job) {
+                status(
+                    &runtime,
+                    "failed",
+                    "VPN sign-in completed without an authentication response.",
+                );
+            }
             return;
-        };
+        }
+        let (action_url, body) = form.unwrap_or_default();
         let Ok((argv, input)) =
             kyth_shared::system::vpn_saml::replay_saml_command(&action_url, &body, &gateway)
         else {
