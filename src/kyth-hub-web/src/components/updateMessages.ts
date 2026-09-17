@@ -1,5 +1,8 @@
 export function friendlyAvailabilityDetail(detail: string | undefined, fallback: string): string {
   const lower = (detail ?? "").toLowerCase();
+  if (lower.includes("privileged service")) {
+    return "The system update helper isn't running. Update KythOS and restart, then try again.";
+  }
   if (lower.includes("timed out") || lower.includes("timeout") || lower.includes("network") || lower.includes("unavailable")) {
     return "We couldn't reach the update service. Check your internet connection and try again.";
   }
@@ -23,6 +26,9 @@ export function friendlyActionError(action: string, error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
   const lower = detail.toLowerCase();
 
+  if (lower.includes("privileged service")) {
+    return "The system update helper isn't running, so this couldn't finish. Update KythOS and restart, then try again.";
+  }
   if (lower.includes("timed out") || lower.includes("timeout") || lower.includes("network") || lower.includes("unavailable")) {
     if (action === "stage") {
       return "KythOS couldn't reach the update registry before the check timed out. Your current system has not changed.";

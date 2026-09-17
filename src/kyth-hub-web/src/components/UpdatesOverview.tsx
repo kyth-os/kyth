@@ -37,6 +37,9 @@ function numericPending(pending: Record<string, string> | null): number {
 
 function actionErrorNextStep(failure: string, action: string | null): string {
   const lower = failure.toLowerCase();
+  if (lower.includes("system helper")) {
+    return "Update KythOS and restart, then choose “Try again”. Your current system is still safe to use.";
+  }
   if (action === "check") {
     return "Check your connection, then choose “Try again”. Your current system is still safe to use.";
   }

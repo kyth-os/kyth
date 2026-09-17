@@ -154,6 +154,31 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updateMessages, /No changes were made/);
 });
 
+test("Privileged-helper outage is not reported as a network problem", () => {
+  // A dead kyth-privileged daemon surfaces as "privileged service is
+  // unavailable", which also matches the generic "unavailable" network
+  // branch. The helper branch must come first so users get the real fix
+  // (update + restart) instead of "check your internet connection".
+  const helperBranch = updateMessages.indexOf("privileged service");
+  assert.ok(helperBranch !== -1, "updateMessages must name the privileged helper failure");
+  assert.ok(
+    helperBranch < updateMessages.indexOf("We couldn't reach the update service"),
+    "privileged-helper branch must win over the network message",
+  );
+  // Same ordering guarantee inside the action-error mapper (the second half
+  // of the file): the "apps" failure from a dead daemon must not fall
+  // through to the network branch either.
+  const actionMapper = updateMessages.slice(updateMessages.indexOf("export function friendlyActionError"));
+  const actionHelper = actionMapper.indexOf("privileged service");
+  assert.ok(actionHelper !== -1, "friendlyActionError must name the privileged helper failure");
+  assert.ok(
+    actionHelper < actionMapper.indexOf("We couldn't reach the update service"),
+    "friendlyActionError helper branch must win over the network message",
+  );
+  assert.match(updateMessages, /update helper isn't running/);
+  assert.match(updatesOverview, /system helper/);
+});
+
 test("cancel commands pair every job status command and resolve in the pollers", () => {
   for (const command of [
     "cancel_job",
