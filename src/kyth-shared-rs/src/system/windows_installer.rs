@@ -16,6 +16,10 @@ use std::io::{Read, Seek, SeekFrom};
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::Duration;
+
+use super::jobs::{timeout_for, JobTimeoutClass};
+use super::process::run_bounded_command;
 
 pub const BOTTLES_ID: &str = "com.usebottles.bottles";
 pub const FLATHUB_URL: &str = "https://dl.flathub.org/repo/flathub.flatpakrepo";
@@ -465,23 +469,36 @@ fn run(
     kind: WorkflowFailureKind,
     message: &str,
     wait: bool,
+    timeout: Duration,
 ) -> Result<String, InstallerInspectionError> {
     let Some((program, arguments)) = command.split_first() else {
         return Err(failure(kind, "empty command"));
     };
-    let child = Command::new(program)
-        .args(arguments)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| failure(kind, format!("{message}: {error}")))?;
+    let mut child_command = Command::new(program);
+    child_command.args(arguments).stdin(Stdio::null());
     if !wait {
+        // Fire-and-forget launch: no output capture, so no pipe to drain and
+        // no wait. The caller owns the launched process lifetime.
+        child_command
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| failure(kind, format!("{message}: {error}")))?;
         return Ok(String::new());
     }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| failure(kind, format!("{message}: {error}")))?;
+    // Bounded wait with pipe drain: a stalled mirror must surface as a
+    // timeout, not a forever-"running" Hub job, and verbose output must not
+    // wedge the child on a full pipe buffer.
+    let output = run_bounded_command(child_command, timeout).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::TimedOut {
+            failure(
+                kind,
+                format!("{message} (it took too long and was stopped)"),
+            )
+        } else {
+            failure(kind, format!("{message}: {error}"))
+        }
+    })?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(if output.stderr.is_empty() {
             &output.stdout
@@ -489,7 +506,9 @@ fn run(
             &output.stderr
         })
         .trim()
-        .to_string();
+        .chars()
+        .take(2000)
+        .collect::<String>();
         return Err(failure(
             kind,
             format!(
@@ -524,17 +543,21 @@ pub fn launch_in_bottles(
 ) -> Result<LaunchResult, InstallerInspectionError> {
     if !flatpak_info(BOTTLES_ID) {
         let commands = flatpak_install_commands();
+        // Network downloads: same tier as the Hub's other Flatpak tool installs.
+        let install_timeout = timeout_for(JobTimeoutClass::ToolInstall);
         run(
             &commands[0],
             WorkflowFailureKind::BottlesInstall,
             "Could not configure Flathub",
             true,
+            install_timeout,
         )?;
         run(
             &commands[1],
             WorkflowFailureKind::BottlesInstall,
             "Could not install Bottles",
             true,
+            install_timeout,
         )?;
     }
     let bottle = plan_bottle(request);
@@ -544,6 +567,8 @@ pub fn launch_in_bottles(
         WorkflowFailureKind::BottleCreate,
         "Could not list Bottles environments",
         true,
+        // Local read through the Bottles Flatpak: no downloads, short leash.
+        timeout_for(JobTimeoutClass::QuickRemove),
     )?)
     .contains(&bottle.name)
     {
@@ -561,6 +586,7 @@ pub fn launch_in_bottles(
             WorkflowFailureKind::BottleCreate,
             "Could not create the Windows environment",
             true,
+            timeout_for(JobTimeoutClass::ToolInstall),
         )?;
     }
     let staged = stage_installer(request, home)?;
@@ -581,6 +607,8 @@ pub fn launch_in_bottles(
         WorkflowFailureKind::Launch,
         "Bottles could not launch the installer",
         false,
+        // Unused for fire-and-forget launches, which never wait.
+        Duration::from_secs(0),
     )?;
     Ok(LaunchResult { bottle, staged })
 }
@@ -590,6 +618,44 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn stalled_child_surfaces_as_timeout_not_forever() {
+        let error = run(
+            &["sleep".to_string(), "30".to_string()],
+            WorkflowFailureKind::BottlesInstall,
+            "Could not install Bottles",
+            true,
+            Duration::from_millis(200),
+        )
+        .expect_err("a stalled child must fail, not hang");
+        assert_eq!(error.kind, WorkflowFailureKind::BottlesInstall);
+        assert!(
+            error.message.contains("took too long"),
+            "timeout must say so, got: {}",
+            error.message
+        );
+    }
+
+    #[test]
+    fn failing_child_reports_step_and_detail() {
+        let error = run(
+            &["ls".to_string(), "/nonexistent-kyth-path-xyz".to_string()],
+            WorkflowFailureKind::BottleCreate,
+            "Could not list Bottles environments",
+            true,
+            Duration::from_secs(30),
+        )
+        .expect_err("a failing child must fail");
+        assert_eq!(error.kind, WorkflowFailureKind::BottleCreate);
+        assert!(
+            error
+                .message
+                .starts_with("Could not list Bottles environments:"),
+            "failure must name the step, got: {}",
+            error.message
+        );
+    }
 
     fn pe(machine: u16) -> Vec<u8> {
         let mut bytes = vec![0_u8; 128];
