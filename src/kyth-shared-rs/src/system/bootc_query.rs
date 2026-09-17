@@ -137,7 +137,13 @@ fn effective_uid() -> u32 {
 pub fn holds_sysroot_lock(cmdline: &str) -> bool {
     let text = cmdline.trim();
     if text.contains("ostree admin finalize-staged") {
-        return true;
+        // ostree-finalize-staged-hold.service parks
+        // `ostree admin finalize-staged --hold` for the entire uptime to keep
+        // /boot open; it performs no mutation and must not read as an active
+        // operation, or every status read starves forever. Only a real
+        // finalization (no --hold token) counts as a lock holder.
+        let holding = !text.split_whitespace().any(|token| token == "--hold");
+        return holding;
     }
     let Some(captures) = Regex::new(r"(?:^|[\s/])bootc\s+(upgrade|switch|rollback|reset)(?:\s|$)")
         .ok()
@@ -362,6 +368,18 @@ mod tests {
         assert!(holds_sysroot_lock("123 /usr/bin/bootc upgrade"));
         assert!(holds_sysroot_lock("/usr/bin/ostree admin finalize-staged"));
         assert!(!holds_sysroot_lock("/usr/bin/bootc status --json"));
+    }
+
+    #[test]
+    fn lock_detection_ignores_the_permanent_boot_hold_daemon() {
+        // ostree-finalize-staged-hold.service parks this exact command for
+        // the whole uptime. Treating it as an active operation starved every
+        // status read (and every kyth-safe-upgrade run) forever.
+        assert!(!holds_sysroot_lock(
+            "79830 /usr/bin/ostree admin finalize-staged --hold"
+        ));
+        // A real finalization without the token still counts.
+        assert!(holds_sysroot_lock("/usr/bin/ostree admin finalize-staged"));
     }
 
     #[test]
