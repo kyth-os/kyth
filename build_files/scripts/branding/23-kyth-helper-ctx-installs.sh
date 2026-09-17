@@ -31,7 +31,7 @@ Terminal=false
 Categories=Settings;PackageManager;
 Keywords=apps;store;software;flatpak;install;remove;
 StartupNotify=true
-StartupWMClass=kyth-welcome
+StartupWMClass=com.kythos.hub
 APPSTOREEOF
 # The native Rust helper is copied into the base stage by Dockerfile. Keep the
 # stable /usr/libexec path used by kyth-privileged, but do not install the

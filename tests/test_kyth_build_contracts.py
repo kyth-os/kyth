@@ -111,6 +111,40 @@ class ShippedCommandContracts(unittest.TestCase):
         self.assertIn("hub", keywords)
         self.assertNotIn("pulse", keywords)
 
+    def test_hub_desktop_entries_match_tauri_app_id(self):
+        # Regression pin: the Hub window is a Tauri/WebKitGTK window whose
+        # Wayland app-id is the bundle identifier. Every desktop entry that
+        # launches it must declare that id as StartupWMClass, or Plasma
+        # cannot group the window under the Hub icon and shows a generic
+        # Wayland icon instead.
+        import json
+
+        tauri_conf = ROOT / "src/kyth-hub-web/src-tauri/tauri.conf.json"
+        app_id = json.loads(tauri_conf.read_text(encoding="utf-8"))["identifier"]
+        self.assertTrue(app_id, "tauri.conf.json must define an identifier")
+        desktop = ROOT / "src/kyth-hub-web/src/data/kyth-welcome.desktop"
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        parser.read(desktop, encoding="utf-8")
+        self.assertEqual(parser["Desktop Entry"]["StartupWMClass"], app_id)
+        installer = (
+            BUILD_FILES / "scripts/branding/23-kyth-helper-ctx-installs.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(f"StartupWMClass={app_id}", installer)
+        stale: list[str] = []
+        for path in [ROOT / "src", BUILD_FILES, ROOT / "installer"]:
+            for candidate in path.rglob("*"):
+                if not candidate.is_file() or candidate.suffix in {
+                    ".pyc", ".png", ".svg", ".ico",
+                }:
+                    continue
+                try:
+                    text = candidate.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                if "StartupWMClass=kyth-welcome" in text:
+                    stale.append(str(candidate.relative_to(ROOT)))
+        self.assertEqual(stale, [], "stale hub StartupWMClass declarations remain")
+
 
 class BuildAssemblyContracts(unittest.TestCase):
     def test_package_install_sources_do_not_pin_literal_rpm_nvrs(self):
