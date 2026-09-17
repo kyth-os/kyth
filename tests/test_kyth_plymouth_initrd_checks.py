@@ -159,5 +159,36 @@ class PlymouthInitrdChecksTests(unittest.TestCase):
             self.assertIn("ERROR: fallback theme leaked", result.stderr)
 
 
+class PlymouthBootImageSyncTests(unittest.TestCase):
+    """The verified build must reach the images the boot chain actually reads.
+
+    Regression pin: plymouth-initramfs.sh verified only the ostree-convention
+    /usr/lib/modules/<kver>/initramfs while bootc boots the initramfs.img
+    lineage, so a stale stock copy (Fedora spinner watermark included)
+    shipped in early boot with the gate green.
+    """
+
+    SCRIPT = ROOT / "build_files" / "scripts" / "plymouth-initramfs.sh"
+
+    def test_verified_build_syncs_to_bootc_boot_images(self):
+        text = self.SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("/usr/lib/modules/${KVER}/initramfs.img", text)
+        self.assertIn("/boot/initramfs-${KVER}.img", text)
+
+    def test_synced_copies_are_byte_verified(self):
+        text = self.SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("cmp -s", text)
+        self.assertIn("failed to sync", text)
+
+    def test_sync_runs_after_verification_not_before(self):
+        text = self.SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("verify_branded_initramfs", text)
+        self.assertLess(
+            text.index("verify_branded_initramfs"),
+            text.index("initramfs.img"),
+            "boot images must be synced from the verified build, not rebuilt separately",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -36,19 +36,22 @@ kyth_build_initramfs "/usr/lib/modules/${KVER}/initramfs" \
 echo "=== POST-DRACUT: plymouthd.defaults from initramfs ===" >&2
 (lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" 2>/dev/null || echo "MISSING") >&2
 
-if command -v lsinitrd >/dev/null 2>&1; then
-	initramfs="/usr/lib/modules/${KVER}/initramfs"
+verify_branded_initramfs() {
+	local initramfs="$1"
+
+	local initrd_listing
 	initrd_listing="$(mktemp)"
 	lsinitrd "${initramfs}" >"${initrd_listing}"
 
 	# Each entry is "pattern|message"; message is appended to the standard
 	# "ERROR: branded initramfs ..." prefix.
-	listing_checks=(
+	local listing_checks=(
 		'usr/share/plymouth/themes/kyth/kyth.plymouth|does not contain KythOS Plymouth theme'
 		'usr/share/plymouth/themes/kyth/kyth.script|does not contain KythOS Plymouth script'
 		'usr/share/plymouth/themes/kyth/kyth-logo.png|does not contain KythOS Plymouth logo'
 		'usr/share/plymouth/themes/default.plymouth|does not force the KythOS Plymouth default theme'
 	)
+	local entry
 	for entry in "${listing_checks[@]}"; do
 		plymouth_require_pattern "${initrd_listing}" "${entry%%|*}" "branded initramfs ${entry#*|}"
 	done
@@ -58,15 +61,17 @@ if command -v lsinitrd >/dev/null 2>&1; then
 		/usr/share/kyth/branding/transparent-watermark.png \
 		"branded initramfs still contains distro Plymouth system logo"
 
-	for entry in "${KYTH_PLYMOUTH_DAEMON_CHECKS[@]}"; do
+	local daemon_entry
+	for daemon_entry in "${KYTH_PLYMOUTH_DAEMON_CHECKS[@]}"; do
 		plymouth_require_pattern \
 			<(lsinitrd -f /usr/share/plymouth/plymouthd.defaults "${initramfs}") \
-			"${entry%%|*}" "branded initramfs Plymouth defaults ${entry#*|}"
+			"${daemon_entry%%|*}" "branded initramfs Plymouth defaults ${daemon_entry#*|}"
 	done
 
 	plymouth_require_pattern_ere "${initrd_listing}" 'usr/(lib64|lib)/plymouth/script\.so' \
 		"branded initramfs does not contain plymouth/script.so — kyth script theme will silently fail and fall back to BGRT firmware logo"
 
+	local account_file
 	for account_file in etc/passwd etc/group; do
 		plymouth_require_pattern_ere "${initrd_listing}" "(^|[[:space:]])${account_file}$" \
 			"branded initramfs is missing /${account_file}; early udev/tmpfiles account lookup will fail"
@@ -75,4 +80,26 @@ if command -v lsinitrd >/dev/null 2>&1; then
 	plymouth_forbid_fallback_theme "${initrd_listing}" "Plymouth fallback theme leaked into branded initramfs"
 
 	rm -f "${initrd_listing}"
+}
+
+if command -v lsinitrd >/dev/null 2>&1; then
+	verify_branded_initramfs "/usr/lib/modules/${KVER}/initramfs"
+
+	# bootc boots the initramfs.img lineage (/usr/lib/modules/<kver>/
+	# initramfs.img -> /boot/ostree/<deploy>/initramfs-<kver>.img), not the
+	# ostree-convention no-suffix path verified above. A stale stock copy on
+	# that path is exactly how the Fedora spinner watermark shipped in early
+	# boot while this gate stayed green, so sync the verified build to every
+	# image the boot chain can read and prove the copies identical.
+	boot_image=""
+	for boot_image in "/usr/lib/modules/${KVER}/initramfs.img" "/boot/initramfs-${KVER}.img"; do
+		if [[ -d "$(dirname "${boot_image}")" ]]; then
+			install -m 0600 "/usr/lib/modules/${KVER}/initramfs" "${boot_image}"
+			cmp -s "/usr/lib/modules/${KVER}/initramfs" "${boot_image}" || {
+				echo "ERROR: branded initramfs failed to sync to ${boot_image}" >&2
+				exit 1
+			}
+			echo "branded initramfs synced to ${boot_image}" >&2
+		fi
+	done
 fi
