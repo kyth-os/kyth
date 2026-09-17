@@ -1208,6 +1208,14 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
             }
             Err(error) => Err(format!("Could not start Flatpak: {error}")),
         };
+        // A cancel during the user phase must not fall through into system
+        // mutations: the job is already marked cancelled, and finish() never
+        // overwrites a cancelled job, so returning here is the whole fix.
+        // (A cancel that lands mid-flight in phase 2 still waits for the
+        // daemon's own bounded reply; the socket read cannot be preempted.)
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         let system_result = commands::privilege::flatpak_update().map(|_| ());
         let (state, detail) = match (user_result, system_result) {
             (Ok(()), Ok(())) => ("complete", "Your apps are up to date.".to_string()),

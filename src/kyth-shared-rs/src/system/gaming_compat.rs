@@ -35,8 +35,12 @@ pub fn protondb_lookup(app_id: &str) -> Option<ProtonDbResult> {
 }
 
 pub fn protondb_lookup_many(app_ids: &[String]) -> Vec<ProtonDbResult> {
+    // The Hub UI sends at most 20 ids; clamp here too so a buggy caller
+    // cannot park a sync Tauri worker on minutes of sequential lookups.
+    // Each lookup is already bounded at 8s, so the worst case is ~160s.
     app_ids
         .iter()
+        .take(20)
         .filter_map(|id| protondb_lookup(id))
         .take(20)
         .collect()

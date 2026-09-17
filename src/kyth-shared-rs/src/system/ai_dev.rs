@@ -11,8 +11,8 @@ use std::fs;
 use std::io;
 use std::os::unix::fs::FileTypeExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::time::{Duration, Instant};
+use std::process::{Command, Output};
+use std::time::Duration;
 
 pub const DEFAULT_BOX: &str = "kyth-ai-dev";
 pub const DEFAULT_IMAGE: &str = "registry.fedoraproject.org/fedora-toolbox:44";
@@ -220,7 +220,9 @@ pub fn run(argv: &[&str], timeout: Duration) -> io::Result<Output> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "command must not be empty"))?;
     let mut command = Command::new(program);
     command.args(args);
-    run_command(command, timeout)
+    // Single implementation: the shared bounded runner drains pipes on
+    // background threads (no wedged verbose children) and kills on timeout.
+    super::process::run_bounded_command(command, timeout)
 }
 
 pub fn run_owned(argv: &[String], timeout: Duration) -> io::Result<Output> {
@@ -229,29 +231,11 @@ pub fn run_owned(argv: &[String], timeout: Duration) -> io::Result<Output> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "command must not be empty"))?;
     let mut command = Command::new(program);
     command.args(args);
-    run_command(command, timeout)
+    super::process::run_bounded_command(command, timeout)
 }
 
-pub fn run_command(mut command: Command, timeout: Duration) -> io::Result<Output> {
-    let mut child = command
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let started = Instant::now();
-    loop {
-        match child.try_wait()? {
-            Some(_) => return child.wait_with_output(),
-            None if started.elapsed() <= timeout => std::thread::sleep(Duration::from_millis(25)),
-            None => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "command exceeded its time limit",
-                ));
-            }
-        }
-    }
+pub fn run_command(command: Command, timeout: Duration) -> io::Result<Output> {
+    super::process::run_bounded_command(command, timeout)
 }
 
 pub fn provision_command(config: &Config) -> Vec<String> {

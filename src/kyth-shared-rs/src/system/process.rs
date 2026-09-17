@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::io::{self, Read, Write};
+use std::os::unix::process::CommandExt;
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::AtomicBool;
 use std::thread::JoinHandle;
@@ -52,6 +53,18 @@ fn collect_output(
     }
 }
 
+/// Kill a child and everything it forked. Hub-spawned commands (`flatpak`
+/// pulls, `just` recipes, `sudo openconnect`) fork grandchildren that
+/// survive a direct `child.kill()`; without a group kill, timed-out or
+/// cancelled work keeps running detached from the job that reported it.
+/// Children here are spawned as group leaders (see `process_group(0)` at
+/// each spawn below), so the child's pid is the generation's pgid.
+fn kill_tree(child: &mut std::process::Child) {
+    let _ = child.kill();
+    let _ = unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL) };
+    let _ = child.wait();
+}
+
 /// Run an already-validated argv with captured output and a hard wall-clock
 /// limit. It never invokes a shell and kills a child that outlives its bound.
 pub fn run_bounded(argv: &[String], timeout: Duration) -> io::Result<Output> {
@@ -75,6 +88,8 @@ pub fn run_bounded_with_input(
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "command must not be empty"))?;
     let mut command = Command::new(program);
     command.args(args).stdin(Stdio::piped());
+    // Own process group so a timeout kill reaches forked grandchildren too.
+    command.process_group(0);
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -89,8 +104,7 @@ pub fn run_bounded_with_input(
             Some(status) => return Ok(collect_output(status, stdout_reader, stderr_reader)),
             None if started.elapsed() <= timeout => std::thread::sleep(Duration::from_millis(25)),
             None => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_tree(&mut child);
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "command exceeded its time limit",
@@ -114,6 +128,8 @@ pub fn run_bounded_command_cancel(
     cancel: &AtomicBool,
 ) -> io::Result<Output> {
     use std::sync::atomic::Ordering::Relaxed;
+    // Own process group so timeout/cancel kills reach forked grandchildren.
+    command.process_group(0);
     let mut child = command
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -124,8 +140,7 @@ pub fn run_bounded_command_cancel(
         match child.try_wait()? {
             Some(status) => return Ok(collect_output(status, stdout_reader, stderr_reader)),
             None if cancel.load(Relaxed) => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_tree(&mut child);
                 return Err(io::Error::new(
                     io::ErrorKind::Interrupted,
                     "command was cancelled",
@@ -133,8 +148,7 @@ pub fn run_bounded_command_cancel(
             }
             None if started.elapsed() <= timeout => std::thread::sleep(Duration::from_millis(25)),
             None => {
-                let _ = child.kill();
-                let _ = child.wait();
+                kill_tree(&mut child);
                 return Err(io::Error::new(
                     io::ErrorKind::TimedOut,
                     "command exceeded its time limit",
@@ -421,6 +435,46 @@ mod tests {
     #[test]
     fn eta() {
         assert_eq!(format_eta(90), "~1m 30s remaining");
+    }
+
+    #[test]
+    fn cancel_kills_forked_grandchildren_not_just_the_child() {
+        // `bash -c 'sleep 60'` leaves `sleep` as a grandchild of the test.
+        // A direct child.kill() would orphan it; the group kill must reap it.
+        let marker = "kyth-killtree-probe-sleep";
+        let cancel = std::sync::Arc::new(AtomicBool::new(false));
+        let mut command = Command::new("bash");
+        command.args(["-c".to_string(), format!("exec -a {marker} sleep 60")]);
+        let cancel_worker = cancel.clone();
+        let handle = std::thread::spawn(move || {
+            run_bounded_command_cancel(command, Duration::from_secs(60), &cancel_worker)
+        });
+        // Wait for the grandchild to exist before cancelling.
+        let mut seen = false;
+        for _ in 0..100 {
+            let probe = Command::new("pgrep").arg("-f").arg(marker).output();
+            if probe.map(|out| out.status.success()).unwrap_or(false) {
+                seen = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(seen, "grandchild sleep should have started");
+        cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        let result = handle.join().expect("runner thread joins");
+        assert_eq!(
+            result.map_err(|error| error.kind()),
+            Err(std::io::ErrorKind::Interrupted)
+        );
+        // The grandchild must be gone, not orphaned.
+        for _ in 0..100 {
+            let probe = Command::new("pgrep").arg("-f").arg(marker).output();
+            if !probe.map(|out| out.status.success()).unwrap_or(true) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        panic!("grandchild {marker} survived cancellation");
     }
 
     #[test]
