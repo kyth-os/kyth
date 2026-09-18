@@ -143,6 +143,7 @@ impl NativeInstallRequest {
                     root_subvolume: flag("root_subvolume", filesystem_install),
                     wipe: flag("wipe", false),
                     encryption: text("encryption", "none"),
+                    tpm_recovery_ack: flag("tpm_recovery_ack", false),
                 },
                 configuration: crate::installer_configuration::ConfigurationInput {
                     target_root: target_root.clone(),
@@ -320,6 +321,7 @@ impl NativePhaseExecutor {
                 root_subvolume: false,
                 wipe: false,
                 encryption: String::new(),
+                tpm_recovery_ack: false,
             },
             account: None,
             manual_mounts: None,
@@ -1614,6 +1616,7 @@ mod tests {
                     root_subvolume: false,
                     wipe: true,
                     encryption: "none".into(),
+                    tpm_recovery_ack: false,
                 },
                 configuration: ConfigurationInput {
                     target_root: "/mnt/target".into(),
