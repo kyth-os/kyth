@@ -277,8 +277,19 @@ class HardwarePolicySafetyTests(unittest.TestCase):
 
     def test_blanket_power_and_driver_options_are_removed(self):
         migration = (ROOT / "build_files/scripts/branding/28-bootc-kernel-arguments-and-boot-splash.sh").read_text()
-        self.assertEqual(migration.count("pcie_aspm=performance"), 1)
-        self.assertIn('--remove-args="console=tty0 console=ttyS0,115200 amdgpu.ppfeaturemask', migration)
+        # The migration is additive-only via kargs.d: it must never strip
+        # kargs the user may have set deliberately (GPU/power flags included).
+        # Per-device GPU tuning lives in the versioned hardware policy and
+        # user tunables instead.
+        self.assertNotIn("grubby --", migration)
+        self.assertNotIn("command -v grubby", migration)
+        self.assertNotIn("--remove-args", migration)
+        # The shipped kargs payload itself must not carry the retired blanket
+        # GPU/power globals (assert on the kargs line, not the comments that
+        # document why they were retired).
+        shipped = next(line for line in migration.splitlines() if line.startswith("kargs = ["))
+        self.assertNotIn("amdgpu.ppfeaturemask", shipped)
+        self.assertNotIn("pcie_aspm", shipped)
         base = (ROOT / "build_base/build.sh").read_text()
         # Image kargs.d must not reintroduce the retired globals after migration.
         kargs_line = next(line for line in base.splitlines() if line.startswith("kargs = ["))

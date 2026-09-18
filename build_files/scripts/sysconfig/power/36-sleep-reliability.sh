@@ -26,6 +26,18 @@ SuspendState=mem standby freeze
 HibernateDelaySec=0
 SLEEPEOF
 
+# Lid-switch defaults (family laptop honesty): closing the lid suspends,
+# whether on battery or AC. An explicitly docked lid (external display +
+# dock) keeps systemd's ignore default so a closed-lid desk setup stays up.
+# Idle suspend is left to the desktop session (PowerDevil) — logind only
+# covers the lid/power-key paths here.
+write_config /etc/systemd/logind.conf.d/kyth-lid.conf <<'LIDEOF'
+[Login]
+HandleLidSwitch=suspend
+HandleLidSwitchExternalPower=suspend
+HandleLidSwitchDocked=ignore
+LIDEOF
+
 # Hibernate opt-in path (kept, never default): machines with a verified swap
 # partition/file and a working resume= karg can opt back in by copying the
 # example over the managed drop-in. The managed file above is re-applied on

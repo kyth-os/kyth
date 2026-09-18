@@ -76,16 +76,29 @@ Rust is not the point of using KythOS; dependable desktop behavior is. It is one
 
 | Channel | Choose it when | Download |
 | --- | --- | --- |
+<!-- Download links below resolve to R2_PUBLIC_BASE_URL in
+  build_files/scripts/release_identity.py — update it there first, then these. -->
 | **Stable** | You want the current daily-driver release. | [Download stable ISO](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-latest.iso) |
 | **Testing** | You want to help try new work before it reaches stable. | [Download testing ISO](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-testing.iso) |
 
 You need an x86-64 PC, a USB drive, and at least 8 GB of RAM for the live environment. **Back up anything important before changing partitions or selecting an install disk.**
 
 1. Download the ISO for the channel you chose.
-2. Write it to a USB drive with [Fedora Media Writer](https://fedoraproject.org/workstation/download/), Balena Etcher, Ventoy, or another raw-image writer.
-3. Boot from that USB drive and choose **Install KythOS**.
-4. Read the disk-selection screen carefully, choose the installation layout, and create your local user.
-5. After the first restart, open **Kyth Hub** and follow its short setup checklist.
+2. Verify the download against its published checksum (substitute the
+   testing basename if you chose testing):
+
+```bash
+curl -fsSL -O https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-latest.iso
+curl -fsSL -O https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-latest.iso-CHECKSUM
+sha256sum --check --strict kyth-live-latest.iso-CHECKSUM
+```
+
+The check must report `OK`. See [docs/release-support.md](docs/release-support.md)
+for signature/provenance verification and the channel rollback procedure.
+3. Write it to a USB drive with [Fedora Media Writer](https://fedoraproject.org/workstation/download/), Balena Etcher, Ventoy, or another raw-image writer.
+4. Boot from that USB drive and choose **Install KythOS**.
+5. Read the disk-selection screen carefully, choose the installation layout, and create your local user.
+6. After the first restart, open **Kyth Hub** and follow its short setup checklist.
 
 If you are installing alongside Windows, make a recovery drive and a current backup first. The installer can guide an installation, but it cannot make an unsafe disk choice safe. Stable and testing release records are also available on [GitHub](https://github.com/kyth-os/kyth/releases).
 

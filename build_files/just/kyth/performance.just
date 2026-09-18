@@ -227,6 +227,8 @@ kwin-latency profile="status":
     /usr/bin/kyth-kwin-latency "{{ profile }}"
 
 # PipeWire gaming quantum (pipewire-gaming.toml)
+# BT-headset guard: with a Bluetooth sink active the 128-sample global
+# quantum is skipped (SBC/LDAC need headroom); wired audio keeps it.
 [group('KythOS')]
 pipewire-gaming profile="status":
     #!/usr/bin/env bash

@@ -11,6 +11,8 @@ source "${SCRIPT_DIR}/lib/plymouth-initrd-checks.sh"
 source "${SCRIPT_DIR}/lib/plymouth-stock-themes.sh"
 # shellcheck source=lib/plymouth-config.sh disable=SC1091
 source "${SCRIPT_DIR}/lib/plymouth-config.sh"
+# shellcheck source=lib/dracut-modules.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/dracut-modules.sh"
 
 if [[ "${EUID}" -ne 0 ]]; then
 	printf 'ERROR: run as root, for example: run0 --pty /usr/bin/bash %q\n' "$0" >&2
@@ -138,7 +140,7 @@ for image in "${images[@]}"; do
 			--kver "${kernel}" \
 			--force \
 			--nohardlink \
-			--add "drm plymouth ostree kyth-plymouth" \
+			--add "${KYTH_DRACUT_MODULES}" \
 			--include "${include_root}/etc/plymouth" /etc/plymouth \
 			--include "${include_root}/usr/share/plymouth" /usr/share/plymouth \
 			--include "${include_root}/usr/share/pixmaps/system-logo-white.png" /usr/share/pixmaps/system-logo-white.png \

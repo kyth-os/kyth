@@ -537,11 +537,12 @@ jobs:
           fi
 
       - name: Trigger CVE scan
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
-        run: |
-          gh workflow run cve-scan.yml \
-            --ref "${GITHUB_REF_NAME}" \
-            --field "source_tag=${SOURCE_TAG}"
+        uses: ./.github/actions/dispatch-workflow
+        with:
+          workflow: cve-scan.yml
+          ref: ${{ github.ref_name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fields-json: |
+            {
+              "source_tag": ${{ toJSON(inputs.source_tag) }}
+            }

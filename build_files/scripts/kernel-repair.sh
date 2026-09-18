@@ -10,6 +10,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/find-kver.sh"
 # shellcheck source=lib/dracut-retry.sh disable=SC1091
 source "${SCRIPT_DIR}/lib/dracut-retry.sh"
+# shellcheck source=lib/dracut-modules.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/dracut-modules.sh"
 
 KVER="$(find_active_kver)"
 if [ -z "${KVER}" ]; then
@@ -57,11 +59,8 @@ depmod_output="$(depmod -a "${KVER}" 2>&1)" || {
 	exit 1
 }
 
-# Dracut modules for the rebuilt initramfs. Keep in sync with the --add
-# lists in build_files/scripts/plymouth-initramfs.sh and
-# build_files/scripts/repair-current-plymouth-initramfs.sh.
-KYTH_DRACUT_MODULES="drm plymouth ostree kyth-plymouth"
-
+# Dracut modules for the rebuilt initramfs: the canonical KYTH_DRACUT_MODULES
+# from lib/dracut-modules.sh (mirrors 99-kyth.conf).
 if [ ! -s "/usr/lib/modules/${KVER}/initramfs" ]; then
 	if [ -s "/boot/initramfs-${KVER}.img" ]; then
 		cp --no-preserve=all "/boot/initramfs-${KVER}.img" "/usr/lib/modules/${KVER}/initramfs"

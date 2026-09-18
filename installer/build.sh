@@ -6,6 +6,8 @@ set -exo pipefail
 
 # shellcheck source=build_files/scripts/lib/plymouth-initrd-checks.sh disable=SC1091
 source /src/build_files/scripts/lib/plymouth-initrd-checks.sh
+# shellcheck source=build_files/scripts/lib/dracut-modules.sh disable=SC1091
+source /src/build_files/scripts/lib/dracut-modules.sh
 
 # Tools required by the live installer's NTFS shrink-and-install path.
 if command -v dnf5 >/dev/null 2>&1; then
@@ -336,7 +338,7 @@ install -m 0644 /usr/share/plymouth/plymouthd.defaults \
 install -m 0644 /usr/share/kyth/branding/transparent-watermark.png \
 	"${kyth_plymouth_include_root}/usr/share/pixmaps/system-logo-white.png"
 DRACUT_NO_XATTR=1 dracut -v --force --zstd --no-hostonly \
-	--add "kyth-plymouth plymouth dmsquash-live dmsquash-live-autooverlay" \
+	--add "${KYTH_DRACUT_MODULES} ${KYTH_DRACUT_LIVE_EXTRA}" \
 	--include "${kyth_plymouth_include_root}" / \
 	"/usr/lib/modules/${kernel}/initramfs.img" "${kernel}"
 rm -rf "${kyth_plymouth_include_root}"

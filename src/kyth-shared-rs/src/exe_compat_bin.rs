@@ -14,6 +14,9 @@ fn main() {
     );
     println!("{} via {}: {}", result.status, result.runner, result.reason);
     if result.runner == "Bottles" {
-        println!("Run with: bottles-cli run {}  or  Lutris", name);
+        println!(
+            "{}",
+            kyth_shared::system::exe_compat::bottles_run_hint(&name)
+        );
     }
 }

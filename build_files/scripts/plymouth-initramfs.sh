@@ -13,6 +13,8 @@ source "${SCRIPT_DIR}/lib/plymouth-initrd-checks.sh"
 source "${SCRIPT_DIR}/lib/plymouth-config.sh"
 # shellcheck source=lib/dracut-retry.sh disable=SC1091
 source "${SCRIPT_DIR}/lib/dracut-retry.sh"
+# shellcheck source=lib/dracut-modules.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/dracut-modules.sh"
 
 /usr/libexec/kyth-plymouth-branding-guard /ctx/branding/transparent-watermark.svg
 
@@ -31,7 +33,7 @@ kyth_build_initramfs "/usr/lib/modules/${KVER}/initramfs" \
 	--no-hostonly \
 	--compress "zstd -3" \
 	--kver "${KVER}" \
-	--add kyth-plymouth
+	--add "${KYTH_DRACUT_MODULES}"
 
 echo "=== POST-DRACUT: plymouthd.defaults from initramfs ===" >&2
 (lsinitrd -f /usr/share/plymouth/plymouthd.defaults "/usr/lib/modules/${KVER}/initramfs" 2>/dev/null || echo "MISSING") >&2

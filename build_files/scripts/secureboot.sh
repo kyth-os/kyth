@@ -1,13 +1,20 @@
 #!/bin/bash
 # secureboot.sh — sign custom-kernel vmlinuz files with the KythOS MOK key.
 #
-# Skipped gracefully when no MOK key is provided (local builds without
-# a secret configured). CI passes --secret id=mok_key,env=MOK_KEY.
+# Fail-closed for custom (CachyOS) kernels: an unsigned custom kernel does
+# not boot on Secure Boot machines, so building one without a MOK key is an
+# error unless the builder explicitly opts out for a test/nosb image via
+# KYTH_ALLOW_UNSIGNED_KERNEL=1 (which stamps a nosb marker file so the
+# resulting artifact is traceable — never ship it as a release).
+# CI passes --secret id=mok_key,env=MOK_KEY.
 
 set -euo pipefail
 
 MOK_KEY_FILE="/run/secrets/mok_key"
 SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED:-0}"
+# Explicit opt-out for local/test builds that cannot sign. When set, the
+# image is stamped unsigned (see stamp_unsigned_marker) instead of failing.
+KYTH_ALLOW_UNSIGNED_KERNEL="${KYTH_ALLOW_UNSIGNED_KERNEL:-0}"
 
 CERT="/ctx/secureboot/kyth-secureboot.cer"
 KERNEL_FLAVOR="$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)"
@@ -29,14 +36,40 @@ if [[ "${KERNEL_FLAVOR}" == "fedora" ]]; then
 	exit 0
 fi
 
+# ── nosb marker: traceability for explicitly-unsigned test images ────────────
+# Written whenever KYTH_ALLOW_UNSIGNED_KERNEL=1 lets an unsigned custom
+# kernel through. Release tooling and support can check for this file to
+# tell a nosb/test image apart from a properly signed one.
+stamp_unsigned_marker() {
+	local reason=$1
+	mkdir -p /usr/share/kyth/secureboot
+	cat >/usr/share/kyth/secureboot/unsigned-kernel <<EOF
+status=unsigned
+reason=${reason}
+kernel_flavor=${KERNEL_FLAVOR}
+note=Secure Boot is NOT supported on this image; enroll nothing, expect SB boot failure.
+EOF
+	echo "secureboot: WARNING — ${reason}; stamped /usr/share/kyth/secureboot/unsigned-kernel (nosb image, do not release)" >&2
+}
+
+fail_closed_unsigned() {
+	local reason=$1
+	if [[ "${KYTH_ALLOW_UNSIGNED_KERNEL}" == "1" ]]; then
+		stamp_unsigned_marker "${reason}"
+		exit 0
+	fi
+	echo "secureboot: ERROR — ${reason}" >&2
+	echo "secureboot: provide the MOK key (--secret id=mok_key,env=MOK_KEY, see build.just)" >&2
+	echo "secureboot: or set KYTH_ALLOW_UNSIGNED_KERNEL=1 for a local nosb/test image (never release it)" >&2
+	exit 1
+}
+
 if [[ ! -f "${MOK_KEY_FILE}" ]]; then
 	if [[ "${SECUREBOOT_SIGNING_REQUESTED}" == "1" ]]; then
 		echo "secureboot: ERROR — SECUREBOOT_SIGNING_REQUESTED=1 but MOK_KEY secret is unavailable" >&2
 		exit 1
 	fi
-	echo "secureboot: no MOK key provided — Secure Boot signing skipped"
-	echo "secureboot: set MOK_KEY env var and pass --secret id=mok_key,env=MOK_KEY to enable"
-	exit 0
+	fail_closed_unsigned "no MOK key provided for ${KERNEL_FLAVOR} kernel — refusing to ship an unsigned image that cannot boot under Secure Boot"
 fi
 
 # ── Find the installed custom kernel ─────────────────────────────────────────
@@ -78,9 +111,9 @@ if [[ "${KEY_MD5}" != "${CERT_MD5}" ]]; then
 		echo "secureboot: Update the MOK_KEY GitHub secret with the private key matching cert modulus ${CERT_MD5}." >&2
 		exit 1
 	fi
-	echo "secureboot: WARNING — MOK_KEY secret does not match kyth-secureboot.cer in the repo; signing skipped." >&2
-	echo "secureboot: Update the MOK_KEY GitHub secret with the private key matching cert modulus ${CERT_MD5} to re-enable signing." >&2
-	exit 0
+	# A mismatched key would produce a signature nothing trusts — worse than
+	# unsigned. Fail closed the same way as a missing key.
+	fail_closed_unsigned "MOK_KEY secret does not match kyth-secureboot.cer in the repo (cert modulus ${CERT_MD5}); signing skipped"
 fi
 sbsign --key "${MOK_KEY_FILE}" \
 	--cert "${CERT}" \
@@ -88,6 +121,8 @@ sbsign --key "${MOK_KEY_FILE}" \
 	"${VMLINUZ}"
 mv "${VMLINUZ}.signed" "${VMLINUZ}"
 sbverify --cert "${CERT}" "${VMLINUZ}"
+# A previous opt-out layer may have stamped nosb; a verified signature clears it.
+rm -f /usr/share/kyth/secureboot/unsigned-kernel
 
 echo "secureboot: vmlinuz signed successfully"
 

@@ -68,6 +68,56 @@ pub fn rewrite_steam_exec(exec_line: &str) -> Option<String> {
         })
 }
 
+pub const BOTTLES_FLATPAK_ID: &str = "com.usebottles.bottles";
+/// Hint printed when Bottles is the suggested runner. Bottles ships as a
+/// Flatpak, so a bare `bottles-cli` only resolves on native installs.
+pub const BOTTLES_FLATPAK_HINT: &str =
+    "flatpak run --command=bottles-cli com.usebottles.bottles run <exe>";
+
+fn path_has(program: &str) -> bool {
+    std::env::var_os("PATH")
+        .map(|paths| {
+            std::env::split_paths(&paths).any(|dir| {
+                dir.join(program).is_file() || dir.join(format!("{program}.exe")).is_file()
+            })
+        })
+        .unwrap_or(false)
+}
+
+/// True when a native Bottles runner is on PATH.
+pub fn bottles_native_available() -> bool {
+    path_has("bottles-cli") || path_has("bottles")
+}
+
+/// True when the Bottles Flatpak is installed (user or system scope).
+/// Pure filesystem check so availability gating never shells out.
+pub fn bottles_flatpak_installed(home: &Path) -> bool {
+    home.join(".local/share/flatpak/app")
+        .join(BOTTLES_FLATPAK_ID)
+        .is_dir()
+        || Path::new("/var/lib/flatpak/app")
+            .join(BOTTLES_FLATPAK_ID)
+            .is_dir()
+}
+
+/// True when any usable Bottles runner exists (native or Flatpak).
+pub fn bottles_available(home: &Path) -> bool {
+    bottles_native_available() || bottles_flatpak_installed(home)
+}
+
+/// Runner suggestion for `<exe>`: native form only when a native runner is
+/// on PATH, otherwise the Flatpak form that matches how KythOS ships Bottles.
+pub fn bottles_run_hint(exe: &str) -> String {
+    if bottles_native_available() {
+        format!("Run with: bottles-cli run {exe}  or  Lutris")
+    } else {
+        format!(
+            "Run with: {}  or  Lutris",
+            BOTTLES_FLATPAK_HINT.replace("<exe>", exe)
+        )
+    }
+}
+
 pub fn load_compat(path: impl AsRef<Path>) -> Value {
     std::fs::read_to_string(path)
         .ok()
@@ -154,6 +204,37 @@ mod tests {
             check_exe(&blocked, &serde_json::json!({"entries":{}})).status,
             "Blocked"
         );
+    }
+
+    #[test]
+    fn flatpak_hint_when_no_native_runner() {
+        // KythOS ships Bottles as a Flatpak: without bottles-cli on PATH the
+        // hint must use the flatpak run form, never a bare `bottles-cli`.
+        // (PATH lookup is environment-dependent; assert the documented
+        // constant and the substitution contract instead.)
+        assert!(BOTTLES_FLATPAK_HINT.contains("flatpak run --command=bottles-cli"));
+        assert!(BOTTLES_FLATPAK_HINT.contains("com.usebottles.bottles"));
+        let hint = bottles_run_hint("game.exe");
+        if bottles_native_available() {
+            assert_eq!(hint, "Run with: bottles-cli run game.exe  or  Lutris");
+        } else {
+            assert!(hint.contains("flatpak run --command=bottles-cli"));
+            assert!(hint.contains("game.exe"));
+        }
+    }
+
+    #[test]
+    fn flatpak_marker_dirs_count_as_installed() {
+        // User-scope marker under $HOME always counts, regardless of what
+        // the host has installed system-wide.
+        let home = tempfile::tempdir().unwrap();
+        let marker = home
+            .path()
+            .join(".local/share/flatpak/app/com.usebottles.bottles");
+        assert!(!marker.is_dir());
+        std::fs::create_dir_all(&marker).unwrap();
+        assert!(bottles_flatpak_installed(home.path()));
+        assert!(bottles_available(home.path()));
     }
 
     #[test]

@@ -101,7 +101,8 @@ build: build-base
         fi
         SECUREBOOT_SIGNING_REQUESTED=1
     else
-        echo "Secure Boot: MOK key not set — signing skipped (set MOK_KEY_FILE to enable)"
+        echo "Secure Boot: MOK key not set — custom (CachyOS) kernels will FAIL the build"
+        echo "Secure Boot: unless KYTH_ALLOW_UNSIGNED_KERNEL=1 (local nosb/test image, never release it)"
     fi
     ${PODMAN} build \
         --security-opt label=disable \
@@ -109,6 +110,7 @@ build: build-base
         --build-arg ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS:-0}" \
         --build-arg ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST:-0}" \
         --build-arg ENABLE_KSM="${ENABLE_KSM:-0}" \
+        --build-arg KYTH_ALLOW_UNSIGNED_KERNEL="${KYTH_ALLOW_UNSIGNED_KERNEL:-0}" \
         --build-arg PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" \
         --build-arg UMU_VERSION="${UMU_VERSION}" \
         --build-arg THIRDPARTY_VERSIONS_HASH="${THIRDPARTY_VERSIONS_HASH}" \

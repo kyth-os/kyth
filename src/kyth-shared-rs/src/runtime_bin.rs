@@ -980,15 +980,48 @@ fn readahead(args: &[String]) -> io::Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
+/// Parse `/sys/power/mem_sleep` content into advertised modes.
+/// The kernel marks the current mode with brackets (`[s2idle] deep`).
+/// Pure so unit tests can cover s2idle-only hardware (e.g. AMD Modern
+/// Standby laptops that advertise no S3/`deep`) without touching sysfs.
+pub fn parse_mem_sleep_modes(content: &str) -> Vec<String> {
+    content
+        .split_whitespace()
+        .map(|token| token.trim_matches(|c| c == '[' || c == ']').to_string())
+        .filter(|token| !token.is_empty())
+        .collect()
+}
+
 fn sleep_mode(args: &[String]) -> io::Result<ExitCode> {
     require_args(args, 1, Some(1));
-    if args[0] != "deep" {
+    // Accept what the hardware actually advertises: `deep` (S3) on older
+    // machines, `s2idle` (Modern Standby) on current AMD/Intel laptops.
+    // Refusing unknown modes — instead of writing a value the kernel
+    // rejects — keeps the error actionable instead of a silent no-op.
+    let requested = args[0].as_str();
+    if requested != "deep" && requested != "s2idle" {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "only deep sleep is supported",
+            "unsupported sleep mode (expected 'deep' or 's2idle')",
         ));
     }
-    fs::write("/sys/power/mem_sleep", "deep")?;
+    let advertised = fs::read_to_string("/sys/power/mem_sleep").map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("cannot read /sys/power/mem_sleep: {error}"),
+        )
+    })?;
+    let modes = parse_mem_sleep_modes(&advertised);
+    if !modes.iter().any(|mode| mode == requested) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "sleep mode '{requested}' is not advertised by this kernel (available: {})",
+                modes.join(" ")
+            ),
+        ));
+    }
+    fs::write("/sys/power/mem_sleep", requested)?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -1958,5 +1991,21 @@ fn main() -> ExitCode {
             );
             ExitCode::from(1)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_mem_sleep_modes;
+
+    #[test]
+    fn parses_bracketed_current_mode() {
+        // AMD Modern Standby laptop (FA617NS class): only s2idle advertised.
+        assert_eq!(parse_mem_sleep_modes("[s2idle]"), vec!["s2idle"]);
+        assert_eq!(
+            parse_mem_sleep_modes("s2idle [deep]"),
+            vec!["s2idle", "deep"]
+        );
+        assert!(parse_mem_sleep_modes("").is_empty());
     }
 }

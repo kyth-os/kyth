@@ -47,7 +47,7 @@ perf-gate mode="status":
     set -euo pipefail
     /usr/bin/kyth-perf-gate "{{ mode }}"
 
-# Telemetry privacy — offline collectors opt-out + purge
+# Telemetry privacy — explicit opt-in (default disabled) + purge
 [group('KythOS')]
 telemetry-opt mode="status":
     #!/usr/bin/env bash

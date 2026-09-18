@@ -1,10 +1,12 @@
 name: Dispatch Workflow
 description: >
   Trigger a workflow_dispatch run via gh CLI with an arbitrary set of
-  --field values. Single source of truth for the "kick off a dependent
-  workflow with pinned inputs" pattern used by finalize's supply-chain
-  and Live ISO dispatches — one place to fix instead of two copies that
-  can drift out of sync.
+  --field values, then poll until the downstream run appears. Single source
+  of truth for the "kick off a dependent workflow with pinned inputs"
+  pattern used by finalize's supply-chain and Live ISO dispatches and the
+  supply-chain CVE-scan trigger — one place to fix instead of copies that
+  can drift out of sync. A dispatch with no matching run after ~2 minutes
+  fails loudly instead of silently dropping the downstream job.
 inputs:
   workflow:
     description: Workflow file name to dispatch (e.g. build-live-iso.yml).
@@ -40,4 +42,24 @@ runs:
         while IFS=$'\t' read -r key value; do
           args+=(--field "${key}=${value}")
         done < <(jq -r 'to_entries[] | [.key, (.value | tostring)] | @tsv' <<<"${FIELDS_JSON}")
-        gh workflow run "${WORKFLOW}" "${args[@]}"
+        # gh workflow run is fire-and-forget: a disabled workflow, a ref
+        # without the file, or an API hiccup silently drops the downstream
+        # job. Record the dispatch instant (minus a clock-skew margin), then
+        # poll until a matching workflow_dispatch run appears — fail loudly
+        # if it never does.
+        DISPATCHED_AT="$(date -u -d '60 seconds ago' +%Y-%m-%dT%H:%M:%SZ)"
+        gh workflow run "${WORKFLOW}" "${args[@]}" --repo "${GH_REPO}"
+        for attempt in $(seq 1 12); do
+          sleep 10
+          if gh run list --repo "${GH_REPO}" --workflow "${WORKFLOW}" \
+            --event workflow_dispatch --branch "${REF}" --limit 5 \
+            --json databaseId,createdAt \
+            --jq --arg since "${DISPATCHED_AT}" \
+              '[.[] | select(.createdAt >= $since)] | length > 0' \
+            | grep -q true; then
+            echo "Verified ${WORKFLOW} dispatch on ${REF} (attempt ${attempt})"
+            exit 0
+          fi
+        done
+        echo "::error::No workflow_dispatch run of ${WORKFLOW} on ${REF} appeared within 2 minutes of dispatch — downstream job was dropped, re-run this job."
+        exit 1

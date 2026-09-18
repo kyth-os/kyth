@@ -4,6 +4,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_identity import r2_download_url
+
 def run_command(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
     print(f"Running: {' '.join(args)}")
     return subprocess.run(args, check=check, text=True, capture_output=True)
@@ -37,9 +40,8 @@ def main() -> int:
         prerelease = False
         latest = True
 
-    public_base = "https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev"
-    immutable_iso_url = f"{public_base}/{args.iso_basename}"
-    channel_iso_url = f"{public_base}/{args.channel_basename}"
+    immutable_iso_url = r2_download_url(args.iso_basename)
+    channel_iso_url = r2_download_url(args.channel_basename)
     immutable_release_url = f"https://github.com/{args.repo}/releases/tag/{args.immutable_tag}"
 
     # Read changelog notes

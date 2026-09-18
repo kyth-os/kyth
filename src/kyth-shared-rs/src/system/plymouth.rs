@@ -18,6 +18,10 @@ pub const REQUIRED_ENTRIES: &[&str] = &[
 pub const PLYMOUTH_CONFIG: &str =
     "[Daemon]\nTheme=kyth\nShowDelay=0\nDeviceTimeout=8\nUseFirmwareBackground=false\n";
 pub const DRACUT_CONF_PATH: &str = "/etc/dracut.conf.d/99-kyth.conf";
+/// Canonical dracut `--add` set. Mirrors KYTH_DRACUT_MODULES in
+/// build_files/scripts/lib/dracut-modules.sh (Rust cannot source shell —
+/// keep in sync when editing either side).
+pub const KYTH_DRACUT_MODULES: &str = "drm plymouth ostree kyth-plymouth";
 pub const STATE_DIR: &str = "/var/lib/kyth";
 pub const FINGERPRINT_FILE: &str = "/var/lib/kyth/boot-splash-initramfs.sha256";
 pub const MARKER_FILE: &str = "/var/lib/kyth/boot-splash-initramfs-v17";
@@ -242,7 +246,7 @@ pub fn dracut_image_argv(image: &Path, include: &Path) -> (Vec<String>, String) 
             "--reproducible".to_string(),
             "--force".to_string(),
             "--add".to_string(),
-            "drm plymouth ostree kyth-plymouth".to_string(),
+            KYTH_DRACUT_MODULES.to_string(),
             "--include".to_string(),
             format!("{include_str}/etc/plymouth"),
             "/etc/plymouth".to_string(),
@@ -268,7 +272,7 @@ pub fn dracut_regenerate_all_argv(include: &Path) -> Vec<String> {
         "--regenerate-all".to_string(),
         "--force".to_string(),
         "--add".to_string(),
-        "drm plymouth ostree kyth-plymouth".to_string(),
+        KYTH_DRACUT_MODULES.to_string(),
         "--include".to_string(),
         format!("{include_str}/etc/plymouth"),
         "/etc/plymouth".to_string(),

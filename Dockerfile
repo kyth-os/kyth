@@ -368,8 +368,9 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig.sh,target=/ctx/syscon
 # Build cache boundary: Secure Boot signing, branding, helper app, and Plymouth.
 # These operations share one raw BuildKit layer; legacy-rechunk repartitions the
 # finished filesystem into update-efficient published OCI layers.
-# Skipped gracefully when MOK_KEY is not set (local builds without a signing key).
-# Pass the private key via: --secret id=mok_key,env=MOK_KEY
+# Fail-closed for custom (CachyOS) kernels without a MOK key: pass the private
+# key via --secret id=mok_key,env=MOK_KEY, or set KYTH_ALLOW_UNSIGNED_KERNEL=1
+# for a local nosb/test image (stamps /usr/share/kyth/secureboot/unsigned-kernel).
 
 # The primary React+Tauri Hub's compiled binary — see the hub-web-builder
 # stage declared near the top of this file (before BASE_IMAGE's own FROM,
@@ -441,6 +442,7 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-ntfs-repair /usr/bin/kyth-n
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-performance-mode /usr/bin/kyth-performance-mode
 
 ARG SECUREBOOT_SIGNING_REQUESTED=0
+ARG KYTH_ALLOW_UNSIGNED_KERNEL=0
 # Branding fragments retain the legacy fixtures for rollback; re-run the
 # native dispatcher last so every tunable alias points at Rust in the
 # installed image and cannot be overwritten by a later fragment.
@@ -453,7 +455,8 @@ RUN --mount=type=bind,source=build_files,target=/ctx \
     if [ -d /usr/share/factory/var/cache/libdnf5 ]; then \
         find /usr/share/factory/var/cache/libdnf5 -mindepth 1 -delete; \
     fi && \
-    SECUREBOOT_SIGNING_REQUESTED=${SECUREBOOT_SIGNING_REQUESTED} bash /ctx/scripts/secureboot.sh && \
+    SECUREBOOT_SIGNING_REQUESTED=${SECUREBOOT_SIGNING_REQUESTED} \
+    KYTH_ALLOW_UNSIGNED_KERNEL=${KYTH_ALLOW_UNSIGNED_KERNEL} bash /ctx/scripts/secureboot.sh && \
     bash /ctx/scripts/branding.sh && \
     bash /ctx/scripts/tunable-dispatcher.sh && \
     bash /ctx/scripts/plymouth-initramfs.sh

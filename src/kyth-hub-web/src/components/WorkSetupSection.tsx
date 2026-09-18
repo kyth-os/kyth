@@ -88,7 +88,7 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
       <div className="work-card-grid">
         <WorkCard icon="Aa" label="Office fonts" value={fonts ? fonts.ready ? "Installed" : "Needs setup" : "Checking…"} detail={fonts?.detail || "Microsoft-compatible fonts support office documents."} good={fonts ? fonts.ready : null} />
         <WorkCard icon="⌁" label="Connected services" value={summary ? `${summary.cloudProviders.length} cloud provider${summary.cloudProviders.length === 1 ? "" : "s"}` : "Checking…"} detail={summary?.detail || "VPN and cloud connectivity are being checked."} good={summary ? summary.cloudProviders.length > 0 || summary.vpnConnected : null} />
-        <WorkCard icon="▣" label="Printers" value={printers === null ? "Not scanned" : printers.length === 0 ? "None found" : `${printers.length} found`} detail={printers === null ? "Scan the network or open printer setup." : printers.length > 0 ? printers.join(" · ") : "USB and manually added printers can still be configured."} good={printers === null ? null : printers.length > 0} />
+        <WorkCard icon="▣" label="Printers" value={printers === null ? "Not scanned" : printers.length === 0 ? "None found" : `${printers.length} found`} detail={printers === null ? "Scan the network for IPP printers, or open printer setup." : printers.length > 0 ? printers.join(" · ") : "No network printers answered. USB printers need ipp-usb, which isn't installed — network (IPP Everywhere) printers only."} good={printers === null ? null : printers.length > 0} />
       </div>
       {!live && <SectionFallbackNote loaded={loaded} />}
 

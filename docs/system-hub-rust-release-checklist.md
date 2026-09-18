@@ -5,7 +5,14 @@ System Hub the default launcher. The checklist is intentionally separate from
 the migration roadmap: a green Rust build does not by itself demonstrate
 runtime parity on an installed image.
 
-## Status snapshot (2026-09-05)
+> **Freshness rule:** every checked box below was verified at one snapshot
+> commit. Before shipping from a *different* commit, re-run the gate —
+> `git log --oneline -3`, `gh run list --workflow validation.yml --limit 3`,
+> and the local `cargo test --locked` / acceptance commands named in each
+> section — and move the snapshot header down with the new evidence. A green
+> box from an older commit never qualifies a newer one.
+
+## Status snapshot (2026-09-05) — historical, commit `192ee5ba`
 
 Current target: `testing` at `192ee5ba` with the Hub migration cutover changes;
 the local worktree also contains the P0 closed-action-allowlist fix.
@@ -206,7 +213,8 @@ Tauri shell. Run the focused unit-test gate explicitly when iterating with:
 (cd src/kyth-hub-web/src-tauri && cargo test --locked)
 ```
 
-Phase 6 source validation on 2026-09-02 also passed:
+Phase 6 source validation on 2026-09-02 also passed (historical counts —
+re-run; do not treat these numbers as current):
 
 ```text
 (cd src/kyth-shared-rs && cargo test --locked)       # 498 passed

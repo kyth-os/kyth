@@ -8,6 +8,8 @@ update-proton-cachyos:
     sudo /usr/bin/kyth-proton-cachyos-update
 
 # Install or reinstall umu-launcher (umu-run) from the latest GitHub release.
+# Refuses to install when the release publishes no checksum (asset digest or
+# sidecar) — unverified `sudo install` is not an option.
 [group('KythOS')]
 install-umu:
     #!/usr/bin/env bash
@@ -28,6 +30,48 @@ install-umu:
     UMU_TARBALL=$(basename "${UMU_URL}")
     echo "Downloading ${UMU_TARBALL}…"
     curl -fsSL "${UMU_URL}" -o "${TMPDIR_UMU}/${UMU_TARBALL}"
+    # Checksum (parity with build-time thirdparty/umu.sh): prefer the GitHub
+    # release asset digest, fall back to a published sidecar, and refuse to
+    # install unverified bytes — a `sudo install` of an unchecksummed curl
+    # is a supply-chain hole the hardened paths do not have.
+    UMU_DIGEST=$(python3 - "${release_json}" "${UMU_TARBALL}" <<'PY'
+import json, sys
+release_json, tarball = sys.argv[1], sys.argv[2]
+with open(release_json, encoding="utf-8") as f:
+    data = json.load(f)
+for asset in data.get("assets", []):
+    if asset.get("name") == tarball:
+        print(asset.get("digest", ""))
+        break
+PY
+    ) || true
+    UMU_VERIFIED=0
+    if [[ "${UMU_DIGEST}" =~ ^sha256:[0-9a-fA-F]{64}$ ]]; then
+        echo "${UMU_DIGEST#sha256:}  ${TMPDIR_UMU}/${UMU_TARBALL}" | sha256sum -c - \
+            || { echo "SHA256 mismatch for ${UMU_TARBALL}; refusing to install." >&2; exit 1; }
+        echo "${UMU_TARBALL}: SHA256 verified OK (release asset digest)"
+        UMU_VERIFIED=1
+    elif [[ "${UMU_DIGEST}" =~ ^sha512:[0-9a-fA-F]{128}$ ]]; then
+        echo "${UMU_DIGEST#sha512:}  ${TMPDIR_UMU}/${UMU_TARBALL}" | sha512sum -c - \
+            || { echo "SHA512 mismatch for ${UMU_TARBALL}; refusing to install." >&2; exit 1; }
+        echo "${UMU_TARBALL}: SHA512 verified OK (release asset digest)"
+        UMU_VERIFIED=1
+    else
+        for ext in sha256 sha512; do
+            if curl -fsSL "${UMU_URL}.${ext}" -o "${TMPDIR_UMU}/${UMU_TARBALL}.${ext}" 2>/dev/null; then
+                ( cd "${TMPDIR_UMU}" && "${ext}sum" -c "${UMU_TARBALL}.${ext}" ) \
+                    || { echo "${ext^^} sidecar mismatch for ${UMU_TARBALL}; refusing to install." >&2; exit 1; }
+                echo "${UMU_TARBALL}: ${ext^^} verified OK (sidecar)"
+                UMU_VERIFIED=1
+                break
+            fi
+        done
+    fi
+    if [[ "${UMU_VERIFIED}" != 1 ]]; then
+        echo "No checksum available for ${UMU_TARBALL} (no release asset digest, no sidecar); refusing to install." >&2
+        echo "Use the pinned build-time umu stack instead." >&2
+        exit 1
+    fi
     tar -xf "${TMPDIR_UMU}/${UMU_TARBALL}" -C "${TMPDIR_UMU}/"
     UMU_BIN=$(find "${TMPDIR_UMU}" -name 'umu-run' -type f | head -n1)
     if [[ -z "${UMU_BIN}" ]]; then echo "umu-run not found." >&2; exit 1; fi

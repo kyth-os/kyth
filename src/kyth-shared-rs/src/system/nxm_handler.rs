@@ -24,8 +24,30 @@ pub fn vortex_bottle_dir(home: &Path) -> PathBuf {
         .join(VORTEX_BOTTLE)
 }
 
-pub fn bottles_cli_available() -> bool {
+pub fn bottles_native_available() -> bool {
     which("bottles-cli")
+}
+
+/// True when any usable Bottles runner exists: a native `bottles-cli` on
+/// PATH, or the Bottles Flatpak (how KythOS ships Bottles). Flatpak
+/// detection is a pure install-marker check — no shell-out — so `decide()`
+/// stays side-effect free for unit tests.
+pub fn bottles_cli_available(home: &Path) -> bool {
+    bottles_native_available() || super::exe_compat::bottles_flatpak_installed(home)
+}
+
+/// argv to hand an nxm:// link to Vortex: the native `bottles-cli` form only
+/// when a native runner is on PATH, otherwise the Flatpak form
+/// (`flatpak run --command=bottles-cli com.usebottles.bottles ...`).
+pub fn vortex_launch_argv(url: &str) -> Vec<String> {
+    let tail = ["run", "-b", VORTEX_BOTTLE, "-e", VORTEX_EXE, "--", url];
+    if bottles_native_available() {
+        std::iter::once("bottles-cli".to_string())
+            .chain(tail.iter().map(|arg| (*arg).to_string()))
+            .collect()
+    } else {
+        super::windows_installer::bottles_cli(&tail)
+    }
 }
 
 fn which(program: &str) -> bool {
@@ -47,21 +69,10 @@ pub fn handle(url: Option<&str>, home: &Path) -> i32 {
             1
         }
         NxmAction::LaunchVortex(url) => {
-            let launched = crate::system::process::run_bounded(
-                &[
-                    "bottles-cli".to_string(),
-                    "run".to_string(),
-                    "-b".to_string(),
-                    VORTEX_BOTTLE.to_string(),
-                    "-e".to_string(),
-                    VORTEX_EXE.to_string(),
-                    "--".to_string(),
-                    url.to_string(),
-                ],
-                Duration::from_secs(120),
-            )
-            .map(|output| output.status.success())
-            .unwrap_or(false);
+            let argv: Vec<String> = vortex_launch_argv(url);
+            let launched = crate::system::process::run_bounded(&argv, Duration::from_secs(120))
+                .map(|output| output.status.success())
+                .unwrap_or(false);
             if launched {
                 return 0;
             }
@@ -89,7 +100,7 @@ pub fn decide<'a>(url: Option<&'a str>, home: &Path) -> NxmAction<'a> {
     let Some(url) = url.filter(|url| !url.is_empty()) else {
         return NxmAction::Usage;
     };
-    if vortex_bottle_dir(home).is_dir() && bottles_cli_available() {
+    if vortex_bottle_dir(home).is_dir() && bottles_cli_available(home) {
         NxmAction::LaunchVortex(url)
     } else {
         NxmAction::Inform(url)
@@ -125,6 +136,46 @@ mod tests {
             decide(Some("nxm://example/mods/1/files/2"), dir.path()),
             NxmAction::Inform("nxm://example/mods/1/files/2")
         );
+    }
+
+    #[test]
+    fn flatpak_bottles_routes_to_launch_with_flatpak_argv() {
+        // Vortex bottle + Bottles Flatpak markers but no native bottles-cli:
+        // decide() must launch (not inform) and the argv must use the
+        // flatpak run form.
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vortex_bottle_dir(home.path())).unwrap();
+        std::fs::create_dir_all(
+            home.path()
+                .join(".local/share/flatpak/app/com.usebottles.bottles"),
+        )
+        .unwrap();
+        if bottles_native_available() {
+            // Native runner present: still launches; argv form is native.
+            assert_eq!(
+                decide(Some("nxm://example/mods/1/files/2"), home.path()),
+                NxmAction::LaunchVortex("nxm://example/mods/1/files/2")
+            );
+            let argv = vortex_launch_argv("nxm://example/mods/1/files/2");
+            assert_eq!(argv[0], "bottles-cli");
+        } else {
+            assert_eq!(
+                decide(Some("nxm://example/mods/1/files/2"), home.path()),
+                NxmAction::LaunchVortex("nxm://example/mods/1/files/2")
+            );
+            let argv = vortex_launch_argv("nxm://example/mods/1/files/2");
+            assert_eq!(
+                &argv[..4],
+                &[
+                    "flatpak",
+                    "run",
+                    "--command=bottles-cli",
+                    "com.usebottles.bottles",
+                ]
+            );
+            assert!(argv.contains(&"Vortex.exe".to_string()));
+            assert!(argv.last().unwrap().starts_with("nxm://"));
+        }
     }
 
     #[test]

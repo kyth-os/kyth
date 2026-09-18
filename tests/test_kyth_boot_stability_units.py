@@ -316,8 +316,14 @@ class BootStabilityUnitTests(unittest.TestCase):
     def test_splash_and_branding_wait_for_writable_boot(self) -> None:
         body = BOOT_SPLASH.read_text(encoding="utf-8")
         self.assertGreaterEqual(body.count("After=local-fs.target kyth-boot-rw.service"), 2)
-        self.assertIn("grubby --update-kernel=ALL --remove-args=", body)
-        self.assertIn("|| true", body)
+        # Splash kargs converge via bootc kargs.d (durable across
+        # deployments), never via grubby edits to live BLS entries — and the
+        # migration must never strip user kargs (GPU flags included).
+        self.assertIn("/etc/bootc/kargs.d/99-kyth-splash.toml", body)
+        self.assertIn("boot-splash-kargs-v4", body)
+        self.assertNotIn("grubby --", body)
+        self.assertNotIn("command -v grubby", body)
+        self.assertNotIn("--remove-args", body)
         self.assertNotIn("kyth-firstboot-notice.service", body)
         self.assertNotIn("first-boot-done", body)
 

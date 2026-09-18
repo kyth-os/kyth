@@ -10,6 +10,18 @@ from pathlib import Path
 
 SUPPORTED_CHANNELS = frozenset({"latest", "testing"})
 
+# Single source of truth for the public ISO download base URL. Release
+# scripts, release metadata, and README download links must all resolve to
+# this value — do not hardcode the r2.dev host anywhere else (Python code
+# imports it from here; README links are covered by
+# test_r2_public_base_url_is_single_sourced).
+R2_PUBLIC_BASE_URL = "https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev"
+
+
+def r2_download_url(basename: str) -> str:
+    """Public download URL for an ISO artifact basename."""
+    return f"{R2_PUBLIC_BASE_URL}/{basename}"
+
 
 @dataclass(frozen=True)
 class ReleaseIdentity:

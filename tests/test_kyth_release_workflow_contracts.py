@@ -81,5 +81,56 @@ class WorkflowArtifactContracts(unittest.TestCase):
         self.assertNotIn('RELEASE_ID="${DATE}-${SHORT_SHA}', workflow)
 
 
+class ReleaseChainingContracts(unittest.TestCase):
+    def test_r2_public_base_url_is_single_sourced(self):
+        """The R2 download host lives in release_identity.py exactly once.
+
+        publish-release.py and generate-release-metadata.py import it;
+        README download links must resolve to the same base.
+        """
+        scripts = ROOT / "build_files/scripts"
+        identity_src = (scripts / "release_identity.py").read_text(encoding="utf-8")
+        host = "pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev"
+        self.assertIn(f'R2_PUBLIC_BASE_URL = "https://{host}"', identity_src)
+
+        for name in ("publish-release.py", "generate-release-metadata.py"):
+            src = (scripts / name).read_text(encoding="utf-8")
+            self.assertNotIn(host, src, f"{name} hardcodes the R2 host")
+            self.assertIn("from release_identity import", src)
+
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn(f"https://{host}/kyth-live-latest.iso", readme)
+        self.assertIn(f"https://{host}/kyth-live-testing.iso", readme)
+
+    def test_downstream_dispatches_are_verified(self):
+        """Every gh workflow run dispatch must fail loudly when dropped.
+
+        dispatch-workflow polls for the downstream run; no workflow may
+        fire-and-forget a raw `gh workflow run` anymore.
+        """
+        action = (
+            ROOT / ".github/actions/dispatch-workflow/action.yml"
+        ).read_text(encoding="utf-8")
+        self.assertIn("gh run list", action)
+        self.assertIn("::error::", action)
+
+        for name in ("build.yml", "supply-chain.yml", "build-live-iso.yml"):
+            workflow = (ROOT / ".github/workflows" / name).read_text(
+                encoding="utf-8"
+            )
+            self.assertNotIn(
+                "gh workflow run", workflow, f"{name} has an unverified dispatch"
+            )
+
+    def test_iso_publish_fails_loudly_without_sbom(self):
+        """A missing source-image SBOM blocks ISO publish; never warn-skip."""
+        workflow = (ROOT / ".github/workflows/build-live-iso.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertNotIn("::warning::No SBOM", workflow)
+        self.assertIn("Wait for source image SBOM", workflow)
+        self.assertIn("Fail if source image has no SBOM", workflow)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -8,9 +8,17 @@ if [[ -z "${NXM_URL}" ]]; then
 fi
 
 VORTEX_BOTTLE="${HOME}/.local/share/bottles/bottles/Vortex"
-if [[ -d "${VORTEX_BOTTLE}" ]] && command -v bottles-cli >/dev/null 2>&1; then
-    bottles-cli run -b Vortex -e "Vortex.exe" -- "${NXM_URL}"
-    exit 0
+BOTTLES_FLATPAK_ID="com.usebottles.bottles"
+# Bottles ships as a Flatpak: a bare `bottles-cli` only exists for native
+# installs, so fall back to the flatpak run form (mirrors the native binary).
+if [[ -d "${VORTEX_BOTTLE}" ]]; then
+    if command -v bottles-cli >/dev/null 2>&1; then
+        bottles-cli run -b Vortex -e "Vortex.exe" -- "${NXM_URL}"
+        exit 0
+    elif [[ -d "${HOME}/.local/share/flatpak/app/${BOTTLES_FLATPAK_ID}" || -d "/var/lib/flatpak/app/${BOTTLES_FLATPAK_ID}" ]]; then
+        flatpak run --command=bottles-cli "${BOTTLES_FLATPAK_ID}" run -b Vortex -e "Vortex.exe" -- "${NXM_URL}"
+        exit 0
+    fi
 fi
 
 if command -v notify-send >/dev/null 2>&1; then

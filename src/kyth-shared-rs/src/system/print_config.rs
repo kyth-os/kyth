@@ -1,4 +1,9 @@
 //! Offline print/scan autopilot configuration model.
+//!
+//! The `airscan` flag is retained for forward-compat but is a no-op until
+//! the sane-airscan/ipp-usb stacks (packages + units) actually ship —
+//! nothing in the image may claim otherwise, so the default is `false`
+//! (mirrors `kyth_shared.print_preset` and branding/77-print-scan.sh).
 
 use std::path::{Path, PathBuf};
 
@@ -12,7 +17,7 @@ impl Default for PrintConfig {
     fn default() -> Self {
         Self {
             auto_add: true,
-            airscan: true,
+            airscan: false,
         }
     }
 }
@@ -45,7 +50,7 @@ pub fn load(path: impl AsRef<Path>) -> PrintConfig {
         airscan: table
             .and_then(|table| table.get("airscan"))
             .and_then(toml::Value::as_bool)
-            .unwrap_or(true),
+            .unwrap_or(false),
     }
 }
 
@@ -67,10 +72,13 @@ mod tests {
     fn loads_defaults_and_saves_values() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("print.toml");
+        // airscan defaults to false: the sane-airscan/ipp-usb stacks do not
+        // ship, so a missing key must not promise them (Python parity).
         assert_eq!(load(&path), PrintConfig::default());
+        assert!(!PrintConfig::default().airscan);
         let config = PrintConfig {
             auto_add: false,
-            airscan: true,
+            airscan: false,
         };
         save(&path, &config).unwrap();
         assert_eq!(load(&path), config);

@@ -10572,6 +10572,36 @@
     },
     {
       "current_implementation": "shell",
+      "cutover": "replace installed dracut-modules.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/lib/dracut-modules.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "dracut-modules.sh",
+      "owner": "fixture::build_files/scripts/lib/dracut-modules.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/lib/dracut-modules.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/lib/dracut-modules.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed dracut-modules.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
       "cutover": "replace installed dracut-retry.sh entry point after parity gates",
       "function_inventory": [
         {
@@ -11855,7 +11885,12 @@
       "cutover": "replace installed secureboot.sh entry point after parity gates",
       "function_inventory": [
         {
-          "name": "__main__",
+          "name": "stamp_unsigned_marker",
+          "owner": "fixture::build_files/scripts/secureboot.sh",
+          "ownership": "build-only"
+        },
+        {
+          "name": "fail_closed_unsigned",
           "owner": "fixture::build_files/scripts/secureboot.sh",
           "ownership": "build-only"
         }

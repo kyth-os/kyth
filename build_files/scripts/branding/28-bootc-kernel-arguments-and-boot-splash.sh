@@ -7,17 +7,43 @@ install -Dm0755 /ctx/scripts/plymouth-branding-guard.sh \
 /usr/libexec/kyth-plymouth-branding-guard \
 	/ctx/branding/transparent-watermark.svg
 
+# Pre-existing installs predate the image kargs.d drop-in, so converge them
+# with a helper that writes the same splash set to /etc/bootc/kargs.d (the
+# local-override layer bootc merges with /usr/lib/bootc/kargs.d at deployment
+# time; /usr is read-only on ostree, so the image path cannot be written from
+# here). It takes effect on the next staged update, not the running boot —
+# that is fine, the running BLS entries already carry these args or predate
+# the splash.
+#
+# Deliberately additive-only: this never invokes the bootloader editor to
+# remove args. GPU and power tuning (amdgpu.ppfeaturemask, pcie_aspm, ...)
+# now live in the versioned hardware policy and user tunables, and a blanket
+# removal would also wipe flags the USER set deliberately. Never strip user kargs.
+#
+# NOTE: keep the kargs list below in sync with /usr/lib/bootc/kargs.d/99-kyth.toml
+# in build_base/build.sh.
+write_config /usr/libexec/kyth-boot-splash-kargs-apply 0755 <<'KARGSAPPLYEOF'
+#!/usr/bin/bash
+set -e
+mkdir -p /var/lib/kyth /etc/bootc/kargs.d
+/usr/libexec/kyth-finalize-staged prepare-boot >/dev/null 2>&1 || true
+cat >/etc/bootc/kargs.d/99-kyth-splash.toml <<'TOMLEOF'
+kargs = ["quiet", "rhgb", "splash", "rd.plymouth=1", "plymouth.enable=1", "plymouth.ignore-serial-consoles", "systemd.show_status=false", "rd.systemd.show_status=false", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0", "threadirqs", "split_lock_detect=off", "rootflags=noatime,compress=zstd:1,ssd,discard=async"]
+TOMLEOF
+touch /var/lib/kyth/boot-splash-kargs-v4
+KARGSAPPLYEOF
+
 write_config /usr/lib/systemd/system/kyth-boot-splash-kargs.service <<'SPLASHKARGSEOF'
 [Unit]
-Description=KythOS boot splash kernel argument migration
-ConditionPathExists=!/var/lib/kyth/boot-splash-kargs-v3
+Description=KythOS boot splash kernel arguments via bootc kargs.d
+ConditionPathExists=!/var/lib/kyth/boot-splash-kargs-v4
 After=local-fs.target kyth-boot-rw.service
 
 [Service]
 Type=oneshot
 RemainAfterExit=yes
 TimeoutStartSec=60
-ExecStart=/usr/bin/bash -c 'set -e; mkdir -p /var/lib/kyth; /usr/libexec/kyth-finalize-staged prepare-boot >/dev/null 2>&1 || true; if command -v grubby >/dev/null 2>&1; then if grubby --update-kernel=ALL --remove-args="console=tty0 console=ttyS0,115200 amdgpu.ppfeaturemask=0xffffffff pcie_aspm=performance" && grubby --update-kernel=ALL --args="quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 threadirqs split_lock_detect=off rootflags=noatime,compress=zstd:1,ssd,discard=async,commit=30"; then touch /var/lib/kyth/boot-splash-kargs-v3; fi; fi'
+ExecStart=/usr/libexec/kyth-boot-splash-kargs-apply
 
 [Install]
 WantedBy=multi-user.target

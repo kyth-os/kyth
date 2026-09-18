@@ -1,4 +1,11 @@
 //! Telemetry opt-in/collector preference model.
+//!
+//! Default is DISABLED (explicit opt-in). Rationale: KythOS is a family
+//! desktop — measuring sessions without an explicit owner choice would
+//! violate least surprise on shared machines (the measured "user" may be a
+//! child). Collection is local-first either way, but the writer stays off
+//! until opt-in. A missing or unparseable config means "no consent
+//! recorded" → disabled.
 
 use std::path::{Path, PathBuf};
 
@@ -11,7 +18,7 @@ pub struct TelemetryOptConfig {
 impl Default for TelemetryOptConfig {
     fn default() -> Self {
         Self {
-            enabled: true,
+            enabled: false,
             collectors: Vec::new(),
         }
     }
@@ -51,7 +58,7 @@ pub fn load(path: impl AsRef<Path>) -> TelemetryOptConfig {
         enabled: value
             .get("enabled")
             .and_then(toml::Value::as_bool)
-            .unwrap_or(true),
+            .unwrap_or(false),
         collectors,
     }
 }
@@ -114,6 +121,22 @@ mod tests {
             effective_collectors(&loaded, &["cpu", "gpu"]),
             vec!["cpu", "gpu"]
         );
+    }
+
+    #[test]
+    fn missing_or_partial_config_is_disabled_opt_in() {
+        // Opt-in default: no file (no consent recorded) means disabled, and
+        // a file without an explicit `enabled` key stays disabled too.
+        let directory = tempdir().unwrap();
+        let missing = directory.path().join("absent.toml");
+        let config = load(&missing);
+        assert!(!config.enabled);
+        assert!(effective_collectors(&config, &["cpu"]).is_empty());
+        let partial = directory.path().join("partial.toml");
+        std::fs::write(&partial, "collectors = [\"cpu\"]\n").unwrap();
+        let config = load(&partial);
+        assert!(!config.enabled);
+        assert!(effective_collectors(&config, &["cpu"]).is_empty());
     }
 
     #[test]

@@ -1,11 +1,19 @@
 """PipeWire gaming — pipewire-gaming.toml, wireplumber drop-in only in gaming.
 
 Quantum 128/48000 for low latency, otherwise 1024/48000 studio.
+
+Bluetooth guard: a global 128-sample quantum starves BT codecs (SBC/LDAC
+need headroom for retransmits) into stutter, so when a Bluetooth audio sink
+is active the gaming profile still applies its ALSA wireplumber rules but
+skips the global quantum drop-in and stays on the conservative base clock.
+Wired/USB gaming audio is unaffected.
 """
 
 from __future__ import annotations
 
 import os
+import shutil
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -89,10 +97,50 @@ def _remove_quantum_dropin(dest: Path) -> None:
         pass
 
 
+def bluetooth_audio_active() -> bool:
+    """True when a Bluetooth audio sink looks active (best-effort, offline).
+
+    Checks PipeWire/Pulse sinks for a BlueZ device first, then falls back to
+    ``bluetoothctl`` connected-device output. Any probe failure means "no
+    evidence" (False) — the guard only trips on positive signal, so a
+    missing bluetooth stack never blocks the gaming profile.
+    """
+    for argv in (
+        ["pactl", "list", "sinks", "short"],
+        ["pw-cli", "list-objects", "Node"],
+    ):
+        if not shutil.which(argv[0]):
+            continue
+        try:
+            out = subprocess.run(
+                argv, capture_output=True, text=True, timeout=10
+            ).stdout.lower()
+        except (OSError, ValueError, subprocess.SubprocessError):
+            continue
+        if "bluez" in out or "bluetooth" in out:
+            return True
+    if shutil.which("bluetoothctl"):
+        try:
+            proc = subprocess.run(
+                ["bluetoothctl", "devices", "Connected"],
+                capture_output=True, text=True, timeout=10,
+            )
+            lines = [
+                line for line in proc.stdout.splitlines()
+                if line.strip() and "no default controller" not in line.lower()
+            ]
+            if lines:
+                return True
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    return False
+
+
 def generate_pipewire_gaming(
     cfg: dict[str, Any] | None = None,
     dest: Path | None = None,
     quantum_dest: Path | None = None,
+    bt_active: bool | None = None,
 ) -> Path | None:
     if cfg is None:
         cfg = load_pipewire_gaming()
@@ -106,6 +154,14 @@ def generate_pipewire_gaming(
             pass
         _remove_quantum_dropin(quantum_dropin)
         return None
+    if bt_active is None:
+        bt_active = bluetooth_audio_active()
+    if bt_active:
+        # Bluetooth headset guard: a BT sink is active, so skip the global
+        # 128-sample quantum (SBC/LDAC stutter without headroom) and clear
+        # any stale drop-in. The ALSA wireplumber rules below only match
+        # alsa_output.* — wired/USB gaming audio keeps low latency.
+        _remove_quantum_dropin(quantum_dropin)
     q = int(cfg.get("quantum", GAMING_QUANTUM))
     lines = [
         "-- Kyth PipeWire gaming — generated",
@@ -122,7 +178,8 @@ def generate_pipewire_gaming(
     tmp = dest.with_suffix(".tmp")
     tmp.write_text("\n".join(lines), encoding="utf-8")
     tmp.replace(dest)
-    _write_quantum_dropin(q, quantum_dropin)
+    if not bt_active:
+        _write_quantum_dropin(q, quantum_dropin)
     return dest
 
 

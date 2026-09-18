@@ -4,6 +4,9 @@ import json
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_identity import R2_PUBLIC_BASE_URL
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Generate release metadata JSON files.")
     parser.add_argument("--source-tag", required=True)
@@ -21,7 +24,7 @@ def main() -> int:
     parser.add_argument("--output-dir", required=True, type=Path)
     args = parser.parse_args()
 
-    base_url = "https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev"
+    base_url = R2_PUBLIC_BASE_URL
     iso_name = args.iso_basename
     channel = args.channel_basename
 

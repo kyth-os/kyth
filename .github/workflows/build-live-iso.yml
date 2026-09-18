@@ -545,6 +545,26 @@ jobs:
           version: 0.88.0
           sha256: 7a7e1bf0caf88350eeb7433f41ce6e7b69d1eed57ce67abf24eae62562f38948
 
+      - name: Wait for source image SBOM
+        env:
+          IMAGE_REF: ${{ needs.build.outputs.source_image }}@${{ needs.build.outputs.source_digest }}
+        run: |
+          set -euo pipefail
+          # Supply-chain attaches the SBOM concurrently with this ISO build,
+          # so absence at first sight is a race, not a verdict. Poll for up
+          # to ~20 minutes; a still-missing SBOM after that is a broken
+          # chain and must fail loudly, never publish a CVE-blind ISO.
+          for attempt in $(seq 1 40); do
+            if oras discover --format json "${IMAGE_REF}" 2>/dev/null \
+              | jq -e '[.referrers[] | select(.artifactType | contains("syft"))] | length > 0' >/dev/null; then
+              echo "SBOM referrer present (attempt ${attempt})"
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::No Syft SBOM referrer on ${IMAGE_REF} after ~20 minutes — supply-chain attach failed or was dropped. Refusing to publish without CVE data."
+          exit 1
+
       - name: Pull source image SBOM
         id: current_sbom
         uses: ./.github/actions/pull-sbom-referrer
@@ -552,9 +572,13 @@ jobs:
           image-ref: ${{ needs.build.outputs.source_image }}@${{ needs.build.outputs.source_digest }}
           dest-dir: ${{ runner.temp }}/current-sbom
 
-      - name: Warn if source image has no SBOM
+      - name: Fail if source image has no SBOM
         if: steps.current_sbom.outputs.path == ''
-        run: echo "::warning::No SBOM attached to source image; CVE section will be skipped"
+        run: |
+          echo "::error::SBOM referrer resolved but pull produced no file for ${IMAGE_REF} — refusing to publish without CVE data."
+          exit 1
+        env:
+          IMAGE_REF: ${{ needs.build.outputs.source_image }}@${{ needs.build.outputs.source_digest }}
 
       - name: Scan source image with Grype
         id: grype_current
