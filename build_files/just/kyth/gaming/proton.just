@@ -34,17 +34,7 @@ install-umu:
     # release asset digest, fall back to a published sidecar, and refuse to
     # install unverified bytes — a `sudo install` of an unchecksummed curl
     # is a supply-chain hole the hardened paths do not have.
-    UMU_DIGEST=$(python3 - "${release_json}" "${UMU_TARBALL}" <<'PY'
-import json, sys
-release_json, tarball = sys.argv[1], sys.argv[2]
-with open(release_json, encoding="utf-8") as f:
-    data = json.load(f)
-for asset in data.get("assets", []):
-    if asset.get("name") == tarball:
-        print(asset.get("digest", ""))
-        break
-PY
-    ) || true
+    UMU_DIGEST=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next((a.get("digest","") for a in d.get("assets",[]) if a.get("name")==sys.argv[2]),""))' "${release_json}" "${UMU_TARBALL}") || true
     UMU_VERIFIED=0
     if [[ "${UMU_DIGEST}" =~ ^sha256:[0-9a-fA-F]{64}$ ]]; then
         echo "${UMU_DIGEST#sha256:}  ${TMPDIR_UMU}/${UMU_TARBALL}" | sha256sum -c - \
