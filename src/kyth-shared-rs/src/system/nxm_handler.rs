@@ -2,8 +2,9 @@
 //!
 //! Handles `nxm://` Nexus Mods links from the desktop file association: if a
 //! Vortex bottle exists and `bottles-cli` is available, the link is handed
-//! to Vortex; otherwise the user gets a notification explaining how to set
-//! that up. Exit status mirrors the script: 1 on missing argument, 0 after
+//! to Vortex; otherwise the link is logged to stdout and ignored —
+//! deliberately no desktop notification, so stray links never nag.
+//! Exit status mirrors the script: 1 on missing argument, 0 after
 //! handling or informing.
 
 use std::path::{Path, PathBuf};
@@ -27,10 +28,6 @@ pub fn bottles_cli_available() -> bool {
     which("bottles-cli")
 }
 
-pub fn notify_available() -> bool {
-    which("notify-send")
-}
-
 fn which(program: &str) -> bool {
     std::env::var_os("PATH")
         .map(|paths| {
@@ -39,20 +36,6 @@ fn which(program: &str) -> bool {
             })
         })
         .unwrap_or(false)
-}
-
-pub fn notify_link(url: &str) {
-    let _ = crate::system::process::run_bounded(
-        &[
-            "notify-send".to_string(),
-            "NXM Link".to_string(),
-            format!(
-                "Install Vortex in Bottles to handle Nexus Mods download links automatically.\nLink: {url}"
-            ),
-            "--icon=application-x-addon".to_string(),
-        ],
-        Duration::from_secs(10),
-    );
 }
 
 /// Handle one URL. Returns the process exit code: 1 for a missing argument
@@ -114,9 +97,9 @@ pub fn decide<'a>(url: Option<&'a str>, home: &Path) -> NxmAction<'a> {
 }
 
 fn inform(url: &str) {
-    if notify_available() {
-        notify_link(url);
-    }
+    // Deliberately stdout-only: with no mod manager installed there is
+    // nothing actionable, and a desktop popup on every stray nxm:// click
+    // (or automated probe) is pure nag. Journal/stdout keeps the record.
     println!("NXM link received: {url}");
     println!("Install Vortex via Bottles to enable automatic mod downloads.");
 }
