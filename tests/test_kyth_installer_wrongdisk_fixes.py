@@ -568,6 +568,113 @@ class CoverageGapTests(unittest.TestCase):
                 snapshot=snapshot, dependencies=deps,
             )
 
+    def test_list_disks_skips_non_disk_entries(self):
+        blockdevices = [
+            {"type": "part", "name": "/dev/sda1"},
+            {"type": "disk", "name": "/dev/sda", "size": str(128 * GIB),
+             "model": "Fake", "rota": 0, "tran": "", "rm": False,
+             "ro": False, "pttype": "gpt"},
+        ]
+        with mock.patch.object(disk, "_lsblk_tree", return_value={}), \
+             mock.patch.object(disk, "_running_system_disk", return_value="/dev/sda"), \
+             mock.patch.object(disk, "_protected_install_disks", return_value=set()), \
+             mock.patch.object(disk, "_parent_disk", return_value="/dev/sda"), \
+             mock.patch.object(disk, "_lsblk_blockdevices", return_value=blockdevices):
+            disks = _query.list_disks()
+        self.assertEqual([d["name"] for d in disks], ["/dev/sda"])
+
+    def test_list_disks_returns_empty_when_blockdevices_fail(self):
+        with mock.patch.object(disk, "_lsblk_tree", return_value={}), \
+             mock.patch.object(disk, "_running_system_disk", return_value="/dev/sda"), \
+             mock.patch.object(disk, "_protected_install_disks", return_value=set()), \
+             mock.patch.object(disk, "_parent_disk", return_value="/dev/sda"), \
+             mock.patch.object(disk, "_lsblk_blockdevices", side_effect=OSError("no lsblk")):
+            self.assertEqual(_query.list_disks(), [])
+
+    def test_preflight_skips_non_dict_entries(self):
+        report = _query.storage_preflight(
+            ["junk", {"name": "/dev/sda1", "efi": True}]
+        )
+        self.assertTrue(report["esp_present"])
+        self.assertEqual(report["checked_partitions"], 1)
+
+    def test_free_space_rejects_nameless_or_empty_partitions(self):
+        with mock.patch.object(disk, "_normal_device_path", return_value="/dev/sda"), \
+             mock.patch.object(disk, "_partition_size_bytes", return_value=128 * GIB), \
+             mock.patch.object(disk, "_block_size_bytes", return_value=512), \
+             mock.patch.object(disk, "list_partitions", return_value=[{"name": ""}]):
+            self.assertEqual(_query.list_free_space("/dev/sda"), [])
+
+    def test_free_space_rejects_sub_sector_slivers(self):
+        parts = [{
+            "name": "/dev/sda1", "size_bytes": 100,
+            "start_bytes": 50 * GIB,
+        }]
+        with mock.patch.object(disk, "_normal_device_path", return_value="/dev/sda"), \
+             mock.patch.object(disk, "_partition_size_bytes", return_value=128 * GIB), \
+             mock.patch.object(disk, "_block_size_bytes", return_value=512), \
+             mock.patch.object(disk, "list_partitions", return_value=parts):
+            self.assertEqual(_query.list_free_space("/dev/sda"), [])
+
+    def test_free_space_reports_gap_between_partitions(self):
+        parts = [{
+            "name": "/dev/sda1", "size_bytes": 10 * GIB,
+            "start_bytes": 50 * GIB,
+        }]
+        with mock.patch.object(disk, "_normal_device_path", return_value="/dev/sda"), \
+             mock.patch.object(disk, "_partition_size_bytes", return_value=128 * GIB), \
+             mock.patch.object(disk, "_block_size_bytes", return_value=512), \
+             mock.patch.object(disk, "list_partitions", return_value=parts), \
+             mock.patch("kyth_installer.plan._is_gpt_disk", return_value=True), \
+             mock.patch("kyth_installer.plan._has_bios_boot_partition", return_value=True):
+            gaps = _query.list_free_space("/dev/sda")
+        self.assertTrue(any(g["size_bytes"] >= 32 * GIB for g in gaps))
+
+    def test_free_space_falls_back_when_gpt_probe_fails(self):
+        parts = [{
+            "name": "/dev/sda1", "size_bytes": 10 * GIB,
+            "start_bytes": 50 * GIB,
+        }]
+        with mock.patch.object(disk, "_normal_device_path", return_value="/dev/sda"), \
+             mock.patch.object(disk, "_partition_size_bytes", return_value=128 * GIB), \
+             mock.patch.object(disk, "_block_size_bytes", return_value=512), \
+             mock.patch.object(disk, "list_partitions", return_value=parts), \
+             mock.patch("kyth_installer.plan._is_gpt_disk", side_effect=OSError("no parted")):
+            gaps = _query.list_free_space("/dev/sda")
+        self.assertTrue(any(g["size_bytes"] >= 32 * GIB for g in gaps))
+
+    def test_partition_size_bytes_reads_lsblk(self):
+        out = "123456789\n"
+        with mock.patch.object(disk, "_lsblk_text", return_value=out):
+            self.assertEqual(_query._partition_size_bytes("/dev/sda1"), 123456789)
+
+    def test_partition_start_bytes_are_512_based(self):
+        out = "2048\n"
+        with mock.patch.object(disk, "_lsblk_text", return_value=out):
+            self.assertEqual(
+                _query._partition_start_bytes("/dev/sda1"), 2048 * 512
+            )
+
+    def test_latest_partition_returns_none_when_nothing_after(self):
+        with mock.patch.object(disk, "list_partitions", return_value=[]):
+            self.assertIsNone(
+                _query._latest_partition_on_disk(
+                    "/dev/sda", set(), 4 * 1024**2, 10 * GIB
+                )
+            )
+
+    def test_latest_partition_size_mismatch_is_not_a_match(self):
+        parts = [{
+            "name": "/dev/sda1", "start_bytes": 4 * 1024**2,
+            "size_bytes": 50 * GIB,
+        }]
+        with mock.patch.object(disk, "list_partitions", return_value=parts):
+            self.assertIsNone(
+                _query._latest_partition_on_disk(
+                    "/dev/sda", set(), 4 * 1024**2, 10 * GIB
+                )
+            )
+
 
 if __name__ == "__main__":
     unittest.main()
