@@ -81,9 +81,9 @@ class RuntimeRecipeInventoryTest(unittest.TestCase):
             self.assertEqual(entry["rust_target"], target, entry["name"])
 
         self.assertEqual(self.document["summary"]["routed"], 202)
-        self.assertEqual(self.document["summary"]["explicit_dispatch"], 105)
+        self.assertEqual(self.document["summary"]["explicit_dispatch"], 106)
         self.assertEqual(self.document["summary"]["explicit_retirement"], 3)
-        self.assertEqual(self.document["summary"]["native_fallback"], 94)
+        self.assertEqual(self.document["summary"]["native_fallback"], 93)
 
     def test_verification_depth_is_separate_from_route_ownership(self):
         high_risk = {

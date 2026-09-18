@@ -63,15 +63,36 @@ class WindowSnapTests(unittest.TestCase):
             self.assertFalse(loaded["win_z"])
 
     def test_apply_returns_list(self):
-        with tempfile.TemporaryDirectory() as td:
-            _p = Path(td) / "snap.toml"
-            cfg = {"layout": "2x2", "win_z": True, "electric": True}
-            # avoid touching real kwinrc — mock run via patch of commands.run
-            from unittest.mock import patch
+        # apply_snap shells to kwriteconfig, which exists on a real desktop
+        # but not in CI: pin the binary lookup and the runner so this passes
+        # identically on both instead of touching the live kwinrc.
+        from types import SimpleNamespace
+        from unittest.mock import patch
 
-            with patch.object(snap_mod, "run", return_value=None):
-                applied = snap_mod.apply_snap(cfg)
-                self.assertIsInstance(applied, list)
+        cfg = {"layout": "2x2", "win_z": True, "electric": True}
+        with (
+            patch.object(snap_mod, "_kwriteconfig_bin", return_value="kwriteconfig6"),
+            patch.object(
+                snap_mod, "run", return_value=SimpleNamespace(returncode=0)
+            ) as run_mock,
+        ):
+            applied = snap_mod.apply_snap(cfg)
+            self.assertEqual(applied, ["kwinrc ElectricBorder"])
+            # One ElectricBorder write plus three shortcut writes.
+            self.assertEqual(run_mock.call_count, 4)
+
+    def test_apply_without_binary_touches_nothing(self):
+        from unittest.mock import patch
+
+        with (
+            patch.object(snap_mod, "_kwriteconfig_bin", return_value=None),
+            patch.object(snap_mod, "run") as run_mock,
+        ):
+            applied = snap_mod.apply_snap(
+                {"layout": "2x2", "win_z": True, "electric": True}
+            )
+            self.assertEqual(applied, [])
+            run_mock.assert_not_called()
 
 
 class WorkCacheTests(unittest.TestCase):

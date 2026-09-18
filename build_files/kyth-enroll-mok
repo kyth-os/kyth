@@ -2,7 +2,11 @@
 set -euo pipefail
 # The test fixture runs without the packaged image binary; keep its successful
 # self-check explicit while the installed image always takes the Rust path.
-if [[ -x /usr/bin/kyth-runtime ]]; then
+# KYTH_ENROLL_MOK_FORCE_SHELL=1 forces the shell fallback below so the
+# hermetic fixture in build_files/tests/secureboot-enrollment.sh stays off
+# the live host even where /usr/bin/kyth-runtime exists (dev desktops, CI
+# images with the runtime installed). Production never sets it.
+if [[ -z "${KYTH_ENROLL_MOK_FORCE_SHELL:-}" && -x /usr/bin/kyth-runtime ]]; then
     exec /usr/bin/kyth-runtime enroll-mok "$@"
 fi
 # Source-tree parity fallback only: the packaged image always takes the Rust

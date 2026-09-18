@@ -72,7 +72,7 @@ class RuntimeRecipeDispatchTest(unittest.TestCase):
             for entry in self.ledger["entries"]
             if entry["status"] == "routed" and entry["route_kind"] == "explicit-dispatch"
         ]
-        self.assertEqual(len(explicit), 105)
+        self.assertEqual(len(explicit), 106)
 
         with tempfile.TemporaryDirectory() as directory:
             environment = self._environment(Path(directory))

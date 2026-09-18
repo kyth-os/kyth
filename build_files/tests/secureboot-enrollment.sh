@@ -51,6 +51,7 @@ chmod +x "${MOKUTIL}"
 
 run_enroller() {
 	MOCK_LOG="${LOG}" \
+		KYTH_ENROLL_MOK_FORCE_SHELL="1" \
 		MOCK_SB_ENABLED="${1}" \
 		MOCK_ENROLLED="${2}" \
 		MOCK_IMPORT_FAIL="${MOCK_IMPORT_FAIL:-0}" \

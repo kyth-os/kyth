@@ -84,6 +84,7 @@ class RuntimeRecipeBehaviorTest(unittest.TestCase):
         for command in (
             "sudo",
             "systemctl",
+            "distrobox",
             "efibootmgr",
             "fwupdmgr",
             "kcmshell6",
@@ -341,6 +342,8 @@ class RuntimeRecipeBehaviorTest(unittest.TestCase):
     def test_invalid_high_risk_requests_fail_before_external_commands(self) -> None:
         cases = [
             ("remove-waydroid", []),
+            ("ai-dev-remove", []),
+            ("ai-dev-remove", ["--confirm", "unexpected"]),
             ("setup-waydroid", ["one", "two"]),
             ("setup-printer", ["unexpected"]),
             ("firmware-update", ["unexpected"]),
@@ -357,9 +360,9 @@ class RuntimeRecipeBehaviorTest(unittest.TestCase):
         ]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            for recipe, args in cases:
-                with self.subTest(recipe=recipe):
-                    environment, log = self._environment(root / recipe)
+            for index, (recipe, args) in enumerate(cases):
+                with self.subTest(recipe=recipe, args=args):
+                    environment, log = self._environment(root / f"{recipe}-{index}")
                     result = self._run(recipe, args, environment)
                     self.assertNotEqual(result.returncode, 0)
                     self.assertEqual(self._records(log), [])
