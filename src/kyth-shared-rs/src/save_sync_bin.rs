@@ -74,7 +74,8 @@ fn main() -> std::process::ExitCode {
         }
     }
     if !targets.is_empty() {
-        let mut argv: Vec<&str> = vec!["restic", "--repo", &repo.to_string_lossy(), "backup"];
+        let repo_arg = repo.to_string_lossy();
+        let mut argv: Vec<&str> = vec!["restic", "--repo", &repo_arg, "backup"];
         let owned: Vec<String> = targets;
         let refs: Vec<&str> = owned.iter().map(String::as_str).collect();
         argv.extend(refs);
@@ -82,7 +83,8 @@ fn main() -> std::process::ExitCode {
     }
     let remote = config.remote.clone();
     if !remote.is_empty() && home.join(".config/rclone/rclone.conf").exists() {
-        run(&["rclone", "sync", &repo.to_string_lossy(), &remote], 120);
+        let repo_arg = repo.to_string_lossy();
+        run(&["rclone", "sync", &repo_arg, &remote], 120);
     }
     let remote = if remote.is_empty() {
         "none".to_string()
