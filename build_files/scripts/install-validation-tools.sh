@@ -26,7 +26,7 @@ download_and_verify() {
 
 	local work
 	work="$(mktemp -d)"
-	curl -fsSL -o "${work}/${archive}" "${base_url}/${archive}"
+	curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 -o "${work}/${archive}" "${base_url}/${archive}"
 
 	if [[ -n "${sha256_or_file}" ]]; then
 		if [[ "${#sha256_or_file}" -eq 64 && "${sha256_or_file}" =~ ^[0-9a-fA-F]+$ ]]; then
@@ -34,7 +34,7 @@ download_and_verify() {
 		else
 			local check_file
 			check_file="$(basename "${sha256_or_file}")"
-			curl -fsSL -o "${work}/${check_file}" "${base_url}/${sha256_or_file}"
+			curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 -o "${work}/${check_file}" "${base_url}/${sha256_or_file}"
 			if [[ "${check_file}" == *.sha256 ]]; then
 				(cd "${work}" && sha256sum -c "${check_file}")
 			else

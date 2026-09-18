@@ -17,7 +17,7 @@ After=local-fs.target kyth-boot-rw.service
 Type=oneshot
 RemainAfterExit=yes
 TimeoutStartSec=60
-ExecStart=/usr/bin/bash -c 'set -e; mkdir -p /var/lib/kyth; /usr/libexec/kyth-finalize-staged prepare-boot >/dev/null 2>&1 || true; if command -v grubby >/dev/null 2>&1; then grubby --update-kernel=ALL --remove-args="console=tty0 console=ttyS0,115200 amdgpu.ppfeaturemask=0xffffffff pcie_aspm=performance" || true; grubby --update-kernel=ALL --args="quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 threadirqs split_lock_detect=off rootflags=noatime,compress=zstd:1,ssd,discard=async,commit=30" || true; fi; touch /var/lib/kyth/boot-splash-kargs-v3'
+ExecStart=/usr/bin/bash -c 'set -e; mkdir -p /var/lib/kyth; /usr/libexec/kyth-finalize-staged prepare-boot >/dev/null 2>&1 || true; if command -v grubby >/dev/null 2>&1; then if grubby --update-kernel=ALL --remove-args="console=tty0 console=ttyS0,115200 amdgpu.ppfeaturemask=0xffffffff pcie_aspm=performance" && grubby --update-kernel=ALL --args="quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 threadirqs split_lock_detect=off rootflags=noatime,compress=zstd:1,ssd,discard=async,commit=30"; then touch /var/lib/kyth/boot-splash-kargs-v3; fi; fi'
 
 [Install]
 WantedBy=multi-user.target

@@ -13,6 +13,12 @@ source "${SCRIPT_DIR}/lib/dracut-retry.sh"
 
 KVER="$(find_active_kver)"
 if [ -z "${KVER}" ]; then
+	# Prefer the newest module dir that actually ships a vmlinuz; only fall
+	# back to the newest dir overall so the missing-vmlinuz repair below
+	# still has a candidate to staple a vmlinuz onto.
+	KVER="$(for d in /usr/lib/modules/*/; do [ -s "${d}vmlinuz" ] && basename "${d}"; done | sort -V | tail -n 1)"
+fi
+if [ -z "${KVER}" ]; then
 	KVER="$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n 1)"
 fi
 test -n "${KVER}" ||
@@ -45,7 +51,16 @@ if [ ! -s "/usr/lib/modules/${KVER}/vmlinuz" ]; then
 	fi
 fi
 
-{ depmod -a "${KVER}" 2>/dev/null || true; }
+depmod_output="$(depmod -a "${KVER}" 2>&1)" || {
+	echo "ERROR: depmod -a ${KVER} failed:" >&2
+	echo "${depmod_output}" >&2
+	exit 1
+}
+
+# Dracut modules for the rebuilt initramfs. Keep in sync with the --add
+# lists in build_files/scripts/plymouth-initramfs.sh and
+# build_files/scripts/repair-current-plymouth-initramfs.sh.
+KYTH_DRACUT_MODULES="drm plymouth ostree kyth-plymouth"
 
 if [ ! -s "/usr/lib/modules/${KVER}/initramfs" ]; then
 	if [ -s "/boot/initramfs-${KVER}.img" ]; then
@@ -54,7 +69,8 @@ if [ ! -s "/usr/lib/modules/${KVER}/initramfs" ]; then
 		kyth_build_initramfs "/usr/lib/modules/${KVER}/initramfs" \
 			--no-hostonly \
 			--compress "zstd -3" \
-			--kver "${KVER}"
+			--kver "${KVER}" \
+			--add "${KYTH_DRACUT_MODULES}"
 	fi
 fi
 

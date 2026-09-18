@@ -34,6 +34,7 @@ dnf5 install -y --skip-unavailable \
 	zsh \
 	openconnect \
 	vpnc \
+	ksshaskpass \
 	kde-connect \
 	plasma-browser-integration \
 	zoxide \

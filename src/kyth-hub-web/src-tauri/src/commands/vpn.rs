@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -75,10 +76,14 @@ fn save_profile(
 }
 
 fn terminate_child(runtime: &VpnRuntime) {
-    if let Ok(mut child) = runtime.child.lock() {
-        if let Some(child) = child.as_mut() {
-            let _ = child.kill();
-        }
+    // Take the child out of the slot instead of borrowing it: the reap
+    // below blocks, and holding the lock across it would stall any other
+    // thread that wants the slot (including the worker's own take).
+    let taken = runtime.child.lock().ok().and_then(|mut slot| slot.take());
+    if let Some(mut child) = taken {
+        kyth_shared::system::process::kill_process_group(&mut child);
+        // Reap so a disconnected openconnect never lingers as a zombie.
+        let _ = child.wait();
     }
 }
 
@@ -106,8 +111,21 @@ fn start_process(
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Own process group so a later disconnect kills forked openconnect
+        // grandchildren too, not just the sudo wrapper.
+        child_command.process_group(0);
         if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
             child_command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+        } else {
+            // sudo -A with no askpass helper fails without ever prompting;
+            // fail here with a clear message instead of a cryptic
+            // openconnect error downstream.
+            status(
+                &runtime,
+                "failed",
+                "VPN cannot prompt for administrator access: the askpass helper is missing.",
+            );
+            return;
         }
         let mut child = match child_command.spawn() {
             Ok(child) => child,
@@ -127,21 +145,18 @@ fn start_process(
             *slot = Some(child);
         }
         let (tx, rx) = mpsc::channel();
-        let mut readers = 0;
         if let Some(stdout) = stdout {
-            readers += 1;
             let tx = tx.clone();
             thread::spawn(move || reader(stdout, tx));
         }
         if let Some(stderr) = stderr {
-            readers += 1;
             let tx = tx.clone();
             thread::spawn(move || reader(stderr, tx));
         }
         drop(tx);
         let mut saml_opened = false;
-        while readers > 0 {
-            match rx.recv() {
+        loop {
+            match rx.recv_timeout(std::time::Duration::from_millis(250)) {
                 Ok(line) => {
                     let redacted = kyth_shared::system::vpn_saml::redact_log_line(&line);
                     if let Some(interface) =
@@ -169,14 +184,42 @@ fn start_process(
                         status(&runtime, "connecting", redacted);
                     }
                 }
-                Err(_) => break,
+                Err(mpsc::RecvTimeoutError::Timeout) => {
+                    // Bounded wait: a hung child that prints nothing must
+                    // not park this worker forever. Stop and supersede take
+                    // effect on the next tick; an already-exited child means
+                    // the readers are just flushing their last lines.
+                    if runtime.stopped.load(Ordering::SeqCst)
+                        || runtime.generation.load(Ordering::SeqCst) != generation
+                    {
+                        break;
+                    }
+                    let exited = runtime
+                        .child
+                        .lock()
+                        .ok()
+                        .and_then(|mut slot| slot.as_mut().and_then(|child| child.try_wait().ok()))
+                        .is_some_and(|status| status.is_some());
+                    if exited {
+                        break;
+                    }
+                }
+                Err(mpsc::RecvTimeoutError::Disconnected) => break,
             }
         }
-        let exit_status = runtime
-            .child
-            .lock()
-            .ok()
-            .and_then(|mut slot| slot.as_mut().and_then(|child| child.wait().ok()));
+        // Take the child out of the slot before waiting so a concurrent
+        // disconnect never blocks on this worker's reap. An early break
+        // above (stop/supersede) still has a live child here: kill its
+        // whole group so no openconnect outlives its job.
+        let mut child = runtime.child.lock().ok().and_then(|mut slot| slot.take());
+        if runtime.stopped.load(Ordering::SeqCst)
+            || runtime.generation.load(Ordering::SeqCst) != generation
+        {
+            if let Some(child) = child.as_mut() {
+                kyth_shared::system::process::kill_process_group(child);
+            }
+        }
+        let exit_status = child.as_mut().and_then(|child| child.wait().ok());
         let exit_success = exit_status.map(|status| status.success()).unwrap_or(false);
         if runtime.generation.load(Ordering::SeqCst) != generation {
             return;
@@ -294,17 +337,22 @@ fn handle_saml_callback(
             return;
         }
         let (action_url, body) = form.unwrap_or_default();
-        let Ok((argv, input)) =
-            kyth_shared::system::vpn_saml::replay_saml_command(&action_url, &body, &gateway)
-        else {
-            if let Ok(runtime) = get_job(&job) {
-                status(
-                    &runtime,
-                    "failed",
-                    "VPN sign-in response failed validation.",
-                );
+        let (argv, input) = match kyth_shared::system::vpn_saml::replay_saml_command(
+            &action_url,
+            &body,
+            &gateway,
+        ) {
+            Ok(command) => command,
+            Err(error) => {
+                if let Ok(runtime) = get_job(&job) {
+                    status(
+                        &runtime,
+                        "failed",
+                        format!("VPN sign-in response failed validation: {error}"),
+                    );
+                }
+                return;
             }
-            return;
         };
         let response = kyth_shared::system::process::run_bounded_with_input(
             &argv,

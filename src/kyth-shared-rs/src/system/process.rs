@@ -59,9 +59,13 @@ fn collect_output(
 /// cancelled work keeps running detached from the job that reported it.
 /// Children here are spawned as group leaders (see `process_group(0)` at
 /// each spawn below), so the child's pid is the generation's pgid.
-fn kill_tree(child: &mut std::process::Child) {
+pub fn kill_process_group(child: &mut std::process::Child) {
     let _ = child.kill();
     let _ = unsafe { libc::killpg(child.id() as libc::pid_t, libc::SIGKILL) };
+}
+
+fn kill_tree(child: &mut std::process::Child) {
+    kill_process_group(child);
     let _ = child.wait();
 }
 
@@ -107,8 +111,16 @@ pub fn run_bounded_with_input(
         .stderr(Stdio::piped())
         .spawn()?;
     let (stdout_reader, stderr_reader) = spawn_pipe_readers(&mut child);
+    // Write stdin from a detached thread, never the wait loop: a child
+    // that exits without reading (or stops reading mid-stream) leaves no
+    // reader on the pipe, so a synchronous write_all here would block
+    // past the timeout — or fail the whole run with EPIPE — while the
+    // reaped status below already answers the call.
     if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(input)?;
+        let owned = input.to_vec();
+        std::thread::spawn(move || {
+            let _ = stdin.write_all(&owned);
+        });
     }
     let started = Instant::now();
     loop {
@@ -565,5 +577,23 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.stdout, b"secret");
+    }
+
+    #[test]
+    fn input_writer_never_blocks_a_child_that_exits_without_reading() {
+        // More than a pipe's kernel buffer, handed to a child that exits
+        // without reading a byte: the stdin write must live on its own
+        // thread (absorbing EPIPE there) so the wait loop below still
+        // reaps the real status instead of failing the run.
+        let oversized = vec![b'x'; 1024 * 1024];
+        let started = Instant::now();
+        let output =
+            run_bounded_with_input(&["true".into()], &oversized, Duration::from_secs(5)).unwrap();
+        assert!(output.status.success());
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "took {:?}, the writer thread must not stall the reap",
+            started.elapsed()
+        );
     }
 }

@@ -65,7 +65,17 @@ export function ExeHandlerDialog() {
 
   useEffect(() => {
     if (!job || job.state !== "running") return;
+    // Bottles provisioning can hang on a dead mirror: cap at 240 polls
+    // (~3 minutes at 750ms) then surface a terminal error instead of
+    // spinning forever.
+    let polls = 0;
     const timer = window.setInterval(async () => {
+      polls += 1;
+      if (polls >= 240) {
+        window.clearInterval(timer);
+        setError("The installer is still running after several minutes. Close this dialog and check whether the app appeared; if not, try again.");
+        return;
+      }
       const next = await fetchInstallStatus(job.job);
       if (next) setJob({ job: next.id, state: next.state, detail: next.detail });
     }, 750);
@@ -98,7 +108,12 @@ export function ExeHandlerDialog() {
               else void startExeHandlerFlatpakInstall(inspection.flatpak_id!).then(setJob).catch((reason) => setError(String(reason)));
             }}>{flatpakInstalled ? "Launch Linux Version" : "Install Linux Version"}</button>}
             <button onClick={() => void openExeHandlerFlathub(inspection.search_term).catch((reason) => setError(String(reason)))}>Search Flathub</button>
-            <button onClick={() => setInspection(null)} disabled={job?.state === "running"}>Cancel</button>
+            {/* Cancel stays enabled while a job runs: closing the dialog
+              leaves the backend job to finish on its own. Followup: the
+              backend has no Bottles job cancel/timeout yet, so there is
+              nothing to invoke here — add an exe-handler cancel command
+              (with a Bottles-side timeout) and wire it up. */}
+            <button onClick={() => setInspection(null)}>Cancel</button>
           </div>
         </>}
         {error && !inspection && <><p role="alert" style={{ color: "#f48771" }}>{error}</p><button onClick={() => setError(null)}>Close</button></>}

@@ -14,6 +14,8 @@ const updateMessages = await readFile(resolve(root, "src/components/updateMessag
 const guardian = await readFile(resolve(root, "src/components/GuardianSection.tsx"), "utf8");
 const hardware = await readFile(resolve(root, "src/components/HardwareSection.tsx"), "utf8");
 const apps = await readFile(resolve(root, "src/components/AppStoreSection.tsx"), "utf8");
+const vpn = await readFile(resolve(root, "src/components/VpnSection.tsx"), "utf8");
+const exeDialog = await readFile(resolve(root, "src/components/ExeHandlerDialog.tsx"), "utf8");
 const gaming = await readFile(resolve(root, "src/components/GamingSection.tsx"), "utf8");
 const actions = await readFile(resolve(root, "src/components/SectionActions.tsx"), "utf8");
 const rust = await readFile(resolve(root, "src-tauri/src/main.rs"), "utf8");
@@ -282,4 +284,67 @@ test("Home Guardian activity exposes expandable current recommendations", () => 
   assert.match(guardianHistory, /Dismiss/);
   assert.match(dashboard, /dismissGuardianRecommendation/);
   assert.match(dashboard, /invokeGuardianExecute/);
+});
+
+test("App Store install waits out slow mirrors and stays cancellable after the UI wait", () => {
+  assert.match(apps, /waitInstallJob\(await installFlatpak\(id\), 1800\)/, "install bound must be 1800 iters (15 min), not 60");
+  const fn = service.match(/export async function waitInstallJob\(job: string[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.notEqual(fn, "", "waitInstallJob not found");
+  assert.match(fn, /settled/, "waitInstallJob must keep the job tracked after a UI timeout so Cancel still reaches it");
+  assert.match(fn, /if \(settled\) untrackJob/, "waitInstallJob must only untrack on terminal settle");
+});
+
+test("availability check races a 95s timeout with a friendly error", () => {
+  const check = service.match(/export async function checkForUpdates\(\)[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.notEqual(check, "", "checkForUpdates not found");
+  assert.match(check, /Promise\.race/, "collect_availability must race a timeout");
+  assert.match(check, /95_000/, "timeout must be 95s");
+  assert.match(check, /timed out/, "timeout must throw a friendly error");
+});
+
+test("strict pollers tolerate transient status failures before throwing", () => {
+  for (const name of ["waitGuardianCheck", "runPrivilegedAction", "waitJustJob", "waitUpdateJob", "uninstallFlatpak", "updateFlatpaks"]) {
+    const start = service.indexOf(name);
+    assert.ok(start !== -1, `${name} not found`);
+    const fn = service.slice(start, service.indexOf("\n}\n", start) + 3);
+    assert.match(fn, /statusFailures >= 5/, `${name} must tolerate 5 consecutive status failures`);
+  }
+});
+
+test("tolerant pollers bail on lost jobs and treat unknown as terminal", () => {
+  for (const name of ["waitHubJob", "pollSecurityJob", "pollGamingJob"]) {
+    const start = service.indexOf(`function ${name}`);
+    assert.ok(start !== -1, `${name} not found`);
+    const fn = service.slice(start, service.indexOf("\n}\n", start) + 3);
+    assert.match(fn, /nulls >= 10/, `${name} must bail after 10 consecutive nulls`);
+    assert.match(fn, /state\.state === "unknown"\) throw/, `${name} must treat unknown as terminal`);
+  }
+});
+
+test("a second launch into an occupied domain is rejected", () => {
+  const fn = service.match(/function trackJob\(domain: JobDomain, job: string\): void \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.notEqual(fn, "", "trackJob not found");
+  assert.match(fn, /already running/, "trackJob must reject a second launch into an occupied slot");
+});
+
+test("in-flight jobs persist across reloads and reattach on init", () => {
+  assert.match(service, /kyth-hub:inflight-jobs/, "resumable ids need a localStorage key");
+  assert.match(service, /localStorage\.setItem/, "track must persist resumable ids");
+  assert.match(service, /localStorage\.getItem/, "init must reattach resumable ids");
+  assert.match(service, /reattachInFlightJobs\(\);/, "reattach must run on module init");
+  assert.match(service, /export function getInFlightJob/, "cancel paths need a reader for reattached ids");
+});
+
+test("VPN polling stops on terminal states and is capped with backoff", () => {
+  assert.match(vpn, /connected", "failed", "disconnected/, "all terminal states must stop polling");
+  assert.match(vpn, /polls >= 300/, "polls must be capped at 300");
+  assert.match(vpn, /polls < 60 \? 1000 : 5000/, "polling must back off after the first minute");
+  assert.doesNotMatch(vpn, /setInterval/, "the unbounded 1s interval must go");
+});
+
+test("exe handler dialog caps polls and stays cancellable while running", () => {
+  assert.match(exeDialog, /polls >= 240/, "exe handler polls must cap at 240");
+  assert.match(exeDialog, /still running after several minutes/, "cap must surface a terminal error");
+  assert.doesNotMatch(exeDialog, /setInspection\(null\)\} disabled/, "Cancel must stay enabled while a job runs");
+  assert.match(exeDialog, /Bottles.*timeout|timeout.*Bottles/i, "Cancel must note the backend Bottles timeout followup");
 });

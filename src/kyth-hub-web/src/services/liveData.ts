@@ -134,9 +134,16 @@ export async function runGuardianCheck(investigate = false): Promise<string> {
 export async function waitGuardianCheck(job: string): Promise<string> {
   trackJob("guardian", job);
   try {
+    let statusFailures = 0;
     for (let i = 0; i < 180; i += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await invoke<InstallStatus>("guardian_check_status", { job });
+      const state = await invoke<InstallStatus>("guardian_check_status", { job }).catch(() => null);
+      if (!state) {
+        statusFailures += 1;
+        if (statusFailures >= 5) throw new Error("Lost contact with the Guardian check; refresh the page in a moment.");
+        continue;
+      }
+      statusFailures = 0;
       if (state.state === "running") continue;
       return resolveTerminalJob(state);
     }
@@ -160,18 +167,59 @@ function resolveTerminalJob(state: InstallStatus): string {
  * Cancel button can stop the actual running backend job without every
  * action having to thread job ids through its presentation state. Two
  * concurrent jobs in one domain is a misuse bug, not a supported state:
- * the second launch wins the slot while the first still runs to its
- * (bounded) timeout. */
+ * the second launch is rejected with an already-running error while the
+ * first keeps the slot. */
 export type JobDomain = "guardian" | "privileged" | "hub-action" | "update" | "job" | "install" | "security" | "gaming";
 
 const inFlightJobs = new Map<JobDomain, string>();
 
+// Resumable job ids survive a page reload so Cancel still reaches the real
+// backend job after a refresh. Reattached on module init below.
+const INFLIGHT_STORAGE_KEY = "kyth-hub:inflight-jobs";
+
+function persistInFlightJobs(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    if (inFlightJobs.size === 0) localStorage.removeItem(INFLIGHT_STORAGE_KEY);
+    else localStorage.setItem(INFLIGHT_STORAGE_KEY, JSON.stringify(Object.fromEntries(inFlightJobs)));
+  } catch {
+    // Storage full or unavailable (private mode): in-memory tracking still works.
+  }
+}
+
+function reattachInFlightJobs(): void {
+  try {
+    if (typeof localStorage === "undefined") return;
+    const raw = localStorage.getItem(INFLIGHT_STORAGE_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw) as Record<string, string>;
+    for (const [domain, job] of Object.entries(parsed)) {
+      if (typeof job === "string" && job) inFlightJobs.set(domain as JobDomain, job);
+    }
+  } catch {
+    // Corrupt entry: start clean rather than tracking a bogus job id.
+  }
+}
+
+reattachInFlightJobs();
+
+/** Current tracked job for a domain, if any (including reattached ids). */
+export function getInFlightJob(domain: JobDomain): string | undefined {
+  return inFlightJobs.get(domain);
+}
+
 function trackJob(domain: JobDomain, job: string): void {
+  const current = inFlightJobs.get(domain);
+  if (current && current !== job) {
+    throw new Error("Another action is already running; wait for it to finish or cancel it first.");
+  }
   inFlightJobs.set(domain, job);
+  persistInFlightJobs();
 }
 
 function untrackJob(domain: JobDomain, job: string): void {
   if (inFlightJobs.get(domain) === job) inFlightJobs.delete(domain);
+  persistInFlightJobs();
 }
 
 /** Cancel a running backend job. Each domain owns a status/cancel command
@@ -242,9 +290,16 @@ export async function runPrivilegedAction(operation: string, payload: Privileged
   const job = launch.job;
   trackJob("privileged", job);
   try {
+    let statusFailures = 0;
     for (let i = 0; i < 1800; i += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await invoke<InstallStatus>("privileged_action_status", { job });
+      const state = await invoke<InstallStatus>("privileged_action_status", { job }).catch(() => null);
+      if (!state) {
+        statusFailures += 1;
+        if (statusFailures >= 5) throw new Error("Lost contact with the privileged operation; check the system status shortly.");
+        continue;
+      }
+      statusFailures = 0;
       if (state.state === "running") continue;
       return resolveTerminalJob(state);
     }
@@ -647,9 +702,16 @@ export async function fetchJustList(): Promise<JustRecipe[] | null> {
 async function waitJustJob(job: string): Promise<string> {
   trackJob("hub-action", job);
   try {
+    let statusFailures = 0;
     for (let i = 0; i < 1800; i += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await invoke<InstallStatus>("hub_action_status", { job });
+      const state = await invoke<InstallStatus>("hub_action_status", { job }).catch(() => null);
+      if (!state) {
+        statusFailures += 1;
+        if (statusFailures >= 5) throw new Error("Lost contact with this action; check the status here again in a moment.");
+        continue;
+      }
+      statusFailures = 0;
       if (state.state === "running") continue;
       return resolveTerminalJob(state);
     }
@@ -670,9 +732,16 @@ async function waitUpdateJob(job: string): Promise<string> {
   // Upgrade downloads can legitimately take an hour on a slow connection.
   trackJob("update", job);
   try {
+    let statusFailures = 0;
     for (let i = 0; i < 7200; i += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await invoke<InstallStatus>("update_job_status", { job });
+      const state = await invoke<InstallStatus>("update_job_status", { job }).catch(() => null);
+      if (!state) {
+        statusFailures += 1;
+        if (statusFailures >= 5) throw new Error("Lost contact with the update; refresh the Updates page in a moment.");
+        continue;
+      }
+      statusFailures = 0;
       if (state.state === "running") continue;
       return resolveTerminalJob(state);
     }
@@ -822,10 +891,18 @@ export async function fetchCloudSyncRemotes(): Promise<CloudSyncRemote[] | null>
 async function waitHubJob(job: string, limit = 7200): Promise<string> {
   trackJob("job", job);
   try {
+    let nulls = 0;
     for (let i = 0; i < limit; i += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 500));
       const state = await invoke<InstallStatus>("job_status", { job }).catch(() => null);
-      if (!state || state.state === "running") continue;
+      if (!state) {
+        nulls += 1;
+        if (nulls >= 10) throw new Error("Lost contact with this action; check back in a moment.");
+        continue;
+      }
+      nulls = 0;
+      if (state.state === "running") continue;
+      if (state.state === "unknown") throw new Error("The background job is no longer known; it may have been cleared by a restart. Check back in a moment.");
       return resolveTerminalJob(state);
     }
     throw new Error("This action is still running; check back in a moment.");
@@ -1028,10 +1105,20 @@ export interface AvailabilityStatusLive { state: string; detail: string; flatpak
  * the user gets a useful next step instead of a misleading shell message. */
 export async function checkForUpdates(): Promise<AvailabilityStatusLive> {
   if (!inTauriShell()) throw new Error("Update checking is available from the installed Kyth Hub.");
-  return await invoke<AvailabilityStatusLive>("collect_availability", {
-    branch: null,
-    useCached: false,
+  // The backend check fans out to the update registry and can hang on a
+  // dead mirror past the Hub-side 90s deadline (issue #164): race the
+  // invoke against a 95s timer so the button always settles with a
+  // friendly, actionable error instead of spinning forever.
+  const timeout = new Promise<never>((_, reject) => {
+    window.setTimeout(() => reject(new Error("The update check timed out; your current system has not changed. Check your connection and try again.")), 95_000);
   });
+  return await Promise.race([
+    invoke<AvailabilityStatusLive>("collect_availability", {
+      branch: null,
+      useCached: false,
+    }),
+    timeout,
+  ]);
 }
 
 // Drives — live `lsblk -J` blockdevices (Move In's "Rescan drives"). The
@@ -1206,10 +1293,17 @@ export async function uninstallFlatpak(id: string): Promise<string> {
   const launch = await invoke<InstallActionLaunch>("uninstall_flatpak", { appId: id });
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Uninstall did not start.");
   const job = launch.job;
+  let statusFailures = 0;
   for (let i = 0; i < 120; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await fetchInstallStatus(job);
-    if (!state || state.state === "running") continue;
+    if (!state) {
+      statusFailures += 1;
+      if (statusFailures >= 5) throw new Error("Lost contact with the uninstall; refresh Flatpak in a moment.");
+      continue;
+    }
+    statusFailures = 0;
+    if (state.state === "running") continue;
     if (state.state === "complete") return state.detail;
     throw new Error(state.detail);
   }
@@ -1223,10 +1317,17 @@ export async function updateFlatpaks(): Promise<string> {
   // privileged system update with a 900s daemon timeout, so a large or
   // multi-app update can legitimately run for many minutes — mirror
   // waitUpdateJob's hour-long bound rather than giving up early.
+  let statusFailures = 0;
   for (let i = 0; i < 7200; i += 1) {
     await new Promise((resolve) => window.setTimeout(resolve, 500));
     const state = await fetchInstallStatus(launch.job);
-    if (!state || state.state === "running") continue;
+    if (!state) {
+      statusFailures += 1;
+      if (statusFailures >= 5) throw new Error("Lost contact with the app update; refresh status in a moment.");
+      continue;
+    }
+    statusFailures = 0;
+    if (state.state === "running") continue;
     if (state.state === "complete") {
       invalidateSharedReads("updates-snapshot", "installed-flatpaks", "pending-updates", "probe:flatpak-apps", "probe:flatpak-updates");
       return state.detail;
@@ -1250,16 +1351,20 @@ export async function fetchInstallStatus(id: string): Promise<InstallStatus | nu
  * stops the actual running backend job. */
 export async function waitInstallJob(job: string, limit = 120): Promise<string> {
   trackJob("install", job);
+  let settled = false;
   try {
     for (let i = 0; i < limit; i += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 500));
       const state = await fetchInstallStatus(job);
       if (!state || state.state === "running") continue;
+      settled = true;
       return resolveTerminalJob(state);
     }
+    // The UI wait expired but the backend job is still running: leave it
+    // tracked so Cancel still reaches it and a later status check reattaches.
     throw new Error("Installation is still running; refresh Apps in a moment.");
   } finally {
-    untrackJob("install", job);
+    if (settled) untrackJob("install", job);
   }
 }
 
@@ -1286,10 +1391,18 @@ export async function fetchSecHostTools(): Promise<SecHostTool[] | null> {
 async function pollSecurityJob(job: string, maxIterations: number): Promise<string> {
   trackJob("security", job);
   try {
+    let nulls = 0;
     for (let i = 0; i < maxIterations; i += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 3000));
       const state = await invoke<InstallStatus>("security_job_status", { job }).catch(() => null);
-      if (!state || state.state === "running") continue;
+      if (!state) {
+        nulls += 1;
+        if (nulls >= 10) throw new Error("Lost contact with the security job; check back in a moment.");
+        continue;
+      }
+      nulls = 0;
+      if (state.state === "running") continue;
+      if (state.state === "unknown") throw new Error("The security job is no longer known; it may have been cleared by a restart. Check back in a moment.");
       return resolveTerminalJob(state);
     }
     throw new Error("Still running; check back in a moment.");
@@ -1343,10 +1456,18 @@ export async function fetchGamingTools(): Promise<GamingTool[] | null> {
 async function pollGamingJob(job: string, maxIterations: number): Promise<string> {
   trackJob("gaming", job);
   try {
+    let nulls = 0;
     for (let i = 0; i < maxIterations; i += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 3000));
       const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
-      if (!state || state.state === "running") continue;
+      if (!state) {
+        nulls += 1;
+        if (nulls >= 10) throw new Error("Lost contact with the gaming job; check back in a moment.");
+        continue;
+      }
+      nulls = 0;
+      if (state.state === "running") continue;
+      if (state.state === "unknown") throw new Error("The gaming job is no longer known; it may have been cleared by a restart. Check back in a moment.");
       return resolveTerminalJob(state);
     }
     throw new Error("Still running; check back in a moment.");
@@ -1391,10 +1512,18 @@ export async function setScxScheduler(scheduler: "rusty" | "stop"): Promise<stri
   const job = await invoke<string>("scx_set_scheduler", { scheduler });
   trackJob("gaming", job);
   try {
+    let nulls = 0;
     for (let i = 0; i < 20; i += 1) {
       await new Promise((resolve) => window.setTimeout(resolve, 1500));
       const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
-      if (!state || state.state === "running") continue;
+      if (!state) {
+        nulls += 1;
+        if (nulls >= 10) throw new Error("Lost contact with the scheduler change; check back in a moment.");
+        continue;
+      }
+      nulls = 0;
+      if (state.state === "running") continue;
+      if (state.state === "unknown") throw new Error("The scheduler change is no longer known; it may have been cleared by a restart. Check back in a moment.");
       return resolveTerminalJob(state);
     }
     throw new Error("Still running; check back in a moment.");

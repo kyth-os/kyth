@@ -97,6 +97,7 @@ if [[ ! -x "${codeql_bin}" ]]; then
 	mkdir -p "${codeql_cache}"
 	archive="${work_dir}/codeql-bundle-linux64.tar.zst"
 	curl --fail --location --silent --show-error \
+		--retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 \
 		--output "${archive}" \
 		"https://github.com/github/codeql-action/releases/download/codeql-bundle-v${codeql_version}/codeql-bundle-linux64.tar.zst"
 	echo "${codeql_sha256}  ${archive}" | sha256sum --check --strict

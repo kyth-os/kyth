@@ -111,7 +111,10 @@ export function AppStoreSection({ section }: { section: HubSection }) {
     if (nextSnapshot) setSnapshot(nextSnapshot);
     if (nextInstalled) setInstalled(nextInstalled);
   }
-  async function install(id: string): Promise<string> { return await waitInstallJob(await installFlatpak(id), 60); }
+  // Flatpak installs over a slow mirror can run many minutes: wait up to
+  // 15 minutes (1800 * 500ms) in the UI. waitInstallJob keeps the job
+  // tracked after this UI wait expires, so Cancel still reaches it.
+  async function install(id: string): Promise<string> { return await waitInstallJob(await installFlatpak(id), 1800); }
   async function installPack(pack: StarterPack): Promise<string> { for (const app of pack.apps) await install(app.id); await refreshInstalled(); return `${pack.name} apps installed.`; }
   async function installAndRefresh(id: string): Promise<string> { const result = await install(id); await refreshInstalled(); return result; }
 

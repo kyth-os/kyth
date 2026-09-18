@@ -23,5 +23,6 @@ write_config /usr/lib/systemd/system/ostree-finalize-staged.service.d/10-kyth-bo
 ExecStart=
 ExecStart=-/usr/libexec/kyth-finalize-staged prepare-boot
 ExecStop=
-ExecStop=/usr/libexec/kyth-finalize-staged
+# '-' so a finalize failure at shutdown cannot fail the unit either.
+ExecStop=-/usr/libexec/kyth-finalize-staged
 EOF

@@ -276,15 +276,22 @@ fn run_operation(spec: ExecSpec) -> Result<String, String> {
         .spawn()
         .map_err(|error| format!("could not start privileged operation: {error}"))?;
     if let Some(input) = spec.stdin {
-        child
+        let mut stdin = child
             .stdin
             .take()
-            .expect("piped stdin")
+            .ok_or_else(|| "privileged operation has no piped stdin".to_string())?;
+        stdin
             .write_all(&input)
             .map_err(|error| format!("could not provide privileged input: {error}"))?;
     }
-    let stdout = child.stdout.take().expect("piped stdout");
-    let stderr = child.stderr.take().expect("piped stderr");
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or_else(|| "privileged operation has no piped stdout".to_string())?;
+    let stderr = child
+        .stderr
+        .take()
+        .ok_or_else(|| "privileged operation has no piped stderr".to_string())?;
     let stdout_thread = thread::spawn(move || {
         let mut bytes = Vec::new();
         let _ = BufReader::new(stdout)
@@ -545,7 +552,9 @@ pub fn serve() -> Result<(), String> {
 mod tests {
     use serde_json::json;
 
-    use super::{parse_wheel_gid, redact_request_detail, validate_request};
+    use super::{
+        parse_wheel_gid, redact_request_detail, run_operation, validate_request, ExecSpec,
+    };
 
     #[test]
     fn wheel_gid_reads_third_field_not_password_placeholder() {
@@ -634,5 +643,24 @@ mod tests {
         let detail = redact_request_detail(&request, "mount failed password=share-secret");
         assert!(!detail.contains("share-secret"));
         assert!(detail.contains("password=<redacted>"));
+    }
+
+    #[test]
+    fn operation_spawn_failure_returns_err_instead_of_panicking() {
+        let missing = run_operation(ExecSpec {
+            argv: vec!["/nonexistent-kyth-helper-binary".into()],
+            stdin: None,
+        });
+        assert!(missing.is_err());
+        let failing = run_operation(ExecSpec {
+            argv: vec!["false".into()],
+            stdin: None,
+        });
+        assert!(failing.is_err());
+        let passing = run_operation(ExecSpec {
+            argv: vec!["true".into()],
+            stdin: None,
+        });
+        assert!(passing.is_ok());
     }
 }

@@ -42,18 +42,32 @@ export function VpnSection({ section }: { section: HubSection }) {
   useEffect(() => {
     if (!job) return;
     let cancelled = false;
+    let timer: number | undefined;
+    let polls = 0;
+    const TERMINAL_VPN_STATES = new Set(["connected", "failed", "disconnected"]);
     const poll = async () => {
+      if (cancelled) return;
+      polls += 1;
       const current = await fetchVpnConnectionStatus(job);
       if (!cancelled && current) {
         setJobStatus(current.detail);
-        if (current.state === "connected" || current.state === "failed" || current.state === "disconnected") {
+        // Terminal state reached: stop polling rather than holding the 1s
+        // interval open forever.
+        if (TERMINAL_VPN_STATES.has(current.state)) {
           if (current.state === "connected") setSummary((value) => value ? { ...value, vpnConnected: true, vpnName: gateway } : value);
+          return;
         }
       }
+      // Safety cap: 300 polls, backing off from 1s to 5s after the first
+      // minute so a wedged backend can't spin the UI forever.
+      if (polls >= 300) {
+        if (!cancelled) setJobStatus((value) => value ?? "VPN status is still pending; refresh the connection check.");
+        return;
+      }
+      timer = window.setTimeout(() => void poll(), polls < 60 ? 1000 : 5000);
     };
     void poll();
-    const timer = window.setInterval(() => void poll(), 1000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
   }, [job, gateway]);
   return (
     <LiveSectionCard section={section} live={summary !== null}>

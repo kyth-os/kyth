@@ -112,11 +112,18 @@ fn spawn_perf_mode(mode: &str) {
     if !Path::new("/usr/bin/kyth-performance-mode").exists() && !on_path("kyth-performance-mode") {
         return;
     }
-    let _ = std::process::Command::new("/usr/bin/kyth-performance-mode")
+    if let Ok(mut child) = std::process::Command::new("/usr/bin/kyth-performance-mode")
         .arg(mode)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
-        .spawn();
+        .spawn()
+    {
+        // Reap the exit status on a background thread: fire-and-forget
+        // without this leaks a zombie until the daemon itself exits.
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
 }
 
 fn enter_gaming_perf_mode() {

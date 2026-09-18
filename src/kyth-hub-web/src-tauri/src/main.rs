@@ -857,8 +857,25 @@ fn focus_stop(id: String) -> Result<String, String> {
     let Some(mut child) = sessions.remove(&id) else {
         return Ok("Focus session already ended.".to_string());
     };
-    let _ = child.kill();
-    let _ = child.wait();
+    drop(sessions);
+    // Never block the command on an unwaited child: TERM the process,
+    // SIGKILL its group for good measure (harmless ESRCH when the child
+    // is not a group leader), then give it 2s to exit before reaping.
+    kyth_shared::system::process::kill_process_group(&mut child);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(25));
+            }
+            _ => {
+                kyth_shared::system::process::kill_process_group(&mut child);
+                let _ = child.wait();
+                break;
+            }
+        }
+    }
     Ok("Focus session ended; normal power behavior is restored.".to_string())
 }
 
@@ -1487,7 +1504,7 @@ fn open_feedback_issue(title: String, body: String) -> Result<String, String> {
 /// webview's JS not having registered its "navigate" listener yet.
 #[tauri::command]
 fn take_pending_page(state: tauri::State<PendingPage>) -> Option<String> {
-    state.0.lock().unwrap().take()
+    state.0.lock().ok().and_then(|mut pending| pending.take())
 }
 
 #[derive(Serialize)]
@@ -1615,13 +1632,21 @@ fn exe_handler_open_flathub(search_term: String) -> Result<(), String> {
 #[tauri::command]
 fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
-    Ok(Command::new("flatpak")
-        .args(["info", "--user", &app_id])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .is_ok_and(|status| status.success()))
+    // Bounded lookup: a bare `status()` blocks this command for as long
+    // as flatpak hangs. Any failure (timeout, missing binary) reads as
+    // "not installed" for the UI rather than an error.
+    match kyth_shared::system::process::run_bounded(
+        &[
+            "flatpak".to_string(),
+            "info".to_string(),
+            "--user".to_string(),
+            app_id,
+        ],
+        std::time::Duration::from_secs(15),
+    ) {
+        Ok(output) => Ok(output.status.success()),
+        Err(_) => Ok(false),
+    }
 }
 
 #[tauri::command]
@@ -1689,7 +1714,7 @@ fn exe_handler_start_bottles(
 
 #[tauri::command]
 fn take_pending_exe_handler(state: tauri::State<PendingExeHandler>) -> Option<String> {
-    state.0.lock().unwrap().take()
+    state.0.lock().ok().and_then(|mut pending| pending.take())
 }
 
 /// Append a small, opt-in record for the installed-image acceptance guest.

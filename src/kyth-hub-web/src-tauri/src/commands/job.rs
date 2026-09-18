@@ -116,6 +116,13 @@ pub(crate) fn spawn_argv_job(
     timeout: Duration,
     on_done: impl FnOnce(Result<Output, std::io::Error>) -> (String, String) + Send + 'static,
 ) {
+    if argv.is_empty() {
+        // Indexing argv[0] below would panic inside the worker thread,
+        // leaving the job stuck on "running" for every poller. Fail it
+        // on the caller so the status contract still resolves.
+        finish_job(job, "failed", "Job has no command to run.".to_string());
+        return;
+    }
     // The flag is registered by start_job; a detached always-false flag
     // keeps the worker correct if the entry already expired.
     let cancel = cancel_flag(&job).unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
@@ -128,4 +135,20 @@ pub(crate) fn spawn_argv_job(
         let (state, detail) = on_done(result);
         finish_job(job, &state, detail);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_argv_fails_the_job_without_spawning() {
+        let job = new_job_id("test-empty");
+        jobs().start(&job, "pending".to_string());
+        spawn_argv_job(job.clone(), vec![], Duration::from_secs(5), |_| {
+            panic!("empty argv must never reach the worker")
+        });
+        let (state, _) = jobs().status(&job).expect("job should resolve");
+        assert_eq!(state, "failed");
+    }
 }

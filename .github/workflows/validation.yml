@@ -56,7 +56,7 @@ jobs:
         shell: bash --noprofile --norc -euo pipefail {0}
 
       - name: Cache apt (validation)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-validation-${{ hashFiles('.github/workflows/validation.yml') }}
@@ -114,7 +114,7 @@ jobs:
           persist-credentials: false
 
       - name: Cache pip (quality)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/pip
           key: pip-quality-${{ runner.os }}-${{ hashFiles('requirements-quality.txt') }}
@@ -190,7 +190,7 @@ jobs:
         shell: bash --noprofile --norc -euo pipefail {0}
 
       - name: Cache cargo registry and build output
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -201,7 +201,7 @@ jobs:
             cargo-hub-shell-${{ runner.os }}-
 
       - name: Cache apt (hub-shell)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-hub-shell-${{ hashFiles('.github/workflows/validation.yml') }}
@@ -260,7 +260,7 @@ jobs:
         shell: bash --noprofile --norc -euo pipefail {0}
 
       - name: Cache cargo registry and build output
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: |
             ~/.cargo/registry
@@ -271,7 +271,7 @@ jobs:
             cargo-installer-shell-${{ runner.os }}-
 
       - name: Cache apt (installer-shell)
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: /var/cache/apt/archives
           key: apt-${{ runner.os }}-installer-shell-${{ hashFiles('.github/workflows/validation.yml') }}
