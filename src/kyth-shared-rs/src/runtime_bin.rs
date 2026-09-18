@@ -137,6 +137,38 @@ fn command_exists(program: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// True when a display server socket is actually reachable, not just when
+/// the variables exist: test sandboxes and broken sessions often export
+/// DISPLAY with an empty runtime dir, and launching a GUI app there only
+/// produces a GTK panic. Remote X11 (host:0) is assumed reachable since it
+/// cannot be verified cheaply.
+fn graphical_session_available() -> bool {
+    if let Some(wayland) = env::var_os("WAYLAND_DISPLAY") {
+        let wayland = PathBuf::from(wayland);
+        let socket = if wayland.is_absolute() {
+            wayland
+        } else {
+            env::var_os("XDG_RUNTIME_DIR")
+                .map(PathBuf::from)
+                .unwrap_or_default()
+                .join(wayland)
+        };
+        return socket.exists();
+    }
+    if let Some(display) = env::var_os("DISPLAY") {
+        let display = display.to_string_lossy();
+        if let Some(local) = display.strip_prefix(':') {
+            let number = local.split('.').next().unwrap_or("");
+            if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) {
+                return Path::new(&format!("/tmp/.X11-unix/X{number}")).exists();
+            }
+            return false;
+        }
+        return true;
+    }
+    false
+}
+
 fn setup_kali(args: &[String]) -> io::Result<ExitCode> {
     let tools = args.first().map(String::as_str).unwrap_or("headless");
     if args.len() > 1 || !matches!(tools, "headless" | "gui" | "everything") {
@@ -1357,7 +1389,15 @@ fn recipe(args: &[String]) -> io::Result<ExitCode> {
         "ai-dev-enter" => ("ai-dev", vec!["enter".into()]),
         "ai-dev-start" => ("ai-dev", vec!["start".into()]),
         "ai-dev-stop" => ("ai-dev", vec!["stop".into()]),
-        "ai-dev-remove" => ("ai-dev", vec!["remove".into()]),
+        "ai-dev-remove" => {
+            if forwarded.iter().map(String::as_str).collect::<Vec<_>>() != ["--confirm"] {
+                println!(
+                    "This permanently deletes the AI development container. Re-run as: ujust ai-dev-remove --confirm"
+                );
+                return Ok(ExitCode::from(2));
+            }
+            ("ai-dev", vec!["remove".into()])
+        }
         "setup-kali-box" => ("setup-kali-box", forwarded.to_vec()),
         "export-kali-apps" => ("export-kali-apps", forwarded.to_vec()),
         "setup-waydroid" => ("setup-waydroid", forwarded.to_vec()),
@@ -1482,6 +1522,15 @@ fn recipe(args: &[String]) -> io::Result<ExitCode> {
         "install-nvidia-driver" => ("install-nvidia-driver", forwarded.to_vec()),
         "install-displaylink" => ("install-displaylink", forwarded.to_vec()),
         "hardware-inventory" => ("hardware-policy", vec!["inventory".into()]),
+        "hardware-policy" => {
+            if forwarded.is_empty() {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "hardware-policy requires a subcommand (inventory|evaluate|apply|status|matrix|validate)",
+                ));
+            }
+            ("hardware-policy", forwarded.to_vec())
+        }
         "hardware-policy-apply" => ("hardware-policy", vec!["apply".into(), "--force".into()]),
         "export-steam-games" => ("steam-game-export", forwarded.to_vec()),
         "setup-sunshine" => ("setup-sunshine", forwarded.to_vec()),
@@ -1651,6 +1700,12 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
         "reclaim-windows" => {
             require_args(args, 0, Some(0));
             println!("Use System Hub → Disks to remove the Windows partition and grow KythOS.");
+            if !graphical_session_available() {
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "No graphical session detected; open System Hub → Disks from the desktop to reclaim the Windows partition.",
+                ));
+            }
             run(
                 "/usr/bin/kyth-welcome-launch",
                 &["--page".into(), "This PC".into()],
