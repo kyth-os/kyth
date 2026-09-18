@@ -110,7 +110,10 @@ class SecretScanParityTests(unittest.TestCase):
             label: re.compile(body, re.IGNORECASE if ci else 0)
             for label, (body, ci) in self.py_patterns.items()
         }
-        self.assertTrue(compiled["private key block"].search("-----BEGIN PRIVATE KEY-----"))
+        # Built by concatenation so this file itself never contains the
+        # byte sequence the committed-secrets gate scans for.
+        key_block = "-----BEGIN " + "PRIVATE KEY-----"
+        self.assertTrue(compiled["private key block"].search(key_block))
         self.assertTrue(
             compiled["GitHub token"].search("token=«redacted:ghp_" + "A" * 36 + "»")
             or compiled["GitHub token"].search("x " + "ghp_" + "A" * 36 + " y")
