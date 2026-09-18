@@ -113,6 +113,10 @@ done
 if [[ -n "${KYTH_FORCE_FULL_VALIDATION:-}" ]]; then
     validate_force_full=1
 fi
+# An explicit full-suite request wins over --fast when both are given.
+if [[ ${validate_force_full} -eq 1 ]]; then
+    validate_fast=0
+fi
 
 echo "==> Python unit tests"
 test_home="$(mktemp -d)"
