@@ -108,6 +108,24 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("secureboot enrollment tests passed", result.stdout)
 
+    def test_sched_user_unit_does_not_order_on_system_loader(self) -> None:
+        # kyth-sched.service runs in the user manager, which cannot order on
+        # system units — Wants=/After= scx_loader.service never took effect.
+        # Loader absence is covered by a bounded retry in code instead.
+        body = (ROOT / "build_files/kyth-sched.service").read_text(encoding="utf-8")
+        directives = [
+            line.split("=", 1)[0].strip()
+            for line in body.splitlines()
+            if "scx_loader.service" in line and not line.lstrip().startswith("#")
+        ]
+        self.assertEqual(directives, [])
+        self.assertIn("After=graphical-session.target", body)
+
+    def test_privileged_service_restarts_on_failure(self) -> None:
+        body = (ROOT / "build_files/kyth-privileged.service").read_text(encoding="utf-8")
+        self.assertIn("Restart=on-failure", body)
+        self.assertIn("RestartSec=2", body)
+
     def test_sched_and_telem_install_as_user_units(self) -> None:
         body = (ROOT / "build_files/scripts/branding/27-performance-daemons.sh").read_text(
             encoding="utf-8"
@@ -129,6 +147,7 @@ class BootStabilityUnitTests(unittest.TestCase):
             ROOT / "build_files/kyth-batteryd.service",
             ROOT / "build_files/rclone@.service",
             ROOT / "build_files/kyth-telem.service",
+            ROOT / "build_files/kyth-privileged.service",
         )
         for path in units:
             body = path.read_text(encoding="utf-8")

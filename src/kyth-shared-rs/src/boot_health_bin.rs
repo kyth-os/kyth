@@ -8,7 +8,8 @@ use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use kyth_shared::system::boot_health::{
-    BootHealthState, DEFAULT_FAILURE_THRESHOLD, DEFAULT_STATE_PATH,
+    quarantine_boot_message, rollback_retry_due, BootHealthState, DEFAULT_FAILURE_THRESHOLD,
+    DEFAULT_STATE_PATH,
 };
 use kyth_shared::system::boot_runtime::boot_runtime_checks;
 use kyth_shared::system::bootc_query::{fetch_status_data, image_digest_from_status};
@@ -92,10 +93,9 @@ fn maybe_rollback(
     updated: &BootHealthState,
     digest: &str,
 ) -> io::Result<()> {
-    if !updated.quarantined.contains_key(digest)
-        || before.quarantined.contains_key(digest)
-        || updated.rollback_attempted_for == digest
-    {
+    // A failed rollback retries on subsequent red boots (last_rollback_error
+    // set); a successful one stays once-ever via rollback_attempted_for.
+    if !rollback_retry_due(before, updated, digest) {
         return Ok(());
     }
     let (code, detail) = match run_rollback() {
@@ -222,7 +222,7 @@ fn parse_args() -> Result<(PathBuf, String, Vec<String>), String> {
 }
 
 fn usage() {
-    eprintln!("usage: kyth-boot-health [--state PATH] <check|status [--json]|mark-healthy|record-failure --reason TEXT [--threshold N]|clear-quarantine --digest DIGEST|retry-rollback --digest DIGEST>");
+    eprintln!("usage: kyth-boot-health [--state PATH] <check|status [--json]|mark-healthy|record-failure --reason TEXT [--threshold N]|clear-quarantine --digest DIGEST|retry-rollback --digest DIGEST|boot-message>");
 }
 
 fn execute() -> io::Result<bool> {
@@ -253,6 +253,15 @@ fn execute() -> io::Result<bool> {
             let digest = current_digest()?;
             coordinator.mark_healthy(&digest, now())?;
             println!("Marked {digest} healthy");
+            Ok(true)
+        }
+        "boot-message" => {
+            // One-line quarantine summary for a boot menu entry or plymouth
+            // message. Prints nothing (but still succeeds) when clean so
+            // shell callers can use `msg=$(kyth-boot-health boot-message)`.
+            if let Some(message) = quarantine_boot_message(&coordinator.read()) {
+                println!("{message}");
+            }
             Ok(true)
         }
         "record-failure" => {

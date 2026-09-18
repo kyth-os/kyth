@@ -1,9 +1,12 @@
 [Unit]
 Description=KythOS automatic sched-ext profile switcher
 Documentation=https://github.com/kyth-os/kyth
-After=graphical-session.target scx_loader.service
-Wants=scx_loader.service
+After=graphical-session.target
 PartOf=graphical-session.target
+# No Wants=/After= on the system scx_loader.service: this is a user unit and
+# the user manager cannot order on system units, so the dependency never did
+# what it said. Loader absence at login is handled with a bounded retry in
+# code (see set_scheduler_with_retry) instead of unit ordering.
 StartLimitIntervalSec=60
 StartLimitBurst=3
 

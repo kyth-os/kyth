@@ -2,6 +2,8 @@
 Description=Kyth allowlisted privileged action service
 Documentation=https://github.com/kyth-os/kyth
 After=local-fs.target
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -25,6 +27,8 @@ RestrictSUIDSGID=yes
 CapabilityBoundingSet=
 ReadWritePaths=/run/kyth
 TimeoutStartSec=10
+Restart=on-failure
+RestartSec=2
 
 [Install]
 WantedBy=multi-user.target

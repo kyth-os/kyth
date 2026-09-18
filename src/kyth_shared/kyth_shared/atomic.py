@@ -34,10 +34,12 @@ def atomic_write_json(
             raise ValueError(f"refusing to write {path} with invariant violations: {errs}")
     dest = Path(path)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # Per-file flock with 2s blocking timeout + retry — prevents history
-    # loss when two writers race mkstemp+rename (probe-cache, boot-health).
-    # Falls back to unlocked atomic write only after timeout, durability still holds.
+    # Per-file flock with 2s blocking timeout — prevents history loss when
+    # two writers race mkstemp+rename (probe-cache, boot-health). A timed-out
+    # lock is a real contention signal: fail closed so the caller retries
+    # instead of racing an unlocked write past the lock holder.
     _lock_fh = None
+    _lock_timed_out = False
     try:
         import fcntl  # noqa: PLC0415 -- local import keeps non-Linux tests portable
         import time as _time
@@ -67,8 +69,13 @@ def atomic_write_json(
             except OSError:
                 pass
             _lock_fh = None
+            # Deferred raise: TimeoutError subclasses OSError, so raising
+            # here would be swallowed by the except below.
+            _lock_timed_out = True
     except (ImportError, OSError, AttributeError):  # noqa: BLE001 -- narrow: best-effort production path
         _lock_fh = None
+    if _lock_timed_out:
+        raise TimeoutError(f"could not acquire the write lock for {dest} within 2s")
     fd, tmp = tempfile.mkstemp(prefix=f".{dest.name}.", dir=dest.parent, text=True)
     try:
         os.fchmod(fd, mode)

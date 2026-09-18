@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::process::CommandExt;
@@ -15,6 +15,25 @@ use crate::InstallStatus;
 
 static JOBS: OnceLock<Mutex<HashMap<String, Arc<VpnRuntime>>>> = OnceLock::new();
 
+/// Jobs whose SAML cookie was already consumed by a first callback. The
+/// portal page can fire the navigation hook twice (form submit + synthetic
+/// redirect); the second callback for the same job must be ignored so it
+/// cannot restart or disturb the reconnect the first one started.
+static SAML_CONSUMED: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+
+fn saml_consumed() -> &'static Mutex<HashSet<String>> {
+    SAML_CONSUMED.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+/// Claim the cookie for `job`. Returns false when a previous callback
+/// already consumed it — the caller must ignore the duplicate.
+fn claim_saml_cookie(job: &str) -> bool {
+    saml_consumed()
+        .lock()
+        .map(|mut consumed| consumed.insert(job.to_string()))
+        .unwrap_or(true)
+}
+
 /// Upper bound on tracked VPN runtimes. Connects are rare user actions, so
 /// this cap is generous headroom, not a tight budget: it only stops an
 /// unbounded accumulate-across-the-process-lifetime leak.
@@ -26,7 +45,10 @@ fn jobs() -> &'static Mutex<HashMap<String, Arc<VpnRuntime>>> {
 
 struct VpnRuntime {
     status: Mutex<(String, String)>,
-    child: Mutex<Option<Child>>,
+    /// Child slot tagged with the worker generation that spawned it. A
+    /// superseded worker (reconnect/disconnect bumped `generation`) must
+    /// only take and kill its own generation — never a newer one's child.
+    child: Mutex<Option<(u64, Child)>>,
     stopped: AtomicBool,
     generation: AtomicU64,
     gateway: String,
@@ -79,12 +101,28 @@ fn terminate_child(runtime: &VpnRuntime) {
     // Take the child out of the slot instead of borrowing it: the reap
     // below blocks, and holding the lock across it would stall any other
     // thread that wants the slot (including the worker's own take).
-    let taken = runtime.child.lock().ok().and_then(|mut slot| slot.take());
+    let taken = runtime
+        .child
+        .lock()
+        .ok()
+        .and_then(|mut slot| slot.take().map(|(_, child)| child));
     if let Some(mut child) = taken {
         kyth_shared::system::process::kill_process_group(&mut child);
         // Reap so a disconnected openconnect never lingers as a zombie.
         let _ = child.wait();
     }
+}
+
+/// Take the child only when its tag matches `generation`. A superseded
+/// worker exiting late must not reap or kill the newer generation's child.
+fn take_child_for_generation(runtime: &VpnRuntime, generation: u64) -> Option<Child> {
+    runtime.child.lock().ok().and_then(|mut slot| {
+        if slot.as_ref().is_some_and(|(tag, _)| *tag == generation) {
+            slot.take().map(|(_, child)| child)
+        } else {
+            None
+        }
+    })
 }
 
 fn reader<R: std::io::Read + Send + 'static>(stream: R, tx: mpsc::Sender<String>) {
@@ -111,6 +149,16 @@ fn start_process(
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
+        // Never inherit the webview-adjacent environment into a sudo child:
+        // clear it, keep only the minimal desktop set (DISPLAY/Wayland,
+        // HOME, PATH, …) via the shared sanitizer, then set the askpass
+        // helper explicitly. No `-E` passthrough anywhere in this path.
+        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+        let desktop = kyth_shared::commands::environment_for(
+            kyth_shared::commands::EnvironmentPolicy::Desktop,
+            &inherited,
+        );
+        child_command.env_clear().envs(desktop);
         // Own process group so a later disconnect kills forked openconnect
         // grandchildren too, not just the sudo wrapper.
         child_command.process_group(0);
@@ -142,7 +190,7 @@ fn start_process(
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
         if let Ok(mut slot) = runtime.child.lock() {
-            *slot = Some(child);
+            *slot = Some((generation, child));
         }
         let (tx, rx) = mpsc::channel();
         if let Some(stdout) = stdout {
@@ -198,7 +246,9 @@ fn start_process(
                         .child
                         .lock()
                         .ok()
-                        .and_then(|mut slot| slot.as_mut().and_then(|child| child.try_wait().ok()))
+                        .and_then(|mut slot| {
+                            slot.as_mut().and_then(|(_, child)| child.try_wait().ok())
+                        })
                         .is_some_and(|status| status.is_some());
                     if exited {
                         break;
@@ -210,8 +260,10 @@ fn start_process(
         // Take the child out of the slot before waiting so a concurrent
         // disconnect never blocks on this worker's reap. An early break
         // above (stop/supersede) still has a live child here: kill its
-        // whole group so no openconnect outlives its job.
-        let mut child = runtime.child.lock().ok().and_then(|mut slot| slot.take());
+        // whole group so no openconnect outlives its job. Only take on a
+        // tag match: a superseded worker exiting late must leave the newer
+        // generation's child alone.
+        let mut child = take_child_for_generation(&runtime, generation);
         if runtime.stopped.load(Ordering::SeqCst)
             || runtime.generation.load(Ordering::SeqCst) != generation
         {
@@ -224,8 +276,17 @@ fn start_process(
         if runtime.generation.load(Ordering::SeqCst) != generation {
             return;
         }
+        // Only clear our own generation's slot: a reconnect may have stored
+        // a newer child since we took ours above; blanking it would orphan
+        // (and leak) the new openconnect.
         if let Ok(mut slot) = runtime.child.lock() {
-            *slot = None;
+            if slot
+                .as_ref()
+                .map(|(tag, _)| *tag == generation)
+                .unwrap_or(true)
+            {
+                *slot = None;
+            }
         }
         if runtime.stopped.load(Ordering::SeqCst) {
             return;
@@ -314,6 +375,12 @@ fn handle_saml_callback(
             return;
         }
         if let Some(cookie) = callback_value(&url, "cookie") {
+            // Debounce: the portal can deliver the same cookie twice (form
+            // submit + synthetic redirect). The second callback is ignored
+            // once the first has consumed the cookie.
+            if !claim_saml_cookie(&job) {
+                return;
+            }
             if let Some(window) = app.get_webview_window(&label) {
                 let _ = window.close();
             }
@@ -360,15 +427,35 @@ fn handle_saml_callback(
             std::time::Duration::from_secs(35),
         );
         let cookie = response.ok().and_then(|output| {
+            // The bounded runner already caps each pipe at 8 MiB; refuse an
+            // over-cap capture here too and bound the slice handed to the
+            // header/body parser so a hostile portal cannot grow it.
+            if output.stdout.len() > kyth_shared::system::process::MAX_CAPTURE_BYTES {
+                return None;
+            }
             let text = String::from_utf8_lossy(&output.stdout);
+            let text = text
+                .char_indices()
+                .nth(8 * 1024 * 1024)
+                .map_or_else(|| text.into_owned(), |(index, _)| text[..index].to_string());
             let (headers, body) = kyth_shared::system::vpn_saml::split_http_response(&text);
+            if body.len() > kyth_shared::system::process::MAX_CAPTURE_BYTES {
+                return None;
+            }
             kyth_shared::system::vpn_saml::parse_saml_acs_response(headers, body)
         });
         if let Some(window) = app.get_webview_window(&label) {
             let _ = window.close();
         }
         match cookie {
-            Some(cookie) => start_reconnect(app, job, cookie),
+            Some(cookie) => {
+                // Same debounce as the direct-cookie path: only the first
+                // callback that yields a cookie may start the reconnect.
+                if !claim_saml_cookie(&job) {
+                    return;
+                }
+                start_reconnect(app, job, cookie)
+            }
             None => {
                 if let Ok(runtime) = get_job(&job) {
                     status(
@@ -498,6 +585,22 @@ pub(crate) fn vpn_connect(
     username: String,
     password: String,
 ) -> Result<String, String> {
+    // A second connect to the same gateway while one is already up would
+    // fork a duplicate openconnect fighting over the tunnel route. Reject
+    // it; the UI disconnects or reuses the live job instead.
+    let already_connected = jobs().lock().map(|store| {
+        store.values().any(|runtime| {
+            runtime.gateway == gateway
+                && runtime
+                    .status
+                    .lock()
+                    .ok()
+                    .is_some_and(|guard| guard.0 == "connected")
+        })
+    });
+    if already_connected.unwrap_or(false) {
+        return Err(format!("Already connected to {gateway}; disconnect first."));
+    }
     let command = kyth_shared::system::vpn_saml::build_initial_command(
         &gateway,
         &protocol,
@@ -585,4 +688,23 @@ pub(crate) fn vpn_disconnect(job: String) -> Result<String, String> {
     terminate_child(&runtime);
     status(&runtime, "complete", "VPN disconnected.");
     Ok("VPN disconnected.".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saml_cookie_claim_debounces_second_callback() {
+        let job = format!(
+            "vpn-test-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        );
+        assert!(claim_saml_cookie(&job));
+        assert!(!claim_saml_cookie(&job));
+        saml_consumed().lock().unwrap().remove(&job);
+    }
 }

@@ -11,6 +11,29 @@ use std::sync::atomic::AtomicBool;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
+/// Upper bound on a single captured pipe. Child output is untrusted and
+/// unbounded (a compromised helper could stream gigabytes); exceeding the
+/// cap fails the run instead of growing the Hub without limit.
+pub const MAX_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
+
+fn read_capped(pipe: &mut dyn Read, limit: usize) -> io::Result<Vec<u8>> {
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let count = pipe.read(&mut chunk)?;
+        if count == 0 {
+            return Ok(buf);
+        }
+        if buf.len().saturating_add(count) > limit {
+            return Err(io::Error::new(
+                io::ErrorKind::OutOfMemory,
+                "captured output exceeded its size limit",
+            ));
+        }
+        buf.extend_from_slice(&chunk[..count]);
+    }
+}
+
 /// Drain a child's stdout/stderr on background threads as soon as it's
 /// spawned. A pipe's kernel buffer is a few tens of KB; a command that
 /// writes past that (e.g. `ps -eo pid=,args=` on a host with hundreds of
@@ -21,36 +44,43 @@ use std::time::{Duration, Instant};
 /// that deadlock regardless of how much output the command produces.
 fn spawn_pipe_readers(
     child: &mut std::process::Child,
-) -> (JoinHandle<Vec<u8>>, JoinHandle<Vec<u8>>) {
+) -> (
+    JoinHandle<io::Result<Vec<u8>>>,
+    JoinHandle<io::Result<Vec<u8>>>,
+) {
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
     let stdout_reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(pipe) = stdout.as_mut() {
-            let _ = pipe.read_to_end(&mut buf);
-        }
-        buf
+        stdout
+            .as_mut()
+            .map(|pipe| read_capped(pipe, MAX_CAPTURE_BYTES))
+            .unwrap_or(Ok(Vec::new()))
     });
     let stderr_reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(pipe) = stderr.as_mut() {
-            let _ = pipe.read_to_end(&mut buf);
-        }
-        buf
+        stderr
+            .as_mut()
+            .map(|pipe| read_capped(pipe, MAX_CAPTURE_BYTES))
+            .unwrap_or(Ok(Vec::new()))
     });
     (stdout_reader, stderr_reader)
 }
 
 fn collect_output(
     status: ExitStatus,
-    stdout_reader: JoinHandle<Vec<u8>>,
-    stderr_reader: JoinHandle<Vec<u8>>,
-) -> Output {
-    Output {
+    stdout_reader: JoinHandle<io::Result<Vec<u8>>>,
+    stderr_reader: JoinHandle<io::Result<Vec<u8>>>,
+) -> io::Result<Output> {
+    let stdout = stdout_reader
+        .join()
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "output reader panicked"))??;
+    let stderr = stderr_reader
+        .join()
+        .map_err(|_| io::Error::new(io::ErrorKind::Other, "output reader panicked"))??;
+    Ok(Output {
         status,
-        stdout: stdout_reader.join().unwrap_or_default(),
-        stderr: stderr_reader.join().unwrap_or_default(),
-    }
+        stdout,
+        stderr,
+    })
 }
 
 /// Kill a child and everything it forked. Hub-spawned commands (`flatpak`
@@ -125,7 +155,7 @@ pub fn run_bounded_with_input(
     let started = Instant::now();
     loop {
         match child.try_wait()? {
-            Some(status) => return Ok(collect_output(status, stdout_reader, stderr_reader)),
+            Some(status) => return collect_output(status, stdout_reader, stderr_reader),
             None if started.elapsed() <= timeout => std::thread::sleep(Duration::from_millis(25)),
             None => {
                 kill_tree(&mut child);
@@ -162,7 +192,7 @@ pub fn run_bounded_command_cancel(
     let started = Instant::now();
     loop {
         match child.try_wait()? {
-            Some(status) => return Ok(collect_output(status, stdout_reader, stderr_reader)),
+            Some(status) => return collect_output(status, stdout_reader, stderr_reader),
             None if cancel.load(Relaxed) => {
                 kill_tree(&mut child);
                 return Err(io::Error::new(
@@ -595,5 +625,17 @@ mod tests {
             "took {:?}, the writer thread must not stall the reap",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn capped_reader_fails_past_eight_mib() {
+        assert_eq!(MAX_CAPTURE_BYTES, 8 * 1024 * 1024);
+        let oversized = vec![b'x'; MAX_CAPTURE_BYTES + 1];
+        let mut cursor: &[u8] = &oversized;
+        let error = read_capped(&mut cursor, MAX_CAPTURE_BYTES).unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::OutOfMemory);
+        let exact = vec![b'y'; 16];
+        let mut cursor: &[u8] = &exact;
+        assert_eq!(read_capped(&mut cursor, MAX_CAPTURE_BYTES).unwrap(), exact);
     }
 }

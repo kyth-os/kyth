@@ -492,7 +492,7 @@ class InstallerPlanTests(unittest.TestCase):
                     "install_mode": "alongside",
                     "disk": "/dev/nvme0n1",
                     "target_partition": "/dev/nvme0n1p2",
-                })
+                }, uefi_boot=False)
 
     def test_validate_alongside_rechecks_explicit_efi_partition(self):
         target = {
@@ -818,7 +818,7 @@ class InstallerPlanTests(unittest.TestCase):
                     "disk": "/dev/nvme0n1",
                     "free_region_start": start,
                     "free_region_end": end,
-                })
+                }, uefi_boot=False)
 
     def test_validate_free_space_rejects_stale_region_no_longer_free(self):
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \

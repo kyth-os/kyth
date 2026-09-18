@@ -229,6 +229,36 @@ pub fn set_scheduler(run: &dyn Fn(&[String], u64) -> Option<(i32, String)>, name
     }
 }
 
+/// Bounded attempts for one scheduler switch, with a sleep between tries.
+pub const SCX_SET_ATTEMPTS: u32 = 3;
+/// Delay between scheduler-switch attempts while the loader may be starting.
+pub const SCX_SET_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Retry a scheduler switch while the loader is absent, then give up loudly.
+///
+/// `kyth-sched` runs as a user unit and must not order on the system
+/// `scx_loader.service`, so the loader can still be starting at login.
+/// Mirror the flathub-setup pattern: bounded retries in code instead of unit
+/// ordering, then return false so the caller logs the failure. `attempts`
+/// is clamped to at least one; tests pass a zero delay.
+pub fn set_scheduler_with_retry(
+    run: &dyn Fn(&[String], u64) -> Option<(i32, String)>,
+    name: &str,
+    attempts: u32,
+    delay: std::time::Duration,
+) -> bool {
+    let attempts = attempts.max(1);
+    for attempt in 0..attempts {
+        if set_scheduler(run, name) {
+            return true;
+        }
+        if attempt + 1 < attempts {
+            std::thread::sleep(delay);
+        }
+    }
+    false
+}
+
 /// Schedulers kyth-scx lists, else `scx_*` binaries minus the loader.
 pub fn available_schedulers(
     run: &dyn Fn(&[String], u64) -> Option<(i32, String)>,
@@ -440,6 +470,54 @@ mod tests {
             effects[0],
             SchedEffect::SetScheduler("scx_rusty".to_string())
         );
+    }
+
+    #[test]
+    fn scheduler_retry_gives_up_after_bounded_attempts() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+        let calls = AtomicUsize::new(0);
+        let run = |_: &[String], _: u64| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            Some((1, String::new()))
+        };
+        assert!(!set_scheduler_with_retry(
+            &run,
+            "scx_rusty",
+            SCX_SET_ATTEMPTS,
+            Duration::from_secs(0)
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), SCX_SET_ATTEMPTS as usize);
+    }
+
+    #[test]
+    fn scheduler_retry_stops_on_first_success() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::time::Duration;
+        let calls = AtomicUsize::new(0);
+        let run = |_: &[String], _: u64| {
+            let attempt = calls.fetch_add(1, Ordering::SeqCst);
+            if attempt < 2 {
+                Some((1, String::new()))
+            } else {
+                Some((0, String::new()))
+            }
+        };
+        assert!(set_scheduler_with_retry(
+            &run,
+            "scx_rusty",
+            SCX_SET_ATTEMPTS,
+            Duration::from_secs(0)
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 3);
+        // Zero attempts still tries once rather than silently doing nothing.
+        let run = |_: &[String], _: u64| Some((0, String::new()));
+        assert!(set_scheduler_with_retry(
+            &run,
+            "default",
+            0,
+            Duration::from_secs(0)
+        ));
     }
 
     #[test]

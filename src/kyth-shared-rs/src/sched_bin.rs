@@ -15,7 +15,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use kyth_shared::system::process::{run_bounded, run_bounded_command};
 use kyth_shared::system::sched_daemon::{
     current_scheduler, gamescope_active, load_sched_config, poll_step, proc_gaming_active,
-    session_uids, set_scheduler, write_status, GamingCache, SchedEffect, SchedState,
+    session_uids, set_scheduler_with_retry, write_status, GamingCache, SchedEffect, SchedState,
+    SCX_SET_ATTEMPTS, SCX_SET_RETRY_DELAY,
 };
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
@@ -195,7 +196,14 @@ fn main() -> std::process::ExitCode {
     let mut config = load_sched_config();
     log("Configuration loaded/reloaded.");
     log("Starting kyth-sched...");
-    set_scheduler(&run, &config.desktop_scheduler);
+    // The system loader may still be starting at login (no unit ordering —
+    // see kyth-sched.service), so retry briefly before giving up loudly.
+    set_scheduler_with_retry(
+        &run,
+        &config.desktop_scheduler,
+        SCX_SET_ATTEMPTS,
+        SCX_SET_RETRY_DELAY,
+    );
     let poll = config.poll_interval;
     log(&format!(
         "Started — desktop={}  gaming={}  poll={}s",
@@ -227,7 +235,8 @@ fn main() -> std::process::ExitCode {
         for effect in poll_step(&mut state, &config, gaming_now) {
             match effect {
                 SchedEffect::SetScheduler(name) => {
-                    if set_scheduler(&run, &name) {
+                    if set_scheduler_with_retry(&run, &name, SCX_SET_ATTEMPTS, SCX_SET_RETRY_DELAY)
+                    {
                         log(&format!("Scheduler → {name}"));
                     } else {
                         log(&format!(

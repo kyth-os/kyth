@@ -317,6 +317,14 @@ struct SmbBrowseResponse {
 }
 #[tauri::command]
 fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
+    if let Some(host) = host.as_deref() {
+        if !kyth_shared::system::smb::is_valid_smb_host(host) {
+            return SmbBrowseResponse {
+                ok: false,
+                detail: "invalid SMB host".to_string(),
+            };
+        }
+    }
     let (ok, detail) = kyth_shared::system::smb::smb_browse_dry_run(host.as_deref());
     SmbBrowseResponse { ok, detail }
 }
@@ -527,7 +535,16 @@ fn valid_cloud_sync_remote(name: &str, info: &serde_json::Value) -> Option<Cloud
     let valid_text = |value: &str, maximum: usize| {
         !value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control)
     };
-    if !valid_text(name, 64) {
+    // Remote names become part of the rclone `name:` positional, so restrict
+    // them to alphanumerics, dash, and underscore (max 64) and reject a
+    // leading dash that could parse as a flag.
+    let valid_remote_name = !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('-')
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'));
+    if !valid_remote_name {
         return None;
     }
     let object = info.as_object()?;
@@ -589,15 +606,45 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
     let Some(configured) = valid_cloud_sync_remote(&remote, info) else {
         return Err("That cloud remote is invalid".to_string());
     };
+    // The folder comes from a user-writable JSON file, so canonicalize it
+    // and require it to stay under HOME before it becomes an rclone target.
+    let home = std::env::var_os("HOME")
+        .ok_or_else(|| "could not locate the current user's home directory".to_string())?;
+    let home_path = PathBuf::from(&home);
+    let home_canonical = fs::canonicalize(&home_path).unwrap_or(home_path.clone());
+    let folder_path = PathBuf::from(&configured.folder);
+    let folder_canonical = fs::canonicalize(&folder_path).unwrap_or_else(|_| {
+        let absolute = if folder_path.is_absolute() {
+            folder_path.clone()
+        } else {
+            home_canonical.join(&folder_path)
+        };
+        let mut clean = PathBuf::new();
+        for component in absolute.components() {
+            match component {
+                std::path::Component::CurDir => {}
+                std::path::Component::ParentDir => {
+                    clean.pop();
+                }
+                other => clean.push(other.as_os_str()),
+            }
+        }
+        clean
+    });
+    if !folder_canonical.starts_with(&home_canonical) {
+        return Err("That cloud remote is invalid".to_string());
+    }
+    let folder = folder_canonical.to_string_lossy().into_owned();
     let job = commands::job::start_job("cloud-sync", &format!("Syncing {}…", configured.name))?;
     let argv = vec![
         "rclone".to_string(),
         "sync".to_string(),
-        format!("{}:", configured.name),
-        configured.folder.clone(),
         "--progress".to_string(),
         "--stats-one-line".to_string(),
         "--stats=2s".to_string(),
+        "--".to_string(),
+        format!("{}:", configured.name),
+        folder.clone(),
     ];
     commands::job::spawn_argv_job(
         job.clone(),
@@ -606,7 +653,7 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
         move |result| match result {
             Ok(output) if output.status.success() => (
                 "complete".to_string(),
-                format!("{} synced to {}.", configured.name, configured.folder),
+                format!("{} synced to {}.", configured.name, folder),
             ),
             Ok(output) => (
                 "failed".to_string(),

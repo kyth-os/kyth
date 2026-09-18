@@ -22,6 +22,7 @@ pub fn validate_profile(
 ) -> Result<(), String> {
     if gateway.is_empty()
         || gateway.len() > 2048
+        || gateway.starts_with('-')
         || !gateway.bytes().all(|byte| {
             byte.is_ascii_alphanumeric()
                 || matches!(
@@ -42,6 +43,14 @@ pub fn validate_profile(
         })
     {
         return Err("VPN gateway contains unsupported characters".into());
+    }
+    // Require a bare hostname or an https:// URL shape so a gateway that
+    // smuggles flags or a foreign scheme never reaches the argv builder.
+    // `origin(..., true)` accepts both forms and rejects credentials,
+    // fragments, and non-HTTPS schemes.
+    match origin(gateway, true) {
+        Ok((host, _)) if !host.is_empty() && !host.starts_with('-') => {}
+        _ => return Err("VPN gateway contains unsupported characters".into()),
     }
     if !VPN_PROTOCOLS.contains(&protocol) {
         return Err("unsupported VPN protocol".into());
@@ -78,7 +87,6 @@ pub fn build_initial_command(
     validate_secret("password", password)?;
     let mut argv = vec![
         "sudo".into(),
-        "-E".into(),
         "-A".into(),
         "/usr/bin/openconnect".into(),
         "--protocol".into(),
@@ -100,7 +108,9 @@ pub fn build_initial_command(
     if !username.is_empty() {
         argv.extend(["--user".into(), username.into()]);
     }
-    argv.push(gateway.into());
+    // Double-dash separator: the gateway is positional, so a validated but
+    // dash-adjacent value must never parse as an openconnect flag.
+    argv.extend(["--".into(), gateway.into()]);
     Ok(OpenconnectCommand {
         argv,
         stdin: (!password.is_empty()).then(|| format!("{password}\n")),
@@ -129,7 +139,6 @@ pub fn build_reconnect_command(
     };
     let mut argv = vec![
         "sudo".into(),
-        "-E".into(),
         "-A".into(),
         "/usr/bin/openconnect".into(),
         "--protocol".into(),
@@ -151,7 +160,8 @@ pub fn build_reconnect_command(
     if !username.is_empty() {
         argv.extend(["--user".into(), username.into()]);
     }
-    argv.push(gateway.into());
+    // Double-dash separator before the positional gateway (see initial).
+    argv.extend(["--".into(), gateway.into()]);
     Ok(OpenconnectCommand {
         argv,
         stdin: Some(format!(
@@ -496,6 +506,8 @@ pub fn replay_saml_command(
             "10".into(),
             "--max-redirs".into(),
             "0".into(),
+            "--max-filesize".into(),
+            "8388608".into(),
             "--proto".into(),
             "=https".into(),
             "--request".into(),
@@ -687,5 +699,61 @@ mod tests {
             parse_saml_acs_response(headers, body),
             Some("prelogin-cookie=abc&saml-username=".into())
         );
+    }
+
+    #[test]
+    fn gateway_rejects_leading_dash_and_non_https_shapes() {
+        assert!(validate_profile("-evil", "gp", "win", "pat").is_err());
+        assert!(validate_profile("--help", "gp", "win", "pat").is_err());
+        assert!(validate_profile("https://-evil.example/gp", "gp", "win", "pat").is_err());
+        assert!(validate_profile("http://vpn.example/gp", "gp", "win", "pat").is_err());
+        assert!(validate_profile("vpn.example; rm -rf /", "gp", "win", "pat").is_err());
+        assert!(validate_profile("vpn.example", "gp", "win", "pat").is_ok());
+        assert!(validate_profile("https://vpn.example/gp", "gp", "win", "pat").is_ok());
+    }
+
+    #[test]
+    fn openconnect_argv_separates_positional_gateway_and_drops_env_passthrough() {
+        for command in [
+            build_initial_command("https://vpn.example/gp", "gp", "win", "pat", "secret").unwrap(),
+            build_reconnect_command(
+                "https://vpn.example/gp",
+                "gp",
+                "win",
+                "gateway",
+                "portal-userauthcookie=abc&saml-username=pat",
+                "pat",
+            )
+            .unwrap(),
+        ] {
+            assert!(
+                !command.argv.iter().any(|arg| arg == "-E"),
+                "sudo must not pass the caller environment through: {:?}",
+                command.argv
+            );
+            let dash = command
+                .argv
+                .iter()
+                .position(|arg| arg == "--")
+                .expect("positional gateway needs a -- separator");
+            assert_eq!(command.argv[dash + 1], "https://vpn.example/gp");
+            assert_eq!(command.argv[0], "sudo");
+            assert_eq!(command.argv[1], "-A");
+        }
+    }
+
+    #[test]
+    fn replay_caps_server_response_size() {
+        let (argv, _) = replay_saml_command(
+            "https://vpn.example/SAML20/SP/ACS",
+            "SAMLResponse=token",
+            "vpn.example",
+        )
+        .unwrap();
+        let index = argv
+            .iter()
+            .position(|arg| arg == "--max-filesize")
+            .expect("curl replay must bound the response body");
+        assert_eq!(argv[index + 1], "8388608");
     }
 }

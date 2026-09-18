@@ -129,6 +129,20 @@ pub(crate) fn spawn_argv_job(
     std::thread::spawn(move || {
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
+        // Sudo children never inherit the caller environment: clear it and
+        // keep only the minimal desktop set via the shared sanitizer, then
+        // set the askpass helper explicitly. No `-E` passthrough.
+        if argv
+            .first()
+            .is_some_and(|program| program == "sudo" || program.ends_with("/sudo"))
+        {
+            let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+            let desktop = kyth_shared::commands::environment_for(
+                kyth_shared::commands::EnvironmentPolicy::Desktop,
+                &inherited,
+            );
+            command.env_clear().envs(desktop);
+        }
         askpass_env(&mut command);
         let result =
             kyth_shared::system::process::run_bounded_command_cancel(command, timeout, &cancel);

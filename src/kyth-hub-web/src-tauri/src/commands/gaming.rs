@@ -256,10 +256,9 @@ pub(crate) fn scx_set_scheduler(scheduler: String) -> Result<String, String> {
 }
 
 fn valid_appid(appid: &str) -> bool {
-    !appid.is_empty()
-        && appid.len() <= 64
-        && !appid.contains('"')
-        && !appid.chars().any(char::is_control)
+    // Steam app ids are short decimal ids. Restrict to digits, max 12, so a
+    // crafted id can never smuggle shell metacharacters or option flags.
+    !appid.is_empty() && appid.len() <= 12 && appid.bytes().all(|byte| byte.is_ascii_digit())
 }
 
 #[derive(Serialize)]

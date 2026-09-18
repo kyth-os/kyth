@@ -123,19 +123,31 @@ def _empty_doc() -> dict[str, Any]:
     return {"version": CACHE_VERSION, "generated_at": 0.0, "sections": {}}
 
 
-_FILE_CACHE: dict[Path, tuple[float, dict[str, Any]]] = {}
+_FILE_CACHE: dict[Path, tuple[tuple[int, int], dict[str, Any]]] = {}
 _FILE_CACHE_LOCK = threading.Lock()
 
 
-def load_cache_file(path: Path) -> dict[str, Any] | None:
+def _file_cache_key(path: Path) -> tuple[int, int] | None:
+    """Cache key for *path*: `(mtime_ns, size)`.
+
+    mtime alone (second resolution) misses sub-second rewrites from a
+    concurrent writer; pairing nanosecond mtime with size closes that gap
+    while staying a pure stat() with no content hash cost.
+    """
     try:
         st = path.stat()
-        mtime = st.st_mtime
+        return (st.st_mtime_ns, st.st_size)
     except OSError:
+        return None
+
+
+def load_cache_file(path: Path) -> dict[str, Any] | None:
+    key = _file_cache_key(path)
+    if key is None:
         return None
     with _FILE_CACHE_LOCK:
         cached = _FILE_CACHE.get(path)
-        if cached is not None and cached[0] == mtime:
+        if cached is not None and cached[0] == key:
             return cached[1]
     try:
         raw = path.read_text(encoding="utf-8")
@@ -152,12 +164,111 @@ def load_cache_file(path: Path) -> dict[str, Any] | None:
         if len(_FILE_CACHE) >= 16 and path not in _FILE_CACHE:
             oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
             _FILE_CACHE.pop(oldest, None)
-        _FILE_CACHE[path] = (mtime, data)
+        refreshed = _file_cache_key(path)
+        _FILE_CACHE[path] = (refreshed if refreshed is not None else key, data)
     return data
 
 
-def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
+def _cache_lock_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".lock")
+
+
+def _acquire_cache_lock(lock_path: Path, timeout: float) -> int | None:
+    """Open + exclusive-flock *lock_path*, waiting up to *timeout*.
+
+    Returns the fd on success, None when the lock dir is unusable. A busy
+    lock past the deadline raises TimeoutError — fail closed, never silently
+    write past a holder. (TimeoutError subclasses OSError: callers match it
+    before any OSError branch.)
+    """
+    import fcntl
+
+    import errno as _errno
+
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.touch(exist_ok=True)
+    except OSError:
+        return None
+    try:
+        fd = os.open(str(lock_path), os.O_RDWR)
+    except OSError:
+        return None
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return fd
+        except OSError as exc:
+            if exc.errno not in (_errno.EAGAIN, _errno.EACCES):
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                return None
+            if time.monotonic() >= deadline:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+                raise TimeoutError(f"could not acquire the probe cache lock for {lock_path}")
+
+
+def _release_cache_lock(fd: int | None) -> None:
+    if fd is None:
+        return
+    try:
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+    except OSError:
+        pass
+
+
+def _store_file_cache(path: Path, doc: dict[str, Any]) -> None:
+    with _FILE_CACHE_LOCK:
+        key = _file_cache_key(path)
+        if key is None:
+            key = (time.time_ns(), len(repr(doc)))
+        if len(_FILE_CACHE) >= 16 and path not in _FILE_CACHE:
+            oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
+            _FILE_CACHE.pop(oldest, None)
+        _FILE_CACHE[path] = (key, doc)
+
+
+def _write_doc_unlocked(path: Path, payload: str, doc: dict[str, Any]) -> None:
+    """Atomic tmp+fsync+rename+parent-fsync write. No locking: the caller
+    holds the cache lock (or deliberately proceeds without it after the
+    retry below — the rename itself is still atomic for readers)."""
     path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=".probe-", suffix=".json", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(payload)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+        # S1: fsync parent dir so rename survives power-loss (matches boot_health.write_state)
+        try:
+            dir_fd = os.open(path.parent, os.O_DIRECTORY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            pass
+        _store_file_cache(path, doc)
+    except (OSError, ValueError) as exc:
+        _logger.debug("handled %s: %s", "probe.py", exc, exc_info=True)
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+
+
+def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
     # Serialize first so we don't hold any lock during JSON encoding
     try:
         payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
@@ -167,86 +278,26 @@ def write_cache_file(path: Path, doc: dict[str, Any]) -> None:
         # crashing kyth-probe.service and poisoning the on-disk cache.
         payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False, default=str)
         _logger.warning("write_cache_file: fell back to default=str for %s", path)
-    # Use a sibling lock file to prevent concurrent read-modify-write races
-    # between kyth-probe.service, Hub, and kyth-update-watcher.
-    import fcntl
-
-    lock_path = path.with_suffix(path.suffix + ".lock")
-    try:
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path.touch(exist_ok=True)
-    except OSError:
-        pass
-    lock_fd = None
+    # Sibling lock file serializes writers (kyth-probe.service, Hub,
+    # kyth-update-watcher). On a lock timeout retry once, then write anyway:
+    # the tmp+rename below is still atomic for readers, so a racing pair
+    # resolves last-writer-wins instead of silently dropping one update.
+    lock_path = _cache_lock_path(path)
+    lock_fd: int | None = None
     try:
         try:
-            lock_fd = os.open(str(lock_path), os.O_RDWR)
-            # Try non-blocking lock with 2s retry window to avoid boot thunder-herd blocking
-            import errno as _errno
-
-            deadline = time.monotonic() + CACHE_LOCK_TIMEOUT_SEC
-            while True:
-                try:
-                    fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                    break
-                except OSError as e:
-                    if e.errno not in (_errno.EAGAIN, _errno.EACCES):
-                        raise
-                    if time.monotonic() >= deadline:
-                        _logger.warning(
-                            "write_cache_file: lock timeout for %s, skipping write",
-                            path,
-                        )
-                        try:
-                            os.close(lock_fd)
-                        except OSError:
-                            pass
-                        lock_fd = None
-                        return
-                    time.sleep(0.05)
-        except OSError:
-            lock_fd = None
-        fd, tmp_name = tempfile.mkstemp(prefix=".probe-", suffix=".json", dir=str(path.parent))
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(payload)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp_name, path)
-            # S1: fsync parent dir so rename survives power-loss (matches boot_health.write_state)
+            lock_fd = _acquire_cache_lock(lock_path, CACHE_LOCK_TIMEOUT_SEC)
+        except TimeoutError:
+            _logger.warning("write_cache_file: lock timeout for %s, retrying once", path)
+            time.sleep(0.1)
             try:
-                dir_fd = os.open(path.parent, os.O_DIRECTORY)
-                try:
-                    os.fsync(dir_fd)
-                finally:
-                    os.close(dir_fd)
-            except OSError:
-                pass
-            with _FILE_CACHE_LOCK:
-                try:
-                    mtime = path.stat().st_mtime
-                except OSError:
-                    mtime = time.time()
-                if len(_FILE_CACHE) >= 16 and path not in _FILE_CACHE:
-                    oldest = min(_FILE_CACHE, key=lambda p: _FILE_CACHE[p][0])
-                    _FILE_CACHE.pop(oldest, None)
-                _FILE_CACHE[path] = (mtime, doc)
-        except (OSError, ValueError) as exc:
-            import logging; logging.getLogger(__name__).debug("handled %s: %s", "probe.py", exc, exc_info=True)
-            try:
-                os.unlink(tmp_name)
-            except OSError:
-                pass
-            raise
-    except (OSError, ValueError) as exc:
-        raise
+                lock_fd = _acquire_cache_lock(lock_path, CACHE_LOCK_TIMEOUT_SEC)
+            except TimeoutError:
+                _logger.warning("write_cache_file: lock still held for %s, writing unlocked", path)
+                lock_fd = None
+        _write_doc_unlocked(path, payload, doc)
     finally:
-        if lock_fd is not None:
-            try:
-                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                os.close(lock_fd)
-            except OSError:
-                pass
+        _release_cache_lock(lock_fd)
 
 
 def read_section(
@@ -281,6 +332,61 @@ def read_section(
     return best[1]
 
 
+FETCH_MARKER_TTL_SEC = 30.0
+
+
+def _fetch_marker_path(path: Path) -> Path:
+    return path.with_suffix(path.suffix + ".fetching")
+
+
+def claim_fetch(path: Path, *, ttl: float = FETCH_MARKER_TTL_SEC) -> bool:
+    """Claim the cross-process fetch-in-progress marker for *path*.
+
+    Returns True when this process owns the fetch. A fresh marker from
+    another process (a concurrent kyth-probe run) returns False so the
+    caller can skip its duplicate sweep; a stale marker past *ttl* (owner
+    crashed mid-fetch) is unlinked and the claim retried once.
+    """
+    marker = _fetch_marker_path(path)
+    try:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        try:
+            age = time.time() - marker.stat().st_mtime
+        except OSError:
+            return False
+        if age <= ttl:
+            return False
+        try:
+            marker.unlink()
+        except OSError:
+            return False
+        try:
+            fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except OSError:
+            return False
+    except OSError:
+        # Marker dir unusable: don't block the fetch on bookkeeping.
+        return True
+    try:
+        os.write(fd, f"{os.getpid()} {time.time()}\n".encode())
+    except OSError:
+        pass
+    try:
+        os.close(fd)
+    except OSError:
+        pass
+    return True
+
+
+def clear_fetch(path: Path) -> None:
+    try:
+        _fetch_marker_path(path).unlink()
+    except OSError:
+        pass
+
+
 def update_sections(
     sections: dict[str, Any],
     *,
@@ -288,14 +394,42 @@ def update_sections(
     system: bool = False,
 ) -> Path:
     target = path or default_write_path(system=system)
-    doc = load_cache_file(target) or _empty_doc()
-    now = time.time()
-    store = doc.setdefault("sections", {})
-    for key, data in sections.items():
-        store[key] = {"ts": now, "data": data}
-    doc["version"] = CACHE_VERSION
-    doc["generated_at"] = now
-    write_cache_file(target, doc)
+    # Hold the cache lock across the whole load-modify-write: loading
+    # outside the lock (then writing through write_cache_file's narrower
+    # lock) let two writers interleave and drop each other's sections.
+    lock_path = _cache_lock_path(target)
+    lock_fd: int | None = None
+    try:
+        try:
+            lock_fd = _acquire_cache_lock(lock_path, CACHE_LOCK_TIMEOUT_SEC)
+        except TimeoutError:
+            _logger.warning("update_sections: lock timeout for %s, retrying once", target)
+            time.sleep(0.1)
+            try:
+                lock_fd = _acquire_cache_lock(lock_path, CACHE_LOCK_TIMEOUT_SEC)
+            except TimeoutError:
+                _logger.warning("update_sections: lock still held for %s, merging unlocked", target)
+                lock_fd = None
+        # Re-read under the lock: the in-memory file cache may predate a
+        # concurrent writer's rename, but it is keyed on (mtime_ns, size)
+        # so any committed rename misses and re-reads from disk.
+        with _FILE_CACHE_LOCK:
+            _FILE_CACHE.pop(target, None)
+        doc = load_cache_file(target) or _empty_doc()
+        now = time.time()
+        store = doc.setdefault("sections", {})
+        for key, data in sections.items():
+            store[key] = {"ts": now, "data": data}
+        doc["version"] = CACHE_VERSION
+        doc["generated_at"] = now
+        try:
+            payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False)
+        except TypeError:
+            payload = json.dumps(doc, separators=(",", ":"), ensure_ascii=False, default=str)
+            _logger.warning("update_sections: fell back to default=str for %s", target)
+        _write_doc_unlocked(target, payload, doc)
+    finally:
+        _release_cache_lock(lock_fd)
     return target
 
 
@@ -614,9 +748,19 @@ def invalidate_nvidia() -> None:
 
 def refresh_cache(*, system: bool = False, path: Path | None = None) -> tuple[Path, dict[str, Any]]:
     target = path or default_write_path(system=system)
-    sections = collect_snapshot()
-    update_sections(sections, path=target, system=system)
-    return target, sections
+    # Cross-process single-flight: a concurrent kyth-probe sweep owns the
+    # fetch; skip the duplicate collection and serve what it wrote instead
+    # of doubling flatpak/bootc subprocess spawns.
+    if not claim_fetch(target):
+        _logger.debug("refresh_cache: fetch already in progress for %s, serving existing cache", target)
+        doc = load_cache_file(target) or _empty_doc()
+        return target, {key: entry.get("data") for key, entry in (doc.get("sections") or {}).items() if isinstance(entry, dict)}
+    try:
+        sections = collect_snapshot()
+        update_sections(sections, path=target, system=system)
+        return target, sections
+    finally:
+        clear_fetch(target)
 
 
 # ── Unified probe cache service (mem + disk) ─────────────────────────────────
@@ -767,5 +911,5 @@ def probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
 
 def invalidate_probe_caches(keys: Iterable[str] | None = None) -> None:
     """Invalidate both mem and disk caches — drop-in replacement for process.invalidate_probe_caches."""
-    _logger.info("invalidate_probe_caches: clearing %s", list(keys) if keys is not None else "all")
+    _logger.debug("invalidate_probe_caches: clearing %s", list(keys) if keys is not None else "all")
     _service.invalidate(keys)

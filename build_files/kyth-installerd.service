@@ -2,7 +2,9 @@
 Description=KythOS installer privileged API service
 Documentation=https://github.com/kyth-os/kyth
 After=local-fs.target
-ConditionPathExists=/run/kyth-installer/session-token
+# No ConditionPathExists= on the session token: a missing token must fail
+# visibly (daemon exits nonzero -> Restart=on-failure loop) instead of
+# silently staying inactive while the WebUI waits on the socket forever.
 
 [Service]
 Type=simple

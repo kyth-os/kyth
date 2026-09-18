@@ -3,13 +3,26 @@
 
 use std::time::Duration;
 
+/// Hostnames accepted for SMB discovery: a conservative allowlist (letters,
+/// digits, dot, dash, underscore, max 253) that also rejects a leading dash
+/// so the value can never parse as an smbclient flag.
+pub fn is_valid_smb_host(host: &str) -> bool {
+    !host.is_empty()
+        && host.len() <= 253
+        && !host.starts_with('-')
+        && host
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+}
+
 pub fn smb_discover_command(host: Option<&str>) -> Vec<String> {
     if let Some(h) = host {
         vec![
             "smbclient".to_string(),
             "-L".to_string(),
-            h.to_string(),
             "-N".to_string(),
+            "--".to_string(),
+            h.to_string(),
         ]
     } else {
         vec![
@@ -37,6 +50,11 @@ fn run_with_timeout(cmd: &[String], timeout: Duration) -> Option<(i32, String, S
 }
 
 pub fn smb_browse_dry_run(host: Option<&str>) -> (bool, String) {
+    if let Some(host) = host {
+        if !is_valid_smb_host(host) {
+            return (false, "invalid SMB host".to_string());
+        }
+    }
     let cmd = smb_discover_command(host);
     match run_with_timeout(&cmd, Duration::from_secs(10)) {
         Some((0, stdout, _)) => (true, stdout.chars().take(500).collect()),
@@ -69,7 +87,26 @@ mod tests {
     fn discover_host() {
         assert_eq!(
             smb_discover_command(Some("host")),
-            vec!["smbclient", "-L", "host", "-N"]
+            vec!["smbclient", "-L", "-N", "--", "host"]
+        );
+    }
+    #[test]
+    fn host_allowlist_rejects_flags_and_separates_positional() {
+        assert!(is_valid_smb_host("fileserver-01.example"));
+        assert!(is_valid_smb_host("192.168.1.10"));
+        assert!(!is_valid_smb_host("-evil"));
+        assert!(!is_valid_smb_host("--help"));
+        assert!(!is_valid_smb_host("host; rm -rf /"));
+        assert!(!is_valid_smb_host(""));
+        let cmd = smb_discover_command(Some("fileserver"));
+        let dash = cmd
+            .iter()
+            .position(|arg| arg == "--")
+            .expect("host needs a -- separator");
+        assert_eq!(cmd[dash + 1], "fileserver");
+        assert_eq!(
+            smb_browse_dry_run(Some("-evil")),
+            (false, "invalid SMB host".to_string())
         );
     }
     #[test]

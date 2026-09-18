@@ -6,6 +6,7 @@ commit path re-runs this as a guard. Keeps PlanReport as single gate.
 from __future__ import annotations
 
 import logging
+import os
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Callable
 
@@ -22,6 +23,36 @@ if TYPE_CHECKING:
 from .plan_types import PlanReport
 
 _logger = logging.getLogger(__name__)
+
+#: Presence of this path means the live session booted via UEFI firmware.
+_EFI_FIRMWARE_PATH = "/sys/firmware/efi"
+
+
+def _is_uefi_boot(path_exists=os.path.exists) -> bool:
+    """Return True when the live session booted via UEFI rather than legacy BIOS."""
+    try:
+        return bool(path_exists(_EFI_FIRMWARE_PATH))
+    except (OSError, ValueError):
+        return False
+
+
+def _needs_bios_boot(snapshot, *, uefi_boot: bool | None = None) -> bool:
+    """Return True only when a legacy-BIOS GPT boot needs a bios-boot helper.
+
+    The 1 MiB BIOS boot partition is a GRUB-on-GPT requirement for legacy
+    BIOS boot only: UEFI sessions boot via the ESP and never need it, and
+    guided resize/free-space commits auto-create it from free space (see
+    plan_commit.ensure_bios_boot_partition), so validation there only
+    reserves the extra MiB instead of rejecting the layout. Pass
+    `uefi_boot` explicitly in tests; None probes the live session.
+    """
+    if snapshot is None or not snapshot.is_gpt:
+        return False
+    if snapshot.has_bios_boot_partition(BIOS_BOOT_GUID):
+        return False
+    if uefi_boot is None:
+        uefi_boot = _is_uefi_boot()
+    return not uefi_boot
 
 
 @dataclass(frozen=True, slots=True)
@@ -146,6 +177,7 @@ def _validate_install_target(
     snapshot: StorageSnapshot | None = None,
     *,
     dependencies: ValidationDependencies | None = None,
+    uefi_boot: bool | None = None,
 ) -> tuple[str, str | None]:
     dependencies = dependencies or default_validation_dependencies()
 
@@ -175,7 +207,7 @@ def _validate_install_target(
             disk, target, "target partition", snapshot,
             dependencies=dependencies,
         )
-        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID):
+        if _needs_bios_boot(snapshot, uefi_boot=uefi_boot):
             raise RuntimeError(
                 "This GPT disk has no BIOS boot partition required by the KythOS bootloader. "
                 "Choose unallocated space, shrink Windows, or erase the disk so the installer can create one."
@@ -215,6 +247,7 @@ def validate_resize_ntfs_target(
     snapshot: StorageSnapshot | None = None,
     *,
     dependencies: GuidedValidationDependencies,
+    uefi_boot: bool | None = None,
 ) -> tuple[str, str, int]:
     """Validate an NTFS shrink request without modifying its filesystem."""
     disk = _normal_device_path(config.get("disk"))
@@ -255,7 +288,7 @@ def validate_resize_ntfs_target(
     shrink_bytes = shrink_gib * 1024**3
     required = (
         MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
-        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+        if _needs_bios_boot(snapshot, uefi_boot=uefi_boot)
         else MIN_KYTHOS_BYTES
     )
     if shrink_bytes < required:
@@ -274,6 +307,7 @@ def validate_free_space_target(
     snapshot: StorageSnapshot | None = None,
     *,
     dependencies: GuidedValidationDependencies,
+    uefi_boot: bool | None = None,
 ) -> tuple[str, int, int]:
     """Validate that a selected free region remains safe and available."""
     disk = _normal_device_path(config.get("disk"))
@@ -292,7 +326,7 @@ def validate_free_space_target(
         raise RuntimeError("The selected disk is not a safe install target.")
     required = (
         MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
-        if snapshot.is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+        if _needs_bios_boot(snapshot, uefi_boot=uefi_boot)
         else MIN_KYTHOS_BYTES
     )
     if end - start < required:
@@ -315,6 +349,7 @@ def build_plan_report(
     *,
     snapshot: StorageSnapshot | None = None,
     dependencies: ReportDependencies,
+    uefi_boot: bool | None = None,
 ) -> PlanReport:
     """Build the complete read-only plan report for every installation mode."""
     request = dependencies.as_request(state)
@@ -344,16 +379,16 @@ def build_plan_report(
     try:
         if mode == "resize_ntfs":
             disk, target, required = dependencies.validate_resize(
-                state, snapshot=snapshot,
+                state, snapshot=snapshot, uefi_boot=uefi_boot,
             )
             snapshot = snapshot or dependencies.probe_storage(disk)
             efi = snapshot.efi_partition or ""
             is_gpt = snapshot.is_gpt
-            needs_bios = is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+            needs_bios = _needs_bios_boot(snapshot, uefi_boot=uefi_boot)
             available = required
         elif mode == "free_space":
             disk, start, end = dependencies.validate_free_space(
-                state, snapshot=snapshot,
+                state, snapshot=snapshot, uefi_boot=uefi_boot,
             )
             available = end - start
             snapshot = snapshot or dependencies.probe_storage(
@@ -361,7 +396,7 @@ def build_plan_report(
             )
             efi = snapshot.efi_partition or ""
             is_gpt = snapshot.is_gpt
-            needs_bios = is_gpt and not snapshot.has_bios_boot_partition(BIOS_BOOT_GUID)
+            needs_bios = _needs_bios_boot(snapshot, uefi_boot=uefi_boot)
             required = MIN_KYTHOS_BYTES + (BIOS_BOOT_BYTES if needs_bios else 0)
         else:
             effective = snapshot or dependencies.probe_storage(
@@ -369,11 +404,12 @@ def build_plan_report(
             )
             is_gpt = effective.is_gpt
             needs_bios = (
-                is_gpt and not effective.has_bios_boot_partition(BIOS_BOOT_GUID)
+                _needs_bios_boot(effective, uefi_boot=uefi_boot)
                 if mode == "alongside" else False
             )
             disk, resolved = dependencies.validate_install(
                 request.as_state(), context, snapshot=effective,
+                uefi_boot=uefi_boot,
             )
             target = resolved or ""
             efi = effective.efi_partition or ""

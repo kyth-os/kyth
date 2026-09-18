@@ -42,7 +42,15 @@ class AtomicWriteTests(unittest.TestCase):
 
             def writer(n):
                 try:
-                    atomic_write_json(path, {"n": n, "data": "x" * 100})
+                    # Fail-closed contract: a lock timeout raises TimeoutError
+                    # and the caller retries rather than racing an unlocked write.
+                    for _attempt in range(3):
+                        try:
+                            atomic_write_json(path, {"n": n, "data": "x" * 100})
+                            return
+                        except TimeoutError:
+                            continue
+                    raise AssertionError("lock never became free")
                 except Exception as exc:  # noqa: BLE001
                     errors.append(exc)
 
@@ -57,6 +65,21 @@ class AtomicWriteTests(unittest.TestCase):
             self.assertIn("n", data)
             # file is valid JSON
             json.loads(path.read_text(encoding="utf-8"))
+
+    def test_lock_timeout_raises_instead_of_unlocked_write(self):
+        import fcntl
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = pathlib.Path(tmp) / "state.json"
+            atomic_write_json(path, {"a": 1})
+            lock_path = pathlib.Path(tmp) / ".state.json.lock"
+            lock_path.touch(exist_ok=True)
+            with open(lock_path, "a+") as holder:
+                fcntl.flock(holder, fcntl.LOCK_EX)
+                with self.assertRaises(TimeoutError):
+                    atomic_write_json(path, {"a": 2})
+                # file unchanged: no unlocked write raced past the holder
+                self.assertEqual(read_json_or_default(path, None), {"a": 1})
 
     def test_parent_fsync_survives(self):
         with tempfile.TemporaryDirectory() as tmp:

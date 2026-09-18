@@ -1,5 +1,3 @@
-use rustix::fs::{flock, FlockOperation};
-use std::fs::OpenOptions;
 use std::time::Duration;
 
 const DEFAULT_CONFIG: &str = "/etc/kyth/auto-update.toml";
@@ -251,44 +249,12 @@ fn retryable_upgrade_output(output: &str) -> bool {
         || lower.contains("no space left")
 }
 
-fn run_bootc_upgrade(timeout: Duration) -> UpgradeResult {
-    if let Some(free) = free_sysroot_bytes() {
-        const REQUIRED: u64 = 2 * 1024 * 1024 * 1024;
-        if free < REQUIRED {
-            return UpgradeResult {
-                ok: false,
-                output: format!(
-                    "Not enough free disk space: {} MiB free, need 2048 MiB",
-                    free / (1024 * 1024)
-                ),
-                retryable: true,
-            };
-        }
-    }
-    let Ok(lock) = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open("/run/kyth-bootc.lock")
-    else {
-        return UpgradeResult {
-            ok: false,
-            output: "Could not open the bootc upgrade lock".into(),
-            retryable: true,
-        };
-    };
-    if flock(&lock, FlockOperation::NonBlockingLockExclusive).is_err() {
-        return UpgradeResult {
-            ok: false,
-            output: "Another bootc upgrade is in progress; will retry on the next run".into(),
-            retryable: true,
-        };
-    }
+fn run_bootc_upgrade_inner(timeout: Duration) -> UpgradeResult {
     let argv = ["bootc", "upgrade"]
         .iter()
         .map(|value| (*value).to_string())
         .collect::<Vec<_>>();
     let result = kyth_shared::system::process::run_bounded(&argv, timeout);
-    let _ = flock(&lock, FlockOperation::Unlock);
     match result {
         Ok(output) => {
             let text = format!(
@@ -318,6 +284,35 @@ fn run_bootc_upgrade(timeout: Duration) -> UpgradeResult {
     }
 }
 
+/// Serialized against every other bootc writer via [`with_bootc_lock`]:
+/// the safe-upgrade helper, `bootc switch`, and the Hub's mutating jobs
+/// all contend on the same `/run/kyth-bootc.lock`.
+fn run_bootc_upgrade(timeout: Duration) -> UpgradeResult {
+    if let Some(free) = free_sysroot_bytes() {
+        const REQUIRED: u64 = 2 * 1024 * 1024 * 1024;
+        if free < REQUIRED {
+            return UpgradeResult {
+                ok: false,
+                output: format!(
+                    "Not enough free disk space: {} MiB free, need 2048 MiB",
+                    free / (1024 * 1024)
+                ),
+                retryable: true,
+            };
+        }
+    }
+    match kyth_shared::system::bootc_guard::with_bootc_lock(|| {
+        Ok::<UpgradeResult, String>(run_bootc_upgrade_inner(timeout))
+    }) {
+        Ok(result) => result,
+        Err(message) => UpgradeResult {
+            ok: false,
+            output: message,
+            retryable: true,
+        },
+    }
+}
+
 fn notify_users(os_staged: bool, flatpaks: i64) {
     let Some((true, sessions)) = run(
         "loginctl",
@@ -341,46 +336,62 @@ fn notify_users(os_staged: bool, flatpaks: i64) {
             format!("{flatpaks} Flatpak update(s) available. Click to open System Hub."),
         )
     };
-    for uid in sessions
+    let users: Vec<String> = sessions
         .lines()
         .filter_map(|line| line.split_whitespace().nth(2))
-    {
-        let Some((true, passwd)) = run("getent", &["passwd", uid], Duration::from_secs(2)) else {
-            continue;
-        };
-        let Some(user) = passwd.split(':').next() else {
-            continue;
-        };
-        let args = [
-            "-u",
-            user,
-            "--",
-            "notify-send",
-            "--app-name=KythOS",
-            "--icon=software-update-available",
-            "--urgency=normal",
-            "--action=default=View Updates",
-            "--wait",
-            title,
-            &body,
-        ];
-        if run("runuser", &args, Duration::from_secs(65))
-            .is_some_and(|(_, output)| output.trim() == "default")
-        {
-            let _ = run(
-                "runuser",
-                &[
+        .filter_map(|uid| {
+            let (ok, passwd) = run("getent", &["passwd", uid], Duration::from_secs(2))?;
+            ok.then(|| passwd.split(':').next().map(str::to_string))?
+        })
+        .collect();
+    // notify-send --wait blocks up to 65s per session; notifying serially
+    // would stall the watcher for minutes on multi-seat hosts. Fan out with
+    // a small cap so one wedged session cannot exhaust threads either.
+    const NOTIFY_CONCURRENCY: usize = 4;
+    std::thread::scope(|scope| {
+        let mut pending: Vec<std::thread::ScopedJoinHandle<()>> = Vec::new();
+        for user in &users {
+            while pending.len() >= NOTIFY_CONCURRENCY {
+                pending.remove(0).join().ok();
+            }
+            let (title, body) = (title, body.clone());
+            let user = user.clone();
+            pending.push(scope.spawn(move || {
+                let args = [
                     "-u",
-                    user,
+                    user.as_str(),
                     "--",
-                    "/usr/bin/kyth-welcome-launch",
-                    "--page",
-                    "Update",
-                ],
-                Duration::from_secs(10),
-            );
+                    "notify-send",
+                    "--app-name=KythOS",
+                    "--icon=software-update-available",
+                    "--urgency=normal",
+                    "--action=default=View Updates",
+                    "--wait",
+                    title,
+                    body.as_str(),
+                ];
+                if run("runuser", &args, Duration::from_secs(65))
+                    .is_some_and(|(_, output)| output.trim() == "default")
+                {
+                    let _ = run(
+                        "runuser",
+                        &[
+                            "-u",
+                            user.as_str(),
+                            "--",
+                            "/usr/bin/kyth-welcome-launch",
+                            "--page",
+                            "Update",
+                        ],
+                        Duration::from_secs(10),
+                    );
+                }
+            }));
         }
-    }
+        for handle in pending {
+            handle.join().ok();
+        }
+    });
 }
 
 fn main() -> std::process::ExitCode {
@@ -603,5 +614,28 @@ mod tests {
         assert!(retryable_upgrade_output("bootc upgrade timed out"));
         assert!(retryable_upgrade_output("No space left on device"));
         assert!(!retryable_upgrade_output("signature verification failed"));
+    }
+
+    #[test]
+    fn busy_bootc_lock_maps_to_retryable_upgrade_result() {
+        // The real /run/kyth-bootc.lock is only writable as root: skip the
+        // contention half outside privileged CI rather than failing there.
+        let held = match std::fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(kyth_shared::system::bootc_guard::BOOTC_LOCK_PATH)
+        {
+            Ok(held) => held,
+            Err(_) => return,
+        };
+        rustix::fs::flock(&held, rustix::fs::FlockOperation::NonBlockingLockExclusive)
+            .expect("test holds the lock");
+        let result = run_bootc_upgrade(Duration::from_secs(1));
+        assert!(!result.ok);
+        assert!(result.retryable);
+        assert!(result
+            .output
+            .contains("Another bootc upgrade is in progress"));
+        let _ = rustix::fs::flock(&held, rustix::fs::FlockOperation::Unlock);
     }
 }

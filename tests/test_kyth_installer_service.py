@@ -337,7 +337,7 @@ class InstallerServiceCrudTests(unittest.TestCase):
     @patch("kyth_installer.disk.list_disks")
     def test_commit_partitions_reports_validation_errors(self, mock_list_disks):
         self._new_table(mock_list_disks)  # no create op -> no root partition
-        res = self.service.commit_partitions({"disk": "/dev/sda"})
+        res = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("message"), "Validation failed.")
         self.assertTrue(res.get("errors"))
@@ -346,7 +346,7 @@ class InstallerServiceCrudTests(unittest.TestCase):
     def test_commit_partitions_success_transitions_back_to_idle(self, mock_list_disks):
         journal = self._committable_journal(mock_list_disks)
         with patch.object(journal, "commit", return_value="/dev/sda1") as mock_commit:
-            res = self.service.commit_partitions({"disk": "/dev/sda"})
+            res = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
         self.assertTrue(res.get("ok"))
         self.assertEqual(res.get("root_partition"), "/dev/sda1")
         mock_commit.assert_called_once()
@@ -357,7 +357,7 @@ class InstallerServiceCrudTests(unittest.TestCase):
         journal = self._committable_journal(mock_list_disks)
         with patch.object(journal, "commit", side_effect=RuntimeError("sgdisk failed")), \
              patch.object(journal, "rollback") as mock_rollback:
-            res = self.service.commit_partitions({"disk": "/dev/sda"})
+            res = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("message"), "sgdisk failed")
         mock_rollback.assert_called_once()
@@ -372,14 +372,14 @@ class InstallerServiceCrudTests(unittest.TestCase):
         journal = self._committable_journal(mock_list_disks)
         with patch.object(journal, "commit", side_effect=RuntimeError("sgdisk failed")), \
              patch.object(journal, "rollback"):
-            failed = self.service.commit_partitions({"disk": "/dev/sda"})
+            failed = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
         self.assertFalse(failed.get("ok"))
 
         # The frontend re-enables its Commit button on exactly this failure
         # and expects a retry (e.g. of a transient sgdisk hiccup) to actually
         # attempt the commit again, not bounce off an internal FSM error.
         with patch.object(journal, "commit", return_value="/dev/sda1") as mock_commit:
-            retried = self.service.commit_partitions({"disk": "/dev/sda"})
+            retried = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
         self.assertTrue(retried.get("ok"), retried.get("message"))
         self.assertEqual(retried.get("root_partition"), "/dev/sda1")
         mock_commit.assert_called_once()
@@ -391,12 +391,42 @@ class InstallerServiceCrudTests(unittest.TestCase):
         journal.irreversible_completed = True
         with patch.object(journal, "commit", side_effect=RuntimeError("mkfs of later op failed")), \
              patch.object(journal, "rollback") as mock_rollback:
-            res = self.service.commit_partitions({"disk": "/dev/sda"})
+            res = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
         self.assertFalse(res.get("ok"))
         self.assertTrue(res.get("irreversible"))
         self.assertIn("would not restore files", res.get("message"))
         mock_rollback.assert_not_called()
         self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.FAILED)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_requires_confirmations_for_destructive_ops(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)  # new_table + create
+        with patch.object(journal, "commit") as mock_commit:
+            res = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+        self.assertIn("acknowledgements", res.get("message", ""))
+        mock_commit.assert_not_called()
+
+        # Only one of the two acknowledgements is still a refusal.
+        with patch.object(journal, "commit") as mock_commit:
+            res = self.service.commit_partitions(
+                {"disk": "/dev/sda", "confirm_erase": True}
+            )
+        self.assertFalse(res.get("ok"))
+        mock_commit.assert_not_called()
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_allows_nondestructive_journal_without_confirmations(
+        self, mock_list_disks,
+    ):
+        journal = self._committable_journal(mock_list_disks)
+        journal.ops[:] = [op for op in journal.ops if op["kind"] != "new_table"]
+        self.assertTrue(journal.ops)
+        with patch.object(journal, "validate", return_value=[]), \
+             patch.object(journal, "commit", return_value="/dev/sda1") as mock_commit:
+            res = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertTrue(res.get("ok"), res.get("message"))
+        mock_commit.assert_called_once()
 
     @patch("kyth_installer.disk.list_disks")
     def test_rollback_partitions_success_resets_the_journal(self, mock_list_disks):

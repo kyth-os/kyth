@@ -153,24 +153,67 @@ def _prepare_include(root: Path) -> None:
     (themes / "default.plymouth").symlink_to("kyth/kyth.plymouth")
 
 
+def _scrub_dracut_scratch() -> None:
+    """Best-effort removal of dracut stage leftovers under /var/tmp.
+
+    An interrupted dracut run (SIGTERM, power loss, inspect failure below)
+    can leave multi-hundred-MB `dracut.*` directories behind; every failure
+    path through _refresh_image/_refresh_writable funnels here.
+    """
+    tmp = Path("/var/tmp")
+    try:
+        entries = list(tmp.iterdir())
+    except OSError:
+        return
+    for entry in entries:
+        if not (entry.name.startswith("dracut.") or entry.name.startswith(".dracut")):
+            continue
+        try:
+            if entry.is_dir() and not entry.is_symlink():
+                shutil.rmtree(entry, ignore_errors=True)
+            else:
+                entry.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
 def _refresh_image(image: Path, include: Path) -> None:
     kernel = image.name.removeprefix("initramfs-").removesuffix(".img")
-    result = run(
-        [
-            "dracut", "--tmpdir", "/var/tmp", "--no-hostonly", "--kver", kernel,
-            "--reproducible", "--force", "--add", "drm plymouth ostree kyth-plymouth",
-            "--include", include / "etc/plymouth", "/etc/plymouth",
-            "--include", include / "usr/share/plymouth", "/usr/share/plymouth",
-            "--include", include / "usr/share/pixmaps/system-logo-white.png",
-            "/usr/share/pixmaps/system-logo-white.png", image, kernel,
-        ],
-        env={**os.environ, "TMPDIR": "/var/tmp"},
-    )
-    if result.returncode:
-        raise RuntimeError(f"dracut failed for {image}")
-    errors = inspect_image(image)
-    if errors:
-        raise RuntimeError("\n".join(errors))
+    # Rebuild to a sidecar, then atomically rename over the live image:
+    # dracut --force in place left a truncated initramfs behind whenever
+    # the build died mid-write, unbootable on the next reboot.
+    staged = image.with_name(image.name + ".new")
+    try:
+        if staged.exists() or staged.is_symlink():
+            try:
+                staged.unlink()
+            except OSError:
+                pass
+        result = run(
+            [
+                "dracut", "--tmpdir", "/var/tmp", "--no-hostonly", "--kver", kernel,
+                "--reproducible", "--force", "--add", "drm plymouth ostree kyth-plymouth",
+                "--include", include / "etc/plymouth", "/etc/plymouth",
+                "--include", include / "usr/share/plymouth", "/usr/share/plymouth",
+                "--include", include / "usr/share/pixmaps/system-logo-white.png",
+                "/usr/share/pixmaps/system-logo-white.png", str(staged), kernel,
+            ],
+            env={**os.environ, "TMPDIR": "/var/tmp"},
+        )
+        if result.returncode:
+            raise RuntimeError(f"dracut failed for {image}")
+        errors = inspect_image(staged)
+        if errors:
+            raise RuntimeError("\n".join(errors))
+        os.replace(staged, image)
+    except (OSError, RuntimeError):
+        try:
+            if staged.exists() or staged.is_symlink():
+                staged.unlink()
+        except OSError:
+            pass
+        _scrub_dracut_scratch()
+        raise
 
 
 def _refresh_writable() -> int:
@@ -210,10 +253,12 @@ def _refresh_writable() -> int:
                 "/usr/share/pixmaps/system-logo-white.png",
             ], env={**os.environ, "TMPDIR": "/var/tmp"})
             if result.returncode:
+                _scrub_dracut_scratch()
                 raise RuntimeError("dracut --regenerate-all failed")
             for image in collect_images():
                 errors = inspect_image(image)
                 if errors:
+                    _scrub_dracut_scratch()
                     raise RuntimeError("\n".join(errors))
     fp_file.write_text(current + "\n", encoding="utf-8")
     marker.touch()

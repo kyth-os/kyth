@@ -114,8 +114,16 @@ class GuidedPlanValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "boot partition"):
             validate_resize_ntfs_target(
                 {**config, "resize_gib": 32}, snapshot=gpt,
-                dependencies=self.dependencies(),
+                dependencies=self.dependencies(), uefi_boot=False,
             )
+        # UEFI boot never needs the helper: the same tight shrink validates.
+        self.assertEqual(
+            validate_resize_ntfs_target(
+                {**config, "resize_gib": 32}, snapshot=gpt,
+                dependencies=self.dependencies(), uefi_boot=True,
+            ),
+            ("/dev/sda", "/dev/sda2", 32 * 1024**3),
+        )
 
     def test_explicit_validation_rejects_partition_and_manual_invariants(self):
         snapshot = StorageSnapshot(
@@ -352,7 +360,7 @@ class GuidedPlanValidationTests(unittest.TestCase):
         )
         report = build_plan_report(
             {"disk": "/dev/sda", "install_mode": "resize_ntfs"}, snapshot=snapshot,
-            dependencies=self.report_dependencies(),
+            dependencies=self.report_dependencies(), uefi_boot=False,
         )
         self.assertTrue(report.valid)
         self.assertTrue(report.needs_bios_boot)
@@ -368,10 +376,67 @@ class GuidedPlanValidationTests(unittest.TestCase):
             {"disk": "/dev/sda", "install_mode": "alongside"}, snapshot=snapshot,
             dependencies=self.report_dependencies(
                 validate_install=lambda *_args, **_kwargs: ("/dev/sda", "/dev/sda2")
-            ),
+            ), uefi_boot=False,
         )
         self.assertFalse(report.valid)
         self.assertIn("Legacy BIOS", report.errors[0])
+
+    def test_uefi_boot_skips_bios_helper_everywhere(self):
+        from kyth_installer.plan_validate import _is_uefi_boot, _needs_bios_boot
+
+        gpt = StorageSnapshot(
+            disks=({"name": "/dev/sda"},),
+            partitions=({"name": "/dev/sda2", "size_bytes": 80 * 1024**3},),
+            free_regions=(), efi_partition="/dev/sda1", is_gpt=True,
+        )
+        self.assertFalse(_needs_bios_boot(gpt, uefi_boot=True))
+        self.assertTrue(_needs_bios_boot(gpt, uefi_boot=False))
+        self.assertFalse(
+            _needs_bios_boot(
+                StorageSnapshot(
+                    disks=(), partitions=(), free_regions=(),
+                    efi_partition=None, is_gpt=False,
+                ),
+                uefi_boot=False,
+            )
+        )
+        # Probe failures fail closed to legacy behavior, never skip the check.
+        self.assertFalse(_is_uefi_boot(path_exists=lambda _path: False))
+        self.assertTrue(_is_uefi_boot(path_exists=lambda _path: True))
+        def _boom(_path):
+            raise OSError("no sysfs in test")
+        self.assertFalse(_is_uefi_boot(path_exists=_boom))
+
+        # Alongside on UEFI validates without a BIOS boot partition.
+        report = build_plan_report(
+            {"disk": "/dev/sda", "install_mode": "alongside"}, snapshot=gpt,
+            dependencies=self.report_dependencies(
+                validate_install=lambda *_args, **_kwargs: ("/dev/sda", "/dev/sda2")
+            ), uefi_boot=True,
+        )
+        self.assertTrue(report.valid, report.errors)
+        self.assertFalse(report.needs_bios_boot)
+
+        # Free-space on UEFI needs no extra MiB beyond the OS itself.
+        start = 1024**2
+        end = start + MIN_KYTHOS_BYTES
+        free_snapshot = StorageSnapshot(
+            disks=({"name": "/dev/sda"},), partitions=(),
+            free_regions=({"start_bytes": start, "end_bytes": end},),
+            efi_partition="/dev/sda1", is_gpt=True,
+        )
+        self.assertEqual(
+            validate_free_space_target(
+                {"disk": "/dev/sda", "free_region_start": start, "free_region_end": end},
+                snapshot=free_snapshot, dependencies=self.dependencies(), uefi_boot=True,
+            ),
+            ("/dev/sda", start, end),
+        )
+        with self.assertRaisesRegex(RuntimeError, "boot partition"):
+            validate_free_space_target(
+                {"disk": "/dev/sda", "free_region_start": start, "free_region_end": end},
+                snapshot=free_snapshot, dependencies=self.dependencies(), uefi_boot=False,
+            )
 
     def test_report_builder_translates_unexpected_dependency_error(self):
         report = build_plan_report(

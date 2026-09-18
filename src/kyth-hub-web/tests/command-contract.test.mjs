@@ -106,10 +106,11 @@ test("App updates poll long enough for the unbounded backend flatpak job and ref
   const fn = service.match(/export async function updateFlatpaks\(\)[\s\S]*?\n}/)?.[0] ?? "";
   assert.notEqual(fn, "", "updateFlatpaks not found");
   // update_flatpaks runs an unbounded `flatpak update --user` plus a
-  // privileged system update with a 900s daemon timeout; the poll loop must
-  // outlast that, not give up after ~2 minutes (240 * 500ms).
-  const iterations = Number(fn.match(/for \(let i = 0; i < (\d+); i \+= 1\)/)?.[1] ?? 0);
-  assert.ok(iterations >= 3600, `updateFlatpaks poll bound (${iterations} * 500ms) is too short for a real app update`);
+  // privileged system update with a 900s daemon timeout; the poll bound must
+  // outlast that, not give up after ~2 minutes. Bound lives on the shared
+  // per-domain poller now (limit: N) instead of a local for-loop.
+  const shared = fn.match(/limit: (\d+)/)?.[1] ?? fn.match(/for \(let i = 0; i < (\d+); i \+= 1\)/)?.[1] ?? 0;
+  assert.ok(Number(shared) >= 3600, `updateFlatpaks poll bound (${shared}) is too short for a real app update`);
   assert.match(fn, /invalidateSharedReads\([^)]*"updates-snapshot"/, "updateFlatpaks must invalidate updates-snapshot so refresh() after the update isn't served a stale cached count");
 });
 
@@ -303,11 +304,16 @@ test("availability check races a 95s timeout with a friendly error", () => {
 });
 
 test("strict pollers tolerate transient status failures before throwing", () => {
+  // Transient tolerance lives in the shared per-domain poller (default 5
+  // consecutive nulls); each strict waiter routes through it instead of
+  // running its own loop.
+  assert.match(service, /maxNulls \?\? 5/, "shared poller must default to 5 tolerated nulls");
   for (const name of ["waitGuardianCheck", "runPrivilegedAction", "waitJustJob", "waitUpdateJob", "uninstallFlatpak", "updateFlatpaks"]) {
     const start = service.indexOf(name);
     assert.ok(start !== -1, `${name} not found`);
     const fn = service.slice(start, service.indexOf("\n}\n", start) + 3);
-    assert.match(fn, /statusFailures >= 5/, `${name} must tolerate 5 consecutive status failures`);
+    assert.match(fn, /pollJobUntilSettled/, `${name} must poll through the shared per-domain poller`);
+    assert.match(fn, /lostContactMessage/, `${name} must keep its lost-contact message`);
   }
 });
 
@@ -316,8 +322,30 @@ test("tolerant pollers bail on lost jobs and treat unknown as terminal", () => {
     const start = service.indexOf(`function ${name}`);
     assert.ok(start !== -1, `${name} not found`);
     const fn = service.slice(start, service.indexOf("\n}\n", start) + 3);
-    assert.match(fn, /nulls >= 10/, `${name} must bail after 10 consecutive nulls`);
+    assert.match(fn, /maxNulls: 10/, `${name} must bail after 10 consecutive nulls`);
     assert.match(fn, /state\.state === "unknown"\) throw/, `${name} must treat unknown as terminal`);
+  }
+});
+
+test("domains share one poller with backoff and cross-tab awareness", () => {
+  assert.match(service, /activeDomainPollers/, "one poller per domain needs a shared registry");
+  assert.match(service, /elapsed > 30_000 \? Math\.max\(baseInterval, 2000\)/, "pollers must back off 500ms -> 2s after 30s");
+  assert.match(service, /inFlightJobs\.get\(domain\) !== job/, "poll ticks must stop when another tab clears the slot");
+  assert.match(service, /addEventListener\("storage"/, "slot changes from other tabs need a storage listener");
+});
+
+test("persisted slots carry timestamps and stale ones are dropped", () => {
+  assert.match(service, /\{ job, ts: Date\.now\(\) \}/, "persisted entries must be job + timestamp objects");
+  assert.match(service, /REATTACHED_JOB_TTL_MS/, "reattach must drop entries older than the job TTL");
+  assert.match(service, /validateReattachedJobs\(\)/, "reattached ids need a one-shot status probe before being trusted");
+  assert.match(service, /DOMAIN_STATUS_COMMAND\[domain\]/, "reattach validation must probe each domain's own status command");
+});
+
+test("mutating Hub update launches serialize on the shared bootc lock", () => {
+  for (const command of ["bootc_rollback", "bootc_switch_branch", "apply_staged"]) {
+    const fn = updatesRust.match(new RegExp(`fn ${command}\\b[\\s\\S]*?start_update_job`))?.[0] ?? "";
+    assert.notEqual(fn, "", `${command} not found`);
+    assert.match(fn, /with_bootc_lock/, `${command} must admission-check the shared bootc lock before launching`);
   }
 });
 

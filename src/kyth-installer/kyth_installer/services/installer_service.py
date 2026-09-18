@@ -159,6 +159,18 @@ class InstallerService:
         _disk, journal, error = self._journal_for(body)
         if error:
             return error
+        # Destructive journals (fresh table or partition deletion) need the
+        # same on-screen acknowledgements as start_install: committing without
+        # them would erase data the user never confirmed away.
+        destructive = any(
+            isinstance(op, dict) and op.get("kind") in ("new_table", "delete")
+            for op in getattr(journal, "ops", None) or []
+        )
+        if destructive and not (body.get("confirm_erase") and body.get("confirm_backup")):
+            return {
+                "ok": False,
+                "message": "Please confirm the on-screen acknowledgements before starting the install.",
+            }
         errors = journal.validate()
         if errors:
             return {"ok": False, "message": "Validation failed.", "errors": errors}

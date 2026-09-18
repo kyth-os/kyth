@@ -405,6 +405,10 @@ pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
 
 #[tauri::command]
 pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
+    // Admission check on the shared bootc lock: the privileged helper takes
+    // it for the whole rollback, so refuse a second mutating launch here
+    // instead of stacking two sudo prompts that serialize anyway.
+    kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "Rollback",
         vec!["sudo", "-A", "/usr/bin/bootc", "rollback"]
@@ -432,6 +436,9 @@ pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, 
         .map(String::from)
         .collect::<Vec<_>>();
     argv.push(operation);
+    // Same admission check as rollback: kyth-bootc-guard takes the shared
+    // lock for the whole switch.
+    kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "Switch channel",
         argv,
@@ -444,6 +451,8 @@ pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
     if !std::path::Path::new("/usr/libexec/kyth-finalize-staged").exists() {
         return Err("The staged-update finalizer is not installed on this system.".to_string());
     }
+    // Finalize flips the boot target: serialize against upgrade/switch too.
+    kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "Apply staged update",
         vec!["sudo", "-A", "/usr/libexec/kyth-finalize-staged", "reboot"]

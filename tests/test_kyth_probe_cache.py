@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -93,7 +94,7 @@ class ProbeCacheLockTests(unittest.TestCase):
         probe_mod._FILE_CACHE.clear()
         self._tmp.cleanup()
 
-    def test_lock_timeout_skips_write(self):
+    def test_lock_timeout_retries_then_writes(self):
         import fcntl
         import os
 
@@ -105,11 +106,96 @@ class ProbeCacheLockTests(unittest.TestCase):
         fcntl.flock(fd, fcntl.LOCK_EX)
         try:
             with mock.patch.object(probe_mod, "CACHE_LOCK_TIMEOUT_SEC", 0.05):
+                # Contended lock: retry once, then write anyway so the update
+                # is not silently dropped (tmp+rename stays atomic for readers).
                 probe_mod.write_cache_file(self.path, {"version": 9, "sections": {}})
         finally:
             fcntl.flock(fd, fcntl.LOCK_UN)
             os.close(fd)
-        self.assertEqual(json.loads(self.path.read_text()), original)
+        self.assertEqual(json.loads(self.path.read_text()), {"version": 9, "sections": {}})
+
+    def test_concurrent_update_sections_keep_both_keys(self):
+        import threading
+
+        errors = []
+
+        def writer(key, value):
+            try:
+                for _ in range(5):
+                    probe_mod.update_sections({key: value}, path=self.path)
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+
+        threads = [
+            threading.Thread(target=writer, args=(f"key-{n}", n)) for n in range(8)
+        ]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        self.assertEqual(errors, [])
+        doc = json.loads(self.path.read_text())
+        for n in range(8):
+            self.assertIn(f"key-{n}", doc["sections"])
+
+    def test_file_cache_key_tracks_subsecond_rewrites(self):
+        probe_mod.update_sections({"nvidia-detect": True}, path=self.path)
+        first = probe_mod.load_cache_file(self.path)
+        self.assertIsNotNone(first)
+        # Rewrite within the same mtime second with different content: the
+        # (mtime_ns, size) key must miss and re-read instead of serving the
+        # stale in-process entry.
+        probe_mod.update_sections({"nvidia-detect": False, "extra-section": [1]}, path=self.path)
+        second = probe_mod.load_cache_file(self.path)
+        self.assertIs(second["sections"]["nvidia-detect"]["data"], False)
+        self.assertIn("extra-section", second["sections"])
+
+    def test_claim_fetch_single_flights_and_reclaims_stale(self):
+        target = self.path
+        try:
+            self.assertTrue(probe_mod.claim_fetch(target))
+            # A concurrent sweep sees the fresh marker and stands down.
+            self.assertFalse(probe_mod.claim_fetch(target))
+            probe_mod.clear_fetch(target)
+            self.assertTrue(probe_mod.claim_fetch(target))
+            probe_mod.clear_fetch(target)
+            # A crashed owner's stale marker is reclaimed after its TTL.
+            marker = target.with_suffix(target.suffix + ".fetching")
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            marker.write_text("dead\n", encoding="utf-8")
+            old = time.time() - (probe_mod.FETCH_MARKER_TTL_SEC + 5)
+            os.utime(marker, (old, old))
+            self.assertTrue(probe_mod.claim_fetch(target))
+        finally:
+            probe_mod.clear_fetch(target)
+
+    def test_refresh_cache_serves_existing_when_fetch_in_progress(self):
+        import os
+
+        probe_mod.update_sections({"nvidia-detect": True}, path=self.path)
+        marker = self.path.with_suffix(self.path.suffix + ".fetching")
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("other\n", encoding="utf-8")
+        try:
+            with mock.patch.object(
+                probe_mod, "collect_snapshot", side_effect=AssertionError("must not collect")
+            ):
+                target, sections = probe_mod.refresh_cache(path=self.path)
+            self.assertEqual(target, self.path)
+            self.assertIs(sections["nvidia-detect"], True)
+        finally:
+            try:
+                os.unlink(marker)
+            except OSError:
+                pass
+
+    def test_invalidate_logs_at_debug(self):
+        import logging
+
+        with self.assertLogs(probe_mod._logger, level="DEBUG") as captured:
+            probe_mod.invalidate_probe_caches(["nvidia-detect"])
+        self.assertTrue(any("invalidate_probe_caches" in line for line in captured.output))
+        self.assertFalse(any("INFO" in line.split(":")[0] for line in captured.output))
 
 
 class ProbeCachedIntegrationTests(unittest.TestCase):

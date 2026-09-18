@@ -340,6 +340,57 @@ pub fn mark_healthy(state: &BootHealthState, digest: &str, now: i64) -> BootHeal
     }
 }
 
+/// Decide whether a `bootc rollback` should be attempted for `digest` now.
+///
+/// Fires for a newly quarantined digest (preserving the once-ever success
+/// semantics: a recorded attempt with no error means the rollback already
+/// took effect, so it is not repeated), and retries on subsequent red boots
+/// when the last attempt failed (`last_rollback_error` set) and this boot
+/// counted a new failure — the per-boot dedupe in `record_failure` keeps
+/// repeat reports from one boot from spamming rollbacks.
+pub fn rollback_retry_due(
+    before: &BootHealthState,
+    updated: &BootHealthState,
+    digest: &str,
+) -> bool {
+    if !updated.quarantined.contains_key(digest) {
+        return false;
+    }
+    if updated.rollback_attempted_for == digest && updated.last_rollback_error.is_empty() {
+        return false;
+    }
+    if !before.quarantined.contains_key(digest) {
+        return true;
+    }
+    if updated.last_rollback_error.is_empty() {
+        return false;
+    }
+    let before_count = before.failures_by_digest.get(digest).copied().unwrap_or(0);
+    let updated_count = updated.failures_by_digest.get(digest).copied().unwrap_or(0);
+    updated_count > before_count
+}
+
+/// One-line quarantine summary for a boot menu entry or plymouth message.
+///
+/// Returns `None` when nothing is quarantined. Names the newest quarantine
+/// and whether the automatic rollback already ran or still needs a retry.
+pub fn quarantine_boot_message(state: &BootHealthState) -> Option<String> {
+    let record = state.newest_quarantine()?;
+    let mut message = format!(
+        "KythOS update quarantined after {} failed boots: {}",
+        record.failures, record.reason
+    );
+    if !state.last_rollback_error.is_empty() {
+        message.push_str(&format!(
+            " — automatic rollback failed: {}",
+            state.last_rollback_error
+        ));
+    } else if state.rollback_attempted_for == record.digest {
+        message.push_str(" — rolled back, rebooting into the previous deployment");
+    }
+    Some(message)
+}
+
 /// Record a one-shot rollback attempt without executing it.
 pub fn note_rollback_attempted(
     state: &BootHealthState,
@@ -544,6 +595,59 @@ mod tests {
         let cleared = clear_quarantine(&state, digest, 4);
         assert!(!cleared.failures_by_digest.contains_key(digest));
         assert!(cleared.invariants().is_empty());
+    }
+
+    #[test]
+    fn rollback_retries_after_a_failed_attempt_but_not_after_success() {
+        let digest = "sha256:aaa";
+        let mut state = BootHealthState::default();
+        for (index, boot) in ["boot-1", "boot-2"].into_iter().enumerate() {
+            state = record_failure(&state, digest, boot, "failed", 3, index as i64);
+        }
+        let before = state.clone();
+        // Third red boot quarantines: first rollback attempt is due.
+        state = record_failure(&state, digest, "boot-3", "failed", 3, 2);
+        assert!(rollback_retry_due(&before, &state, digest));
+        // A failed attempt records its error: the next red boot retries.
+        state = note_rollback_attempted(&state, digest, Some("exit 1"), 3);
+        let before = state.clone();
+        state = record_failure(&state, digest, "boot-4", "failed", 3, 4);
+        assert!(rollback_retry_due(&before, &state, digest));
+        // Duplicate reports from the same boot must not spam rollbacks.
+        let duplicate = record_failure(&state, digest, "boot-4", "failed", 3, 5);
+        assert!(!rollback_retry_due(&state, &duplicate, digest));
+        // A successful attempt is once-ever: later red boots stay quiet.
+        let state = note_rollback_attempted(&state, digest, None, 6);
+        let before = state.clone();
+        let state = record_failure(&state, digest, "boot-5", "failed", 3, 7);
+        assert!(!rollback_retry_due(&before, &state, digest));
+        // Unrelated digests never trigger.
+        assert!(!rollback_retry_due(&before, &state, "sha256:other"));
+    }
+
+    #[test]
+    fn boot_message_surfaces_quarantine_and_rollback_state() {
+        assert_eq!(quarantine_boot_message(&BootHealthState::default()), None);
+        let digest = "sha256:aaa";
+        let mut state = BootHealthState::default();
+        for (index, boot) in ["boot-1", "boot-2", "boot-3"].into_iter().enumerate() {
+            state = record_failure(&state, digest, boot, "failed", 3, index as i64);
+        }
+        let message = quarantine_boot_message(&state).unwrap();
+        assert!(
+            message.contains("quarantined after 3 failed boots"),
+            "{message}"
+        );
+        assert!(!message.contains("rollback"), "{message}");
+        let state = note_rollback_attempted(&state, digest, Some("exit 1"), 4);
+        let message = quarantine_boot_message(&state).unwrap();
+        assert!(
+            message.contains("automatic rollback failed: exit 1"),
+            "{message}"
+        );
+        let state = note_rollback_attempted(&state, digest, None, 5);
+        let message = quarantine_boot_message(&state).unwrap();
+        assert!(message.contains("rolled back"), "{message}");
     }
 
     #[test]

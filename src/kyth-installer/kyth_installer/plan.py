@@ -239,6 +239,8 @@ def _commit_new_kythos_partition(
 def _validate_resize_ntfs_target(
     config: dict,
     snapshot: StorageSnapshot | None = None,
+    *,
+    uefi_boot: bool | None = None,
 ) -> tuple[str, str, int]:
     return _pv_validate_resize_ntfs_target(
         config,
@@ -247,6 +249,7 @@ def _validate_resize_ntfs_target(
             probe_storage=_probe_storage, parent_disk=_parent_disk,
             partition_size=_partition_size_bytes,
         ),
+        uefi_boot=uefi_boot,
     )
 
 
@@ -311,6 +314,8 @@ def _prepare_ntfs_resize_target(
 def _validate_free_space_target(
     config: dict,
     snapshot: StorageSnapshot | None = None,
+    *,
+    uefi_boot: bool | None = None,
 ) -> tuple[str, int, int]:
     return _pv_validate_free_space_target(
         config,
@@ -319,6 +324,7 @@ def _validate_free_space_target(
             probe_storage=_probe_storage, parent_disk=_parent_disk,
             partition_size=_partition_size_bytes,
         ),
+        uefi_boot=uefi_boot,
     )
 
 
@@ -356,6 +362,7 @@ def validate_plan_state(
     context=None,
     *,
     snapshot: StorageSnapshot | None = None,
+    uefi_boot: bool | None = None,
 ) -> PlanReport:
     """Return the canonical read-only report through the compatibility facade."""
     return _pv_build_plan_report(
@@ -364,7 +371,7 @@ def validate_plan_state(
             probe_storage=_probe_storage, validate_install=_validate_install_target,
             validate_resize=_validate_resize_ntfs_target,
             validate_free_space=_validate_free_space_target,
-        ),
+        ), uefi_boot=uefi_boot,
     )
 
 

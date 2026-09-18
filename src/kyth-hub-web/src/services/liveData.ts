@@ -134,20 +134,12 @@ export async function runGuardianCheck(investigate = false): Promise<string> {
 export async function waitGuardianCheck(job: string): Promise<string> {
   trackJob("guardian", job);
   try {
-    let statusFailures = 0;
-    for (let i = 0; i < 180; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await invoke<InstallStatus>("guardian_check_status", { job }).catch(() => null);
-      if (!state) {
-        statusFailures += 1;
-        if (statusFailures >= 5) throw new Error("Lost contact with the Guardian check; refresh the page in a moment.");
-        continue;
-      }
-      statusFailures = 0;
-      if (state.state === "running") continue;
-      return resolveTerminalJob(state);
-    }
-    throw new Error("Guardian is still running; refresh the page in a moment.");
+    return resolveTerminalJob(await pollJobUntilSettled("guardian", job, {
+      statusCommand: "guardian_check_status",
+      limit: 180,
+      lostContactMessage: "Lost contact with the Guardian check; refresh the page in a moment.",
+      timeoutMessage: "Guardian is still running; refresh the page in a moment.",
+    }));
   } finally {
     untrackJob("guardian", job);
   }
@@ -177,14 +169,72 @@ const inFlightJobs = new Map<JobDomain, string>();
 // backend job after a refresh. Reattached on module init below.
 const INFLIGHT_STORAGE_KEY = "kyth-hub:inflight-jobs";
 
+/** Persisted slot: the job id plus when this tab tracked it. The timestamp
+ * lets a reattaching tab drop entries older than the job TTL instead of
+ * polling a backend job that is long gone. */
+interface PersistedSlot {
+  job: string;
+  ts: number;
+}
+
+/** Upper bound on reattaching a persisted slot. Covers the longest
+ * legitimate wait (hour-long update downloads) with margin; anything older
+ * is a stale entry from a tab that died without untracking. */
+const REATTACHED_JOB_TTL_MS = 2 * 60 * 60 * 1000;
+
+// Domains allowed to own a resumable job, and the backend id shape
+// (`<prefix>-<nanos>`, e.g. `gaming-install-123456789`). localStorage is
+// attacker-reachable (XSS, devtools, extensions), so reattach drops anything
+// that does not match rather than tracking a bogus id into a cancel call.
+const JOB_DOMAINS: readonly JobDomain[] = [
+  "guardian",
+  "privileged",
+  "hub-action",
+  "update",
+  "job",
+  "install",
+  "security",
+  "gaming",
+];
+const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$/;
+
+function isValidPersistedJob(domain: string, job: unknown): job is string {
+  return (
+    (JOB_DOMAINS as readonly string[]).includes(domain) &&
+    typeof job === "string" &&
+    job.length > 0 &&
+    job.length <= 128 &&
+    JOB_ID_PATTERN.test(job)
+  );
+}
+
 function persistInFlightJobs(): void {
   try {
     if (typeof localStorage === "undefined") return;
     if (inFlightJobs.size === 0) localStorage.removeItem(INFLIGHT_STORAGE_KEY);
-    else localStorage.setItem(INFLIGHT_STORAGE_KEY, JSON.stringify(Object.fromEntries(inFlightJobs)));
+    else {
+      const slots: Record<string, PersistedSlot> = {};
+      for (const [domain, job] of inFlightJobs) slots[domain] = { job, ts: Date.now() };
+      localStorage.setItem(INFLIGHT_STORAGE_KEY, JSON.stringify(slots));
+    }
   } catch {
     // Storage full or unavailable (private mode): in-memory tracking still works.
   }
+}
+
+/** Normalize one persisted entry. Accepts the current `{job, ts}` object
+ * and the legacy plain-string id (treated as freshly tracked) so older
+ * Hub builds' entries still reattach instead of stranding a Cancel. */
+function normalizePersistedSlot(domain: string, entry: unknown): string | null {
+  if (typeof entry === "string") {
+    return isValidPersistedJob(domain, entry) ? entry : null;
+  }
+  if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
+  const { job, ts } = entry as { job?: unknown; ts?: unknown };
+  if (!isValidPersistedJob(domain, job)) return null;
+  if (typeof ts !== "number" || !Number.isFinite(ts)) return null;
+  if (Date.now() - ts > REATTACHED_JOB_TTL_MS) return null;
+  return job;
 }
 
 function reattachInFlightJobs(): void {
@@ -192,16 +242,87 @@ function reattachInFlightJobs(): void {
     if (typeof localStorage === "undefined") return;
     const raw = localStorage.getItem(INFLIGHT_STORAGE_KEY);
     if (!raw) return;
-    const parsed = JSON.parse(raw) as Record<string, string>;
-    for (const [domain, job] of Object.entries(parsed)) {
-      if (typeof job === "string" && job) inFlightJobs.set(domain as JobDomain, job);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+    let dropped = false;
+    for (const [domain, entry] of Object.entries(parsed)) {
+      const job = normalizePersistedSlot(domain, entry);
+      if (job == null) {
+        dropped = true;
+        continue;
+      }
+      inFlightJobs.set(domain as JobDomain, job);
     }
+    // Drop mismatches from storage too so a poisoned entry cannot linger.
+    if (dropped) persistInFlightJobs();
   } catch {
     // Corrupt entry: start clean rather than tracking a bogus job id.
   }
 }
 
 reattachInFlightJobs();
+
+/** Status command per domain for the one-shot reattach validation below. */
+const DOMAIN_STATUS_COMMAND: Record<JobDomain, string> = {
+  guardian: "guardian_check_status",
+  privileged: "privileged_action_status",
+  "hub-action": "hub_action_status",
+  update: "update_job_status",
+  job: "job_status",
+  install: "install_status",
+  security: "security_job_status",
+  gaming: "gaming_job_status",
+};
+
+/** Validate each reattached id with a single status probe before it is
+ * trusted: a job the backend no longer knows (restart, eviction, TTL) is
+ * dropped instead of tracked into a Cancel that can never land. Runs once
+ * at module init; live launches use trackJob directly and need no probe. */
+async function validateReattachedJobs(): Promise<void> {
+  if (!inTauriShell()) return;
+  const entries = [...inFlightJobs];
+  if (entries.length === 0) return;
+  await Promise.all(entries.map(async ([domain, job]) => {
+    try {
+      const state = await invoke<InstallStatus>(DOMAIN_STATUS_COMMAND[domain], { job });
+      if (!state || state.state === "unknown") untrackJob(domain, job);
+    } catch {
+      // Probe itself failed (backend restarting): keep the slot so Cancel
+      // still has a chance once the backend is back.
+    }
+  }));
+}
+
+void validateReattachedJobs();
+
+/** Cross-tab single-flight: another Hub tab tracking or clearing a domain
+ * slot adopts or releases it here, so two tabs never poll (or cancel) the
+ * same backend job independently and a Cancel in one tab stops the other
+ * tab's poller on its next tick (see pollJobUntilSettled). */
+function handleInflightStorageEvent(event: StorageEvent): void {
+  try {
+    if (event.key !== INFLIGHT_STORAGE_KEY) return;
+    const parsed = (event.newValue ? JSON.parse(event.newValue) : {}) as Record<string, unknown>;
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
+    const incoming = new Map<JobDomain, string>();
+    for (const [domain, entry] of Object.entries(parsed)) {
+      const job = normalizePersistedSlot(domain, entry);
+      if (job != null) incoming.set(domain as JobDomain, job);
+    }
+    for (const [domain, job] of incoming) {
+      if (inFlightJobs.get(domain) !== job) inFlightJobs.set(domain, job);
+    }
+    for (const domain of [...inFlightJobs.keys()]) {
+      if (!incoming.has(domain)) inFlightJobs.delete(domain);
+    }
+  } catch {
+    // Corrupt cross-tab payload: keep local tracking untouched.
+  }
+}
+
+if (typeof window !== "undefined" && typeof window.addEventListener === "function") {
+  window.addEventListener("storage", handleInflightStorageEvent);
+}
 
 /** Current tracked job for a domain, if any (including reattached ids). */
 export function getInFlightJob(domain: JobDomain): string | undefined {
@@ -220,6 +341,74 @@ function trackJob(domain: JobDomain, job: string): void {
 function untrackJob(domain: JobDomain, job: string): void {
   if (inFlightJobs.get(domain) === job) inFlightJobs.delete(domain);
   persistInFlightJobs();
+}
+
+interface DomainPollOptions {
+  statusCommand: string;
+  /** Max status probes before giving up. */
+  limit: number;
+  /** Probe interval for the first 30s (default 500ms). */
+  baseIntervalMs?: number;
+  /** Consecutive empty probes before lost-contact (default 5). */
+  maxNulls?: number;
+  lostContactMessage: string;
+  timeoutMessage: string;
+}
+
+/** One poller per domain: concurrent waiters for the same job share a
+ * single promise (and therefore a single probe cadence) instead of each
+ * opening their own 500ms loop against the backend. A different job id in
+ * the same domain is a misuse bug and is rejected like trackJob rejects it.
+ *
+ * Backoff: 500ms probes for the first 30s, then 2s — long upgrades and
+ * installs do not need sub-second resolution for an hour. Slower-based
+ * pollers (security/gaming at 3s) keep their cadence throughout.
+ *
+ * Storage-event subscribed: every tick re-checks the tracked slot, so a
+ * Cancel (or untrack) from another tab stops this tab's poll on its next
+ * tick instead of polling a dead job to the limit. */
+const activeDomainPollers = new Map<JobDomain, { job: string; promise: Promise<InstallStatus> }>();
+
+function pollJobUntilSettled(
+  domain: JobDomain,
+  job: string,
+  options: DomainPollOptions,
+): Promise<InstallStatus> {
+  const active = activeDomainPollers.get(domain);
+  if (active) {
+    if (active.job === job) return active.promise;
+    throw new Error("Another action is already running; wait for it to finish or cancel it first.");
+  }
+  const baseInterval = options.baseIntervalMs ?? 500;
+  const maxNulls = options.maxNulls ?? 5;
+  const startedAt = Date.now();
+  const promise = (async (): Promise<InstallStatus> => {
+    let nulls = 0;
+    for (let i = 0; i < options.limit; i += 1) {
+      const elapsed = Date.now() - startedAt;
+      await new Promise((resolve) => window.setTimeout(resolve, elapsed > 30_000 ? Math.max(baseInterval, 2000) : baseInterval));
+      // Another tab cleared or replaced this domain's slot: stop polling.
+      if (inFlightJobs.get(domain) !== job) {
+        throw new Error("This action is no longer tracked here; it may have been cancelled in another tab.");
+      }
+      const state = await invoke<InstallStatus>(options.statusCommand, { job }).catch(() => null);
+      if (!state) {
+        nulls += 1;
+        if (nulls >= maxNulls) throw new Error(options.lostContactMessage);
+        continue;
+      }
+      nulls = 0;
+      if (state.state === "running") continue;
+      return state;
+    }
+    throw new Error(options.timeoutMessage);
+  })();
+  activeDomainPollers.set(domain, { job, promise });
+  const release = (): void => {
+    if (activeDomainPollers.get(domain)?.promise === promise) activeDomainPollers.delete(domain);
+  };
+  promise.then(release, release);
+  return promise;
 }
 
 /** Cancel a running backend job. Each domain owns a status/cancel command
@@ -290,20 +479,12 @@ export async function runPrivilegedAction(operation: string, payload: Privileged
   const job = launch.job;
   trackJob("privileged", job);
   try {
-    let statusFailures = 0;
-    for (let i = 0; i < 1800; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await invoke<InstallStatus>("privileged_action_status", { job }).catch(() => null);
-      if (!state) {
-        statusFailures += 1;
-        if (statusFailures >= 5) throw new Error("Lost contact with the privileged operation; check the system status shortly.");
-        continue;
-      }
-      statusFailures = 0;
-      if (state.state === "running") continue;
-      return resolveTerminalJob(state);
-    }
-    throw new Error("Privileged operation is still running; check the system status shortly.");
+    return resolveTerminalJob(await pollJobUntilSettled("privileged", job, {
+      statusCommand: "privileged_action_status",
+      limit: 1800,
+      lostContactMessage: "Lost contact with the privileged operation; check the system status shortly.",
+      timeoutMessage: "Privileged operation is still running; check the system status shortly.",
+    }));
   } finally {
     untrackJob("privileged", job);
   }
@@ -702,20 +883,12 @@ export async function fetchJustList(): Promise<JustRecipe[] | null> {
 async function waitJustJob(job: string): Promise<string> {
   trackJob("hub-action", job);
   try {
-    let statusFailures = 0;
-    for (let i = 0; i < 1800; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await invoke<InstallStatus>("hub_action_status", { job }).catch(() => null);
-      if (!state) {
-        statusFailures += 1;
-        if (statusFailures >= 5) throw new Error("Lost contact with this action; check the status here again in a moment.");
-        continue;
-      }
-      statusFailures = 0;
-      if (state.state === "running") continue;
-      return resolveTerminalJob(state);
-    }
-    throw new Error("This action is still running; check the status here again in a moment.");
+    return resolveTerminalJob(await pollJobUntilSettled("hub-action", job, {
+      statusCommand: "hub_action_status",
+      limit: 1800,
+      lostContactMessage: "Lost contact with this action; check the status here again in a moment.",
+      timeoutMessage: "This action is still running; check the status here again in a moment.",
+    }));
   } finally {
     untrackJob("hub-action", job);
   }
@@ -732,20 +905,12 @@ async function waitUpdateJob(job: string): Promise<string> {
   // Upgrade downloads can legitimately take an hour on a slow connection.
   trackJob("update", job);
   try {
-    let statusFailures = 0;
-    for (let i = 0; i < 7200; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await invoke<InstallStatus>("update_job_status", { job }).catch(() => null);
-      if (!state) {
-        statusFailures += 1;
-        if (statusFailures >= 5) throw new Error("Lost contact with the update; refresh the Updates page in a moment.");
-        continue;
-      }
-      statusFailures = 0;
-      if (state.state === "running") continue;
-      return resolveTerminalJob(state);
-    }
-    throw new Error("The update is still running; refresh the Updates page in a moment.");
+    return resolveTerminalJob(await pollJobUntilSettled("update", job, {
+      statusCommand: "update_job_status",
+      limit: 7200,
+      lostContactMessage: "Lost contact with the update; refresh the Updates page in a moment.",
+      timeoutMessage: "The update is still running; refresh the Updates page in a moment.",
+    }));
   } finally {
     untrackJob("update", job);
   }
@@ -891,21 +1056,15 @@ export async function fetchCloudSyncRemotes(): Promise<CloudSyncRemote[] | null>
 async function waitHubJob(job: string, limit = 7200): Promise<string> {
   trackJob("job", job);
   try {
-    let nulls = 0;
-    for (let i = 0; i < limit; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await invoke<InstallStatus>("job_status", { job }).catch(() => null);
-      if (!state) {
-        nulls += 1;
-        if (nulls >= 10) throw new Error("Lost contact with this action; check back in a moment.");
-        continue;
-      }
-      nulls = 0;
-      if (state.state === "running") continue;
-      if (state.state === "unknown") throw new Error("The background job is no longer known; it may have been cleared by a restart. Check back in a moment.");
-      return resolveTerminalJob(state);
-    }
-    throw new Error("This action is still running; check back in a moment.");
+    const state = await pollJobUntilSettled("job", job, {
+      statusCommand: "job_status",
+      limit,
+      maxNulls: 10,
+      lostContactMessage: "Lost contact with this action; check back in a moment.",
+      timeoutMessage: "This action is still running; check back in a moment.",
+    });
+    if (state.state === "unknown") throw new Error("The background job is no longer known; it may have been cleared by a restart. Check back in a moment.");
+    return resolveTerminalJob(state);
   } finally {
     untrackJob("job", job);
   }
@@ -1293,21 +1452,19 @@ export async function uninstallFlatpak(id: string): Promise<string> {
   const launch = await invoke<InstallActionLaunch>("uninstall_flatpak", { appId: id });
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Uninstall did not start.");
   const job = launch.job;
-  let statusFailures = 0;
-  for (let i = 0; i < 120; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    const state = await fetchInstallStatus(job);
-    if (!state) {
-      statusFailures += 1;
-      if (statusFailures >= 5) throw new Error("Lost contact with the uninstall; refresh Flatpak in a moment.");
-      continue;
-    }
-    statusFailures = 0;
-    if (state.state === "running") continue;
+  trackJob("install", job);
+  try {
+    const state = await pollJobUntilSettled("install", job, {
+      statusCommand: "install_status",
+      limit: 120,
+      lostContactMessage: "Lost contact with the uninstall; refresh Flatpak in a moment.",
+      timeoutMessage: "Uninstall is still running; refresh Flatpak in a moment.",
+    });
     if (state.state === "complete") return state.detail;
     throw new Error(state.detail);
+  } finally {
+    untrackJob("install", job);
   }
-  throw new Error("Uninstall is still running; refresh Flatpak in a moment.");
 }
 export async function launchAppImage(path: string): Promise<string> { return await invoke<string>("launch_appimage", { path }); }
 export async function updateFlatpaks(): Promise<string> {
@@ -1317,24 +1474,22 @@ export async function updateFlatpaks(): Promise<string> {
   // privileged system update with a 900s daemon timeout, so a large or
   // multi-app update can legitimately run for many minutes — mirror
   // waitUpdateJob's hour-long bound rather than giving up early.
-  let statusFailures = 0;
-  for (let i = 0; i < 7200; i += 1) {
-    await new Promise((resolve) => window.setTimeout(resolve, 500));
-    const state = await fetchInstallStatus(launch.job);
-    if (!state) {
-      statusFailures += 1;
-      if (statusFailures >= 5) throw new Error("Lost contact with the app update; refresh status in a moment.");
-      continue;
-    }
-    statusFailures = 0;
-    if (state.state === "running") continue;
+  trackJob("install", launch.job);
+  try {
+    const state = await pollJobUntilSettled("install", launch.job, {
+      statusCommand: "install_status",
+      limit: 7200,
+      lostContactMessage: "Lost contact with the app update; refresh status in a moment.",
+      timeoutMessage: "App updates are still running. Refresh status in a moment.",
+    });
     if (state.state === "complete") {
       invalidateSharedReads("updates-snapshot", "installed-flatpaks", "pending-updates", "probe:flatpak-apps", "probe:flatpak-updates");
       return state.detail;
     }
     throw new Error(state.detail);
+  } finally {
+    untrackJob("install", launch.job);
   }
-  throw new Error("App updates are still running. Refresh status in a moment.");
 }
 export async function installFlatpak(appId: string): Promise<string> {
   const launch = await invoke<InstallActionLaunch>("install_flatpak", { appId });
@@ -1353,16 +1508,23 @@ export async function waitInstallJob(job: string, limit = 120): Promise<string> 
   trackJob("install", job);
   let settled = false;
   try {
-    for (let i = 0; i < limit; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 500));
-      const state = await fetchInstallStatus(job);
-      if (!state || state.state === "running") continue;
-      settled = true;
-      return resolveTerminalJob(state);
-    }
+    // Null probes are tolerated to the limit here (same as before): the UI
+    // wait may expire while the backend job still runs.
+    const state = await pollJobUntilSettled("install", job, {
+      statusCommand: "install_status",
+      limit,
+      maxNulls: Number.POSITIVE_INFINITY,
+      lostContactMessage: "Lost contact with the install; refresh Apps in a moment.",
+      timeoutMessage: "Installation is still running; refresh Apps in a moment.",
+    });
+    settled = true;
+    return resolveTerminalJob(state);
+  } catch (error) {
     // The UI wait expired but the backend job is still running: leave it
     // tracked so Cancel still reaches it and a later status check reattaches.
-    throw new Error("Installation is still running; refresh Apps in a moment.");
+    if (error instanceof Error && error.message === "Installation is still running; refresh Apps in a moment.") throw error;
+    settled = true;
+    throw error;
   } finally {
     if (settled) untrackJob("install", job);
   }
@@ -1391,21 +1553,16 @@ export async function fetchSecHostTools(): Promise<SecHostTool[] | null> {
 async function pollSecurityJob(job: string, maxIterations: number): Promise<string> {
   trackJob("security", job);
   try {
-    let nulls = 0;
-    for (let i = 0; i < maxIterations; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 3000));
-      const state = await invoke<InstallStatus>("security_job_status", { job }).catch(() => null);
-      if (!state) {
-        nulls += 1;
-        if (nulls >= 10) throw new Error("Lost contact with the security job; check back in a moment.");
-        continue;
-      }
-      nulls = 0;
-      if (state.state === "running") continue;
-      if (state.state === "unknown") throw new Error("The security job is no longer known; it may have been cleared by a restart. Check back in a moment.");
-      return resolveTerminalJob(state);
-    }
-    throw new Error("Still running; check back in a moment.");
+    const state = await pollJobUntilSettled("security", job, {
+      statusCommand: "security_job_status",
+      limit: maxIterations,
+      baseIntervalMs: 3000,
+      maxNulls: 10,
+      lostContactMessage: "Lost contact with the security job; check back in a moment.",
+      timeoutMessage: "Still running; check back in a moment.",
+    });
+    if (state.state === "unknown") throw new Error("The security job is no longer known; it may have been cleared by a restart. Check back in a moment.");
+    return resolveTerminalJob(state);
   } finally {
     untrackJob("security", job);
   }
@@ -1456,21 +1613,16 @@ export async function fetchGamingTools(): Promise<GamingTool[] | null> {
 async function pollGamingJob(job: string, maxIterations: number): Promise<string> {
   trackJob("gaming", job);
   try {
-    let nulls = 0;
-    for (let i = 0; i < maxIterations; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 3000));
-      const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
-      if (!state) {
-        nulls += 1;
-        if (nulls >= 10) throw new Error("Lost contact with the gaming job; check back in a moment.");
-        continue;
-      }
-      nulls = 0;
-      if (state.state === "running") continue;
-      if (state.state === "unknown") throw new Error("The gaming job is no longer known; it may have been cleared by a restart. Check back in a moment.");
-      return resolveTerminalJob(state);
-    }
-    throw new Error("Still running; check back in a moment.");
+    const state = await pollJobUntilSettled("gaming", job, {
+      statusCommand: "gaming_job_status",
+      limit: maxIterations,
+      baseIntervalMs: 3000,
+      maxNulls: 10,
+      lostContactMessage: "Lost contact with the gaming job; check back in a moment.",
+      timeoutMessage: "Still running; check back in a moment.",
+    });
+    if (state.state === "unknown") throw new Error("The gaming job is no longer known; it may have been cleared by a restart. Check back in a moment.");
+    return resolveTerminalJob(state);
   } finally {
     untrackJob("gaming", job);
   }
@@ -1512,21 +1664,16 @@ export async function setScxScheduler(scheduler: "rusty" | "stop"): Promise<stri
   const job = await invoke<string>("scx_set_scheduler", { scheduler });
   trackJob("gaming", job);
   try {
-    let nulls = 0;
-    for (let i = 0; i < 20; i += 1) {
-      await new Promise((resolve) => window.setTimeout(resolve, 1500));
-      const state = await invoke<InstallStatus>("gaming_job_status", { job }).catch(() => null);
-      if (!state) {
-        nulls += 1;
-        if (nulls >= 10) throw new Error("Lost contact with the scheduler change; check back in a moment.");
-        continue;
-      }
-      nulls = 0;
-      if (state.state === "running") continue;
-      if (state.state === "unknown") throw new Error("The scheduler change is no longer known; it may have been cleared by a restart. Check back in a moment.");
-      return resolveTerminalJob(state);
-    }
-    throw new Error("Still running; check back in a moment.");
+    const state = await pollJobUntilSettled("gaming", job, {
+      statusCommand: "gaming_job_status",
+      limit: 20,
+      baseIntervalMs: 1500,
+      maxNulls: 10,
+      lostContactMessage: "Lost contact with the scheduler change; check back in a moment.",
+      timeoutMessage: "Still running; check back in a moment.",
+    });
+    if (state.state === "unknown") throw new Error("The scheduler change is no longer known; it may have been cleared by a restart. Check back in a moment.");
+    return resolveTerminalJob(state);
   } finally {
     untrackJob("gaming", job);
   }

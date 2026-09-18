@@ -56,7 +56,15 @@ class InstallerEntrypointTests(unittest.TestCase):
         self.assertIn('name = "kyth-installerd"', cargo)
         self.assertIn("kyth-installerd.service", build)
         self.assertIn("/usr/bin/kyth-installerd", (ROOT / "installer" / "Containerfile").read_text())
-        self.assertIn("ConditionPathExists=/run/kyth-installer/session-token", unit)
+        # A missing session token must fail visibly (daemon token validation
+        # exits nonzero -> Restart=on-failure loop), never skip silently via
+        # a path condition while the WebUI waits on the socket forever.
+        conditions = [
+            line for line in unit.splitlines()
+            if line.startswith("ConditionPathExists=") and "session-token" in line
+        ]
+        self.assertEqual(conditions, [])
+        self.assertIn("Restart=on-failure", unit)
         self.assertIn("User=root", unit)
         self.assertIn("Group=root", unit)
         self.assertIn("--socket-group liveuser", unit)
