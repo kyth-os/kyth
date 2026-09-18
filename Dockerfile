@@ -339,6 +339,7 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
     --mount=type=bind,source=build_files/scripts/lib/fedora-kernel.sh,target=/ctx/lib/fedora-kernel.sh \
     --mount=type=bind,source=build_files/scripts/lib/find-kver.sh,target=/ctx/lib/find-kver.sh \
     --mount=type=bind,source=build_files/scripts/lib/dracut-retry.sh,target=/ctx/lib/dracut-retry.sh \
+    --mount=type=bind,source=build_files/scripts/lib/dracut-modules.sh,target=/ctx/lib/dracut-modules.sh \
     --mount=type=bind,source=build_files/scripts/lib/check-multilib.sh,target=/ctx/lib/check-multilib.sh \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=dnf-cache,sharing=locked,target=/var/cache/libdnf5 \

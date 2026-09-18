@@ -285,6 +285,23 @@ class BuildAssemblyContracts(unittest.TestCase):
         script = (BUILD_FILES / "scripts/kernel-repair.sh").read_text(encoding="utf-8")
         self.assertIn('find /usr/lib/kernel -name "vmlinuz-${KVER}"', script)
 
+    def test_cherry_pick_run_steps_mount_every_sourced_lib(self):
+        # RUN steps that bind individual files (not all of build_files) must
+        # mount every lib/ helper the invoked script sources, or the build
+        # dies mid-image (kernel-repair.sh + missing dracut-modules.sh).
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        sourced = re.findall(
+            r'source\s+"?\$\{SCRIPT_DIR\}/(lib/[^"\s]+)"?',
+            (BUILD_FILES / "scripts/kernel-repair.sh").read_text(encoding="utf-8"),
+        )
+        self.assertTrue(sourced)
+        for lib in sourced:
+            self.assertIn(
+                f"source=build_files/scripts/{lib},target=/ctx/{lib}",
+                dockerfile,
+                f"RUN step invoking kernel-repair.sh must bind-mount {lib}",
+            )
+
     def test_native_installer_is_the_only_installed_entry_point(self):
         self.assertFalse((BUILD_FILES / "kyth-install.sh").exists())
         self.assertFalse((BUILD_FILES / "kyth-manual-install.sh").exists())
