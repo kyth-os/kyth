@@ -12,7 +12,7 @@ dist/
 # Virtual environments
 venv/
 .venv/
-.venv-quality/
+.venv-quality
 env/
 .ENV/
 
