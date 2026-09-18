@@ -823,8 +823,10 @@ class InstallerPlanTests(unittest.TestCase):
                 }, uefi_boot=False)
 
     def test_validate_free_space_rejects_stale_region_no_longer_free(self):
+        esp = {"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"), \
+             patch.object(self.plan, "list_partitions", return_value=[esp]), \
              patch.object(self.plan, "list_free_space", return_value=[]):
             with self.assertRaisesRegex(RuntimeError, "no longer available"):
                 self.plan._validate_free_space_target({
@@ -860,8 +862,10 @@ class InstallerPlanTests(unittest.TestCase):
         self.assertEqual((disk_name, start, end), ("/dev/nvme0n1", 40 * 1024**3, 80 * 1024**3))
 
     def test_validate_free_space_rejects_ui_supplied_subregion(self):
+        esp = {"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"), \
+             patch.object(self.plan, "list_partitions", return_value=[esp]), \
              patch.object(self.plan, "list_free_space", return_value=[
                  {"start_bytes": 40 * 1024**3, "end_bytes": 100 * 1024**3},
              ]):
