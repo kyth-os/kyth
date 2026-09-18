@@ -376,11 +376,18 @@ pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, Stri
                     let current = !mounts.is_empty();
                     let in_use = !device.children.is_empty();
                     let read_only = device.ro.unwrap_or(false);
-                    let alongside_candidate =
+                    // Replace-flow eligibility: big enough, not the ESP, not
+                    // mounted, with no stacked device on top, and writable.
+                    // Windows filesystems are never replace candidates — the
+                    // resize flow owns NTFS via ntfs_resize_candidate below,
+                    // so "Replace a partition" cannot silently offer a
+                    // Windows partition for destruction.
+                    let replaceable =
                         size_bytes >= MIN_KYTHOS_BYTES && !efi && !current && !in_use && !read_only;
-                    let ntfs_resize_candidate = alongside_candidate
-                        && matches!(fstype.as_str(), "ntfs" | "ntfs3")
-                        && size_bytes >= NTFS_MIN_BYTES;
+                    let is_windows = matches!(fstype.as_str(), "ntfs" | "ntfs3");
+                    let alongside_candidate = replaceable && !is_windows;
+                    let ntfs_resize_candidate =
+                        replaceable && is_windows && size_bytes >= NTFS_MIN_BYTES;
                     partitions.push(PartitionRecord {
                         name,
                         size_bytes,
@@ -724,6 +731,20 @@ mod tests {
             .mountpoints
             .iter()
             .any(|mount| mount == "/mnt"));
+    }
+
+    #[test]
+    fn windows_partitions_are_never_alongside_candidates() {
+        let snapshot = r#"{"blockdevices":[{"name":"/dev/sda","type":"disk","children":[
+            {"name":"/dev/sda1","type":"part","size":137438953472,"fstype":"ntfs","parttype":"ebd0a0a2-b9e5-4433-87c0-68b6b72699c7","mountpoints":[]},
+            {"name":"/dev/sda2","type":"part","size":137438953472,"fstype":"ext4","mountpoints":[]}
+        ]}]}"#;
+        let partitions = parse_partitions(snapshot).expect("snapshot should parse");
+        assert_eq!(partitions.len(), 2);
+        assert!(!partitions[0].alongside_candidate);
+        assert!(partitions[0].ntfs_resize_candidate);
+        assert!(partitions[1].alongside_candidate);
+        assert!(!partitions[1].ntfs_resize_candidate);
     }
 
     #[test]

@@ -39,6 +39,13 @@ export function invalidateSharedReads(...keys: string[]): void {
   for (const key of keys) sharedReads.delete(key);
 }
 
+/** Drop every cached shared read. Used on reconnect (see OfflineBanner):
+ * TTLs served while offline go stale, and the banner promises actions work
+ * without a manual refresh — so the next read after `online` must be live. */
+export function invalidateAllSharedReads(): void {
+  sharedReads.clear();
+}
+
 // Real backend data, read through the Tauri shell's bridge commands (see
 // src-tauri/src/main.rs, which calls straight into the kyth-shared Rust
 // crate — src/kyth-shared-rs — no subprocess). Every read here returns
@@ -161,7 +168,7 @@ function resolveTerminalJob(state: InstallStatus): string {
  * concurrent jobs in one domain is a misuse bug, not a supported state:
  * the second launch is rejected with an already-running error while the
  * first keeps the slot. */
-export type JobDomain = "guardian" | "privileged" | "hub-action" | "update" | "job" | "install" | "security" | "gaming";
+export type JobDomain = "guardian" | "privileged" | "hub-action" | "update" | "job" | "install" | "security" | "gaming" | "vpn";
 
 const inFlightJobs = new Map<JobDomain, string>();
 
@@ -195,6 +202,7 @@ const JOB_DOMAINS: readonly JobDomain[] = [
   "install",
   "security",
   "gaming",
+  "vpn",
 ];
 const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$/;
 
@@ -262,7 +270,9 @@ function reattachInFlightJobs(): void {
 
 reattachInFlightJobs();
 
-/** Status command per domain for the one-shot reattach validation below. */
+/** Status command per domain for the one-shot reattach validation below.
+ * vpn_status returns the shared InstallStatus shape (unknown for a job the
+ * backend no longer knows), so the vpn slot validates like every other. */
 const DOMAIN_STATUS_COMMAND: Record<JobDomain, string> = {
   guardian: "guardian_check_status",
   privileged: "privileged_action_status",
@@ -272,6 +282,7 @@ const DOMAIN_STATUS_COMMAND: Record<JobDomain, string> = {
   install: "install_status",
   security: "security_job_status",
   gaming: "gaming_job_status",
+  vpn: "vpn_status",
 };
 
 /** Validate each reattached id with a single status probe before it is
@@ -1155,7 +1166,13 @@ export async function startVpnConnection(profile: { gateway: string; protocol: s
   // The Tauri binding is snake_case (`os_emulation`): map the camelCase
   // profile field at the boundary or the invoke fails to deserialize.
   const { gateway, protocol, osEmulation, username, password } = profile;
-  return await invoke<string>("vpn_connect", { gateway, protocol, os_emulation: osEmulation, username, password });
+  const job = await invoke<string>("vpn_connect", { gateway, protocol, os_emulation: osEmulation, username, password });
+  // Tracked like every other cancellable job: Disconnect/Cancel keeps reaching
+  // the real backend job after a reload via the reattached slot, and a second
+  // connect is rejected while one owns the domain. Untracked when the
+  // section's poller observes a terminal state (see untrackVpnJob).
+  trackJob("vpn", job);
+  return job;
 }
 export interface VpnConnectionStatus { id: string; state: "connecting" | "authentication_required" | "connected" | "disconnected" | "failed" | "complete" | "failed_lockdown" | "failed_lockdown_open" | "connected_firewall_open" | "complete_firewall_open" | "unknown"; detail: string; }
 export async function fetchVpnConnectionStatus(job: string): Promise<VpnConnectionStatus | null> {
@@ -1164,7 +1181,29 @@ export async function fetchVpnConnectionStatus(job: string): Promise<VpnConnecti
 }
 export async function disconnectVpnConnection(job: string): Promise<string> {
   if (!inTauriShell()) throw new Error("VPN connections require the installed Kyth Hub.");
-  return await invoke<string>("vpn_disconnect", { job });
+  try {
+    return await invoke<string>("vpn_disconnect", { job });
+  } finally {
+    untrackJob("vpn", job);
+  }
+}
+/** Release the tracked VPN job without disconnecting. Called when the
+ * section poller observes a terminally-dead state (failed/disconnected):
+ * the tunnel is gone, so Cancel has nothing to reach. Live states —
+ * connecting/authentication_required/connected — stay tracked so Disconnect
+ * keeps working, including after a reload via the reattached slot. */
+export function untrackVpnJob(job: string): void {
+  untrackJob("vpn", job);
+}
+/** Cancel/Disconnect entry point for the tracked VPN job. vpn_disconnect
+ * returns a plain string (not the InstallStatus shape cancelBackendJob
+ * expects), so the vpn domain resolves its slot here instead of through
+ * cancelTracked. Returns "Nothing to cancel." with no tracked job, matching
+ * every other domain's cancel contract. */
+export async function cancelVpnConnection(): Promise<string> {
+  const job = inFlightJobs.get("vpn");
+  if (!job) return "Nothing to cancel.";
+  return disconnectVpnConnection(job);
 }
 export interface VpnSavedProfile { gateway: string; protocol: string; os: string; }
 export interface VpnProtectionStatus { vpn_fail_closed: boolean; vpn_dns_exclusive: boolean; firewall_zone: string; }

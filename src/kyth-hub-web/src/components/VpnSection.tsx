@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { disconnectVpnConnection, fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnConnectionStatus, fetchVpnProtectionStatus, fetchVpnSavedProfile, openVpnApp, setVpnProtection, startVpnConnection, type NetworkSummary, type VpnProtectionStatus, type VpnSavedProfile } from "../services/liveData";
+import { disconnectVpnConnection, fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnConnectionStatus, fetchVpnProtectionStatus, fetchVpnSavedProfile, getInFlightJob, openVpnApp, setVpnProtection, startVpnConnection, untrackVpnJob, type NetworkSummary, type VpnProtectionStatus, type VpnSavedProfile } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -18,7 +18,10 @@ export function VpnSection({ section }: { section: HubSection }) {
   const [osEmulation, setOsEmulation] = useState("win");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [job, setJob] = useState<string | null>(null);
+  // The connect job is tracked in the shared in-flight registry, so a reload
+  // reattaches here: Cancel/Disconnect keeps reaching the real backend job
+  // even though component state was lost.
+  const [job, setJob] = useState<string | null>(() => getInFlightJob("vpn") ?? null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [protection, setProtection] = useState<VpnProtectionStatus | null>(null);
   const { status, busy, run } = useSectionAction("hub-action");
@@ -53,6 +56,13 @@ export function VpnSection({ section }: { section: HubSection }) {
       const current = await fetchVpnConnectionStatus(job);
       if (!cancelled && current) {
         setJobStatus(current.detail);
+        // The backend no longer knows this job (restart, eviction): release
+        // the slot instead of polling a dead id to the cap.
+        if (current.state === "unknown") {
+          untrackVpnJob(job);
+          if (!cancelled) setJobStatus("The VPN job is no longer known; it may have been cleared by a restart.");
+          return;
+        }
         // Terminal state reached: stop polling rather than holding the 1s
         // interval open forever. Lockdown states are terminal too: the
         // tunnel is gone and the firewall verdict (blocked vs open) is final.
@@ -60,6 +70,12 @@ export function VpnSection({ section }: { section: HubSection }) {
           if (current.state === "connected") setSummary((value) => value ? { ...value, vpnConnected: true, vpnName: gateway } : value);
           if (current.state === "failed_lockdown_open" || current.state === "connected_firewall_open" || current.state === "complete_firewall_open") {
             setJobStatus(`Action needed: ${current.detail}`);
+          }
+          // Dead tunnels release the tracked slot; live ones (connected,
+          // connected_firewall_open) stay tracked so Disconnect keeps
+          // working — including after a reload.
+          if (current.state !== "connected" && current.state !== "connected_firewall_open") {
+            untrackVpnJob(job);
           }
           return;
         }
@@ -126,12 +142,17 @@ export function VpnSection({ section }: { section: HubSection }) {
           <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username (optional)" style={fieldStyle} />
           <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password (optional)" style={fieldStyle} />
           <ActionButton label={busy === "connect" ? "Starting…" : "Connect"} disabled={busy !== null || !gateway.trim()} onClick={() => run("connect", "Starting native VPN connection…", async () => {
+            const active = getInFlightJob("vpn");
+            if (active && active !== job) {
+              setJob(active);
+              return "A VPN connection is already active; disconnect it before starting another.";
+            }
             const nextJob = await startVpnConnection({ gateway: gateway.trim(), protocol, osEmulation, username: username.trim(), password });
             setJob(nextJob);
             setPassword("");
             return "VPN connection started. Complete SAML sign-in if the secure window appears.";
           })} />
-          {job && <ActionButton label="Disconnect" disabled={busy !== null} onClick={() => run("disconnect", "Disconnecting VPN…", async () => { const detail = await disconnectVpnConnection(job); setJobStatus(detail); setSummary((value) => value ? { ...value, vpnConnected: false, vpnName: "" } : value); return detail; })} />}
+          {job && <ActionButton label="Disconnect" disabled={busy !== null} onClick={() => run("disconnect", "Disconnecting VPN…", async () => { try { const detail = await disconnectVpnConnection(job); setJobStatus(detail); setSummary((value) => value ? { ...value, vpnConnected: false, vpnName: "" } : value); return detail; } finally { setJob(null); } })} />}
         </div>
         <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
           VPN profiles, openconnect, and SAML sign-in are handled by native Rust commands. Credentials and authentication tokens are never shown in status text.
