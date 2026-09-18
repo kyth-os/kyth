@@ -65,6 +65,11 @@ pub struct SaveCloudConfig {
     pub repo: String,
     pub remote: String,
     pub on_battery: bool,
+    /// Path to a file holding the restic repository password. Passed as
+    /// `restic --password-file`, mirroring `BackupConfig`. Empty means the
+    /// repo is unencrypted or the password comes from the environment.
+    #[serde(default)]
+    pub password_file: String,
 }
 
 impl Default for SaveCloudConfig {
@@ -73,6 +78,7 @@ impl Default for SaveCloudConfig {
             repo: DEFAULT_REPO.into(),
             remote: String::new(),
             on_battery: false,
+            password_file: String::new(),
         }
     }
 }
@@ -113,15 +119,62 @@ pub fn load(path: impl AsRef<Path>) -> SaveCloudConfig {
             .get("on_battery")
             .and_then(toml::Value::as_bool)
             .unwrap_or(false),
+        password_file: table
+            .get("password_file")
+            .and_then(toml::Value::as_str)
+            .unwrap_or("")
+            .into(),
     }
 }
 
 pub fn save(path: impl AsRef<Path>, config: &SaveCloudConfig) -> std::io::Result<()> {
     let text = format!(
-        "# Kyth save cloud — restic local + rclone remote, offline\nrepo = {:?}\nremote = {:?}\non_battery = {}\n",
-        config.repo, config.remote, config.on_battery,
+        "# Kyth save cloud — restic local + rclone remote, offline\nrepo = {:?}\nremote = {:?}\non_battery = {}\npassword_file = {:?}\n",
+        config.repo, config.remote, config.on_battery, config.password_file,
     );
     crate::atomic_io::atomic_write_text(path, &text, Some(0o600))
+}
+
+/// Shared `--repo` / `--password-file` prefix for every restic invocation.
+/// The password travels via file (or not at all), never via argv.
+pub fn restic_prefix(config: &SaveCloudConfig) -> Vec<String> {
+    let mut argv = vec![
+        "restic".to_string(),
+        "--repo".to_string(),
+        config.repo.clone(),
+    ];
+    if !config.password_file.trim().is_empty() {
+        argv.push("--password-file".to_string());
+        argv.push(config.password_file.clone());
+    }
+    argv
+}
+
+/// Fail closed when `repo` points at external media that is not mounted.
+///
+/// Writing a repo into an unmounted `/run/media/…` or `/mnt/…` stub
+/// directory fills the root filesystem and strands the backup where no
+/// offload will ever find it. Same-disk repos always pass (there is no
+/// mount to be missing); external-prefixed repos must sit under a live
+/// mount from `/proc/mounts`. Pure over explicit mounts text so it is
+/// unit-testable.
+pub fn repo_mount_ready(repo: &str, proc_mounts_text: &str) -> bool {
+    const EXTERNAL_PREFIXES: [&str; 2] = ["/run/media/", "/mnt/"];
+    if !EXTERNAL_PREFIXES
+        .iter()
+        .any(|prefix| repo.starts_with(prefix))
+    {
+        return true;
+    }
+    let repo = repo.trim_end_matches('/');
+    for line in proc_mounts_text.lines() {
+        let target = line.split_whitespace().nth(1).unwrap_or_default();
+        let target = target.trim_end_matches('/');
+        if !target.is_empty() && (repo == target || repo.starts_with(&format!("{target}/"))) {
+            return true;
+        }
+    }
+    false
 }
 
 /// Compat `drive_c` directories under every Steam compatdata prefix, mirroring
@@ -214,6 +267,36 @@ mod tests {
     }
 
     #[test]
+    fn restic_prefix_carries_password_file_and_mount_preflight() {
+        let config = SaveCloudConfig {
+            repo: "/run/media/alice/BACKUP/saves".into(),
+            password_file: "/etc/kyth/saves-pass".into(),
+            ..SaveCloudConfig::default()
+        };
+        let argv = restic_prefix(&config);
+        assert_eq!(
+            argv,
+            vec![
+                "restic",
+                "--repo",
+                "/run/media/alice/BACKUP/saves",
+                "--password-file",
+                "/etc/kyth/saves-pass",
+            ]
+        );
+        // Legacy configs without the key keep parsing; no password flag then.
+        assert!(!restic_prefix(&SaveCloudConfig::default())
+            .iter()
+            .any(|arg| arg == "--password-file"));
+        let mounts = "/dev/sdb1 /run/media/alice/BACKUP exfat rw 0 0\n";
+        assert!(repo_mount_ready("/run/media/alice/BACKUP/saves", mounts));
+        assert!(!repo_mount_ready("/run/media/alice/BACKUP/saves", ""));
+        assert!(!repo_mount_ready("/mnt/nas/saves", mounts));
+        // Same-disk default never trips the external gate.
+        assert!(repo_mount_ready(DEFAULT_REPO, ""));
+    }
+
+    #[test]
     fn defaults_when_config_is_missing() {
         let directory = tempdir().unwrap();
         assert_eq!(
@@ -230,6 +313,7 @@ mod tests {
             repo: "/mnt/My Saves".into(),
             remote: "nas:games".into(),
             on_battery: true,
+            password_file: "/etc/kyth/saves-pass".into(),
         };
         save(&path, &config).unwrap();
         assert_eq!(load(&path), config);

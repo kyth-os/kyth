@@ -1643,7 +1643,7 @@ mod tests {
             },
             manual_mounts: None,
             secure_boot_password: String::new(),
-            transaction_path: "/tmp/kyth-transaction.json".into(),
+            transaction_path: "/run/kyth-installer/transaction.json".into(),
         }
     }
 
@@ -1751,6 +1751,7 @@ mod tests {
     fn skipped_secure_boot_does_not_spawn_or_retain_secret_in_plan() {
         let mut request = request(false);
         let directory = tempfile::tempdir().expect("temporary transaction directory");
+        crate::installer_transaction::allow_test_transaction_base(directory.path());
         request.transaction_path = directory
             .path()
             .join("transaction.json")
@@ -1775,6 +1776,7 @@ mod tests {
     #[test]
     fn completion_writes_a_secret_free_native_transaction() {
         let directory = tempfile::tempdir().expect("temporary transaction directory");
+        crate::installer_transaction::allow_test_transaction_base(directory.path());
         let mut request = request(false);
         request.transaction_path = directory
             .path()
@@ -1795,6 +1797,7 @@ mod tests {
     #[test]
     fn preparation_persists_a_recoverable_native_transaction() {
         let directory = tempfile::tempdir().expect("temporary transaction directory");
+        crate::installer_transaction::allow_test_transaction_base(directory.path());
         let mut request = request(false);
         request.transaction_path = directory
             .path()
@@ -1828,6 +1831,7 @@ mod tests {
     #[test]
     fn native_failure_hook_persists_support_safe_failure_state() {
         let directory = tempfile::tempdir().expect("temporary transaction directory");
+        crate::installer_transaction::allow_test_transaction_base(directory.path());
         let mut request = request(false);
         request.transaction_path = directory
             .path()

@@ -70,6 +70,37 @@ def _run_typed(payload, *, timeout, **kwargs):
     )
 
 
+def ntfs_filesystem_size_bytes(partition: str, *, timeout: int = 120) -> int | None:
+    """Return the live NTFS filesystem size on `partition`, or None if unknown.
+
+    Parses `ntfsresize --info` ("Current volume size: N bytes") through the
+    validated disk helper. Best-effort: any failure returns None and callers
+    fall back to the in-session `/run` marker. Unlike that marker (tmpfs,
+    gone after a reboot), this probes live state, so an NTFS volume whose
+    filesystem was shrunk but whose table change was rolled back is still
+    detected after a reboot.
+    """
+    import re as _re
+
+    try:
+        proc = _run_typed(
+            {"operation": "filesystem_resize", "device": partition, "fs": "ntfs",
+             "new_size_bytes": 1, "stage": "info"},
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout,
+        )
+    except (OSError, ValueError, RuntimeError):
+        return None
+    if proc.returncode != 0:
+        return None
+    match = _re.search(r"Current volume size:\s*(\d+)\s*bytes", proc.stdout or "")
+    if not match:
+        return None
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return None
+
+
 def _require_tools(*tools: str) -> None:
     missing = [tool for tool in tools if shutil.which(tool) is None]
     if missing:

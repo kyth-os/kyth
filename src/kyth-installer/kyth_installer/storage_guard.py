@@ -97,7 +97,11 @@ def PartitionTableGuard(disk: str, log, *, disk_service=None, should_restore=Non
             if restore:
                 try:
                     disk_service.restore_table(disk, backup_path)
-                    log("Partition table restored to its state before this attempt.")
+                    log(
+                        "Partition table restored to its state before this attempt. "
+                        "This restores the table only — a format or filesystem "
+                        "shrink that already completed is not undone."
+                    )
                 except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as restore_exc:  # noqa: BLE001 -- narrow: best-effort production path
                     log(f"Warning: automatic partition table restore failed: {restore_exc}")
             else:

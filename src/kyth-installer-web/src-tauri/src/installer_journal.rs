@@ -1188,8 +1188,8 @@ mod tests {
             "create",
             json!({
                 "partition": "/dev/sda9",
-                "start_bytes": 96 * 1024 * 1024 * 1024,
-                "size_bytes": 31 * 1024 * 1024 * 1024,
+                "start_bytes": 96_i64 * 1024 * 1024 * 1024,
+                "size_bytes": 31_i64 * 1024 * 1024 * 1024,
                 "fs_type": "btrfs",
                 "mountpoint": "/",
             }),
@@ -1204,7 +1204,7 @@ mod tests {
         // saying the operation cannot be undone.
         let journal = resize_journal(
             "/dev/sda2",
-            json!({"new_size_bytes": 32 * 1024 * 1024 * 1024}),
+            json!({"new_size_bytes": 32_i64 * 1024 * 1024 * 1024}),
         );
         let errors = validate(&journal, &parts, "gpt", 128 * 1024 * 1024 * 1024);
         assert!(
@@ -1234,7 +1234,7 @@ mod tests {
         // Same-disk GPT backup path is refused: it dies with the disk.
         let journal = resize_journal(
             "/dev/sda2",
-            json!({"new_size_bytes": 32 * 1024 * 1024 * 1024, "gpt_backup_path": "/root/gpt.bak", "ntfs_verified_clean": true, "on_ac_power": true}),
+            json!({"new_size_bytes": 32_i64 * 1024 * 1024 * 1024, "gpt_backup_path": "/root/gpt.bak", "ntfs_verified_clean": true, "on_ac_power": true}),
         );
         let errors = validate(&journal, &parts, "gpt", 128 * 1024 * 1024 * 1024);
         assert!(
@@ -1244,7 +1244,7 @@ mod tests {
         // Fully attested shrink passes the gate.
         let journal = resize_journal(
             "/dev/sda2",
-            json!({"new_size_bytes": 32 * 1024 * 1024 * 1024, "gpt_backup_path": "/run/media/alice/BACKUP/sda-gpt.bak", "ntfs_verified_clean": true, "on_ac_power": true}),
+            json!({"new_size_bytes": 32_i64 * 1024 * 1024 * 1024, "gpt_backup_path": "/run/media/alice/BACKUP/sda-gpt.bak", "ntfs_verified_clean": true, "on_ac_power": true}),
         );
         let errors = validate(&journal, &parts, "gpt", 128 * 1024 * 1024 * 1024);
         assert!(errors.is_empty(), "{errors:?}");
@@ -1253,7 +1253,7 @@ mod tests {
         let ext4 = vec![partition("/dev/sda2", "ext4", false)];
         let journal = resize_journal(
             "/dev/sda2",
-            json!({"new_size_bytes": 32 * 1024 * 1024 * 1024, "gpt_backup_path": "/mnt/usb/sda-gpt.bak", "on_ac_power": true}),
+            json!({"new_size_bytes": 32_i64 * 1024 * 1024 * 1024, "gpt_backup_path": "/mnt/usb/sda-gpt.bak", "on_ac_power": true}),
         );
         let errors = validate(&journal, &ext4, "gpt", 128 * 1024 * 1024 * 1024);
         assert!(errors.is_empty(), "{errors:?}");

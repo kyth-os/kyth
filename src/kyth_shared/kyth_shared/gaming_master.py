@@ -133,19 +133,26 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
         elif _battery_low():
             throttled_reason = "battery <30% discharging — staying balanced"
             gaming = False
-    # snapshot before gaming master — must succeed or gaming is unsafe
+    # snapshot before gaming master — the result must be surfaced, never
+    # silently dropped: a missing snapshot means no rollback point.
+    out: dict[str, str] = {}
     if gaming and not dry_run:
         try:
             from .gaming_snapshot import ensure_snapshot_before_master
 
-            ensure_snapshot_before_master()
+            snapshot = ensure_snapshot_before_master()
+            if not snapshot.get("ok"):
+                detail = snapshot.get("error") or "pre-gaming snapshot unavailable"
+                logger.warning("gaming snapshot: %s", detail)
+                out["snapshot"] = f"warning: {detail}"
+            else:
+                out["snapshot"] = f"ok ({snapshot.get('tool')}: {snapshot.get('id')})"
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
             logger.warning("gaming snapshot failed (%s) — staying balanced to avoid half-written kargs/Bore", exc, exc_info=True)
-            out: dict[str, str] = {"snapshot": f"failed: {exc}", "kargs": "balanced"}
+            out = {"snapshot": f"failed: {exc}", "kargs": "balanced"}
             if throttled_reason:
                 out["throttled_reason"] = throttled_reason
             return out
-    out: dict[str, str] = {}
     # dynamic imports to avoid cycles
     try:
         from .kargs_preset import load_kargs, save_kargs

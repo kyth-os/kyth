@@ -137,6 +137,12 @@ pub fn build_reconnect_command(
     } else {
         &saml_username
     };
+    // Post-decode re-validation: `saml-username` arrives percent-decoded
+    // from portal-controlled bytes, so an encoded control character (e.g.
+    // `%0A`) sails through the whole-cookie `validate_secret` above and only
+    // materializes here. Re-run the profile rule on the resolved value
+    // before it reaches `--user`.
+    validate_profile(gateway, protocol, os_emulation, username)?;
     let mut argv = vec![
         "sudo".into(),
         "-A".into(),
@@ -656,6 +662,58 @@ mod tests {
         assert!(
             validate_saml_acs_url("https://evil.example/SAML20/SP/ACS", "vpn.example").is_err()
         );
+    }
+
+    #[test]
+    fn reconnect_revalidates_portal_supplied_saml_username_after_decode() {
+        // `%0A` passes the whole-cookie control-character check (it is
+        // literal ASCII at validation time) and only becomes a newline when
+        // the cookie parser percent-decodes it. The reconnect builder must
+        // reject the decoded value before it reaches `--user`.
+        let error = build_reconnect_command(
+            "https://vpn.example/gp",
+            "gp",
+            "win",
+            "gateway",
+            "portal-userauthcookie=abc&saml-username=%0Aevil",
+            "pat",
+        )
+        .expect_err("decoded control characters in saml-username must fail closed");
+        assert!(
+            error.contains("control characters"),
+            "unexpected error: {error}"
+        );
+        // An over-long decoded username fails the same gate.
+        let long = format!(
+            "portal-userauthcookie=abc&saml-username={}",
+            "u".repeat(257)
+        );
+        assert!(build_reconnect_command(
+            "https://vpn.example/gp",
+            "gp",
+            "win",
+            "gateway",
+            &long,
+            "pat",
+        )
+        .is_err());
+        // A clean portal username is still accepted and preferred over the
+        // configured one.
+        let command = build_reconnect_command(
+            "https://vpn.example/gp",
+            "gp",
+            "win",
+            "gateway",
+            "portal-userauthcookie=abc&saml-username=portalpat",
+            "configuredpat",
+        )
+        .expect("clean saml-username must build");
+        let user_index = command
+            .argv
+            .iter()
+            .position(|arg| arg == "--user")
+            .expect("reconnect command should set --user");
+        assert_eq!(command.argv[user_index + 1], "portalpat");
     }
 
     #[test]

@@ -179,6 +179,7 @@ mod tests {
         assert!(cancel.cancel_message.contains("may have already"));
 
         let directory = tempfile::tempdir().expect("transaction directory");
+        installer_transaction::allow_test_transaction_base(directory.path());
         let failure_path = directory.path().join("failure.json");
         let state = TransactionState {
             schema_version: 1,

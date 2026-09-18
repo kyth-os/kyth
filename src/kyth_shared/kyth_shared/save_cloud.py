@@ -21,8 +21,8 @@ def load_save_cloud(path: Path | None = None) -> dict[str, Any]:
         with p.open("rb") as _f:
             data=tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
-        return {"repo": "/var/cache/kyth/saves", "remote": "", "on_battery": False}
-    return {"repo": str(data.get("repo","/var/cache/kyth/saves")), "remote": str(data.get("remote","")), "on_battery": bool(data.get("on_battery", False))}
+        return {"repo": "/var/cache/kyth/saves", "remote": "", "on_battery": False, "password_file": ""}
+    return {"repo": str(data.get("repo","/var/cache/kyth/saves")), "remote": str(data.get("remote","")), "on_battery": bool(data.get("on_battery", False)), "password_file": str(data.get("password_file", ""))}
 
 def save_save_cloud(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p=save_cloud_path(path)
@@ -31,5 +31,6 @@ def save_save_cloud(cfg: dict[str, Any], path: Path | None = None) -> Path:
     lines.append(f'repo = "{cfg.get("repo","/var/cache/kyth/saves")}"')
     lines.append(f'remote = "{cfg.get("remote","")}"')
     lines.append(f'on_battery = {str(bool(cfg.get("on_battery", False))).lower()}')
+    lines.append(f'password_file = "{cfg.get("password_file","")}"')
     p.write_text("\n".join(lines)+"\n", encoding="utf-8")
     return p

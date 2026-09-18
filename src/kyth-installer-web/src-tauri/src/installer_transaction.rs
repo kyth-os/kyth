@@ -85,7 +85,61 @@ fn safe_transaction_path(raw: &str) -> Result<PathBuf, String> {
     {
         return Err("transaction path must be an absolute safe path".to_string());
     }
+    // `starts_with` is component-wise, so `/run/kyth-installer-evil/x`
+    // does not match the base. The base directory itself is not a file.
+    if !accepted_transaction_base(path)
+        || path.as_os_str() == TRANSACTION_BASE
+        || path.file_name().is_none()
+    {
+        return Err(format!(
+            "transaction path must be a file under {TRANSACTION_BASE}"
+        ));
+    }
     Ok(path.to_path_buf())
+}
+
+/// Runtime state directory that owns every transaction file. The typed
+/// request parser, the `KYTH_INSTALLER_TRANSACTION` /
+/// `KYTH_INSTALLER_FAILURE_SUMMARY` overrides, and the frontend-supplied
+/// `transaction_path` all funnel through `safe_transaction_path`, so
+/// pinning the prefix here keeps a malicious or mistaken caller from
+/// redirecting transaction writes anywhere else on the filesystem.
+pub(crate) const TRANSACTION_BASE: &str = "/run/kyth-installer";
+
+/// Unit tests exercise the writer against scratch directories; production
+/// rule stays identical, with explicitly registered test bases appended.
+/// The allowlist is append-only and keyed by unique tempdirs, so parallel
+/// tests cannot weaken each other's checks.
+#[cfg(test)]
+static TEST_TRANSACTION_BASES: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Register a scratch directory as an accepted transaction base for the
+/// current test process. Test-only: production builds accept exactly
+/// [`TRANSACTION_BASE`].
+#[cfg(test)]
+pub(crate) fn allow_test_transaction_base(directory: &Path) {
+    if let Ok(mut bases) = TEST_TRANSACTION_BASES.lock() {
+        let directory = directory.to_path_buf();
+        if !bases.contains(&directory) {
+            bases.push(directory);
+        }
+    }
+}
+
+#[cfg(test)]
+fn accepted_transaction_base(path: &Path) -> bool {
+    if path.starts_with(TRANSACTION_BASE) {
+        return true;
+    }
+    TEST_TRANSACTION_BASES
+        .lock()
+        .map(|bases| bases.iter().any(|base| path.starts_with(base)))
+        .unwrap_or(false)
+}
+
+#[cfg(not(test))]
+fn accepted_transaction_base(path: &Path) -> bool {
+    path.starts_with(TRANSACTION_BASE)
 }
 
 fn sync_directory(path: &Path) -> Result<(), String> {
@@ -242,6 +296,7 @@ mod tests {
     #[test]
     fn writes_transaction_state_atomically_and_durably() {
         let directory = tempfile::tempdir().expect("temporary directory");
+        allow_test_transaction_base(directory.path());
         let path = directory.path().join("transaction.json");
         let state: TransactionState = serde_json::from_value(serde_json::json!({
             "status": "partitioning",
@@ -264,6 +319,7 @@ mod tests {
     #[test]
     fn writes_failure_summary_with_recovery_marker_and_history() {
         let directory = tempfile::tempdir().expect("temporary directory");
+        allow_test_transaction_base(directory.path());
         let path = directory.path().join("failure.json");
         let state: TransactionState = serde_json::from_value(serde_json::json!({
             "transaction_id": "native-test",
@@ -296,5 +352,27 @@ mod tests {
         })
         .expect_err("relative traversal path must fail");
         assert!(error.contains("absolute safe path"));
+    }
+
+    #[test]
+    fn rejects_transaction_paths_outside_the_runtime_directory() {
+        // The frontend supplies `transaction_path` and two environment
+        // overrides feed the same writer: every one of them must stay under
+        // the daemon-owned runtime directory.
+        for raw in [
+            "/tmp/kyth-transaction.json",
+            "/etc/kyth-installer-evil/transaction.json",
+            "/run/kyth-installer-evil/transaction.json",
+            "/run/kyth-installer",
+            "/var/tmp/transaction.json",
+        ] {
+            let error = safe_transaction_path(raw).expect_err(format!("{raw} must fail").as_str());
+            assert!(
+                error.contains("/run/kyth-installer"),
+                "{raw}: unexpected error: {error}"
+            );
+        }
+        // The production base itself stays accepted.
+        assert!(safe_transaction_path("/run/kyth-installer/transaction.json").is_ok());
     }
 }

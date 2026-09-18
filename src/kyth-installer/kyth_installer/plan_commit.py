@@ -113,11 +113,21 @@ def commit_new_kythos_partition(
     dependencies: CommitDependencies,
     before_partition: Callable[[], None] | None = None,
     failure_message: str = "A step failed — restoring the original partition table...",
-    restored_message: str = "Partition table restored to its state before this attempt.",
+    restored_message: str = "Partition table restored to its state before this attempt (table only — filesystem writes already made are not undone).",
 ) -> str:
     """Create and format a target partition inside a guarded table transaction."""
     del restored_message  # guard owns restore logging; retained for compatibility
     disk_service = dependencies.disk_service_factory()
+    if before_partition is not None:
+        # `before_partition` mutates the disk (boundary move / shrink) inside
+        # the guarded scope: if a LATER step fails, the guard restores the
+        # table, but that restore cannot undo filesystem writes already made
+        # and is unsafe to mistake for a full rollback. Say so up front.
+        log(
+            "Warning: a filesystem/boundary change runs inside this guarded step. "
+            "If a later step fails, the partition table is restored but any "
+            "filesystem write already made is NOT undone."
+        )
     with dependencies.disk_hold(disk, log):
         with dependencies.guard_factory(disk, log, disk_service=disk_service):
             if before_partition is not None:
@@ -215,6 +225,37 @@ def shrink_ntfs_filesystem_guarded(
         _logger.debug("ntfs marker write failed for %s: %s", partition, exc, exc_info=True)
 
 
+def _fail_if_ntfs_already_shrunk(partition: str, partition_size_bytes: int, log, *, ntfs_fs_size=None) -> None:
+    """Fail closed when the live NTFS filesystem is already smaller than its partition.
+
+    A previous shrink whose table change was rolled back (or a retry after a
+    reboot that wiped the tmpfs `/run` marker) leaves exactly this shape:
+    filesystem < partition. Shrinking again on top would compound the loss,
+    so refuse with remediation instead. Best-effort: an unreadable size
+    (None) falls back to the in-session marker check below. No probe
+    dependency means no probe (unit-test hermeticity) — production wires
+    the real `ntfsresize --info` probe through `plan.py`.
+    """
+    probe = ntfs_fs_size
+    if probe is None:
+        return
+    try:
+        fs_size = probe(partition)
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
+        return
+    if not isinstance(fs_size, int) or fs_size <= 0:
+        return
+    tolerance = 64 * 1024 * 1024
+    if fs_size < partition_size_bytes - tolerance:
+        raise RuntimeError(
+            "This NTFS filesystem is already smaller than its partition — a previous "
+            "shrink completed but its partition-table change was rolled back (or the "
+            "installer rebooted and lost its in-progress marker). Shrinking again would "
+            "compound the change. Reboot, let Windows extend the volume back to fill "
+            "the partition (Disk Management → Extend Volume), then retry the install."
+        )
+
+
 def prepare_free_space_target(
     config: dict, log, *, validate_target, required_tools, which,
     unmount_target_disk, commit_partition,
@@ -243,6 +284,7 @@ def prepare_ntfs_resize_target(
     partition_start, shrink_filesystem_guarded, run_command, as_root, settle,
     commit_partition, resize_partition=None,
     marker_root: Path = Path("/run/kyth-installer"),
+    ntfs_fs_size=None,
 ) -> tuple[str, str]:
     """Shrink a validated NTFS target and commit a partition in its freed tail."""
     try:
@@ -284,6 +326,13 @@ def prepare_ntfs_resize_target(
         )
     current_size = partition_size(partition)
     new_ntfs_size = current_size - shrink_bytes
+    # Reboot-persistent already-shrunk check: the /run marker below is tmpfs
+    # and vanishes on reboot, but a rolled-back table change leaves the live
+    # filesystem smaller than its partition. Probe that live state and fail
+    # closed instead of shrinking twice.
+    _fail_if_ntfs_already_shrunk(
+        partition, current_size, log, ntfs_fs_size=ntfs_fs_size,
+    )
     part_num = partition_number(partition)
     sector = block_size(disk)
     start = partition_start(partition)

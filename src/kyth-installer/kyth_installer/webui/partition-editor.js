@@ -432,7 +432,7 @@ function rollbackPartitions() {
       renderDiskLayouts();
       showOverlay('Undo Complete',
         el('div', { style: 'color:var(--green);font-size:14px;',
-          text: 'Partition table restored to previous state.' }),
+          text: 'Partition table restored to its pre-commit layout (table only — already-formatted filesystems are not undone).' }),
         null, 'OK');
     } else {
       showOverlay('Error', el('div', { class: 'validation-errors', text: j.message || 'Rollback failed' }), null);

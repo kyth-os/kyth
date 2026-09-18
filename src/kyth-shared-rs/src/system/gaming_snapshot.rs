@@ -15,6 +15,9 @@ pub struct SnapshotResult {
     pub id: String,
     pub tool: String,
     pub error: Option<String>,
+    /// True when the caller may proceed but must surface the failure as a
+    /// warning: no snapshot means no rollback point. Never silently OK.
+    pub warning: bool,
 }
 
 pub fn plan(description: impl Into<String>) -> SnapshotPlan {
@@ -51,6 +54,7 @@ pub fn evaluate(
                 id: output.trim().into(),
                 tool: "snapper".into(),
                 error: None,
+                warning: false,
             };
         }
     }
@@ -60,13 +64,18 @@ pub fn evaluate(
             id: description.into(),
             tool: "btrfs".into(),
             error: None,
+            warning: false,
         };
     }
     SnapshotResult {
         ok: false,
         id: String::new(),
         tool: String::new(),
-        error: Some("no snapper/btrfs available — snapshot skipped (safe to proceed)".into()),
+        error: Some(
+            "no snapper/btrfs snapshot tool available — proceeding WITHOUT a pre-gaming snapshot; changes will not be rollable back to this point."
+                .into(),
+        ),
+        warning: true,
     }
 }
 
@@ -92,9 +101,12 @@ mod tests {
     }
 
     #[test]
-    fn unavailable_snapshot_is_non_fatal() {
+    fn unavailable_snapshot_is_a_warning_never_silent_ok() {
         let result = evaluate("pre-gaming-master", None, Some(1));
         assert!(!result.ok);
-        assert!(result.error.unwrap().contains("safe to proceed"));
+        assert!(result.warning);
+        let error = result.error.unwrap();
+        assert!(!error.contains("safe to proceed"));
+        assert!(error.contains("WITHOUT"));
     }
 }

@@ -154,6 +154,50 @@ pub fn snapshot_then_send_plan(
     }
 }
 
+/// `statvfs` filesystem magic for Btrfs. A `btrfs send` stream can only land
+/// on a Btrfs volume (`btrfs receive`); streaming into an exfat/NTFS stick
+/// or the wrong directory silently produces no usable offload.
+pub const BTRFS_MAGIC: i64 = 0x9123_683E;
+
+/// Minimum free bytes required on a USB send target before streaming.
+/// A full-home send that runs out of space mid-stream leaves a truncated,
+/// unrestorable receive directory — fail closed instead.
+pub const MIN_SEND_TARGET_FREE_BYTES: u64 = 1024 * 1024 * 1024;
+
+/// Pure gate for a USB `btrfs send` target, over an already-observed
+/// filesystem magic and free-byte count so it is unit-testable without
+/// touching live mounts. Callers observe both via `statfs`.
+pub fn validate_send_target(target: &str, fs_magic: i64, free_bytes: u64) -> Result<(), String> {
+    if fs_magic != BTRFS_MAGIC {
+        return Err(format!(
+            "btrfs send target {target:?} is not a Btrfs filesystem (magic {fs_magic:#x}); \
+the send stream cannot be received there. Format the stick as Btrfs or pick another target."
+        ));
+    }
+    if free_bytes < MIN_SEND_TARGET_FREE_BYTES {
+        return Err(format!(
+            "btrfs send target {target:?} has only {free_bytes} bytes free \
+(need at least {MIN_SEND_TARGET_FREE_BYTES}); refusing a send that would truncate mid-stream."
+        ));
+    }
+    Ok(())
+}
+
+/// Observe `(fs_type_magic, free_bytes)` for `path` via `statfs`.
+pub fn statvfs_usage(path: &std::path::Path) -> Option<(i64, u64)> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let cpath = CString::new(path.as_os_str().as_bytes()).ok()?;
+    let mut stat: libc::statfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statfs(cpath.as_ptr(), &mut stat) } != 0 {
+        return None;
+    }
+    Some((
+        i64::from(stat.f_type),
+        stat.f_bavail.saturating_mul(stat.f_bsize.max(0) as u64),
+    ))
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SnapshotRow {
     pub id: String,
@@ -409,6 +453,27 @@ mod tests {
         assert_eq!(rows[0].row_type, "deployment");
         assert_eq!(rows[1].row_type, "rollback");
         assert_eq!(rows[1].id, "sha256:rollb");
+    }
+
+    #[test]
+    fn send_target_requires_btrfs_and_headroom() {
+        // exFAT stick (0x2011b958): refused — the stream could never land.
+        assert!(validate_send_target("/run/media/u/STICK", 0x2011_b958, u64::MAX).is_err());
+        // Btrfs but nearly full: refused — a truncated stream is unrestorable.
+        assert!(validate_send_target("/run/media/u/BACKUP", BTRFS_MAGIC, 0).is_err());
+        assert!(validate_send_target(
+            "/run/media/u/BACKUP",
+            BTRFS_MAGIC,
+            MIN_SEND_TARGET_FREE_BYTES - 1
+        )
+        .is_err());
+        // Btrfs with headroom: accepted.
+        assert!(validate_send_target(
+            "/run/media/u/BACKUP",
+            BTRFS_MAGIC,
+            MIN_SEND_TARGET_FREE_BYTES
+        )
+        .is_ok());
     }
 
     #[test]

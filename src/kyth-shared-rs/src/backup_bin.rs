@@ -11,6 +11,9 @@
 //!   config records `allow_same_disk = true`.
 //! * Any restic failure (init/backup/forget/check) yields a nonzero exit —
 //!   a silent "backup ran" with nothing written is worse than no backup.
+//! * `rclone sync` mirrors deletions, so it is skipped when any earlier
+//!   stage failed, and a repo holding no snapshots is never mirrored over
+//!   the remote (a fresh-empty repo would delete good remote snapshots).
 //! * USB offload never streams the live subvolume: a read-only snapshot is
 //!   frozen first, the snapshot is sent, then the staging snapshot is
 //!   deleted (see `system::snapshot::snapshot_then_send_plan`).
@@ -22,10 +25,10 @@ use std::time::Duration;
 
 use kyth_shared::system::backup_config::{
     backup_argv, check_argv, config_path, external_mounts_from_proc_mounts, forget_argv, load,
-    on_battery, validate_repo,
+    on_battery, repo_has_snapshots, validate_forget_policy, validate_repo,
 };
 use kyth_shared::system::process::run_bounded;
-use kyth_shared::system::snapshot::snapshot_then_send_plan;
+use kyth_shared::system::snapshot::{snapshot_then_send_plan, statvfs_usage, validate_send_target};
 
 /// Run `argv` with a timeout, returning true on exit 0. Every failure is
 /// reported loudly: the process exit code is the backup's only signal to
@@ -106,6 +109,13 @@ fn main() -> std::process::ExitCode {
         return std::process::ExitCode::FAILURE;
     }
     let mut failed = false;
+    // A malformed retention policy must fail closed before restic runs: it is
+    // appended raw to the forget argv, so an unknown flag could silently
+    // change what `forget --prune` keeps.
+    if let Err(error) = validate_forget_policy(&config.forget_policy) {
+        eprintln!("kyth-backup: {error}");
+        return std::process::ExitCode::FAILURE;
+    }
     let repo = PathBuf::from(&config.repo);
     let _ = std::fs::create_dir_all(&repo);
     if !repo.join("config").exists() {
@@ -141,25 +151,61 @@ fn main() -> std::process::ExitCode {
     }
     if config.btrfs_send && !on_battery() {
         if let Some(usb) = first_usb_dir() {
-            // Snapshot-then-send: freeze a read-only snapshot of /home,
-            // stream the snapshot (never the live subvolume) to USB, then
-            // delete the staging snapshot.
-            let plan = snapshot_then_send_plan("/home", "kyth-send", &usb.to_string_lossy());
-            let staged = run(&plan.snapshot_argv, 120, "btrfs snapshot for send");
-            if !staged {
-                failed = true;
-            } else {
-                if !run(&plan.send_argv, 300, "btrfs send to USB") {
-                    failed = true;
+            // Capacity/filesystem gate before streaming: the send stream can
+            // only land on Btrfs with room to hold it, and the alphabetical
+            // first dir may be the wrong stick or a non-btrfs volume.
+            let target_ok = match statvfs_usage(&usb) {
+                Some((magic, free_bytes)) => {
+                    match validate_send_target(&usb.to_string_lossy(), magic, free_bytes) {
+                        Ok(()) => true,
+                        Err(error) => {
+                            eprintln!("kyth-backup: skipping btrfs send: {error}");
+                            failed = true;
+                            false
+                        }
+                    }
                 }
-                if !run(&plan.cleanup_argv, 120, "btrfs send staging cleanup") {
+                None => {
+                    eprintln!(
+                        "kyth-backup: skipping btrfs send: cannot stat target {}",
+                        usb.display()
+                    );
                     failed = true;
+                    false
+                }
+            };
+            if target_ok {
+                // Snapshot-then-send: freeze a read-only snapshot of /home,
+                // stream the snapshot (never the live subvolume) to USB, then
+                // delete the staging snapshot.
+                let plan = snapshot_then_send_plan("/home", "kyth-send", &usb.to_string_lossy());
+                let staged = run(&plan.snapshot_argv, 120, "btrfs snapshot for send");
+                if !staged {
+                    failed = true;
+                } else {
+                    if !run(&plan.send_argv, 300, "btrfs send to USB") {
+                        failed = true;
+                    }
+                    if !run(&plan.cleanup_argv, 120, "btrfs send staging cleanup") {
+                        failed = true;
+                    }
                 }
             }
         }
     }
     if !config.remote.is_empty() && home.join(".config/rclone/rclone.conf").exists() {
-        if !run(
+        // `rclone sync` mirrors deletions: syncing after a failed backup, or
+        // syncing a fresh-empty repo, would delete good remote snapshots.
+        if failed {
+            eprintln!("kyth-backup: skipping rclone sync: earlier backup stages failed");
+        } else if !repo_has_snapshots(&repo) {
+            eprintln!(
+                "kyth-backup: skipping rclone sync: repo {} holds no snapshots; \
+refusing to mirror an empty repo over the remote",
+                repo.display()
+            );
+            failed = true;
+        } else if !run(
             &[
                 "rclone".to_string(),
                 "sync".to_string(),

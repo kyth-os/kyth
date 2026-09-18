@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -72,6 +73,76 @@ fn get_job(job: &str) -> Result<Arc<VpnRuntime>, String> {
         .get(job)
         .cloned()
         .ok_or_else(|| "VPN job not found".to_string())
+}
+
+/// Fixed askpass helper for every `sudo -A` spawn in this module. One
+/// constant, not per-call literals, so a helper relocation updates every
+/// privileged path at once instead of leaving one silently unpinned.
+pub(crate) const SUDO_ASKPASS_PATH: &str = "/usr/bin/ksshaskpass";
+
+/// Scrub a `sudo -A` child down to the minimal desktop environment and pin
+/// the askpass helper. Fails closed when the helper is missing: `sudo -A`
+/// with no helper dies without ever prompting, so every caller must treat
+/// this `Err` as "no admin prompt possible" and land in its own terminal
+/// state instead of spawning sudo.
+///
+/// Ordering is load-bearing: the desktop sanitizer passes through an
+/// inherited `SUDO_ASKPASS`, so the fixed helper is set *after* the
+/// scrubbed environment is applied and always wins. No `-E` passthrough
+/// anywhere on this path.
+fn prepare_sudo_command(command: &mut Command) -> Result<(), String> {
+    let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+    let desktop = kyth_shared::commands::environment_for(
+        kyth_shared::commands::EnvironmentPolicy::Desktop,
+        &inherited,
+    );
+    command.env_clear().envs(desktop);
+    if std::path::Path::new(SUDO_ASKPASS_PATH).exists() {
+        command.env("SUDO_ASKPASS", SUDO_ASKPASS_PATH);
+        Ok(())
+    } else {
+        Err(
+            "VPN cannot prompt for administrator access: the askpass helper is missing."
+                .to_string(),
+        )
+    }
+}
+
+/// Counter disambiguating staging files when two toggles land in the same
+/// nanosecond (pid + clock alone could collide on a fast retry).
+static STAGING_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Stage validated preset text for the privileged copy.
+///
+/// The file is created with `O_EXCL` (`create_new`) at `0o600` under a
+/// pid/clock/counter-unique name: the old `$TMPDIR/kyth-network-{pid}` was
+/// guessable from outside, and plain `fs::write` follows a pre-planted
+/// symlink straight into root's `cp`. Returns the staging path; the caller
+/// removes it after the copy settles either way.
+fn stage_network_preset(rendered: &str) -> Result<PathBuf, String> {
+    let pid = std::process::id();
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    for _ in 0..8 {
+        let slot = STAGING_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let staging = std::env::temp_dir().join(format!("kyth-network-{pid}-{nanos}-{slot}.toml"));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true).mode(0o600);
+        match options.open(&staging) {
+            Ok(mut file) => {
+                if let Err(error) = file.write_all(rendered.as_bytes()) {
+                    let _ = std::fs::remove_file(&staging);
+                    return Err(format!("could not stage network preset: {error}"));
+                }
+                return Ok(staging);
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(format!("could not stage network preset: {error}")),
+        }
+    }
+    Err("could not stage network preset: no unique staging name".to_string())
 }
 
 fn save_profile(
@@ -157,7 +228,10 @@ fn vpn_fail_closed_enabled() -> bool {
 /// Returns true when lockdown is a no-op (opt-out) or the zone flip
 /// succeeded. Status ownership: engaging lockdown (`lockdown == true`) sets
 /// a terminal state itself — `failed_lockdown` on success,
-/// `failed_lockdown_open` when the admin prompt goes unanswered — so the
+/// `failed_lockdown_open` when the admin prompt goes unanswered, `failed`
+/// when the Hub never opted into fail-closed (an engage that turns out to
+/// be opted out must still land somewhere terminal, or the job sits on a
+/// stale `connecting` while the frontend polls past it) — so the
 /// prior `failed` is never clobbered with a generic `warning` the frontend
 /// polls past. Releasing lockdown leaves the caller's status alone; the
 /// caller sets its own `*_firewall_open` terminal state on failure.
@@ -175,6 +249,14 @@ fn set_vpn_lockdown_at(
 ) -> bool {
     let preset = network_preset::load(preset_file);
     let Some(zone) = vpn_lockdown_target(&preset, lockdown) else {
+        // Opt-out no-op. Releasing lockdown stays silent — the caller owns
+        // `connected`/`complete` there. But an *engage* that turns out to be
+        // opted out (preset flipped between the drop check and this load)
+        // must still land in an explicit terminal state, or the job keeps a
+        // stale `connecting` the frontend polls for 300 intervals.
+        if lockdown {
+            status(runtime, "failed", "VPN connection ended unexpectedly.");
+        }
         return true;
     };
     let mut command = std::process::Command::new("sudo");
@@ -185,8 +267,19 @@ fn set_vpn_lockdown_at(
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
-        command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+    // Same fail-closed askpass gate as the openconnect spawn: without the
+    // helper no admin prompt is possible, so report the lockdown as open
+    // (engage) instead of letting `sudo -A` die cryptically, or let the
+    // caller set its own `*_firewall_open` terminal state (release).
+    if prepare_sudo_command(&mut command).is_err() {
+        if lockdown {
+            status(
+                runtime,
+                "failed_lockdown_open",
+                "VPN dropped but the network lockdown needs an admin password; traffic may leave the tunnel.",
+            );
+        }
+        return false;
     }
     let ok = kyth_shared::system::process::run_bounded_command(
         command,
@@ -249,31 +342,17 @@ fn start_process(
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
         // Never inherit the webview-adjacent environment into a sudo child:
-        // clear it, keep only the minimal desktop set (DISPLAY/Wayland,
-        // HOME, PATH, …) via the shared sanitizer, then set the askpass
-        // helper explicitly. No `-E` passthrough anywhere in this path.
-        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
-        let desktop = kyth_shared::commands::environment_for(
-            kyth_shared::commands::EnvironmentPolicy::Desktop,
-            &inherited,
-        );
-        child_command.env_clear().envs(desktop);
+        // scrub it to the minimal desktop set, then pin the askpass helper
+        // (shared `prepare_sudo_command`; no `-E` passthrough anywhere in
+        // this path). A missing helper fails closed here with a clear
+        // message instead of a cryptic openconnect error downstream.
+        if let Err(error) = prepare_sudo_command(&mut child_command) {
+            status(&runtime, "failed", error);
+            return;
+        }
         // Own process group so a later disconnect kills forked openconnect
         // grandchildren too, not just the sudo wrapper.
         child_command.process_group(0);
-        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
-            child_command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
-        } else {
-            // sudo -A with no askpass helper fails without ever prompting;
-            // fail here with a clear message instead of a cryptic
-            // openconnect error downstream.
-            status(
-                &runtime,
-                "failed",
-                "VPN cannot prompt for administrator access: the askpass helper is missing.",
-            );
-            return;
-        }
         let mut child = match child_command.spawn() {
             Ok(child) => child,
             Err(error) => {
@@ -847,11 +926,13 @@ pub(crate) fn vpn_protection_status() -> VpnProtectionStatus {
 
 /// Flip the two VPN protection opt-ins in `network.toml`, preserving the
 /// DNS/firewall choices already there. The preset file is root-owned, so a
-/// user-run Hub writes through a fixed `sudo -A cp` of a validated staging
-/// file (same askpass path as the lockdown flip); a Hub that can write the
-/// file directly (test mode, root) takes that path instead. Either way the
-/// rendered text is re-loaded and compared before it is persisted: a
-/// rendering that does not decode to the intended preset fails closed.
+/// user-run Hub writes through a fixed `sudo -A cp --preserve=mode` of a
+/// validated staging file (same askpass gate as the lockdown flip); a Hub
+/// that can write the file directly (test mode, root) takes that path
+/// instead. Either way the rendered text is re-loaded and compared before
+/// it is persisted, and the persisted file is read back and compared after:
+/// a rendering that does not decode to the intended preset fails closed and
+/// never reports success on a half-configured system.
 fn set_vpn_protection_at(
     path: &std::path::Path,
     vpn_fail_closed: bool,
@@ -861,9 +942,10 @@ fn set_vpn_protection_at(
     preset.vpn_fail_closed = vpn_fail_closed;
     preset.vpn_dns_exclusive = vpn_dns_exclusive;
     let rendered = network_preset::render_network_toml(&preset);
-    let staging = std::env::temp_dir().join(format!("kyth-network-{}.toml", std::process::id()));
-    std::fs::write(&staging, rendered.as_bytes())
-        .map_err(|error| format!("could not stage network preset: {error}"))?;
+    // Exclusive-create 0600 staging under an unpredictable name (see
+    // `stage_network_preset`): the old `$TMPDIR/kyth-network-{pid}` plus
+    // plain `fs::write` let a local observer pre-plant the staging path.
+    let staging = stage_network_preset(&rendered)?;
     let round_trips = network_preset::load(&staging) == preset;
     if !round_trips {
         let _ = std::fs::remove_file(&staging);
@@ -871,10 +953,25 @@ fn set_vpn_protection_at(
     }
     if kyth_shared::atomic_io::atomic_write_text(path, &rendered, Some(0o644)).is_ok() {
         let _ = std::fs::remove_file(&staging);
-        return Ok(vpn_protection_summary(&preset));
+        // Direct write took the fast path: confirm it landed as intended
+        // before reporting success, same as the sudo path below.
+        if network_preset::load(path) == preset {
+            return Ok(vpn_protection_summary(&preset));
+        }
+        return Err("the network preset write did not verify; no change was applied.".to_string());
     }
-    // Root-owned preset: fixed `mkdir -p` + `cp` through the sudo/askpass
-    // path. Argv is fully fixed (both paths are computed, never user text).
+    // Root-owned preset: fixed `mkdir -p` + `cp --preserve=mode` through the
+    // shared sudo/askpass gate (fail closed when no admin prompt is
+    // possible; never spawn `sudo -A` into a guaranteed cryptic failure).
+    // Argv is fully fixed (both paths are computed, never user text). The
+    // staging file is opened to the documented destination mode (0o644,
+    // matching the direct-write path) after the round-trip check, so
+    // `--preserve=mode` carries deterministic permissions instead of
+    // whatever umask-dependent mode a bare `cp` would apply.
+    if std::fs::set_permissions(&staging, std::fs::Permissions::from_mode(0o644)).is_err() {
+        let _ = std::fs::remove_file(&staging);
+        return Err("could not stage network preset: permission setup failed".to_string());
+    }
     let mut mkdir = std::process::Command::new("sudo");
     mkdir
         .arg("-A")
@@ -891,14 +988,21 @@ fn set_vpn_protection_at(
     let mut copy = std::process::Command::new("sudo");
     copy.arg("-A")
         .arg("cp")
+        .arg("--preserve=mode")
         .arg(&staging)
         .arg(path)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
-    if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
-        mkdir.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
-        copy.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+    if prepare_sudo_command(&mut mkdir)
+        .and(prepare_sudo_command(&mut copy))
+        .is_err()
+    {
+        let _ = std::fs::remove_file(&staging);
+        return Err(
+            "saving VPN protection needs an admin password; the preset was not changed."
+                .to_string(),
+        );
     }
     let bound = std::time::Duration::from_secs(60);
     let mkdir_ok = kyth_shared::system::process::run_bounded_command(mkdir, bound)
@@ -909,13 +1013,19 @@ fn set_vpn_protection_at(
             .map(|output| output.status.success())
             .unwrap_or(false);
     let _ = std::fs::remove_file(&staging);
-    if copy_ok {
-        Ok(vpn_protection_summary(&preset))
-    } else {
-        Err(
+    if !copy_ok {
+        return Err(
             "saving VPN protection needs an admin password; the preset was not changed."
                 .to_string(),
-        )
+        );
+    }
+    // Read-back: the privileged copy must decode to exactly the preset the
+    // Hub validated, or the system is left half-configured with a success
+    // report. Fail closed on any mismatch.
+    if network_preset::load(path) == preset {
+        Ok(vpn_protection_summary(&preset))
+    } else {
+        Err("the network preset copy did not verify; the preset may not have changed.".to_string())
     }
 }
 
@@ -1004,6 +1114,51 @@ mod tests {
         assert!(set_vpn_lockdown_at(&runtime, true, &preset_file));
         assert!(set_vpn_lockdown_at(&runtime, false, &preset_file));
         assert_eq!(runtime_state(&runtime).0, "failed");
+    }
+
+    #[test]
+    fn lockdown_engage_without_opt_in_still_reaches_a_terminal_state() {
+        // An engage that turns out to be opted out (preset flipped between
+        // the drop check and the lockdown load) must not leave a stale
+        // `connecting` the frontend polls for 300 intervals.
+        let dir = tempfile::tempdir().unwrap();
+        let preset_file = dir.path().join("network.toml");
+        let runtime = test_runtime("connecting");
+        assert!(set_vpn_lockdown_at(&runtime, true, &preset_file));
+        let (state, _) = runtime_state(&runtime);
+        assert_eq!(state, "failed");
+        assert!(
+            VPN_TERMINAL_STATES.contains(&state.as_str()),
+            "{state} must be terminal or the frontend polls past it"
+        );
+        // Release stays a pure no-op: the caller owns `connected`.
+        let release = test_runtime("connected");
+        assert!(set_vpn_lockdown_at(&release, false, &preset_file));
+        assert_eq!(runtime_state(&release).0, "connected");
+    }
+
+    #[test]
+    fn staging_is_exclusive_create_and_unpredictable() {
+        use std::os::unix::fs::PermissionsExt;
+        let first = stage_network_preset("dns = \"off\"\n").expect("stage");
+        let second = stage_network_preset("dns = \"off\"\n").expect("stage");
+        assert_ne!(first, second);
+        // O_EXCL: re-creating the same path must fail, never truncate.
+        assert!(
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&first)
+                .is_err(),
+            "staging must be exclusive-create"
+        );
+        assert_eq!(
+            first.metadata().unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        let _ = std::fs::remove_file(&first);
+        let _ = std::fs::remove_file(&second);
     }
 
     #[test]

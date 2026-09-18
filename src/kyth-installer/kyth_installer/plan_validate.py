@@ -200,20 +200,22 @@ def _validate_install_target(
     if not disk:
         raise RuntimeError("No target disk was selected.")
 
-    snapshot = snapshot or dependencies.probe_storage(disk, include_partitions=mode != "wipe")
+    snapshot = snapshot or dependencies.probe_storage(disk, include_partitions=True)
     safe_disks = snapshot.disks_by_name
     if disk not in safe_disks:
         raise RuntimeError("The selected disk is not a safe install target. Re-scan disks and choose a non-live, non-mounted disk.")
+
+    # ESP-preservation / BitLocker preflight runs in EVERY mode, wipe
+    # included: wiping a disk with a locked BitLocker volume destroys the
+    # only key material without warning. In wipe mode only the BitLocker
+    # gate applies (the ESP is recreated by `bootc to-disk`).
+    _check_storage_preflight(snapshot, mode)
 
     if mode == "wipe":
         size_bytes = _safe_int(safe_disks[disk].get("size_bytes"))
         if size_bytes < MIN_KYTHOS_BYTES:
             raise RuntimeError(f"This disk is too small for KythOS. At least {MIN_KYTHOS_GIB} GiB is required.")
         return disk, None
-
-    # Shared ESP-preservation / BitLocker preflight before any guided target
-    # checks (same detection source as the typed Rust preflight).
-    _check_storage_preflight(snapshot, mode)
 
     if mode == "alongside":
         target = _normal_device_path(config.get("target_partition"))

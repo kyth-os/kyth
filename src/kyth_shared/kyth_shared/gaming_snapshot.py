@@ -26,7 +26,15 @@ def create_pre_gaming_snapshot(description: str = "pre-gaming-master") -> dict[s
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         logger.debug("handled expected exception", exc_info=True)
         pass
-    return {"ok": False, "error": "no snapper/btrfs available — snapshot skipped (safe to proceed)"}
+    return {
+        "ok": False,
+        "warning": True,
+        "error": (
+            "no snapper/btrfs snapshot tool available — proceeding WITHOUT a "
+            "pre-gaming snapshot. Gaming preset changes will not be rollable "
+            "back to this point."
+        ),
+    }
 
 
 def ensure_snapshot_before_master() -> dict[str, Any]:

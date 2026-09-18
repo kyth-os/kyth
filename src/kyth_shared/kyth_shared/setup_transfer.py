@@ -230,8 +230,46 @@ def archive_summary(archive_name: str) -> str:
     )
 
 
+def _backup_existing(home: Path, paths: list[str]) -> Path | None:
+    """Stage a timestamped backup of existing restore targets under `home`.
+
+    Restore overwrites dotfiles in place; without a backup, the user's
+    current settings are unrecoverable the moment the first copy lands.
+    Returns the backup dir, or None when no target existed yet. Failures
+    are loud (raise) — a restore that cannot back up first must not run.
+    """
+    existing = [rel for rel in paths if (home / rel).exists()]
+    if not existing:
+        return None
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir = home / ".local/share/kyth/setup-restore-backup" / stamp
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for rel in existing:
+        source = home / rel
+        # Never back the backup dir into itself: skip any target that is the
+        # backup dir or one of its ancestors.
+        try:
+            backup_dir.relative_to(source)
+            continue
+        except ValueError:
+            pass
+        dest = backup_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir() and not source.is_symlink():
+            shutil.copytree(source, dest, dirs_exist_ok=True, symlinks=True)
+        else:
+            shutil.copy2(source, dest, follow_symlinks=False)
+    return backup_dir
+
+
 def _restore_files(payload: Path, home: Path, paths: list[str]) -> int:
     restored = 0
+    backup_dir = _backup_existing(home, paths)
+    if backup_dir is not None:
+        print(
+            f"Existing settings backed up to {backup_dir} before restore.",
+            flush=True,
+        )
     for rel in paths:
         source = payload / "files" / rel
         if not source.exists():

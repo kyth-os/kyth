@@ -228,6 +228,84 @@ pub fn check_argv(config: &BackupConfig) -> Vec<String> {
     argv
 }
 
+/// Flags allowed in `forget_policy`. Anything else (notably `--repo`,
+/// `--password-file`, or shell metacharacters) is rejected by
+/// [`validate_forget_policy`] so a malformed config cannot turn
+/// `restic forget --prune` into unexpected retention or credential exposure.
+pub const FORGET_FLAG_ALLOWLIST: &[&str] = &[
+    "--keep-last",
+    "--keep-hourly",
+    "--keep-daily",
+    "--keep-weekly",
+    "--keep-monthly",
+    "--keep-yearly",
+    "--keep-within",
+    "--keep-tag",
+    "--group-by",
+    "--prune",
+];
+
+/// Validate a `forget_policy` string before it is `split_whitespace`-appended
+/// to the restic forget argv. Fails closed on unknown flags, flag-like values
+/// (a missing value would re-target the next token), and shell metacharacters.
+pub fn validate_forget_policy(policy: &str) -> Result<(), String> {
+    let mut expect_value_for: Option<&str> = None;
+    let mut seen_any = false;
+    for token in policy.split_whitespace() {
+        if let Some(flag) = expect_value_for.take() {
+            if token.starts_with('-') || token.contains(char::is_whitespace) {
+                return Err(format!(
+                    "backup forget_policy: {flag} needs a value, got {token:?}."
+                ));
+            }
+            if token.contains([
+                ';', '&', '|', '$', '`', '(', ')', '<', '>', '\\', '"', '\'', '!',
+            ]) {
+                return Err(format!(
+                    "backup forget_policy: value {token:?} for {flag} contains unsafe characters."
+                ));
+            }
+            seen_any = true;
+            continue;
+        }
+        if !FORGET_FLAG_ALLOWLIST.contains(&token) {
+            return Err(format!(
+                "backup forget_policy: unsupported flag {token:?}; allowed: {}.",
+                FORGET_FLAG_ALLOWLIST.join(" ")
+            ));
+        }
+        seen_any = true;
+        // `--prune` is standalone; every other allowed flag takes a value.
+        if token != "--prune" {
+            expect_value_for = Some(token);
+        }
+    }
+    if let Some(flag) = expect_value_for {
+        return Err(format!(
+            "backup forget_policy: {flag} needs a value, got end of policy."
+        ));
+    }
+    if !seen_any {
+        // Empty policy: forget runs as bare `forget --prune` with no
+        // retention bounds. Allowed (explicit opt-out), not an error.
+    }
+    Ok(())
+}
+
+/// True when a restic repo at `repo` already holds at least one snapshot.
+///
+/// Guards the `rclone sync repo remote` mirror stage: syncing a fresh-empty
+/// repo over a populated remote deletes every remote snapshot. A fresh
+/// `restic init` leaves `snapshots/` empty, so a missing or empty
+/// `snapshots/` dir means "nothing to upload — do not mirror".
+pub fn repo_has_snapshots(repo: &std::path::Path) -> bool {
+    let mut entries = match std::fs::read_dir(repo.join("snapshots")) {
+        Ok(entries) => entries,
+        Err(_) => return false,
+    };
+    entries.any(|entry| entry.map(|entry| entry.path().is_file()).unwrap_or(false))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -314,6 +392,38 @@ mod tests {
         );
         assert_eq!(mounts, vec!["/run/media/alice/BACKUP", "/mnt/nas"]);
         assert!(!mounts.iter().any(|mount| mount == "/"));
+    }
+
+    #[test]
+    fn forget_policy_allows_only_known_keep_flags() {
+        assert!(validate_forget_policy("--keep-daily 7 --keep-weekly 4 --keep-monthly 6").is_ok());
+        assert!(validate_forget_policy("--keep-last 3 --prune").is_ok());
+        assert!(validate_forget_policy("").is_ok());
+        // Unknown flags (notably repo/password overrides) fail closed.
+        assert!(validate_forget_policy("--keep-daily 7 --repo /tmp/evil").is_err());
+        assert!(validate_forget_policy("--password-file /tmp/p").is_err());
+        assert!(validate_forget_policy("--prune --verbose").is_err());
+        // A missing value must not re-target the next token as a value.
+        assert!(validate_forget_policy("--keep-daily --keep-weekly 4").is_err());
+        assert!(validate_forget_policy("--keep-daily").is_err());
+        // Shell metacharacters in values are rejected.
+        assert!(validate_forget_policy("--keep-tag a;b").is_err());
+        assert!(validate_forget_policy("--keep-tag $(x)").is_err());
+        assert!(validate_forget_policy("--group-by host --keep-last 5").is_ok());
+    }
+
+    #[test]
+    fn repo_without_snapshots_is_not_mirrorable() {
+        let directory = tempdir().unwrap();
+        let repo = directory.path().join("restic");
+        // Missing entirely: nothing to upload.
+        assert!(!repo_has_snapshots(&repo));
+        // Fresh `restic init` layout: empty snapshots/ dir.
+        std::fs::create_dir_all(repo.join("snapshots")).unwrap();
+        assert!(!repo_has_snapshots(&repo));
+        // One snapshot file: safe to mirror.
+        std::fs::write(repo.join("snapshots").join("abc123"), [0u8; 8]).unwrap();
+        assert!(repo_has_snapshots(&repo));
     }
 
     #[test]

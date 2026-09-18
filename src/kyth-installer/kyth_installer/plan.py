@@ -66,7 +66,7 @@ from .disk import (  # pylint: disable=unused-import
     list_partitions,
 )
 from . import partition_ops
-from .fsresize import shrink_filesystem
+from .fsresize import ntfs_filesystem_size_bytes, shrink_filesystem
 from .services.disk_service import DiskService
 from .system import _as_root, _settle, unmount_target_disk
 from .runner import run_command
@@ -220,7 +220,7 @@ def _commit_new_kythos_partition(
     *,
     before_partition: Callable[[], None] | None = None,
     failure_message: str = "A step failed — restoring the original partition table...",
-    restored_message: str = "Partition table restored to its state before this attempt.",
+    restored_message: str = "Partition table restored to its state before this attempt (table only — filesystem writes already made are not undone).",
 ) -> str:
     """Back up `disk`'s partition table, then create a new KythOS Btrfs
     partition spanning [gap_start, gap_end), restoring the backup if
@@ -309,6 +309,7 @@ def _prepare_ntfs_resize_target(
         resize_partition=DiskService().resize_partition,
         commit_partition=_commit_new_kythos_partition,
         marker_root=marker_root,
+        ntfs_fs_size=ntfs_filesystem_size_bytes,
     )
 
 def _validate_free_space_target(

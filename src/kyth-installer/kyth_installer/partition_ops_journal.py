@@ -889,4 +889,8 @@ class Journal:
         self.ops.clear()
         self._committed = False
         self._root_partition = None
-        log("Partition table restored to previous state.")
+        log(
+            "Partition table restored to its pre-commit layout. "
+            "This restores the table only — filesystems already formatted or "
+            "shrunk by a partial commit were not rolled back."
+        )
