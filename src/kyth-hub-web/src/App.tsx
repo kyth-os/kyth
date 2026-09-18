@@ -2,6 +2,7 @@ import { lazy, Suspense } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
+import { OfflineBanner } from "./components/OfflineBanner";
 import { ExeHandlerDialog } from "./components/ExeHandlerDialog";
 
 const Dashboard = lazy(() => import("./pages/Dashboard").then(({ Dashboard: page }) => ({ default: page })));
@@ -33,6 +34,7 @@ export function App() {
         <Sidebar />
         <main className="scroll-area main-content" style={{ flex: 1, padding: "0 24px 24px", overflowY: "auto" }}>
           <Topbar crumb={crumb} />
+          <OfflineBanner />
           <Suspense fallback={<div className="glass dashboard-card card-copy">Loading Hub page…</div>}>
             <Routes>
               <Route path="/" element={<Dashboard />} />

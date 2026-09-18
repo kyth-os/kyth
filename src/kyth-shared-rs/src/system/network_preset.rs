@@ -140,6 +140,30 @@ pub fn dns_ip(preset: &NetworkPreset) -> &'static str {
     }
 }
 
+/// Render `network.toml` from a validated preset. The Hub toggle path uses
+/// this so flag flips preserve the DNS/firewall choices: only the two VPN
+/// booleans change, everything else round-trips byte-identical in meaning.
+/// Fail-closed note: callers must re-load the rendered text through `load`
+/// and compare before writing — never persist a rendering that does not
+/// decode to the preset it was rendered from.
+pub fn render_network_toml(preset: &NetworkPreset) -> String {
+    format!(
+        "# Kyth network preset — DoT + firewalld, offline\n\
+         dns = \"{}\"\n\
+         doh = {}\n\
+         firewall_zone = \"{}\"\n\
+         dns_strict = {}\n\
+         vpn_dns_exclusive = {}\n\
+         vpn_fail_closed = {}\n",
+        preset.dns,
+        preset.doh,
+        preset.firewall_zone,
+        preset.dns_strict,
+        preset.vpn_dns_exclusive,
+        preset.vpn_fail_closed,
+    )
+}
+
 pub fn render_resolved_conf(preset: &NetworkPreset) -> String {
     // Corporate DHCP DNS servers commonly do not expose DNS-over-TLS.  Use
     // resolved's opportunistic mode so encrypted DNS remains preferred when
@@ -288,6 +312,29 @@ mod tests {
                 vpn_dns_exclusive: true,
                 vpn_fail_closed: false,
             }
+        );
+    }
+
+    #[test]
+    fn renders_network_toml_and_reloads_it_identically() {
+        let dir = tempdir().unwrap();
+        let preset = NetworkPreset {
+            dns: "cloudflare".into(),
+            doh: false,
+            firewall_zone: "work".into(),
+            dns_strict: true,
+            vpn_dns_exclusive: true,
+            vpn_fail_closed: true,
+        };
+        let rendered = render_network_toml(&preset);
+        let path = dir.path().join("network.toml");
+        std::fs::write(&path, &rendered).unwrap();
+        // Fail-closed contract: the rendered file must decode to the exact
+        // preset it was rendered from, or the Hub toggle must not persist it.
+        assert_eq!(load(&path), preset);
+        assert_eq!(
+            load(&dir.path().join("missing.toml")),
+            NetworkPreset::default()
         );
     }
 

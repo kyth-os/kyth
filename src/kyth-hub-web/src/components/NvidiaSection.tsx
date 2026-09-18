@@ -9,7 +9,7 @@ import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 export function NvidiaSection({ section }: { section: HubSection }) {
   const [detected, setDetected] = useState<boolean | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("privileged");
 
   useEffect(() => {
     let cancelled = false;

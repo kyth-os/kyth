@@ -15,7 +15,7 @@ export function PerformanceSection({ section }: { section: HubSection }) {
   const [pendingPreset, setPendingPreset] = useState<string | null>(null);
   const [gamingTools, setGamingTools] = useState<GamingPerfStatus | null>(null);
   const [scx, setScx] = useState<ScxStatus | null>(null);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("gaming");
   useEffect(() => {
     let c = false;
     Promise.all([fetchAuditCache(), fetchAudioPresets(), fetchTelemetryRecent(8), fetchGamingPerfStatus(), fetchScxStatus()]).then(([a, p, recent, tools, scheduler]) => {

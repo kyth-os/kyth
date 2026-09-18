@@ -13,7 +13,7 @@ export function ControllersSection({ section }: { section: HubSection }) {
   const [info, setInfo] = useState<ControllerInfo | null>(null);
   const [live, setLive] = useState<ControllersLive | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;

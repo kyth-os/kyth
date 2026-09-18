@@ -40,7 +40,7 @@ export function FeedbackSection({ section }: { section: HubSection }) {
   const [body, setBody] = useState("");
   const [includeDetails, setIncludeDetails] = useState(true);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
 
   useEffect(() => {
     let c = false;

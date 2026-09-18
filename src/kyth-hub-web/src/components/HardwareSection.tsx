@@ -40,7 +40,7 @@ export function HardwareSection({ section }: { section: HubSection }) {
   const [pci, setPci] = useState<Array<[string, string[]]> | null>(null);
   const [firmware, setFirmware] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;

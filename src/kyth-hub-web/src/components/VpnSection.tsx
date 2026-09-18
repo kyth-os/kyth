@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { disconnectVpnConnection, fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnConnectionStatus, fetchVpnSavedProfile, openVpnApp, startVpnConnection, type NetworkSummary, type VpnSavedProfile } from "../services/liveData";
+import { disconnectVpnConnection, fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnConnectionStatus, fetchVpnProtectionStatus, fetchVpnSavedProfile, openVpnApp, setVpnProtection, startVpnConnection, type NetworkSummary, type VpnProtectionStatus, type VpnSavedProfile } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -20,13 +20,15 @@ export function VpnSection({ section }: { section: HubSection }) {
   const [password, setPassword] = useState("");
   const [job, setJob] = useState<string | null>(null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
-  const { status, busy, run } = useSectionAction();
+  const [protection, setProtection] = useState<VpnProtectionStatus | null>(null);
+  const { status, busy, run } = useSectionAction("hub-action");
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchNetworkSummary(), fetchVpnSavedProfile()]).then(([s, savedProfile]) => {
+    Promise.all([fetchNetworkSummary(), fetchVpnSavedProfile(), fetchVpnProtectionStatus()]).then(([s, savedProfile, vpnProtection]) => {
       if (!cancelled) {
         setSummary(s);
         setProfile(savedProfile);
+        setProtection(vpnProtection);
         if (savedProfile) {
           setGateway(savedProfile.gateway);
           setProtocol(savedProfile.protocol);
@@ -44,7 +46,7 @@ export function VpnSection({ section }: { section: HubSection }) {
     let cancelled = false;
     let timer: number | undefined;
     let polls = 0;
-    const TERMINAL_VPN_STATES = new Set(["connected", "failed", "disconnected"]);
+    const TERMINAL_VPN_STATES = new Set(["connected", "failed", "disconnected", "complete", "failed_lockdown", "failed_lockdown_open", "connected_firewall_open", "complete_firewall_open"]);
     const poll = async () => {
       if (cancelled) return;
       polls += 1;
@@ -52,9 +54,13 @@ export function VpnSection({ section }: { section: HubSection }) {
       if (!cancelled && current) {
         setJobStatus(current.detail);
         // Terminal state reached: stop polling rather than holding the 1s
-        // interval open forever.
+        // interval open forever. Lockdown states are terminal too: the
+        // tunnel is gone and the firewall verdict (blocked vs open) is final.
         if (TERMINAL_VPN_STATES.has(current.state)) {
           if (current.state === "connected") setSummary((value) => value ? { ...value, vpnConnected: true, vpnName: gateway } : value);
+          if (current.state === "failed_lockdown_open" || current.state === "connected_firewall_open" || current.state === "complete_firewall_open") {
+            setJobStatus(`Action needed: ${current.detail}`);
+          }
           return;
         }
       }
@@ -130,6 +136,52 @@ export function VpnSection({ section }: { section: HubSection }) {
         <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
           VPN profiles, openconnect, and SAML sign-in are handled by native Rust commands. Credentials and authentication tokens are never shown in status text.
         </p>
+        <div style={{ marginTop: 12, borderTop: "1px solid var(--hairline)", paddingTop: 12 }}>
+          <p className="card-copy" style={{ fontSize: 13, fontWeight: 600 }}>VPN protection</p>
+          {protection ? (
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={protection.vpn_fail_closed}
+                  disabled={busy !== null}
+                  onChange={() => {
+                    const next = { vpnFailClosed: !protection.vpn_fail_closed, vpnDnsExclusive: protection.vpn_dns_exclusive };
+                    void run("vpn-protection", "Saving VPN protection…", async () => {
+                      const detail = await setVpnProtection(next);
+                      setProtection(await fetchVpnProtectionStatus());
+                      return detail;
+                    });
+                  }}
+                />
+                Fail-closed: block the network if the tunnel drops
+              </label>
+              <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
+                <input
+                  type="checkbox"
+                  checked={protection.vpn_dns_exclusive}
+                  disabled={busy !== null}
+                  onChange={() => {
+                    const next = { vpnFailClosed: protection.vpn_fail_closed, vpnDnsExclusive: !protection.vpn_dns_exclusive };
+                    void run("vpn-protection", "Saving VPN protection…", async () => {
+                      const detail = await setVpnProtection(next);
+                      setProtection(await fetchVpnProtectionStatus());
+                      return detail;
+                    });
+                  }}
+                />
+                Exclusive DNS: pin tunnel links to the VPN resolver
+              </label>
+            </div>
+          ) : (
+            <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Protection toggles are available from the installed Kyth Hub.</p>
+          )}
+          {protection && (
+            <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>
+              Fail-closed is {protection.vpn_fail_closed ? "on — an unexpected drop blocks the network" : "off — traffic may return to the LAN on a drop"} · Exclusive DNS is {protection.vpn_dns_exclusive ? "on" : "off"} · Restores zone {protection.firewall_zone} on clean disconnect.
+            </p>
+          )}
+        </div>
         {jobStatus && <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>{jobStatus}</p>}
         <ActionStatus status={status} />
       </div>

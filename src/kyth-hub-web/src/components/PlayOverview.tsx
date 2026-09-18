@@ -74,7 +74,7 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
   const [readings, setReadings] = useState<PlayReadings>(emptyReadings);
   const [loaded, setLoaded] = useState(false);
   const [, setSearchParams] = useSearchParams();
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;

@@ -41,7 +41,7 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
   const [focusMinutes, setFocusMinutes] = useState(25);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [focusRemaining, setFocusRemaining] = useState(0);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("install");
 
   useEffect(() => {
     let c = false;

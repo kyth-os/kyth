@@ -40,7 +40,7 @@ export function GuardianSection({ section }: { section: HubSection }) {
   const [snapshot, setSnapshot] = useState<GuardianSnapshot | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("guardian");
 
   useEffect(() => {
     let cancelled = false;

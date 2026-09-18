@@ -57,7 +57,7 @@ function InfoCard({ icon, label, value, detail, status }: {
 export function ThisPcOverview() {
   const [readings, setReadings] = useState<PcReadings>(emptyReadings);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("guardian");
 
   useEffect(() => {
     let cancelled = false;

@@ -1,6 +1,18 @@
 import { useState } from "react";
 
-import { cancelHubAction, confirmUserAction, getInFlightJob, runHubRecipeAction } from "../services/liveData";
+import {
+  cancelGamingJob,
+  cancelGuardianCheck,
+  cancelHubAction,
+  cancelInstall,
+  cancelJob,
+  cancelPrivilegedAction,
+  cancelSecurityJob,
+  cancelUpdateJob,
+  confirmUserAction,
+  getInFlightJob,
+  runHubRecipeAction,
+} from "../services/liveData";
 import type { JobDomain } from "../services/liveData";
 
 /** Shared "run a mutating system action, then say what happened" helper.
@@ -64,10 +76,30 @@ export function ActionButton({
 export function ActionStatus({ status }: { status: string | null }) {
   if (!status) return null;
   return (
-    <p className="card-copy action-status" style={{ fontSize: 12, marginTop: 12 }}>
+    <p className="card-copy action-status" role="status" style={{ fontSize: 12, marginTop: 12 }}>
       {status}
     </p>
   );
+}
+
+/** Cancel entry point for each tracked job domain. RecipeButton's Cancel
+ * must stop the domain its recipe actually runs in — every recipe runs as
+ * a `hub-action` job, while installs/Kali/gaming jobs use their own
+ * domains, so a single hard-coded cancel target silently cancels nothing
+ * outside `hub-action`. */
+export const CANCEL_FOR_DOMAIN: Record<JobDomain, () => Promise<string>> = {
+  guardian: cancelGuardianCheck,
+  privileged: cancelPrivilegedAction,
+  "hub-action": cancelHubAction,
+  update: cancelUpdateJob,
+  job: cancelJob,
+  install: cancelInstall,
+  security: cancelSecurityJob,
+  gaming: cancelGamingJob,
+};
+
+export function cancelForDomain(domain: JobDomain): () => Promise<string> {
+  return CANCEL_FOR_DOMAIN[domain];
 }
 
 /** A `just <recipe>` button. The recipe runs as a captured background job;
@@ -78,17 +110,19 @@ export function RecipeButton({
   label,
   busy,
   run,
+  domain = "hub-action",
 }: {
   recipe: string;
   label: string;
   busy: string | null;
   run: (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
+  domain?: JobDomain;
 }) {
   if (busy === recipe) {
     return (
       <ActionButton
         label="Cancel"
-        onClick={() => run(`cancel-${recipe}`, "Cancelling…", cancelHubAction)}
+        onClick={() => run(`cancel-${recipe}`, "Cancelling…", CANCEL_FOR_DOMAIN[domain])}
       />
     );
   }

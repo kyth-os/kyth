@@ -356,6 +356,24 @@ class BridgeFieldTests(unittest.TestCase):
         self.assertIn("osEmulation, username", vpn)
         self.assertNotIn("os_emulation: osEmulation", vpn)
 
+    def test_vpn_protection_toggles_and_lockdown_states_are_registered(self):
+        vpn = (HUB_WEB / "components" / "VpnSection.tsx").read_text(encoding="utf-8")
+        vpn_rs = (
+            ROOT / "src/kyth-hub-web/src-tauri/src/commands/vpn.rs"
+        ).read_text(encoding="utf-8")
+        # Toggle bridges: registered command, frontend wrapper, visible toggle.
+        self.assertIn("vpn_protection_status", MAIN_RS)
+        self.assertIn("set_vpn_protection", MAIN_RS)
+        self.assertIn("fetchVpnProtectionStatus", LIVE_DATA)
+        self.assertIn("setVpnProtection", LIVE_DATA)
+        self.assertIn("VPN protection", vpn)
+        # Lockdown terminal states: backend-advertised and frontend-terminal,
+        # or the Hub polls a finished lockdown job 300 times.
+        for state in ("failed_lockdown", "failed_lockdown_open"):
+            self.assertIn(state, vpn_rs)
+            self.assertIn(state, vpn)
+            self.assertIn(state, LIVE_DATA)
+
     def test_move_in_readiness_and_full_workflow_bridges_are_registered(self):
         move_files = (HUB_WEB / "components" / "MoveFilesSection.tsx").read_text(encoding="utf-8")
         cloud = (HUB_WEB / "components" / "CloudStorageSection.tsx").read_text(encoding="utf-8")

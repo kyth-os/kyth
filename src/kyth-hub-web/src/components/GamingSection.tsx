@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
   fetchAuditCache,
@@ -172,13 +172,18 @@ function ProfileBuilderCard({ busy, run }: { busy: string | null; run: SectionRu
   const [hdr, setHdr] = useState(false);
   const [appid, setAppid] = useState("");
   const [saved, setSaved] = useState<{ profile: string; hdr: boolean } | null>(null);
+  // Same stale-guard as the App Store catalog search: only the latest
+  // debounced profile read may write state.
+  const profileRequest = useRef(0);
 
   useEffect(() => {
+    profileRequest.current += 1;
+    const requestId = profileRequest.current;
     let cancelled = false;
     const trimmed = appid.trim();
     if (!trimmed) { setSaved(null); return; }
     const timer = window.setTimeout(() => {
-      fetchPerGameProfile(trimmed).then((value) => { if (!cancelled) setSaved(value); });
+      fetchPerGameProfile(trimmed).then((value) => { if (!cancelled && profileRequest.current === requestId) setSaved(value); });
     }, 250);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [appid]);
@@ -281,7 +286,7 @@ export function GamingSection({ section }: { section: HubSection }) {
   const [proton, setProton] = useState<ProtonDbResult[]>([]);
   const [antiCheat, setAntiCheat] = useState<AntiCheatEntry[] | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("gaming");
   useEffect(() => {
     let c = false;
     Promise.all([

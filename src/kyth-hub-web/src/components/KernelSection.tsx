@@ -14,7 +14,7 @@ const FLAVOR_LABEL: Record<string, string> = {
 export function KernelSection({ section }: { section: HubSection }) {
   const [flavor, setFlavor] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("privileged");
 
   useEffect(() => {
     let cancelled = false;

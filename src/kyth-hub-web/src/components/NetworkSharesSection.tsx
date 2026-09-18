@@ -27,7 +27,7 @@ export function NetworkSharesSection({ section }: { section: HubSection }) {
   const [share, setShare] = useState("");
   const [form, setForm] = useState(initialForm);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
 
   const refreshConfigured = async () => setConfigured((await fetchConfiguredNetworkShares()) ?? []);
   const refreshSummary = async () => {

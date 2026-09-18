@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
   fetchAppStoreSnapshot, fetchAppImages, fetchFamiliarApps, searchAppStream,
@@ -91,7 +91,10 @@ export function AppStoreSection({ section }: { section: HubSection }) {
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogSearching, setCatalogSearching] = useState(false);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  // Monotonic id for the debounced catalog search: Tauri invokes cannot
+  // be aborted, so a slow earlier query must not overwrite newer results.
+  const catalogRequest = useRef(0);
+  const { status, busy, run } = useSectionAction("install");
 
   useEffect(() => {
     let cancelled = false;
@@ -99,10 +102,12 @@ export function AppStoreSection({ section }: { section: HubSection }) {
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
+    catalogRequest.current += 1;
+    const requestId = catalogRequest.current;
     const q = catalogQuery.trim();
     if (q.length < 2) { setCatalog(null); setCatalogSearching(false); return; }
     let cancelled = false;
-    const timer = window.setTimeout(async () => { setCatalogSearching(true); const apps = await searchAppStream(q); if (!cancelled) { setCatalog(apps ?? []); setCatalogSearching(false); } }, 250);
+    const timer = window.setTimeout(async () => { setCatalogSearching(true); const apps = await searchAppStream(q); if (!cancelled && catalogRequest.current === requestId) { setCatalog(apps ?? []); setCatalogSearching(false); } }, 250);
     return () => { cancelled = true; window.clearTimeout(timer); };
   }, [catalogQuery]);
   async function refreshInstalled(): Promise<void> {

@@ -1154,7 +1154,7 @@ export async function startVpnConnection(profile: { gateway: string; protocol: s
   if (!inTauriShell()) throw new Error("VPN connections require the installed Kyth Hub.");
   return await invoke<string>("vpn_connect", profile);
 }
-export interface VpnConnectionStatus { id: string; state: "connecting" | "authentication_required" | "connected" | "disconnected" | "failed" | "unknown"; detail: string; }
+export interface VpnConnectionStatus { id: string; state: "connecting" | "authentication_required" | "connected" | "disconnected" | "failed" | "complete" | "failed_lockdown" | "failed_lockdown_open" | "connected_firewall_open" | "complete_firewall_open" | "unknown"; detail: string; }
 export async function fetchVpnConnectionStatus(job: string): Promise<VpnConnectionStatus | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<VpnConnectionStatus>("vpn_status", { job }); } catch { return null; }
@@ -1164,6 +1164,15 @@ export async function disconnectVpnConnection(job: string): Promise<string> {
   return await invoke<string>("vpn_disconnect", { job });
 }
 export interface VpnSavedProfile { gateway: string; protocol: string; os: string; }
+export interface VpnProtectionStatus { vpn_fail_closed: boolean; vpn_dns_exclusive: boolean; firewall_zone: string; }
+export async function fetchVpnProtectionStatus(): Promise<VpnProtectionStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<VpnProtectionStatus>("vpn_protection_status"); } catch { return null; }
+}
+export async function setVpnProtection(protection: { vpnFailClosed: boolean; vpnDnsExclusive: boolean }): Promise<string> {
+  if (!inTauriShell()) throw new Error("VPN protection toggles require the installed Kyth Hub.");
+  return await invoke<string>("set_vpn_protection", { vpnFailClosed: protection.vpnFailClosed, vpnDnsExclusive: protection.vpnDnsExclusive });
+}
 export async function fetchVpnSavedProfile(): Promise<VpnSavedProfile | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<VpnSavedProfile | null>("vpn_saved_profile"); } catch { return null; }
@@ -1269,7 +1278,7 @@ export async function checkForUpdates(): Promise<AvailabilityStatusLive> {
   // invoke against a 95s timer so the button always settles with a
   // friendly, actionable error instead of spinning forever.
   const timeout = new Promise<never>((_, reject) => {
-    window.setTimeout(() => reject(new Error("The update check timed out; your current system has not changed. Check your connection and try again.")), 95_000);
+    globalThis.setTimeout(() => reject(new Error("The update check timed out; your current system has not changed. Check your connection and try again.")), 95_000);
   });
   return await Promise.race([
     invoke<AvailabilityStatusLive>("collect_availability", {
@@ -1442,12 +1451,15 @@ export async function fetchInstalledFlatpaks(): Promise<InstalledFlatpak[] | nul
   });
 }
 export async function makeAppImageExecutable(path: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("AppImage actions are available from the installed Kyth Hub.");
   return await invoke<string>("make_appimage_executable", { path });
 }
 export async function importAppImage(path: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("AppImage actions are available from the installed Kyth Hub.");
   return await invoke<string>("import_appimage", { path });
 }
 export async function uninstallFlatpak(id: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("App installs are available from the installed Kyth Hub.");
   if (!confirmUserAction(`Uninstall ${id}? This removes the application from this system.`)) return "Cancelled.";
   const launch = await invoke<InstallActionLaunch>("uninstall_flatpak", { appId: id });
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Uninstall did not start.");
@@ -1466,8 +1478,12 @@ export async function uninstallFlatpak(id: string): Promise<string> {
     untrackJob("install", job);
   }
 }
-export async function launchAppImage(path: string): Promise<string> { return await invoke<string>("launch_appimage", { path }); }
+export async function launchAppImage(path: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("AppImage actions are available from the installed Kyth Hub.");
+  return await invoke<string>("launch_appimage", { path });
+}
 export async function updateFlatpaks(): Promise<string> {
+  if (!inTauriShell()) throw new Error("App installs are available from the installed Kyth Hub.");
   const launch = await invoke<InstallActionLaunch>("update_flatpaks");
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "App updates did not start.");
   // The backend runs an unbounded `flatpak update --user` followed by a
@@ -1492,6 +1508,7 @@ export async function updateFlatpaks(): Promise<string> {
   }
 }
 export async function installFlatpak(appId: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("App installs are available from the installed Kyth Hub.");
   const launch = await invoke<InstallActionLaunch>("install_flatpak", { appId });
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Install did not start.");
   return launch.job;
@@ -1584,18 +1601,26 @@ export async function removeKaliBox(): Promise<string> {
   const job = securityJob(await invoke<SecurityActionLaunch>("kali_remove", {}));
   return await pollSecurityJob(job, 60); // up to 3 minutes
 }
-export async function enterKaliTerminal(): Promise<string> { return await invoke<string>("kali_enter_terminal"); }
+export async function enterKaliTerminal(): Promise<string> {
+  if (!inTauriShell()) throw new Error("Security tools are available from the installed Kyth Hub.");
+  return await invoke<string>("kali_enter_terminal");
+}
 
 export async function installSecHostTool(flatpakId: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Security tools are available from the installed Kyth Hub.");
   const job = securityJob(await invoke<SecurityActionLaunch>("sec_host_tool_install", { flatpakId }));
   return await pollSecurityJob(job, 240); // up to 12 minutes
 }
 export async function uninstallSecHostTool(flatpakId: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Security tools are available from the installed Kyth Hub.");
   if (!confirmUserAction("Remove this tool?")) return "Cancelled.";
   const job = securityJob(await invoke<SecurityActionLaunch>("sec_host_tool_uninstall", { flatpakId }));
   return await pollSecurityJob(job, 60);
 }
-export async function launchSecHostTool(flatpakId: string): Promise<string> { return await invoke<string>("sec_host_tool_launch", { flatpakId }); }
+export async function launchSecHostTool(flatpakId: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Security tools are available from the installed Kyth Hub.");
+  return await invoke<string>("sec_host_tool_launch", { flatpakId });
+}
 
 // ---------------------------------------------------------------------
 // Gaming tab: the install/launch/uninstall tool grid, the two one-shot
@@ -1631,19 +1656,33 @@ interface GamingActionLaunch { job: string; state: "running"; detail: string; }
 function gamingJob(launch: GamingActionLaunch): string { if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Gaming action did not start."); return launch.job; }
 
 export async function installGamingTool(flatpakId: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
   const job = gamingJob(await invoke<GamingActionLaunch>("gaming_tool_install", { flatpakId }));
   return await pollGamingJob(job, 240); // up to 12 minutes
 }
 export async function uninstallGamingTool(flatpakId: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
   if (!confirmUserAction("Remove this tool?")) return "Cancelled.";
   const job = gamingJob(await invoke<GamingActionLaunch>("gaming_tool_uninstall", { flatpakId }));
   return await pollGamingJob(job, 60);
 }
-export async function launchGamingTool(flatpakId: string): Promise<string> { return await invoke<string>("gaming_tool_launch", { flatpakId }); }
+export async function launchGamingTool(flatpakId: string): Promise<string> {
+  if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
+  return await invoke<string>("gaming_tool_launch", { flatpakId });
+}
 
-export async function fixDiscordScreenshare(): Promise<string> { return await invoke<string>("fix_discord_screenshare"); }
-export async function fixObsPipewire(): Promise<string> { return await invoke<string>("fix_obs_pipewire"); }
-export async function openGameFolder(key: "compatdata" | "shadercache"): Promise<string> { return await invoke<string>("open_game_folder", { key }); }
+export async function fixDiscordScreenshare(): Promise<string> {
+  if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
+  return await invoke<string>("fix_discord_screenshare");
+}
+export async function fixObsPipewire(): Promise<string> {
+  if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
+  return await invoke<string>("fix_obs_pipewire");
+}
+export async function openGameFolder(key: "compatdata" | "shadercache"): Promise<string> {
+  if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
+  return await invoke<string>("open_game_folder", { key });
+}
 
 // ---------------------------------------------------------------------
 // Overlays / sched-ext / per-game profile builder — page_gaming_tools_perf.py.
@@ -1661,6 +1700,7 @@ export async function fetchScxStatus(): Promise<ScxStatus | null> {
   try { return await invoke<ScxStatus>("scx_status"); } catch { return null; }
 }
 export async function setScxScheduler(scheduler: "rusty" | "stop"): Promise<string> {
+  if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
   const job = await invoke<string>("scx_set_scheduler", { scheduler });
   trackJob("gaming", job);
   try {
@@ -1685,6 +1725,7 @@ export async function fetchPerGameProfile(appid: string): Promise<GameProfile | 
   try { return await invoke<GameProfile>("per_game_profile", { appid }); } catch { return null; }
 }
 export async function savePerGameProfile(appid: string, profile: string, hdr: boolean): Promise<string> {
+  if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
   return await invoke<string>("save_per_game_profile", { appid, profile, hdr });
 }
 export interface ProtonDbResult { app_id: string; tier: string; detail: string }

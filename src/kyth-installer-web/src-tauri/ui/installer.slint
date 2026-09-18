@@ -17,6 +17,8 @@ export component InstallerWindow inherits Window {
     in-out property <string> free-region-end: "0";
     in-out property <string> install-mode: "wipe";
     in-out property <string> kernel: "fedora";
+    in-out property <string> encryption: "none";
+    in-out property <bool> tpm-recovery-ack: false;
     in-out property <string> resize-gib: "64";
     in-out property <string> timezone: "UTC";
     in-out property <string> locale: "en_US.UTF-8";
@@ -56,7 +58,7 @@ export component InstallerWindow inherits Window {
     in-out property <bool> acknowledged-irreversible: false;
     in-out property <bool> confirm-erase: false;
     in-out property <bool> confirm-current: false;
-    in-out property <bool> start-enabled: selected-disk != "" && username != "" && password != "" && acknowledged-irreversible && confirm-erase && (install-mode != "manual" || manual-committed) && (install-mode != "wipe" || confirm-current) && (install-mode != "alongside" || target-partition != "") && (install-mode != "resize_ntfs" || target-partition != "") && (install-mode != "free_space" || free-region-end != free-region-start);
+    in-out property <bool> start-enabled: selected-disk != "" && username != "" && password != "" && acknowledged-irreversible && confirm-erase && (encryption != "tpm2" || tpm-recovery-ack) && (install-mode != "manual" || manual-committed) && (install-mode != "wipe" || confirm-current) && (install-mode != "alongside" || target-partition != "") && (install-mode != "resize_ntfs" || target-partition != "") && (install-mode != "free_space" || free-region-end != free-region-start);
     in-out property <bool> busy: false;
     in-out property <float> progress: 0;
     in-out property <string> event-log: "Waiting for installer events…";
@@ -77,6 +79,7 @@ export component InstallerWindow inherits Window {
     callback manual-action(string);
     callback select-mode(string);
     callback select-kernel(string);
+    callback select-encryption(string);
     callback start-install();
     callback cancel-install();
     callback reboot();
@@ -197,6 +200,18 @@ export component InstallerWindow inherits Window {
                                 spacing: 8px;
                                 Text { text: "MOK password"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
                                 LineEdit { text <=> mok-password; input-type: InputType.password; placeholder-text: "Only needed if Secure Boot requests enrollment"; }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: "Encryption"; color: #9fb1d1; font-size: 12px; vertical-alignment: center; }
+                                Button { text: "None"; clicked => { encryption = "none"; select-encryption("none"); } }
+                                Button { text: "TPM2"; clicked => { encryption = "tpm2"; select-encryption("tpm2"); } }
+                                Text { text: "TPM2 needs a to-disk install and a recovery key plan."; color: #7f90af; font-size: 11px; vertical-alignment: center; wrap: word-wrap; }
+                            }
+                            HorizontalLayout {
+                                visible: encryption == "tpm2";
+                                spacing: 8px;
+                                CheckBox { text: "I escrowed a TPM recovery key and accept that a board swap, TPM reset, or PCR change destroys access without it."; checked <=> tpm-recovery-ack; }
                             }
                             HorizontalLayout {
                                 spacing: 8px;

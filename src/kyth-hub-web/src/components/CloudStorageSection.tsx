@@ -29,7 +29,7 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
   const [oauth, setOauth] = useState<{ ok: boolean; detail: string } | null>(null);
   const [syncRemotes, setSyncRemotes] = useState<CloudSyncRemote[] | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;

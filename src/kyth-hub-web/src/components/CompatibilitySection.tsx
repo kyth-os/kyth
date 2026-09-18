@@ -31,7 +31,7 @@ export function CompatibilitySection({ section }: { section: HubSection }) {
   const [gameFilter, setGameFilter] = useState<"all" | "works" | "tweaks" | "blocked">("all");
   const [gameQuery, setGameQuery] = useState("");
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("privileged");
 
   useEffect(() => {
     let c = false;

@@ -35,7 +35,16 @@ def load_network_preset(path: Path | None = None) -> dict[str, Any]:
     zone = str(data.get("firewall_zone", "home"))
     if zone not in ("home","public","work"):
         zone="home"
-    return {"dns": dns, "doh": doh, "firewall_zone": zone}
+    # Round-trip the Hub VPN opt-ins (and strict DoT): dropping unknown keys
+    # here would wipe flags the Rust Hub toggles just persisted.
+    return {
+        "dns": dns,
+        "doh": doh,
+        "firewall_zone": zone,
+        "dns_strict": bool(data.get("dns_strict", False)),
+        "vpn_dns_exclusive": bool(data.get("vpn_dns_exclusive", False)),
+        "vpn_fail_closed": bool(data.get("vpn_fail_closed", False)),
+    }
 
 
 def save_network_preset(cfg: dict[str, Any], path: Path | None = None) -> Path:
@@ -45,6 +54,9 @@ def save_network_preset(cfg: dict[str, Any], path: Path | None = None) -> Path:
     lines.append(f'dns = "{cfg.get("dns","quad9")}"')
     lines.append(f'doh = {str(bool(cfg.get("doh", True))).lower()}')
     lines.append(f'firewall_zone = "{cfg.get("firewall_zone","home")}"')
+    lines.append(f'dns_strict = {str(bool(cfg.get("dns_strict", False))).lower()}')
+    lines.append(f'vpn_dns_exclusive = {str(bool(cfg.get("vpn_dns_exclusive", False))).lower()}')
+    lines.append(f'vpn_fail_closed = {str(bool(cfg.get("vpn_fail_closed", False))).lower()}')
     p.write_text("\n".join(lines)+"\n", encoding="utf-8")
     return p
 
@@ -56,7 +68,12 @@ def apply_network_preset(cfg: dict[str, Any] | None = None, root: Path = Path("/
     # Corporate DHCP DNS servers commonly do not expose DNS-over-TLS.  Use
     # resolved's opportunistic mode so encrypted DNS remains preferred when
     # available without breaking per-link enterprise resolvers.
-    doh = "opportunistic" if cfg.get("doh") else "no"
+    # `dns_strict` is an explicit Hub opt-in (mirrors the Rust renderer):
+    # it breaks captive portals, so only set it when the user chose it.
+    if cfg.get("dns_strict"):
+        doh = "strict"
+    else:
+        doh = "opportunistic" if cfg.get("doh") else "no"
     dns_ip = {"quad9":"9.9.9.9","cloudflare":"1.1.1.1","google":"8.8.8.8","off":""}.get(cfg.get("dns","quad9"), "9.9.9.9")
     dest = root / "etc/systemd/resolved.conf.d/50-kyth.conf" if str(root) != "/" else Path("/etc/systemd/resolved.conf.d/50-kyth.conf")
     # handle root prefix correctly

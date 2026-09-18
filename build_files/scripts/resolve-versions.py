@@ -2,7 +2,6 @@
 """resolve-versions.py — Single source of truth for build-time version lookups."""
 from __future__ import annotations
 
-import datetime
 import json
 import os
 import re
@@ -86,7 +85,12 @@ def cmd_thirdparty_versions() -> int:
 
 
 def cmd_cachyos_kernel() -> int:
-    """Print the latest succeeded kernel-cachyos COPR build NVR, falling back to today's date."""
+    """Print the latest succeeded kernel-cachyos COPR build NVR.
+
+    Fail-closed: if the COPR query fails or yields no version, exit nonzero
+    rather than emitting a date placeholder that would silently mislabel
+    the image and poison the layer-cache hash.
+    """
     url = (
         "https://copr.fedorainfracloud.org/api_3/package/"
         "?ownername=bieszczaders&projectname=kernel-cachyos&packagename=kernel-cachyos"
@@ -105,7 +109,11 @@ def cmd_cachyos_kernel() -> int:
         print(f"COPR query failed: {e}", file=sys.stderr)
 
     if not nvr:
-        nvr = datetime.date.today().isoformat()
+        print("ERROR: could not resolve kernel-cachyos version from COPR", file=sys.stderr)
+        return 1
+    if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$", nvr):
+        print(f"ERROR: unsafe kernel-cachyos version from COPR: {nvr!r}", file=sys.stderr)
+        return 1
     print(nvr)
     return 0
 

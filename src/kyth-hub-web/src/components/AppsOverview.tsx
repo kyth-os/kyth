@@ -35,7 +35,7 @@ export function AppsOverview() {
   const [readings, setReadings] = useState<AppsReadings>(emptyReadings);
   const [loaded, setLoaded] = useState(false);
   const [, setSearchParams] = useSearchParams();
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;

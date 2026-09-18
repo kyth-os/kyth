@@ -114,20 +114,68 @@ fn terminate_child(runtime: &VpnRuntime) {
     }
 }
 
-/// Fail-closed lockdown (Hub opt-in `vpn_fail_closed`): flip firewalld to
-/// the `block` zone through the same sudo/askpass path openconnect uses,
-/// so traffic cannot silently return to the raw LAN when the tunnel drops
-/// unexpectedly. Best-effort with a loud status: without an admin prompt
-/// answer there is no lockdown, and the user is told so.
-fn set_vpn_lockdown(runtime: &VpnRuntime, lockdown: bool) {
-    let preset = network_preset::load(network_preset::config_path(None::<&std::path::Path>));
+/// Terminal VPN states: the frontend stops polling on these. Any new
+/// terminal state introduced here must also be added to `TERMINAL_VPN_STATES`
+/// in `VpnSection.tsx` (and the `VpnConnectionStatus` union in `liveData.ts`),
+/// or the Hub will poll a finished job for 300 intervals.
+pub(crate) const VPN_TERMINAL_STATES: &[&str] = &[
+    "connected",
+    "failed",
+    "disconnected",
+    "complete",
+    "failed_lockdown",
+    "failed_lockdown_open",
+    "connected_firewall_open",
+    "complete_firewall_open",
+];
+
+/// Desired firewalld default zone for a lockdown transition. Returns `None`
+/// when the Hub did not opt into `vpn_fail_closed`: lockdown is a no-op and
+/// the caller keeps its own status. Pure over the loaded preset so it is
+/// unit-testable without touching sudo.
+fn vpn_lockdown_target(preset: &network_preset::NetworkPreset, lockdown: bool) -> Option<String> {
     if !preset.vpn_fail_closed {
-        return;
+        return None;
     }
-    let zone = if lockdown {
+    Some(if lockdown {
         "block".to_string()
     } else {
         preset.firewall_zone.clone()
+    })
+}
+
+/// Whether the Hub opted into fail-closed VPN lockdown.
+fn vpn_fail_closed_enabled() -> bool {
+    network_preset::load(preset_path()).vpn_fail_closed
+}
+
+/// Fail-closed lockdown (Hub opt-in `vpn_fail_closed`): flip firewalld to
+/// the `block` zone through the same sudo/askpass path openconnect uses,
+/// so traffic cannot silently return to the raw LAN when the tunnel drops
+/// unexpectedly.
+///
+/// Returns true when lockdown is a no-op (opt-out) or the zone flip
+/// succeeded. Status ownership: engaging lockdown (`lockdown == true`) sets
+/// a terminal state itself — `failed_lockdown` on success,
+/// `failed_lockdown_open` when the admin prompt goes unanswered — so the
+/// prior `failed` is never clobbered with a generic `warning` the frontend
+/// polls past. Releasing lockdown leaves the caller's status alone; the
+/// caller sets its own `*_firewall_open` terminal state on failure.
+fn set_vpn_lockdown(runtime: &VpnRuntime, lockdown: bool) -> bool {
+    set_vpn_lockdown_at(runtime, lockdown, &preset_path())
+}
+
+/// `set_vpn_lockdown` against an explicit preset path so unit tests can
+/// drive the opt-out no-op (and the opt-in target computation) without
+/// touching `/etc/kyth/network.toml` or sudo.
+fn set_vpn_lockdown_at(
+    runtime: &VpnRuntime,
+    lockdown: bool,
+    preset_file: &std::path::Path,
+) -> bool {
+    let preset = network_preset::load(preset_file);
+    let Some(zone) = vpn_lockdown_target(&preset, lockdown) else {
+        return true;
     };
     let mut command = std::process::Command::new("sudo");
     command
@@ -146,17 +194,22 @@ fn set_vpn_lockdown(runtime: &VpnRuntime, lockdown: bool) {
     )
     .map(|output| output.status.success())
     .unwrap_or(false);
-    if !ok {
-        status(
-            runtime,
-            "warning",
-            if lockdown {
-                "VPN dropped but the network lockdown needs an admin password; traffic may leave the tunnel."
-            } else {
-                "VPN ended but restoring the firewall zone needs an admin password; check your zone."
-            },
-        );
+    if lockdown {
+        if ok {
+            status(
+                runtime,
+                "failed_lockdown",
+                "VPN dropped unexpectedly; the network is blocked until you reconnect or disconnect.",
+            );
+        } else {
+            status(
+                runtime,
+                "failed_lockdown_open",
+                "VPN dropped but the network lockdown needs an admin password; traffic may leave the tunnel.",
+            );
+        }
     }
+    ok
 }
 
 /// Take the child only when its tag matches `generation`. A superseded
@@ -275,8 +328,16 @@ fn start_process(
                     } else if kyth_shared::system::vpn_saml::line_is_connected(&line) {
                         status(&runtime, "connected", "VPN connection established.");
                         // Tunnel is up: lift any fail-closed lockdown from an
-                        // earlier drop (no-op unless the Hub opted in).
-                        set_vpn_lockdown(&runtime, false);
+                        // earlier drop (no-op unless the Hub opted in). A
+                        // failed restore must not clobber `connected` with a
+                        // polled-past warning: it gets its own terminal state.
+                        if !set_vpn_lockdown(&runtime, false) {
+                            status(
+                                &runtime,
+                                "connected_firewall_open",
+                                "VPN is connected but restoring the firewall zone needs an admin password; check your zone.",
+                            );
+                        }
                     } else if !redacted.trim().is_empty() {
                         status(&runtime, "connecting", redacted);
                     }
@@ -351,11 +412,14 @@ fn start_process(
         }
         if exit_success {
             status(&runtime, "disconnected", "VPN connection ended.");
-        } else {
-            status(&runtime, "failed", "VPN connection ended unexpectedly.");
+        } else if vpn_fail_closed_enabled() {
             // Unexpected drop with fail-closed opted in: block the raw LAN
             // before background traffic can leak out of the dead tunnel.
+            // `set_vpn_lockdown` owns the terminal state here
+            // (`failed_lockdown` or `failed_lockdown_open`).
             set_vpn_lockdown(&runtime, true);
+        } else {
+            status(&runtime, "failed", "VPN connection ended unexpectedly.");
         }
     });
 }
@@ -698,9 +762,7 @@ pub(crate) fn vpn_connect(
                         .status
                         .lock()
                         .ok()
-                        .filter(|guard| {
-                            matches!(guard.0.as_str(), "failed" | "disconnected" | "complete")
-                        })
+                        .filter(|guard| VPN_TERMINAL_STATES.contains(&guard.0.as_str()))
                         .map(|_| id.clone())
                 })
                 .collect();
@@ -743,9 +805,138 @@ pub(crate) fn vpn_disconnect(job: String) -> Result<String, String> {
     runtime.generation.fetch_add(1, Ordering::SeqCst);
     terminate_child(&runtime);
     status(&runtime, "complete", "VPN disconnected.");
-    // Clean user disconnect lifts any fail-closed lockdown.
-    set_vpn_lockdown(&runtime, false);
+    // Clean user disconnect lifts any fail-closed lockdown. A failed
+    // restore gets its own terminal state rather than clobbering `complete`.
+    if !set_vpn_lockdown(&runtime, false) {
+        status(
+            &runtime,
+            "complete_firewall_open",
+            "VPN disconnected but restoring the firewall zone needs an admin password; check your zone.",
+        );
+    }
     Ok("VPN disconnected.".into())
+}
+
+/// Hub-readable VPN protection flags: the two `network.toml` opt-ins the
+/// Hub can toggle, plus the zone a clean disconnect restores. Read-only:
+/// never prompts, never writes.
+#[derive(serde::Serialize)]
+pub(crate) struct VpnProtectionStatus {
+    pub(crate) vpn_fail_closed: bool,
+    pub(crate) vpn_dns_exclusive: bool,
+    pub(crate) firewall_zone: String,
+}
+
+fn preset_path() -> PathBuf {
+    network_preset::config_path(None::<&std::path::Path>)
+}
+
+fn vpn_protection_status_at(path: &std::path::Path) -> VpnProtectionStatus {
+    let preset = network_preset::load(path);
+    VpnProtectionStatus {
+        vpn_fail_closed: preset.vpn_fail_closed,
+        vpn_dns_exclusive: preset.vpn_dns_exclusive,
+        firewall_zone: preset.firewall_zone,
+    }
+}
+
+#[tauri::command]
+pub(crate) fn vpn_protection_status() -> VpnProtectionStatus {
+    vpn_protection_status_at(&preset_path())
+}
+
+/// Flip the two VPN protection opt-ins in `network.toml`, preserving the
+/// DNS/firewall choices already there. The preset file is root-owned, so a
+/// user-run Hub writes through a fixed `sudo -A cp` of a validated staging
+/// file (same askpass path as the lockdown flip); a Hub that can write the
+/// file directly (test mode, root) takes that path instead. Either way the
+/// rendered text is re-loaded and compared before it is persisted: a
+/// rendering that does not decode to the intended preset fails closed.
+fn set_vpn_protection_at(
+    path: &std::path::Path,
+    vpn_fail_closed: bool,
+    vpn_dns_exclusive: bool,
+) -> Result<String, String> {
+    let mut preset = network_preset::load(path);
+    preset.vpn_fail_closed = vpn_fail_closed;
+    preset.vpn_dns_exclusive = vpn_dns_exclusive;
+    let rendered = network_preset::render_network_toml(&preset);
+    let staging = std::env::temp_dir().join(format!("kyth-network-{}.toml", std::process::id()));
+    std::fs::write(&staging, rendered.as_bytes())
+        .map_err(|error| format!("could not stage network preset: {error}"))?;
+    let round_trips = network_preset::load(&staging) == preset;
+    if !round_trips {
+        let _ = std::fs::remove_file(&staging);
+        return Err("refusing to persist a network preset that does not decode back".to_string());
+    }
+    if kyth_shared::atomic_io::atomic_write_text(path, &rendered, Some(0o644)).is_ok() {
+        let _ = std::fs::remove_file(&staging);
+        return Ok(vpn_protection_summary(&preset));
+    }
+    // Root-owned preset: fixed `mkdir -p` + `cp` through the sudo/askpass
+    // path. Argv is fully fixed (both paths are computed, never user text).
+    let mut mkdir = std::process::Command::new("sudo");
+    mkdir
+        .arg("-A")
+        .arg("mkdir")
+        .arg("-p")
+        .arg(
+            path.parent()
+                .map(|parent| parent.as_os_str())
+                .unwrap_or_default(),
+        )
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut copy = std::process::Command::new("sudo");
+    copy.arg("-A")
+        .arg("cp")
+        .arg(&staging)
+        .arg(path)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+        mkdir.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+        copy.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+    }
+    let bound = std::time::Duration::from_secs(60);
+    let mkdir_ok = kyth_shared::system::process::run_bounded_command(mkdir, bound)
+        .map(|output| output.status.success())
+        .unwrap_or(false);
+    let copy_ok = mkdir_ok
+        && kyth_shared::system::process::run_bounded_command(copy, bound)
+            .map(|output| output.status.success())
+            .unwrap_or(false);
+    let _ = std::fs::remove_file(&staging);
+    if copy_ok {
+        Ok(vpn_protection_summary(&preset))
+    } else {
+        Err(
+            "saving VPN protection needs an admin password; the preset was not changed."
+                .to_string(),
+        )
+    }
+}
+
+fn vpn_protection_summary(preset: &network_preset::NetworkPreset) -> String {
+    format!(
+        "VPN protection: fail-closed {}, exclusive DNS {}.",
+        if preset.vpn_fail_closed { "on" } else { "off" },
+        if preset.vpn_dns_exclusive {
+            "on"
+        } else {
+            "off"
+        },
+    )
+}
+
+#[tauri::command]
+pub(crate) fn set_vpn_protection(
+    vpn_fail_closed: bool,
+    vpn_dns_exclusive: bool,
+) -> Result<String, String> {
+    set_vpn_protection_at(&preset_path(), vpn_fail_closed, vpn_dns_exclusive)
 }
 
 #[cfg(test)]
@@ -764,5 +955,105 @@ mod tests {
         assert!(claim_saml_cookie(&job));
         assert!(!claim_saml_cookie(&job));
         saml_consumed().lock().unwrap().remove(&job);
+    }
+
+    fn test_runtime(state: &str) -> VpnRuntime {
+        VpnRuntime {
+            status: Mutex::new((state.into(), "test".into())),
+            child: Mutex::new(None),
+            stopped: AtomicBool::new(false),
+            generation: AtomicU64::new(0),
+            gateway: "https://vpn.example".into(),
+            protocol: "gp".into(),
+            os_emulation: "win".into(),
+            username: String::new(),
+            interface: Mutex::new("portal".into()),
+        }
+    }
+
+    fn runtime_state(runtime: &VpnRuntime) -> (String, String) {
+        runtime.status.lock().unwrap().clone()
+    }
+
+    #[test]
+    fn lockdown_target_is_none_without_opt_in() {
+        let off = network_preset::NetworkPreset::default();
+        assert!(!off.vpn_fail_closed);
+        assert!(vpn_lockdown_target(&off, true).is_none());
+        assert!(vpn_lockdown_target(&off, false).is_none());
+    }
+
+    #[test]
+    fn lockdown_target_blocks_on_drop_and_restores_preset_zone() {
+        let on = network_preset::NetworkPreset {
+            vpn_fail_closed: true,
+            firewall_zone: "work".into(),
+            ..network_preset::NetworkPreset::default()
+        };
+        assert_eq!(vpn_lockdown_target(&on, true).as_deref(), Some("block"));
+        assert_eq!(vpn_lockdown_target(&on, false).as_deref(), Some("work"));
+    }
+
+    #[test]
+    fn lockdown_without_opt_in_never_touches_status_or_sudo() {
+        let dir = tempfile::tempdir().unwrap();
+        let preset_file = dir.path().join("network.toml");
+        // Absent file loads defaults (opt-out): the no-op path must not
+        // spawn sudo and must leave the caller's status alone.
+        let runtime = test_runtime("failed");
+        assert!(set_vpn_lockdown_at(&runtime, true, &preset_file));
+        assert!(set_vpn_lockdown_at(&runtime, false, &preset_file));
+        assert_eq!(runtime_state(&runtime).0, "failed");
+    }
+
+    #[test]
+    fn every_backend_terminal_state_is_advertised() {
+        // The frontend stops polling only on advertised states. If a new
+        // terminal state is set anywhere in this module but missing here,
+        // the Hub polls a finished job 300 times.
+        for state in [
+            "connected",
+            "failed",
+            "disconnected",
+            "complete",
+            "failed_lockdown",
+            "failed_lockdown_open",
+            "connected_firewall_open",
+            "complete_firewall_open",
+        ] {
+            assert!(
+                VPN_TERMINAL_STATES.contains(&state),
+                "{state} is terminal in the backend but unknown to the frontend"
+            );
+        }
+    }
+
+    #[test]
+    fn protection_toggle_flips_flags_and_preserves_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        let preset_file = dir.path().join("network.toml");
+        std::fs::write(
+            &preset_file,
+            "dns = \"cloudflare\"\ndoh = false\nfirewall_zone = \"work\"\ndns_strict = true\n",
+        )
+        .unwrap();
+        let summary = set_vpn_protection_at(&preset_file, true, true).expect("toggle on");
+        assert!(summary.contains("fail-closed on"));
+        assert!(summary.contains("exclusive DNS on"));
+        let status = vpn_protection_status_at(&preset_file);
+        assert!(status.vpn_fail_closed);
+        assert!(status.vpn_dns_exclusive);
+        assert_eq!(status.firewall_zone, "work");
+        // The pre-existing DNS choices survive the flag flip.
+        let reloaded = network_preset::load(&preset_file);
+        assert_eq!(reloaded.dns, "cloudflare");
+        assert!(!reloaded.doh);
+        assert!(reloaded.dns_strict);
+        let summary = set_vpn_protection_at(&preset_file, false, false).expect("toggle off");
+        assert!(summary.contains("fail-closed off"));
+        let status = vpn_protection_status_at(&preset_file);
+        assert!(!status.vpn_fail_closed);
+        assert!(!status.vpn_dns_exclusive);
+        assert_eq!(network_preset::load(&preset_file).dns, "cloudflare");
     }
 }

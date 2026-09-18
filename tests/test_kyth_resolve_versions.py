@@ -57,14 +57,23 @@ class ResolveVersionsTests(unittest.TestCase):
 
     @mock.patch("urllib.request.urlopen")
     @mock.patch("sys.stdout", new_callable=io.StringIO)
-    def test_cmd_cachyos_kernel_failure_fallback(self, mock_stdout, mock_urlopen) -> None:
+    def test_cmd_cachyos_kernel_failure_fails_closed(self, mock_stdout, mock_urlopen) -> None:
         mock_urlopen.side_effect = Exception("API Down")
 
         ret = resolve_versions.cmd_cachyos_kernel()
-        self.assertEqual(ret, 0)
-        import datetime
-        expected = datetime.date.today().isoformat()
-        self.assertEqual(mock_stdout.getvalue().strip(), expected)
+        self.assertEqual(ret, 1)
+        self.assertEqual(mock_stdout.getvalue().strip(), "")
+
+    @mock.patch("urllib.request.urlopen")
+    @mock.patch("sys.stdout", new_callable=io.StringIO)
+    def test_cmd_cachyos_kernel_empty_fails_closed(self, mock_stdout, mock_urlopen) -> None:
+        mock_response = mock.Mock()
+        mock_response.read.return_value = b'{"builds": {}}'
+        mock_urlopen.return_value.__enter__.return_value = mock_response
+
+        ret = resolve_versions.cmd_cachyos_kernel()
+        self.assertEqual(ret, 1)
+        self.assertEqual(mock_stdout.getvalue().strip(), "")
 
 
 if __name__ == "__main__":

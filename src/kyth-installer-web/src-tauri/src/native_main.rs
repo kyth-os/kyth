@@ -57,6 +57,8 @@ struct InstallState {
     password: String,
     mok_password: String,
     kernel: String,
+    encryption: String,
+    tpm_recovery_ack: bool,
     acknowledged_irreversible: bool,
     confirm_erase: bool,
     confirm_current: bool,
@@ -81,6 +83,8 @@ impl Default for InstallState {
             password: String::new(),
             mok_password: String::new(),
             kernel: "fedora".into(),
+            encryption: "none".into(),
+            tpm_recovery_ack: false,
             acknowledged_irreversible: false,
             confirm_erase: false,
             confirm_current: false,
@@ -107,6 +111,8 @@ impl InstallState {
             "password": self.password,
             "mok_password": self.mok_password,
             "kernel": self.kernel,
+            "encryption": self.encryption,
+            "tpm_recovery_ack": self.tpm_recovery_ack,
             "acknowledged-irreversible": self.acknowledged_irreversible,
             "confirm_erase": self.confirm_erase,
             "confirm_current": self.confirm_current,
@@ -119,6 +125,7 @@ impl InstallState {
             && !self.password.is_empty()
             && self.acknowledged_irreversible
             && self.confirm_erase
+            && (self.encryption != "tpm2" || self.tpm_recovery_ack)
             && (self.install_mode != "manual" || self.manual_committed)
             && (self.install_mode != "wipe" || self.confirm_current)
             && (self.install_mode != "alongside" || !self.target_partition.is_empty())
@@ -966,6 +973,8 @@ fn request_from_window(window: &InstallerWindow, state: &Arc<Mutex<InstallState>
     request.username = window.get_username().to_string();
     request.password = window.get_password().to_string();
     request.mok_password = window.get_mok_password().to_string();
+    request.encryption = window.get_encryption().to_string();
+    request.tpm_recovery_ack = window.get_tpm_recovery_ack();
     request.acknowledged_irreversible = window.get_acknowledged_irreversible();
     request.confirm_erase = window.get_confirm_erase();
     request.confirm_current = window.get_confirm_current();
@@ -1403,6 +1412,8 @@ fn main() -> Result<(), slint::PlatformError> {
     window.set_step_status(SharedString::from("Reading native step status…"));
     window.set_install_mode(SharedString::from("wipe"));
     window.set_kernel(SharedString::from("fedora"));
+    window.set_encryption(SharedString::from("none"));
+    window.set_tpm_recovery_ack(false);
     window.set_hostname(SharedString::from("kyth"));
     window.set_timezone(SharedString::from("UTC"));
     window.set_locale(SharedString::from("en_US.UTF-8"));
@@ -1542,6 +1553,20 @@ fn main() -> Result<(), slint::PlatformError> {
             state.kernel = kernel.to_string();
         }
     });
+    let encryption_state = state.clone();
+    window.on_select_encryption(move |encryption| {
+        if let Ok(mut state) = encryption_state.lock() {
+            // The backend fails closed on unknown modes; mirror that here
+            // so the cached state can never promise a mode the plan rejects.
+            state.encryption = match encryption.as_str() {
+                "tpm2" => "tpm2".to_string(),
+                _ => "none".to_string(),
+            };
+            if state.encryption != "tpm2" {
+                state.tpm_recovery_ack = false;
+            }
+        }
+    });
     let start_weak = window.as_weak();
     let start_config = config.clone();
     let start_state = state.clone();
@@ -1620,6 +1645,30 @@ mod tests {
         assert!(!state.can_start());
         // The user-facing copy must say the quiet part out loud.
         assert!(IRREVERSIBLE_NOTICE.contains("cannot be undone"));
+    }
+
+    #[test]
+    fn tpm2_requires_recovery_ack_before_install_start() {
+        // The request must carry both fields so the backend plan builder
+        // can enforce the recovery acknowledgement.
+        let mut state = InstallState::default();
+        state.disk = "/dev/sda".into();
+        state.username = "alice".into();
+        state.password = "secret".into();
+        state.confirm_erase = true;
+        state.acknowledged_irreversible = true;
+        let request = state.as_request();
+        assert_eq!(request["encryption"], "none");
+        assert_eq!(request["tpm_recovery_ack"], false);
+        assert!(state.can_start());
+
+        state.encryption = "tpm2".into();
+        assert!(!state.can_start());
+        let request = state.as_request();
+        assert_eq!(request["encryption"], "tpm2");
+        state.tpm_recovery_ack = true;
+        assert!(state.can_start());
+        assert_eq!(state.as_request()["tpm_recovery_ack"], true);
     }
 
     #[test]

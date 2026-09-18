@@ -22,7 +22,7 @@ export function ChannelsSection({ section }: { section: HubSection }) {
   const [channel, setChannel] = useState<string | null>(null);
   const [rawTag, setRawTag] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
   useEffect(() => {
     let cancelled = false;
     Promise.all([fetchUpdateChannel(), fetchChannelRaw()]).then(([c, raw]) => {

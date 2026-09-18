@@ -1936,6 +1936,8 @@ fn main() {
             commands::vpn::vpn_connect,
             commands::vpn::vpn_status,
             commands::vpn::vpn_disconnect,
+            commands::vpn::vpn_protection_status,
+            commands::vpn::set_vpn_protection,
             vpn_saved_profile,
             commands::dashboard::boot_runtime_checks,
             desktop_stack_checks,

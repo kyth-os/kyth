@@ -50,6 +50,8 @@ jobs:
         with:
           path: .cache/kyth-ci-tools
           key: validation-tools-${{ runner.os }}-${{ env.ACTIONLINT_VERSION }}-${{ env.HADOLINT_VERSION }}-${{ env.JUST_VERSION }}-${{ env.SHELLCHECK_VERSION }}-${{ env.ZIZMOR_VERSION }}
+          restore-keys: |
+            validation-tools-${{ runner.os }}-
 
       - name: Install pinned validators
         run: ./build_files/scripts/install-validation-tools.sh

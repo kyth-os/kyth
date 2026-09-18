@@ -27,7 +27,7 @@ export function DiagnosticsSection({ section }: { section: HubSection }) {
   const [memory, setMemory] = useState<{ status: string; detail: string } | null>(null);
   const [liveSession, setLiveSession] = useState<boolean | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;

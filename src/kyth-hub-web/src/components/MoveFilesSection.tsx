@@ -35,7 +35,7 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
   const [loaded, setLoaded] = useState(false);
   const [unlockDevice, setUnlockDevice] = useState<NtfsDrive | null>(null);
   const [unlockKey, setUnlockKey] = useState("");
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("privileged");
   useEffect(() => {
     let cancelled = false;
     Promise.all([fetchNtfsDrives(), fetchMigrationReadiness()]).then(([d, migration]) => {

@@ -163,6 +163,63 @@ if ! cmp --silent "${hardware_matrix}" docs/hardware-support-matrix.md; then
 	exit 1
 fi
 
+echo "==> installer/iso.yaml schema (Titanoboa/bootc-image-builder contract)"
+python3 - <<'EOF'
+import re
+import sys
+from pathlib import Path
+
+path = Path("installer/iso.yaml")
+if not path.is_file():
+    print("ERROR: installer/iso.yaml is missing", file=sys.stderr)
+    sys.exit(1)
+lines = path.read_text(encoding="utf-8").splitlines()
+
+
+def fail(msg):
+    print(f"ERROR: installer/iso.yaml: {msg}", file=sys.stderr)
+    sys.exit(1)
+
+
+stripped = [ln for ln in lines if ln.strip() and not ln.strip().startswith("#")]
+m = re.match(r'^label:\s*"?([^"\s][^"]*)"?\s*$', stripped[0] if stripped else "")
+if not m:
+    fail("first entry must be a non-empty 'label:'")
+label = m.group(1).strip()
+if not re.match(r"^[A-Za-z0-9][A-Za-z0-9._-]*$", label):
+    fail(f"label {label!r} must match ^[A-Za-z0-9][A-Za-z0-9._-]*$")
+
+text = "\n".join(lines)
+m = re.search(r"^grub2:\s*$", text, re.M)
+if not m:
+    fail("missing 'grub2:' section")
+m = re.search(r"^\s+timeout:\s*(\d+)\s*$", text, re.M)
+if not m:
+    fail("grub2.timeout must be a non-negative integer")
+if int(m.group(1)) < 0:
+    fail("grub2.timeout must be >= 0")
+
+# Entries are "- name:" list items; each must carry linux: + initrd:.
+names = re.findall(r"^\s*-\s*name:\s*\"?([^\"]*?)\"?\s*$", text, re.M)
+if not names or any(not n.strip() for n in names):
+    fail("grub2.entries must be a non-empty list with a non-empty name per entry")
+blocks = re.split(r"^\s*-\s*name:", text, flags=re.M)[1:]
+if len(blocks) != len(names):
+    fail("could not parse grub2.entries")
+for name, block in zip(names, blocks):
+    # Block runs until the next list item at the same level or end of entries.
+    body = block.split("\n- ", 1)[0]
+    ml = re.search(r"^\s*linux:\s*\"(.*)\"\s*$", body, re.M)
+    mi = re.search(r"^\s*initrd:\s*\"?([^\"]\S*)\"?\s*$", body, re.M)
+    if not ml or not ml.group(1).strip():
+        fail(f"entry {name.strip()!r} is missing a non-empty 'linux:' cmdline")
+    if not mi or not mi.group(1).strip().startswith("/"):
+        fail(f"entry {name.strip()!r} is missing an absolute 'initrd:' path")
+    if f"root=live:CDLABEL={label}" not in ml.group(1):
+        fail(f"entry {name.strip()!r} linux: must contain 'root=live:CDLABEL={label}'")
+print(f"iso.yaml ok: label={label} entries={len(names)}")
+EOF
+
 echo "==> systemd units"
 output="$(systemd-analyze verify build_files/*.service build_files/*.timer 2>&1 || true)"
 printf '%s\n' "${output}"

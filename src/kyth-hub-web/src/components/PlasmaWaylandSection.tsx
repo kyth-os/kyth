@@ -21,7 +21,7 @@ export function PlasmaWaylandSection({ section }: { section: HubSection }) {
   const [stack, setStack] = useState<DesktopStackCheck[] | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pendingPreset, setPendingPreset] = useState<string | null>(null);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;
