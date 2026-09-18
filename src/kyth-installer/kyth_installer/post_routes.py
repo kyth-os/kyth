@@ -136,6 +136,30 @@ class PostRouteService:
                 pass
         if not target or not os.path.isdir(target):
             return ApiResponse({"ok": False, "message": "No USB drive found. Insert a USB stick and try again."}, 400)
+        # A caller-supplied mount is untrusted input to root mkdir/cp/chmod:
+        # confine it to real mounts under /run/media (no symlinks, no `..`
+        # escapes) and verify it is actually mounted before writing.
+        try:
+            resolved = Path(target).resolve()
+        except (OSError, ValueError, RuntimeError):
+            return ApiResponse({"ok": False, "message": "Refusing to export logs to that location."}, 400)
+        if resolved != Path(target) or Path(target).is_symlink():
+            return ApiResponse({"ok": False, "message": "Refusing to export logs to that location."}, 400)
+        try:
+            resolved.relative_to("/run/media")
+        except ValueError:
+            return ApiResponse({"ok": False, "message": "Refusing to export logs outside removable media."}, 400)
+        if resolved == Path("/run/media"):
+            return ApiResponse({"ok": False, "message": "Refusing to export logs to that location."}, 400)
+        try:
+            mounted = run_command(
+                ["findmnt", "-n", str(resolved)], capture_output=True, timeout=3
+            ).returncode == 0
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
+            mounted = False
+        if not mounted:
+            return ApiResponse({"ok": False, "message": "That location is not a mounted USB drive."}, 400)
+        target = str(resolved)
         if shutil.which("kyth-installer-exec"):
             try:
                 result = run_command(
@@ -168,13 +192,15 @@ class PostRouteService:
                 return ApiResponse({"ok": False, "message": str(exc)}, 500)
         try:
             dest = Path(target) / "kyth-installer-logs"
-            run_command(_as_root(["mkdir", "-p", str(dest)]), check=False)
+            run_command(_as_root(["mkdir", "-p", str(dest)]), check=True)
             copied = []
             for src in (LOG_FILE, TRANSACTION_FILE, FAILURE_SUMMARY_FILE):
                 if src.is_file() and not src.is_symlink():
-                    run_command(_as_root(["cp", "-a", str(src), str(dest / src.name)]), check=False)
+                    # check=True: a failed copy must 500, never report
+                    # "copied" for bytes that never landed on the stick.
+                    run_command(_as_root(["cp", "-a", str(src), str(dest / src.name)]), check=True)
                     # Also ensure world-readable on FAT USB
-                    run_command(_as_root(["chmod", "644", str(dest / src.name)]), check=False)
+                    run_command(_as_root(["chmod", "644", str(dest / src.name)]), check=True)
                     copied.append(src.name)
             if not copied:
                 return ApiResponse({"ok": False, "message": "No installer logs found to copy."}, 500)

@@ -142,7 +142,11 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn('invoke("installer_validate_plan"', api)
         self.assertIn('invoke<NonNullable<RescueProbe["rescue_guidance"]>>("installer_recovery_guidance"', api)
         self.assertIn('X-Kyth-Session-Token', api)
-        self.assertIn("session_token=", api)
+        # The session token authenticates via header (mutating requests) and
+        # the HttpOnly bootstrap cookie (SSE stream) — it must never appear
+        # in a URL query string (request lines, devtools, proxy logs).
+        self.assertNotIn("session_token=", api)
+        self.assertIn("withCredentials", api)
         self.assertIn("127.0.0.1:7777", vite)
 
     def test_server_allows_only_tauri_cors_and_stream_auth(self):

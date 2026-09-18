@@ -6,6 +6,7 @@ import os
 import socket
 import stat
 import struct
+import threading
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -105,6 +106,11 @@ def _route_for(method: str, path: str) -> RouteSpec | None:
         if route.method == method and route.path == path:
             return route
     return None
+
+
+# Cap concurrent SSE streams: each pins a ThreadingHTTPServer thread, and
+# uncapped streams let abandoned tabs starve the installer API mid-install.
+_SSE_SLOTS = threading.BoundedSemaphore(8)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -340,7 +346,11 @@ class Handler(BaseHTTPRequestHandler):
         return probe
 
     def _serve_log(self) -> None:
-        # Stream log to avoid OOM on large logs (>100 MiB)
+        # Stream log to avoid OOM on large logs (>100 MiB). Refuse symlinks:
+        # a swapped-in link would stream any daemon-readable file.
+        if LOG_FILE.is_symlink():
+            self.send_error(403, "Refusing to serve a symlinked log")
+            return
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
@@ -379,6 +389,16 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             length = int(self.headers.get("Content-Length", "0"))
+        except (TypeError, ValueError):
+            self.send_error(400, "Invalid Content-Length")
+            return
+        # Bound the body: installer payloads are small JSON (answer files,
+        # partition specs); an uncapped read lets absurd lengths exhaust a
+        # privileged process, and read(-1) would block to EOF.
+        if length < 0 or length > 16 * 1024 * 1024:
+            self.send_error(413, "Request body too large")
+            return
+        try:
             body = json.loads(self.rfile.read(length).decode() or "{}")
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             self.send_error(400, "Invalid JSON")
@@ -400,6 +420,18 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _sse(self) -> None:
+        # Bound concurrent streams: each pins a ThreadingHTTPServer thread,
+        # so abandoned tabs (or a hostile client) must not starve the API
+        # mid-install. Past the cap, refuse fast instead of queuing.
+        if not _SSE_SLOTS.acquire(blocking=False):
+            self.send_error(503, "Too many event streams")
+            return
+        try:
+            self._serve_sse_events()
+        finally:
+            _SSE_SLOTS.release()
+
+    def _serve_sse_events(self) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream")
         self.send_header("Cache-Control", "no-cache")
@@ -410,17 +442,25 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError:
             sent = 0
         sent = max(0, sent)
+        # Idle bound: a client that reads keepalives but never sees done /
+        # error would otherwise pin a thread (and an SSE slot) forever.
+        # 960 event-less keepalives ≈ 4h — far past any real install phase.
+        idle_keepalives = 0
         while True:
             with self.context.events.condition:
                 while sent >= len(self.context.events.events):
                     self.context.events.condition.wait(timeout=15)
                     if sent >= len(self.context.events.events):
+                        idle_keepalives += 1
+                        if idle_keepalives > 960:
+                            return
                         try:
                             self.wfile.write(b":ka\n\n")
                             self.wfile.flush()
                         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                             return
                 batch = self.context.events.events[sent:]
+                idle_keepalives = 0
             for event in batch:
                 try:
                     self.wfile.write(

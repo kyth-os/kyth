@@ -452,7 +452,11 @@ function pollJobUntilSettled(
 async function cancelBackendJob(command: string, job: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Cancelling is available from the installed Kyth Hub.");
   const state = await invoke<InstallStatus>(command, { job });
-  return state.state === "cancelled" ? "Cancelled." : state.detail;
+  // Never present backend prose as a success: a job that is still running
+  // after the cancel call (non-preemptable privileged work) must say so.
+  if (state.state === "cancelled") return "Cancelled.";
+  if (state.state === "running") return `Still running — ${state.detail}`;
+  return state.detail;
 }
 
 async function cancelTracked(domain: JobDomain, command: string): Promise<string> {

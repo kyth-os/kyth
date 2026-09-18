@@ -401,6 +401,62 @@ class ServerSseTests(unittest.TestCase):
         self.assertIn("id: 1", body)
 
 
+class ServerHardeningTests(unittest.TestCase):
+    """POST body caps, log symlink refusal, and SSE concurrency bounds."""
+
+    def _post_handler(self, body: bytes, content_length) -> server.Handler:
+        handler = _make_handler("/api/config", host=f"127.0.0.1:{config.PORT}")
+        handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+        handler.headers["Content-Length"] = content_length
+        handler.rfile = io.BytesIO(body)
+        return handler
+
+    def test_post_rejects_absurd_body_length(self):
+        handler = self._post_handler(b"{}", 256 * 1024 * 1024)
+        with mock.patch.object(server.Handler, "_require_same_origin_context", return_value=True):
+            handler.do_POST()
+        handler.send_error.assert_called_once_with(413, "Request body too large")
+
+    def test_post_rejects_negative_body_length(self):
+        handler = self._post_handler(b"{}", -5)
+        with mock.patch.object(server.Handler, "_require_same_origin_context", return_value=True):
+            handler.do_POST()
+        handler.send_error.assert_called_once_with(413, "Request body too large")
+
+    def test_post_rejects_malformed_content_length(self):
+        handler = self._post_handler(b"{}", "many")
+        with mock.patch.object(server.Handler, "_require_same_origin_context", return_value=True):
+            handler.do_POST()
+        handler.send_error.assert_called_once_with(400, "Invalid Content-Length")
+
+    def test_log_route_refuses_symlink(self):
+        handler = _make_handler("/api/log", host=f"127.0.0.1:{config.PORT}")
+        handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "real.log"
+            real.write_text("secret")
+            link = Path(tmp) / "installer.log"
+            try:
+                link.symlink_to(real)
+            except OSError:
+                self.skipTest("symlinks unavailable")
+            with patch.object(server, "LOG_FILE", link):
+                handler.do_GET()
+        handler.send_error.assert_called_once_with(403, "Refusing to serve a symlinked log")
+
+    def test_stream_refused_past_concurrency_cap(self):
+        slots = [server._SSE_SLOTS.acquire(blocking=False) for _ in range(8)]
+        self.assertTrue(all(slots))
+        try:
+            handler = _make_handler("/api/stream", host=f"127.0.0.1:{config.PORT}")
+            handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+            handler.do_GET()
+            handler.send_error.assert_called_once_with(503, "Too many event streams")
+        finally:
+            for _ in range(8):
+                server._SSE_SLOTS.release()
+
+
 class ServerConstructionTests(unittest.TestCase):
     def test_server_defaults_to_a_fresh_context_when_none_given(self):
         # Construction semantics do not require a real listening socket. Keep

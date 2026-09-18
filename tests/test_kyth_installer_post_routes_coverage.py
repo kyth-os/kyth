@@ -54,20 +54,20 @@ class PostRouteCoverageTests(unittest.TestCase):
 
     def test_rescue_logs_copies_only_safe_files(self):
         with tempfile.TemporaryDirectory() as tmp:
-            mount = Path(tmp) / "usb"
-            mount.mkdir()
             log_file = Path(tmp) / "install.log"
             log_file.write_text("log")
             missing = Path(tmp) / "missing"
             run = mock.Mock()
+            run.return_value = mock.Mock(returncode=0)
             with (
                 mock.patch("kyth_installer.config.LOG_FILE", log_file),
                 mock.patch("kyth_installer.config.TRANSACTION_FILE", missing),
                 mock.patch("kyth_installer.config.FAILURE_SUMMARY_FILE", missing),
                 mock.patch("kyth_installer.runner.run_command", run),
                 mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+                mock.patch("os.path.isdir", return_value=True),
             ):
-                response = self.routes.rescue_logs_to_usb({"usb_mount": str(mount)})
+                response = self.routes.rescue_logs_to_usb({"usb_mount": "/run/media/tester/USB"})
         self.assertEqual(response.status, 200)
         self.assertEqual(response.payload["copied"], ["install.log"])
 
@@ -98,6 +98,7 @@ class PostRouteCoverageTests(unittest.TestCase):
             mount = Path(tmp) / "usb"
             mount.mkdir()
             native_response = mock.Mock(
+                returncode=0,
                 stdout=json.dumps({
                     "ok": True,
                     "dest": f"{mount}/kyth-installer-logs",
@@ -108,30 +109,95 @@ class PostRouteCoverageTests(unittest.TestCase):
                 mock.patch("kyth_installer.post_routes.shutil.which", return_value="/usr/bin/kyth-installer-exec"),
                 mock.patch("kyth_installer.runner.run_command", return_value=native_response) as run,
                 mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+                mock.patch("os.path.isdir", return_value=True),
             ):
-                response = self.routes.rescue_logs_to_usb({"usb_mount": str(mount)})
+                response = self.routes.rescue_logs_to_usb({"usb_mount": "/run/media/tester/USB"})
 
         self.assertEqual(response.status, 200)
         self.assertEqual(response.payload["copied"], ["log"])
         self.assertEqual(run.call_args.args[0], ["kyth-installer-exec", "--operation", "recovery-export"])
         payload = json.loads(run.call_args.kwargs["input"])
-        self.assertEqual(payload["usb_mount"], str(mount))
+        self.assertEqual(payload["usb_mount"], "/run/media/tester/USB")
 
     def test_rescue_logs_native_export_rejects_malformed_or_failed_responses(self):
         with tempfile.TemporaryDirectory() as tmp:
             mount = Path(tmp) / "usb"
             mount.mkdir()
             for result in (
-                mock.Mock(stdout=json.dumps({"ok": False})),
-                mock.Mock(stdout="not json"),
+                mock.Mock(returncode=0, stdout=json.dumps({"ok": False})),
+                mock.Mock(returncode=0, stdout="not json"),
             ):
                 with (
                     mock.patch("kyth_installer.post_routes.shutil.which", return_value="/usr/bin/kyth-installer-exec"),
                     mock.patch("kyth_installer.runner.run_command", return_value=result),
                     mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+                    mock.patch("os.path.isdir", return_value=True),
                 ):
-                    response = self.routes.rescue_logs_to_usb({"usb_mount": str(mount)})
+                    response = self.routes.rescue_logs_to_usb({"usb_mount": "/run/media/tester/USB"})
                 self.assertEqual(response.status, 500)
+
+    def test_rescue_logs_rejects_unconfined_mounts(self):
+        # Symlinks, escapes, non-media paths, and unmounted dirs never reach
+        # the copy stage, no matter what the caller sends.
+        with mock.patch("os.path.isdir", return_value=True), mock.patch(
+            "kyth_installer.runner.run_command",
+            return_value=mock.Mock(returncode=0),
+        ):
+            for bad in (
+                "/etc",
+                "/run/media/../etc",
+                "/tmp/usb",
+                "/run/media",
+            ):
+                self.assertEqual(
+                    self.routes.rescue_logs_to_usb({"usb_mount": bad}).status, 400
+                )
+        with tempfile.TemporaryDirectory() as tmp:
+            link = Path(tmp) / "link"
+            try:
+                link.symlink_to(tmp)
+                real_link = str(link)
+            except OSError:
+                real_link = None
+            with mock.patch("os.path.isdir", return_value=True), mock.patch(
+                "kyth_installer.runner.run_command",
+                return_value=mock.Mock(returncode=0),
+            ):
+                if real_link is not None:
+                    self.assertEqual(
+                        self.routes.rescue_logs_to_usb({"usb_mount": real_link}).status,
+                        400,
+                    )
+        # Mounted check: findmnt failure means "not a mounted drive".
+        with mock.patch("os.path.isdir", return_value=True), mock.patch(
+            "kyth_installer.runner.run_command",
+            return_value=mock.Mock(returncode=1),
+        ):
+            self.assertEqual(
+                self.routes.rescue_logs_to_usb(
+                    {"usb_mount": "/run/media/tester/USB"}
+                ).status,
+                400,
+            )
+        # Path resolution failure and findmnt hard errors fail closed too.
+        with mock.patch("os.path.isdir", return_value=True), mock.patch(
+            "pathlib.PosixPath.resolve", side_effect=OSError("unreadable")
+        ):
+            self.assertEqual(
+                self.routes.rescue_logs_to_usb(
+                    {"usb_mount": "/run/media/tester/USB"}
+                ).status,
+                400,
+            )
+        with mock.patch("os.path.isdir", return_value=True), mock.patch(
+            "kyth_installer.runner.run_command", side_effect=OSError("no findmnt")
+        ):
+            self.assertEqual(
+                self.routes.rescue_logs_to_usb(
+                    {"usb_mount": "/run/media/tester/USB"}
+                ).status,
+                400,
+            )
 
     def test_rescue_logs_reports_missing_media_empty_logs_and_copy_failure(self):
         self.assertEqual(
@@ -143,15 +209,30 @@ class PostRouteCoverageTests(unittest.TestCase):
                 mock.patch("kyth_installer.config.LOG_FILE", missing),
                 mock.patch("kyth_installer.config.TRANSACTION_FILE", missing),
                 mock.patch("kyth_installer.config.FAILURE_SUMMARY_FILE", missing),
-                mock.patch("kyth_installer.runner.run_command"),
+                mock.patch(
+                    "kyth_installer.runner.run_command",
+                    return_value=mock.Mock(returncode=0),
+                ),
+                mock.patch("os.path.isdir", return_value=True),
             ):
                 self.assertEqual(
-                    self.routes.rescue_logs_to_usb({"usb_mount": tmp}).status, 500
+                    self.routes.rescue_logs_to_usb(
+                        {"usb_mount": "/run/media/tester/USB"}
+                    ).status,
+                    500,
                 )
+
+            def fail_copies(argv, **kwargs):
+                if argv and argv[0] == "findmnt":
+                    return mock.Mock(returncode=0)
+                raise RuntimeError("copy failed")
+
             with mock.patch(
-                "kyth_installer.runner.run_command", side_effect=RuntimeError("copy failed")
-            ):
-                response = self.routes.rescue_logs_to_usb({"usb_mount": tmp})
+                "kyth_installer.runner.run_command", side_effect=fail_copies
+            ), mock.patch("os.path.isdir", return_value=True):
+                response = self.routes.rescue_logs_to_usb(
+                    {"usb_mount": "/run/media/tester/USB"}
+                )
             self.assertEqual(response.status, 500)
             self.assertIn("copy failed", response.payload["message"])
 

@@ -153,12 +153,12 @@ export function subscribeToInstallEvents(onEvent: (event: InstallerEvent) => voi
       }).catch(() => onDisconnect());
       return;
     }
-    // EventSource cannot set a header; use the session token in the URL for
-    // this read-only stream. Mutating requests always use the header below.
-    const streamToken = connection?.session_token;
-    const streamPath = streamToken
-      ? `/api/stream?session_token=${encodeURIComponent(streamToken)}`
-      : "/api/stream";
+    // EventSource cannot set a header, so this read-only stream relies on
+    // the HttpOnly bootstrap cookie (sent via withCredentials) — the
+    // session token deliberately never appears in the URL, keeping it out
+    // of request lines, devtools, and proxy logs. Mutating requests use
+    // the X-Kyth-Session-Token header below.
+    const streamPath = "/api/stream";
     source = new EventSource(apiUrl(streamPath), { withCredentials: true });
     source.onmessage = (message) => {
       try { onEvent(JSON.parse(message.data) as InstallerEvent); } catch {
