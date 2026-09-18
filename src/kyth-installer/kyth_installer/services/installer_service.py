@@ -247,9 +247,14 @@ class InstallerService:
             state = validation.validate_install_request(body, self.context, strict_locale=strict_locale)
         except validation.InstallRequestError as exc:
             return {"started": False, "message": str(exc)}
-        if not execution.start_installation(self.context, state, install._run_install):
-            return {"started": False, "message": "An installation is already running."}
-        return {"started": True}
+        try:
+            if not execution.start_installation(self.context, state, install._run_install):
+                return {"started": False, "message": "An installation is already running."}
+            return {"started": True}
+        except RuntimeError as exc:
+            # start_installation releases the slot before raising — report
+            # the reason instead of wedging the client on a dead connection.
+            return {"started": False, "message": str(exc)}
 
     def cancel_install(self, _body: dict) -> dict:
 

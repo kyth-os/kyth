@@ -141,6 +141,13 @@ pub(crate) fn apply(input: ManualMountsInput) -> Result<ManualMountsResult, Stri
         }
         if fs != "linux-swap" {
             let target = format!("{root}{}", fstab_mountpoint);
+            // Mirror the alongside path: a pre-planted symlink under staging
+            // would steer a root mount elsewhere. Fail closed, like above.
+            if let Ok(metadata) = fs::symlink_metadata(&target) {
+                if metadata.file_type().is_symlink() {
+                    return Err("manual mountpoint is a symlink".into());
+                }
+            }
             fs::create_dir_all(&target)
                 .map_err(|e| format!("could not create manual mountpoint: {e}"))?;
             let _ = Command::new("/usr/bin/umount")

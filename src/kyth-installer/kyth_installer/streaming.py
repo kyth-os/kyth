@@ -68,12 +68,21 @@ class StreamingCommandRunner:
             proc.wait()
             raise RuntimeError("Could not capture installer command output.")
 
-        if stdin_data is not None:
-            # Short, fixed-size confirmation answers only (e.g. "y\n") — small
-            # enough to never block on pipe buffer capacity, so writing before
-            # the read loop starts below cannot deadlock.
-            proc.stdin.write(stdin_data.encode())
-            proc.stdin.close()
+        if stdin_data is not None and proc.stdin is not None:
+            # Payloads can be full JSON execution requests, not just short
+            # answers — and the child may already have exited. A failed
+            # write must fall through to the exit-code handling below (which
+            # owns monitor shutdown and descriptor cleanup), never raise
+            # past it and strand the monitor thread or an open stdout.
+            try:
+                proc.stdin.write(stdin_data.encode())
+            except (BrokenPipeError, OSError):
+                pass
+            finally:
+                try:
+                    proc.stdin.close()
+                except (BrokenPipeError, OSError):
+                    pass
 
         monitor_stop = threading.Event()
         recent_output: deque[str] = deque(maxlen=30)

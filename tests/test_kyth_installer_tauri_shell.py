@@ -154,8 +154,10 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn('"http://tauri.localhost"', server)
         self.assertIn("Access-Control-Allow-Origin", server)
         self.assertIn("def do_OPTIONS", server)
-        self.assertIn('parsed.path == "/api/stream"', server)
-        self.assertIn('parsed.query).get("session_token")', server)
+        # Tokens must never travel in the query string (URLs land in logs
+        # and history) — the stream uses the HttpOnly bootstrap cookie.
+        self.assertIn("Tokens never", server)
+        self.assertNotIn('get("session_token")', server)
         self.assertNotIn('Access-Control-Allow-Origin", "*"', server)
 
     def test_server_has_opt_in_unix_transport_with_peer_credentials(self):

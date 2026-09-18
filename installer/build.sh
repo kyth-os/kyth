@@ -2,7 +2,7 @@
 # Based directly on Bazzite's installer/build.sh
 # Ref: https://github.com/ublue-os/bazzite/blob/main/installer/build.sh
 
-set -exo pipefail
+set -euxo pipefail
 
 # shellcheck source=build_files/scripts/lib/plymouth-initrd-checks.sh disable=SC1091
 source /src/build_files/scripts/lib/plymouth-initrd-checks.sh

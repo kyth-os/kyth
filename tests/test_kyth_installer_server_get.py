@@ -226,9 +226,11 @@ class ServerTransportAuthTests(unittest.TestCase):
         rejected.do_OPTIONS()
         rejected.send_error.assert_called_once_with(403, "Forbidden")
 
-    def test_stream_query_token_and_unix_peer_authenticate(self):
+    def test_stream_query_token_rejected_and_unix_peer_authenticate(self):
+        # Tokens must never travel in the query string (URLs land in logs
+        # and history) — the stream authenticates via the bootstrap cookie.
         stream = _make_handler(f"/api/stream?session_token={config.SESSION_TOKEN}")
-        self.assertTrue(stream._require_auth())
+        self.assertFalse(stream._require_auth())
 
         peer = _make_handler("/api/config")
         peer.server = SimpleNamespace(transport="unix", peer_uid=456, context=InstallerContext())

@@ -27,9 +27,15 @@ def start_installation(
     """Acquire the install slot, store validated state, and start its worker."""
     if not context.install_lock.acquire(blocking=False):
         return False
-    request = state if isinstance(state, InstallRequest) else InstallRequest.from_state(state)
-    context.replace_request(request)
-    context.transition(InstallLifecycle.VALIDATED)
+    try:
+        request = state if isinstance(state, InstallRequest) else InstallRequest.from_state(state)
+        context.replace_request(request)
+        context.transition(InstallLifecycle.VALIDATED)
+    except Exception:
+        # Never leak the slot: a rejected transition (e.g. DONE state) must
+        # not wedge every later attempt into "already running".
+        context.install_lock.release()
+        raise
 
     def run() -> None:
         try:

@@ -100,6 +100,15 @@ class PostRouteService:
         return ApiResponse(res, status)
 
     def reboot(self, body: dict) -> ApiResponse:
+        # Never reboot under a running install: a Rescue-tab click or a
+        # replayed POST during IMAGE phase would reboot mid-disk-write.
+        # Post-install reboots are unaffected — a finished install releases
+        # the slot before the UI offers Reboot.
+        if self.context.install_lock.locked():
+            return ApiResponse(
+                {"ok": False, "message": "Refusing to reboot while installation is running."},
+                409,
+            )
         if shutil.which("kyth-installer-exec"):
             from .orchestration import native_operation
             try:

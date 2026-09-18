@@ -105,6 +105,38 @@ class InstallerLifecycleCoverageTests(unittest.TestCase):
         context = InstallerContext()
         self.assertIsNone(check_cancelled(context))
 
+    @patch("kyth_installer.execution.threading.Thread", ImmediateThread)
+    def test_failed_install_is_retryable_without_daemon_restart(self):
+        context = InstallerContext()
+
+        def fail(_context):
+            raise InstallCancelled("disk vanished")
+
+        self.assertTrue(start_installation(context, InstallRequest(), fail))
+        self.assertEqual(context.lifecycle, InstallLifecycle.FAILED)
+        self.assertFalse(context.install_lock.locked())
+
+        def succeed(_context):
+            return None
+
+        # Retry must acquire the slot, not report "already running".
+        self.assertTrue(start_installation(context, InstallRequest(), succeed))
+        # ImmediateThread runs the worker inline, so the retry is already
+        # past VALIDATED into INSTALLING; the point is the slot was free.
+        self.assertEqual(context.lifecycle, InstallLifecycle.INSTALLING)
+        self.assertFalse(context.install_lock.locked())
+
+    def test_rejected_transition_releases_install_slot(self):
+        # PARTITIONING is not reset by replace_request, so the VALIDATED
+        # transition below is rejected — the slot must still be freed.
+        # (DONE/FAILED are reset to IDLE by replace_request itself.)
+        context = InstallerContext()
+        context.transition(InstallLifecycle.PARTITIONING)
+        with self.assertRaises(RuntimeError):
+            start_installation(context, InstallRequest(), lambda _c: None)
+        # The slot must be free: later attempts get a verdict, not a wedge.
+        self.assertFalse(context.install_lock.locked())
+
 
 if __name__ == "__main__":
     unittest.main()

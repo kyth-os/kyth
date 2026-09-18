@@ -37,7 +37,11 @@ P0 interpretation:
 
 - The installer cutover is complete: no `python-installer` authority remains
   active and `p0_open_entries` is 0. The Python installer backend is
-  source-only parity material.
+  source-only parity material — with one documented exception: the
+  `kyth-installerd` compat Unix-socket backend (`daemon.py`), the loopback
+  API (`server.py`, including its systemctl-reboot fallback), and
+  `partition_cli.py` still ship and serve the live session. Treat those
+  three as live privileged surface in audits, not retired fixtures.
 - `python-shared-package` counts only reachable modules. Superseded rollback
   fixtures carry `superseded_by` and are inactive — they are not migration
   tasks until the Hub plan's observation window (Phase 3) retires them.

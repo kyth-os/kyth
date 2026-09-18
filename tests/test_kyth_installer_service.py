@@ -501,6 +501,19 @@ class InstallerServiceCrudTests(unittest.TestCase):
         ):
             self.assertTrue(self.service.start_install({})["started"])
 
+        # A rejected slot transition (e.g. mid-partition state) surfaces as
+        # a verdict, not a dead connection — and the slot stays free.
+        with patch(
+            "kyth_installer.services.installer_service.validation.validate_install_request",
+            return_value={},
+        ), patch(
+            "kyth_installer.services.installer_service.execution.start_installation",
+            side_effect=RuntimeError("Invalid installer lifecycle transition"),
+        ):
+            res = self.service.start_install({})
+            self.assertFalse(res["started"])
+            self.assertIn("transition", res["message"])
+
         with patch(
             "kyth_installer.services.installer_service.execution.request_cancel",
             side_effect=[True, False],

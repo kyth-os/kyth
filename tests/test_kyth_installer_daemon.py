@@ -25,7 +25,7 @@ class InstallerDaemonTests(unittest.TestCase):
             path.write_text("A" * 43)
             with patch.object(
                 daemon.os,
-                "lstat",
+                "fstat",
                 return_value=SimpleNamespace(st_mode=stat.S_IFREG | 0o600, st_uid=0),
             ):
                 self.assertEqual(daemon._read_session_token(path), "A" * 43)
@@ -36,11 +36,22 @@ class InstallerDaemonTests(unittest.TestCase):
             path.write_text("A" * 43)
             with patch.object(
                 daemon.os,
-                "lstat",
+                "fstat",
                 return_value=SimpleNamespace(st_mode=stat.S_IFREG | 0o640, st_uid=0),
             ):
                 with self.assertRaisesRegex(RuntimeError, "private regular file"):
                     daemon._read_session_token(path)
+
+    def test_token_reader_refuses_symlink_without_following(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "real-token"
+            target.write_text("A" * 43)
+            link = Path(tmp) / "session-token"
+            link.symlink_to(target)
+            with self.assertRaisesRegex(RuntimeError, "cannot be opened securely"):
+                daemon._read_session_token(link)
+            # The link target must never be adopted as the session token.
+            self.assertNotEqual(link.read_text(), "")
 
     def test_main_reads_token_before_constructing_service(self):
         fake_service = SimpleNamespace(serve_forever=lambda: None, server_close=lambda: None)

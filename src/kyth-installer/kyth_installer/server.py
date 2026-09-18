@@ -2,6 +2,7 @@
 
 import json
 import grp
+import hmac
 import os
 import socket
 import stat
@@ -150,18 +151,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def _require_auth(self) -> bool:
         # Check header
-        if self.headers.get("X-Kyth-Session-Token", "") == SESSION_TOKEN:
+        if hmac.compare_digest(self.headers.get("X-Kyth-Session-Token", ""), SESSION_TOKEN):
             return True
         # Check cookie
         cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
-        if cookies.get("bootstrap_auth") == SESSION_TOKEN:
+        if hmac.compare_digest(cookies.get("bootstrap_auth", ""), SESSION_TOKEN):
             return True
-        # EventSource cannot set X-Kyth-Session-Token. The Tauri shell uses a
-        # short-lived loopback URL for this read-only stream only; no POST
-        # accepts credentials from a query string.
-        parsed = urlparse(self.path)
-        if parsed.path == "/api/stream" and parse_qs(parsed.query).get("session_token") == [SESSION_TOKEN]:
-            return True
+        # EventSource cannot set X-Kyth-Session-Token, so the stream
+        # authenticates via the HttpOnly bootstrap cookie. Tokens never
+        # travel in the query string (URLs land in logs and history).
         self.send_error(403, "Forbidden")
         return False
 
@@ -347,7 +345,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_log(self) -> None:
         # Stream log to avoid OOM on large logs (>100 MiB). Refuse symlinks:
-        # a swapped-in link would stream any daemon-readable file.
+        # a swapped-in link would stream any daemon-readable file. The
+        # pre-check fails fast with a clear status; the O_NOFOLLOW open
+        # below closes the check-then-use race itself.
         if LOG_FILE.is_symlink():
             self.send_error(403, "Refusing to serve a symlinked log")
             return
@@ -355,7 +355,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
         try:
-            with LOG_FILE.open("r", errors="replace") as f:
+            fd = os.open(LOG_FILE, os.O_RDONLY | os.O_NOFOLLOW)
+        except OSError as exc:
+            try:
+                self.wfile.write(f"Could not read installer log: {exc}\n".encode())
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+                pass
+            return
+        try:
+            with os.fdopen(fd, "r", errors="replace") as f:
                 while True:
                     chunk = f.read(64 * 1024)
                     if not chunk:

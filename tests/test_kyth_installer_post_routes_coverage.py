@@ -26,6 +26,15 @@ class PostRouteCoverageTests(unittest.TestCase):
             self.context.install_lock.release()
         self.assertEqual(response.status, 409)
 
+    def test_reboot_refused_while_install_running(self):
+        self.context.install_lock.acquire()
+        try:
+            response = self.routes.dispatch("reboot", {})
+        finally:
+            self.context.install_lock.release()
+        self.assertEqual(response.status, 409)
+        self.assertIn("running", response.payload["message"])
+
     def test_route_status_translation(self):
         cases = (
             ("new_table", "new_table", {"ok": True}, 200),

@@ -130,7 +130,9 @@ _LIFECYCLE_TRANSITIONS: dict[InstallLifecycle, frozenset[InstallLifecycle]] = {
     InstallLifecycle.PARTITIONING: frozenset({InstallLifecycle.IDLE, InstallLifecycle.FAILED}),
     InstallLifecycle.INSTALLING: frozenset({InstallLifecycle.DONE, InstallLifecycle.FAILED}),
     InstallLifecycle.DONE: frozenset(),
-    InstallLifecycle.FAILED: frozenset(),
+    # Retry edge: a failed install must be restartable without bouncing the
+    # daemon. DONE stays terminal (reinstalls start from a fresh context).
+    InstallLifecycle.FAILED: frozenset({InstallLifecycle.VALIDATED}),
 }
 
 _PHASE_ORDER = {

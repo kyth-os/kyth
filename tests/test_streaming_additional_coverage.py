@@ -12,6 +12,42 @@ from kyth_installer.streaming import StreamingCommandRunner
 
 
 class StreamingAdditionalCoverageTests(unittest.TestCase):
+    def test_stdin_broken_pipe_falls_through_to_exit_handling(self):
+        """Child exits before reading: the write must not escape cleanup."""
+        runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _e: None)
+        fake_proc = mock.Mock()
+        fake_proc.stdout = mock.Mock()
+        fake_proc.stdout.readline = mock.Mock(side_effect=[""])
+        fake_proc.stderr = None
+        fake_proc.stdin = mock.Mock()
+        fake_proc.stdin.write = mock.Mock(side_effect=BrokenPipeError("closed"))
+        # Close itself can also fail on a dead pipe — still no leak, no raise.
+        fake_proc.stdin.close = mock.Mock(side_effect=BrokenPipeError("already closed"))
+        fake_proc.poll = mock.Mock(return_value=1)
+        fake_proc.returncode = 1
+        fake_proc.wait = mock.Mock()
+        with mock.patch("kyth_installer.streaming.spawn_command", return_value=fake_proc), mock.patch(
+            "kyth_installer.streaming.select.select",
+            return_value=([fake_proc.stdout], [], []),
+        ), mock.patch("kyth_installer.streaming.os.read", return_value=b""):
+            with self.assertRaises(RuntimeError):
+                runner.run(
+                    [sys.executable, "-c", "pass"], 0, 100,
+                    lambda m: None, lambda p: None, stdin_data="late answer\n",
+                )
+        # stdin was closed even though the write failed (no descriptor leak).
+        fake_proc.stdin.close.assert_called_once()
+
+    def test_malformed_layers_size_falls_back_to_zero_total(self):
+        """Garbage after 'layers needed:' must not abort a healthy command."""
+        runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _e: None)
+        seen = []
+        runner.run(
+            ["/usr/bin/echo", "layers needed: garbage-no-parens"],
+            0, 100, lambda m: None, lambda p: seen.append(p),
+        )
+        self.assertTrue(seen)
+
     def test_stdout_is_none_raises(self):
         """Covers 67-69: spawn returns proc with stdout None."""
         runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _e: None)
