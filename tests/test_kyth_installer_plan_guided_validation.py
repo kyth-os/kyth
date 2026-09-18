@@ -407,6 +407,30 @@ class GuidedPlanValidationTests(unittest.TestCase):
             raise OSError("no sysfs in test")
         self.assertFalse(_is_uefi_boot(path_exists=_boom))
 
+    def test_bios_boot_partition_present_needs_no_helper(self):
+        from kyth_installer.config import BIOS_BOOT_GUID
+        from kyth_installer.plan_validate import _needs_bios_boot
+
+        gpt_with_helper = StorageSnapshot(
+            disks=({"name": "/dev/sda"},),
+            partitions=({"name": "/dev/sda1", "parttype": BIOS_BOOT_GUID},),
+            free_regions=(), efi_partition=None, is_gpt=True,
+        )
+        self.assertFalse(_needs_bios_boot(gpt_with_helper, uefi_boot=False))
+
+    def test_needs_bios_boot_probes_live_session_when_unset(self):
+        from kyth_installer import plan_validate
+
+        gpt = StorageSnapshot(
+            disks=({"name": "/dev/sda"},),
+            partitions=({"name": "/dev/sda2", "size_bytes": 80 * 1024**3},),
+            free_regions=(), efi_partition="/dev/sda1", is_gpt=True,
+        )
+        with mock.patch.object(plan_validate, "_is_uefi_boot", return_value=True):
+            self.assertFalse(plan_validate._needs_bios_boot(gpt))
+        with mock.patch.object(plan_validate, "_is_uefi_boot", return_value=False):
+            self.assertTrue(plan_validate._needs_bios_boot(gpt))
+
         # Alongside on UEFI validates without a BIOS boot partition.
         report = build_plan_report(
             {"disk": "/dev/sda", "install_mode": "alongside"}, snapshot=gpt,

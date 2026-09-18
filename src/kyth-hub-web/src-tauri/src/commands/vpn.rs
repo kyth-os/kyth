@@ -434,10 +434,14 @@ fn handle_saml_callback(
                 return None;
             }
             let text = String::from_utf8_lossy(&output.stdout);
-            let text = text
+            let cut = text
                 .char_indices()
                 .nth(8 * 1024 * 1024)
-                .map_or_else(|| text.into_owned(), |(index, _)| text[..index].to_string());
+                .map(|(index, _)| index);
+            let text = match cut {
+                Some(index) => text[..index].to_string(),
+                None => text.into_owned(),
+            };
             let (headers, body) = kyth_shared::system::vpn_saml::split_http_response(&text);
             if body.len() > kyth_shared::system::process::MAX_CAPTURE_BYTES {
                 return None;
