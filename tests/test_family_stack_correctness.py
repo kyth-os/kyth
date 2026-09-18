@@ -83,7 +83,7 @@ class TestBluetoothQuantumGuard(unittest.TestCase):
         with (
             patch("shutil.which", return_value=None),
             patch(
-                "kyth_shared.pipewire_gaming.subprocess.run",
+                "kyth_shared.pipewire_gaming.run_optional",
                 side_effect=AssertionError("must not probe"),
             ),
         ):
@@ -102,7 +102,9 @@ class TestBluetoothQuantumGuard(unittest.TestCase):
 
         with (
             patch("shutil.which", return_value="/usr/bin/pactl"),
-            patch.object(pipewire_gaming.subprocess, "run", side_effect=fake_run),
+            patch(
+                "kyth_shared.pipewire_gaming.run_optional", side_effect=fake_run
+            ),
         ):
             self.assertTrue(pipewire_gaming.bluetooth_audio_active())
 

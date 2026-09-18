@@ -4,7 +4,6 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from release_identity import R2_PUBLIC_BASE_URL
 
 def main() -> int:

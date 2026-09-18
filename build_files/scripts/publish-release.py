@@ -4,7 +4,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
 from release_identity import r2_download_url
 
 def run_command(args: list[str], check: bool = True) -> subprocess.CompletedProcess:

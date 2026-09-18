@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import os
 import shutil
-import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
+
+from kyth_shared.commands import run_optional
 
 DEFAULT_PIPEWIRE_GAMING_PATH = Path("/etc/kyth/pipewire-gaming.toml")
 DEFAULT_CONF = Path("/etc/wireplumber/main.lua.d/99-kyth-gaming.lua")
@@ -111,28 +112,23 @@ def bluetooth_audio_active() -> bool:
     ):
         if not shutil.which(argv[0]):
             continue
-        try:
-            out = subprocess.run(
-                argv, capture_output=True, text=True, timeout=10
-            ).stdout.lower()
-        except (OSError, ValueError, subprocess.SubprocessError):
+        proc = run_optional(argv, capture_output=True, text=True, timeout=10)
+        if proc is None:
             continue
-        if "bluez" in out or "bluetooth" in out:
+        if "bluez" in proc.stdout.lower() or "bluetooth" in proc.stdout.lower():
             return True
     if shutil.which("bluetoothctl"):
-        try:
-            proc = subprocess.run(
-                ["bluetoothctl", "devices", "Connected"],
-                capture_output=True, text=True, timeout=10,
-            )
+        proc = run_optional(
+            ["bluetoothctl", "devices", "Connected"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if proc is not None:
             lines = [
                 line for line in proc.stdout.splitlines()
                 if line.strip() and "no default controller" not in line.lower()
             ]
             if lines:
                 return True
-        except (OSError, ValueError, subprocess.SubprocessError):
-            pass
     return False
 
 
