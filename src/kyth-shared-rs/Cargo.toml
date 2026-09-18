@@ -386,3 +386,13 @@ tempfile = "3"
 [features]
 rusqlite = ["dep:rusqlite"]
 telemetry-writer = ["rusqlite"]
+
+# Release tuning for the ~70 small helper binaries: strip symbols, favor
+# size over speed (these are bounded launchers, not hot loops), and share
+# one codegen unit so LTO can actually inline across crates. Keeps the
+# bootc layer delta small on every rebuild.
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"
+codegen-units = 1

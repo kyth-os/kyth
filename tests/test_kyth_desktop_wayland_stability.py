@@ -149,6 +149,18 @@ class PipewireLatencyApplyTests(unittest.TestCase):
 
 
 class DesktopStackTests(unittest.TestCase):
+    def test_network_preset_enforces_firewall_zone(self):
+        # The zone must be APPLIED (firewall-cmd), not just saved to the
+        # preset file — otherwise hotel/school LANs stay trusted.
+        apply_bin = (
+            ROOT / "src/kyth-shared-rs/src/network_apply_bin.rs"
+        ).read_text(encoding="utf-8")
+        self.assertIn("apply_firewall_zone", apply_bin)
+        preset = (
+            ROOT / "src/kyth-shared-rs/src/system/network_preset.rs"
+        ).read_text(encoding="utf-8")
+        self.assertIn("--set-default-zone", preset)
+
     def test_greeter_context_skips_user_units(self):
         checks = stack_mod.desktop_stack_checks(
             has_session_bus=lambda: False,

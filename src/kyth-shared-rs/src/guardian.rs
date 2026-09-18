@@ -120,6 +120,8 @@ pub fn recipes() -> &'static [Recipe] {
         Recipe { id: "storage.smart-warn", title: "SMART disk health at risk", component: "storage", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 86400, verification: "storage", recovery: "SMART reports reallocated/pending sectors — back up and check Disks." },
         Recipe { id: "memory.pressure-relief", title: "Memory pressure high", component: "memory", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 3600, verification: "memory", recovery: "High PSI / low MemAvailable — close heavy apps; Guardian pauses auto-fixes until pressure drops." },
         Recipe { id: "network.vpn-fix", title: "Restart always-on VPN connection", component: "network", command: &["nmcli", "-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "network", recovery: "Re-establishes an autoconnect VPN after a captive-portal hop; idle VPN profiles are left alone." },
+        Recipe { id: "network.vpn-dns-leak-check", title: "Check VPN DNS for leaks", component: "network", command: &["resolvectl", "status"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "network", recovery: "Reports non-tunnel resolvers while a VPN tunnel is up; never rewrites DNS on its own." },
+        Recipe { id: "network.vpn-dns-exclusive", title: "Pin VPN link to exclusive DNS", component: "network", command: &["resolvectl", "status"], risk: "confirm", requires_auth: false, automatic: false, cooldown: 3600, verification: "network", recovery: "Hub opt-in only (vpn_dns_exclusive): pins tunnel links to the VPN resolver with the ~. domain." },
         Recipe { id: "network.dns-flush", title: "Flush DNS cache", component: "network", command: &["resolvectl", "flush-caches"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "network", recovery: "Flushes systemd-resolved cache after portal/DNS change." },
         Recipe { id: "update.review-health", title: "Review update health", component: "updates", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 3600, verification: "updates", recovery: "Run ujust update-health; rollback remains controlled by boot health." },
     ]
@@ -153,6 +155,8 @@ const EXECUTOR_ONLY: &[&str] = &[
     "network.dns-flush",
     "network.captive-fix",
     "network.vpn-fix",
+    "network.vpn-dns-leak-check",
+    "network.vpn-dns-exclusive",
     "controller.repair",
     "portal.restart-user",
     "firmware.refresh",
@@ -198,6 +202,96 @@ fn run_command(argv: &[&str], timeout: Duration) -> Result<String, String> {
 
 fn run_ok(argv: &[&str], timeout: Duration) -> Result<(), String> {
     run_command(argv, timeout).map(|_| ())
+}
+
+/// VPN tunnel link names from `resolvectl status` output: links whose name
+/// looks like a tunnel (`tun*`, `wg*`, `tailscale*`, `ppp*`). Pure and unit
+/// tested; the live check below feeds it real output.
+pub fn vpn_tunnel_links(status_output: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    for line in status_output.lines() {
+        let trimmed = line.trim();
+        // `resolvectl status` format: `Link <index> (<name>):` — the
+        // interface name is the parenthesized token, not the index.
+        if let Some(rest) = trimmed.strip_prefix("Link ") {
+            let name = rest.split(['(', ')']).nth(1).unwrap_or("").trim();
+            if name.starts_with("tun")
+                || name.starts_with("wg")
+                || name.starts_with("tailscale")
+                || name.starts_with("ppp")
+            {
+                links.push(name.to_string());
+            }
+        }
+    }
+    links.sort();
+    links.dedup();
+    links
+}
+
+/// Report-style VPN DNS leak check over one `resolvectl status` snapshot:
+/// `Ok` describes the clean state, `Err` names the leaking links. Pure.
+pub fn check_vpn_dns_leak_output(status_output: &str) -> Result<String, String> {
+    let links = vpn_tunnel_links(status_output);
+    if links.is_empty() {
+        return Ok("no VPN tunnel link up; nothing to leak".to_string());
+    }
+    let refs: Vec<&str> = links.iter().map(String::as_str).collect();
+    let leaks = crate::system::network_preset::vpn_dns_leaks(status_output, &refs);
+    if leaks.is_empty() {
+        Ok(format!("VPN DNS clean on {}", links.join(",")))
+    } else {
+        Err(format!(
+            "VPN DNS leak: non-tunnel resolvers in use: {}",
+            leaks
+                .iter()
+                .map(|(link, server)| format!("{link}={server}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ))
+    }
+}
+
+/// Live `resolvectl`-backed VPN DNS leak check for the Guardian. Reports
+/// only — never rewrites link DNS on its own.
+pub fn check_vpn_dns_leak_live() -> Result<String, &'static str> {
+    let output = run_command(&["resolvectl", "status"], Duration::from_secs(6))
+        .map_err(|_| "resolvectl unavailable")?;
+    check_vpn_dns_leak_output(&output).map_err(|_| "VPN DNS leak detected")
+}
+
+/// Apply Hub-opted-in VPN DNS exclusivity: pins each tunnel link to the VPN
+/// resolver with the `~.` catch-all domain. Refuses unless
+/// `vpn_dns_exclusive` is set in `network.toml` — the Guardian never rewrites
+/// link DNS unasked.
+pub fn apply_vpn_dns_exclusive_live() -> Result<String, &'static str> {
+    use crate::system::network_preset::{
+        config_path, load, vpn_exclusive_dns_argv, vpn_exclusive_domain_argv,
+    };
+    let preset = load(config_path(None::<&std::path::Path>));
+    if !preset.vpn_dns_exclusive {
+        return Err("VPN DNS exclusivity is Hub opt-in; refusing to rewrite link DNS unasked");
+    }
+    let output = run_command(&["resolvectl", "status"], Duration::from_secs(6))
+        .map_err(|_| "resolvectl unavailable")?;
+    let links = vpn_tunnel_links(&output);
+    if links.is_empty() {
+        return Err("no VPN tunnel link found");
+    }
+    let vpn_dns = crate::system::network_preset::dns_ip(&preset);
+    if vpn_dns.is_empty() {
+        return Err("DNS preset is off; nothing to pin");
+    }
+    for link in &links {
+        for argv in [
+            vpn_exclusive_dns_argv(&preset, link, vpn_dns),
+            vpn_exclusive_domain_argv(&preset, link),
+        ] {
+            let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+            run_ok(&args, Duration::from_secs(6)).map_err(|_| "resolvectl update failed")?;
+        }
+    }
+    Ok(format!("VPN DNS pinned on {}", links.join(",")))
 }
 
 /// Rust equivalent of guardian_actions.py's bounded executors. Every command
@@ -282,6 +376,8 @@ fn run_executor(id: &str) -> Result<String, String> {
             }
             Err("no always-on VPN needed reconnecting".to_string())
         }
+        "network.vpn-dns-leak-check" => check_vpn_dns_leak_live().map_err(str::to_string),
+        "network.vpn-dns-exclusive" => apply_vpn_dns_exclusive_live().map_err(str::to_string),
         "controller.repair" => {
             run_ok(
                 &["sudo", "-A", "systemctl", "restart", "joycond.service"],
@@ -347,6 +443,8 @@ fn executor_supported(id: &str) -> bool {
             | "network.dns-flush"
             | "network.captive-fix"
             | "network.vpn-fix"
+            | "network.vpn-dns-leak-check"
+            | "network.vpn-dns-exclusive"
             | "controller.repair"
             | "portal.restart-user"
             | "firmware.refresh"
@@ -1134,7 +1232,7 @@ pub fn dismiss_recommendation(recipe_id: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod pending_gate_tests {
-    use super::{is_pending_recipe, now_unix};
+    use super::{check_vpn_dns_leak_output, is_pending_recipe, now_unix, vpn_tunnel_links};
     use serde_json::json;
 
     fn state_with(action: &str) -> serde_json::Value {
@@ -1175,5 +1273,19 @@ mod pending_gate_tests {
     fn rejects_everything_when_there_is_no_history() {
         let empty = json!({ "schema_version": 1, "history": [], "occurrences": {} });
         assert!(!is_pending_recipe(&empty, "audio.restart"));
+    }
+
+    #[test]
+    fn vpn_dns_leak_check_flags_off_tunnel_resolvers() {
+        assert_eq!(
+            vpn_tunnel_links("Link 2 (wlp0s0):\nLink 5 (tun0):\n"),
+            vec!["tun0".to_string()]
+        );
+        assert!(vpn_tunnel_links("Link 2 (wlp0s0):\n").is_empty());
+        assert!(check_vpn_dns_leak_output("Link 2 (wlp0s0):\n").is_ok());
+        assert!(check_vpn_dns_leak_output("Link 5 (tun0):\n  DNS Servers: 10.8.0.1\n").is_ok());
+        let leaking = "Link 2 (wlp0s0):\n  DNS Servers: 192.168.1.1\nLink 5 (tun0):\n  DNS Servers: 10.8.0.1\n";
+        let error = check_vpn_dns_leak_output(leaking).unwrap_err();
+        assert!(error.contains("192.168.1.1"), "{error}");
     }
 }

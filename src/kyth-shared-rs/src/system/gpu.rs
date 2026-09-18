@@ -29,6 +29,36 @@ pub fn lspci_gpu_lines() -> Vec<String> {
         .collect()
 }
 
+/// Serializable form of the GPU snapshot for the `hardware-snapshot` probe
+/// section: the Hub reads the cached section first (TTL 600 s) and only
+/// shells out to `lspci` on a cache miss, instead of spawning it on every
+/// Hardware page open.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct HardwareSnapshot {
+    pub gpu_lines: Vec<String>,
+}
+
+pub fn hardware_snapshot_section() -> HardwareSnapshot {
+    HardwareSnapshot {
+        gpu_lines: lspci_gpu_lines(),
+    }
+}
+
+/// First GPU line, preferring the cached `hardware-snapshot` probe section
+/// over a live `lspci` call.
+pub fn cached_gpu_line() -> Option<String> {
+    if let Some(cached) = crate::system::probe::read_system_section("hardware-snapshot")
+        .or_else(|| crate::system::probe::read_section("hardware-snapshot"))
+    {
+        if let Ok(snapshot) = serde_json::from_value::<HardwareSnapshot>(cached) {
+            if let Some(line) = snapshot.gpu_lines.into_iter().next() {
+                return Some(line);
+            }
+        }
+    }
+    lspci_gpu_lines().into_iter().next()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

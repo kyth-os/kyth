@@ -31,6 +31,10 @@ RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
 # under src/kyth-hub-web) — src-tauri's Cargo.toml depends on it via a
 # `../../kyth-shared-rs` path dependency, so it needs copying to the same
 # relative position here, not folded into the kyth-hub-web COPY below.
+# Release size policy lives in src/kyth-shared-rs/Cargo.toml
+# ([profile.release]: strip + LTO + opt-z); the `--release` builds below
+# inherit it automatically — do not add per-invocation RUSTFLAGS that would
+# silently diverge the builder from `cargo build --release` checkouts.
 COPY src/kyth-shared-rs /build/kyth-shared-rs
 # system::app_suggestions embeds build_files/exe-handler-apps.json via
 # include_str!("../../../../build_files/exe-handler-apps.json"), a path

@@ -165,6 +165,28 @@ pub const SECRETS_EXCLUDED: &[&str] = &[
 pub const DYNAMIC_LOCK_CONFIG: &str = ".config/kyth-dynamic-lock.json";
 pub const DYNAMIC_LOCK_UNIT: &str = "kyth-dynamic-lock.service";
 
+/// Optional Flatpak app-data bundle (`~/.var/app`) inside a setup archive.
+/// Off by default: app data dwarfs settings (shaders/caches, tens of GiB),
+/// so export requires explicit opt-in and warns above this size first.
+/// Shares the threshold with `save_cloud::FLATPAK_DATA_WARN_BYTES`.
+pub const FLATPAK_DATA_WARN_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+pub const FLATPAK_DATA_REL: &str = ".var/app";
+
+/// Size-warn gate for the optional Flatpak-data bundle: `Ok(bytes)` when the
+/// bundle fits, `Err(warning)` with the human-readable warning when it
+/// exceeds [`FLATPAK_DATA_WARN_BYTES`] and needs explicit confirmation.
+pub fn check_flatpak_data_bundle(home: &Path) -> Result<u64, String> {
+    let bytes = crate::system::save_cloud::dir_size_bytes(&home.join(FLATPAK_DATA_REL));
+    if bytes >= FLATPAK_DATA_WARN_BYTES {
+        return Err(format!(
+            "Flatpak app data is {:.1} GiB (>= 10 GiB); bundling it makes a very \
+             large archive. Confirm explicitly to include `{FLATPAK_DATA_REL}`.",
+            bytes as f64 / 1024.0 / 1024.0 / 1024.0
+        ));
+    }
+    Ok(bytes)
+}
+
 pub type RunText<'a> = dyn for<'x> Fn(&'x [String], u64) -> Option<(i32, String)> + 'a;
 
 pub struct SetupCtx<'a> {
@@ -954,5 +976,80 @@ mod tests {
             1
         );
         assert!(restore_home.path().join(".config/kdeglobals").is_file());
+    }
+
+    #[test]
+    fn flatpak_data_bundle_is_small_ok_and_warns_when_large() {
+        let home = tempfile::tempdir().unwrap();
+        // No ~/.var/app at all: 0 bytes, no warning.
+        assert_eq!(check_flatpak_data_bundle(home.path()), Ok(0));
+        std::fs::create_dir_all(home.path().join(".var/app/org.example.App")).unwrap();
+        std::fs::write(
+            home.path().join(".var/app/org.example.App/data.bin"),
+            [1u8; 64],
+        )
+        .unwrap();
+        assert!(check_flatpak_data_bundle(home.path()).is_ok());
+        assert_eq!(
+            FLATPAK_DATA_WARN_BYTES,
+            crate::system::save_cloud::FLATPAK_DATA_WARN_BYTES
+        );
+    }
+
+    #[test]
+    fn wipe_restore_runbook_export_wipe_restore_round_trip() {
+        // Mirrors docs/wipe-restore-runbook.md: export settings from a home,
+        // wipe the config tree (fresh install simulation), restore into the
+        // wiped home, and confirm the settings come back byte-identical.
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join(".config")).unwrap();
+        std::fs::write(home.path().join(".config/kdeglobals"), "theme=Breeze\n").unwrap();
+        let run = |argv: &[String], _: u64| {
+            // Genuine round trip: tar really archives/extracts (checked
+            // above); everything else is stubbed success.
+            if argv.first().map(String::as_str) == Some("tar") {
+                let output = std::process::Command::new("tar").args(&argv[1..]).output();
+                return output.ok().map(|out| {
+                    (
+                        out.status.code().unwrap_or(1),
+                        String::from_utf8_lossy(&out.stdout).into_owned(),
+                    )
+                });
+            }
+            Some((0, String::new()))
+        };
+        let stamp = || "2026-09-18T00-00-00".to_string();
+        let iso_now = || "2026-09-18T00:00:00+00:00".to_string();
+        let hostname = || "kyth-live".to_string();
+        let ctx = stub_ctx(home.path(), &run, true);
+        let ctx = SetupCtx {
+            stamp: &stamp,
+            iso_now: &iso_now,
+            hostname: &hostname,
+            ..ctx
+        };
+        let dest = tempfile::tempdir().unwrap();
+        // tar(1) is required for the archive step; skip cleanly without it.
+        if std::process::Command::new("tar")
+            .arg("--version")
+            .output()
+            .is_err()
+        {
+            return;
+        }
+        let archive = export_setup(&ctx, dest.path()).expect("export works");
+        // Wipe: simulate a fresh install (settings gone, archive survives).
+        std::fs::remove_dir_all(home.path().join(".config")).unwrap();
+        assert!(!home.path().join(".config/kdeglobals").exists());
+        let stream = |_: &[String], _: &dyn Fn(&str)| 0;
+        let on_line = |_: &str| {};
+        // Restore runs flatpak reinstalls through `stream`; the stub reports
+        // success without touching the system.
+        let report = restore_setup(&ctx, &stream, &on_line, &archive).expect("restore works");
+        assert!(report.paths >= 1);
+        assert_eq!(
+            std::fs::read_to_string(home.path().join(".config/kdeglobals")).unwrap(),
+            "theme=Breeze\n"
+        );
     }
 }

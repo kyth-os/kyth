@@ -8,6 +8,58 @@ use std::path::{Path, PathBuf};
 
 pub const DEFAULT_REPO: &str = "/var/cache/kyth/saves";
 
+/// Warn before bundling a Flatpak app-data tree larger than this: a full
+/// `~/.var/app` copy can silently add tens of GiB (shaders, caches) to a
+/// transfer/save bundle. Callers surface the warning and require opt-in.
+pub const FLATPAK_DATA_WARN_BYTES: u64 = 10 * 1024 * 1024 * 1024;
+
+/// Default restic include set for `kyth-save-sync`: Steam compat prefixes
+/// (native + Flatpak) plus the small Kyth state dirs. Everything else is
+/// opt-in so a first backup never vacuums `~/.var/app` caches by accident.
+pub const DEFAULT_RESTIC_INCLUDES: &[&str] = &[
+    ".local/share/Steam/steamapps/compatdata",
+    ".var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata",
+    ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/compatdata",
+    ".config/kyth",
+    ".local/share/kyth",
+];
+
+/// Default include globs, joined to `home`. Only existing paths are returned.
+pub fn default_restic_includes(home: &Path) -> Vec<PathBuf> {
+    DEFAULT_RESTIC_INCLUDES
+        .iter()
+        .map(|rel| home.join(rel))
+        .filter(|path| path.exists())
+        .collect()
+}
+
+/// Recursive size of `path` in bytes (best-effort: unreadable entries count 0).
+pub fn dir_size_bytes(path: &Path) -> u64 {
+    let mut total = 0u64;
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let entry_path = entry.path();
+            if let Ok(meta) = entry.metadata() {
+                if meta.is_dir() {
+                    stack.push(entry_path);
+                } else {
+                    total = total.saturating_add(meta.len());
+                }
+            }
+        }
+    }
+    total
+}
+
+/// True when bundling `flatpak_data_dir` deserves a size warning first.
+pub fn should_warn_flatpak_bundle(flatpak_data_dir: &Path) -> bool {
+    dir_size_bytes(flatpak_data_dir) >= FLATPAK_DATA_WARN_BYTES
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SaveCloudConfig {
     pub repo: String,
@@ -73,20 +125,29 @@ pub fn save(path: impl AsRef<Path>, config: &SaveCloudConfig) -> std::io::Result
 }
 
 /// Compat `drive_c` directories under every Steam compatdata prefix, mirroring
-/// the `compatdata/*/pfx/drive_c` glob. Only existing paths are returned.
+/// the `compatdata/*/pfx/drive_c` glob. Covers the native install plus the
+/// Flatpak Steam layouts (`~/.var/app/com.valvesoftware.Steam/...`, both the
+/// `data/Steam` and `.local/share/Steam` variants). Only existing paths are
+/// returned, sorted and de-duplicated.
 pub fn compat_drive_cs(home: &Path) -> Vec<PathBuf> {
     let mut found = Vec::new();
-    let Ok(prefixes) = std::fs::read_dir(home.join(".local/share/Steam/steamapps/compatdata"))
-    else {
-        return found;
-    };
-    for prefix in prefixes.flatten() {
-        let candidate = prefix.path().join("pfx/drive_c");
-        if candidate.exists() {
-            found.push(candidate);
+    for rel in [
+        ".local/share/Steam/steamapps/compatdata",
+        ".var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata",
+        ".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/compatdata",
+    ] {
+        let Ok(prefixes) = std::fs::read_dir(home.join(rel)) else {
+            continue;
+        };
+        for prefix in prefixes.flatten() {
+            let candidate = prefix.path().join("pfx/drive_c");
+            if candidate.exists() {
+                found.push(candidate);
+            }
         }
     }
     found.sort();
+    found.dedup();
     found
 }
 
@@ -108,6 +169,48 @@ mod tests {
             vec![compatdata.join("123/pfx/drive_c")]
         );
         assert!(compat_drive_cs(&home.path().join("missing-home")).is_empty());
+    }
+
+    #[test]
+    fn finds_flatpak_steam_compatdata_and_dedupes() {
+        let home = tempdir().unwrap();
+        let flatpak = home
+            .path()
+            .join(".var/app/com.valvesoftware.Steam/data/Steam/steamapps/compatdata");
+        fs::create_dir_all(flatpak.join("321/pfx/drive_c")).unwrap();
+        let legacy = home
+            .path()
+            .join(".var/app/com.valvesoftware.Steam/.local/share/Steam/steamapps/compatdata");
+        fs::create_dir_all(legacy.join("654/pfx/drive_c")).unwrap();
+        let found = compat_drive_cs(home.path());
+        assert!(found.contains(&flatpak.join("321/pfx/drive_c")));
+        assert!(found.contains(&legacy.join("654/pfx/drive_c")));
+        assert_eq!(
+            found.len(),
+            found.iter().collect::<std::collections::HashSet<_>>().len()
+        );
+    }
+
+    #[test]
+    fn default_includes_cover_compat_and_kyth_state() {
+        assert!(DEFAULT_RESTIC_INCLUDES
+            .iter()
+            .any(|rel| rel.contains("compatdata")));
+        assert!(DEFAULT_RESTIC_INCLUDES.contains(&".config/kyth"));
+        let home = tempdir().unwrap();
+        fs::create_dir_all(home.path().join(".config/kyth")).unwrap();
+        let includes = default_restic_includes(home.path());
+        assert_eq!(includes, vec![home.path().join(".config/kyth")]);
+    }
+
+    #[test]
+    fn flatpak_bundle_warns_only_above_threshold() {
+        let small = tempdir().unwrap();
+        std::fs::write(small.path().join("file.bin"), [0u8; 16]).unwrap();
+        assert!(!should_warn_flatpak_bundle(small.path()));
+        assert!(dir_size_bytes(&small.path().join("missing")) == 0);
+        // Threshold sanity: 10 GiB, not bytes — a real shader cache trips it.
+        assert_eq!(FLATPAK_DATA_WARN_BYTES, 10 * 1024 * 1024 * 1024);
     }
 
     #[test]

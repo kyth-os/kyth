@@ -1,14 +1,158 @@
-//! Read-only snapshot/deployment timeline.
+//! Read-only snapshot/deployment timeline plus snapshot-operation planning.
 //!
-//! Mirrors `kyth_shared.snapshot_timeline`: Snapper is preferred, Btrfs is a
-//! filesystem-level fallback, and bootc deployments are appended from the
-//! guarded status reader. No snapshot creation, deletion, or rollback is
-//! performed here.
+//! The timeline itself mirrors `kyth_shared.snapshot_timeline`: Snapper is
+//! preferred, Btrfs is a filesystem-level fallback, and bootc deployments
+//! are appended from the guarded status reader. No snapshot creation,
+//! deletion, or rollback is performed here.
+//!
+//! The planning helpers below (`pre_snapshot_argv`, `post_snapshot_argv`,
+//! [`snapshot_then_send_plan`]) are pure argv builders for the operations
+//! the image performs around updates/polish and USB offload. Only the
+//! `*_bin.rs` entry points execute them.
+//!
+//! Snapshot storage budget: snapper timeline snapshots plus the read-only
+//! staging snapshots used for USB send share one btrfs quota on `/home`,
+//! capped at [`HOME_QUOTA_LIMIT_PCT`]% (see
+//! `build_files/scripts/branding/46-snapshot-autoclean.sh`). Timeline
+//! pruning (`snapper` `TIMELINE_LIMIT_*`) keeps steady-state usage far below
+//! the cap; the headroom exists so a pre-update snapshot never fails for
+//! lack of quota while an offload staging snapshot exists.
 
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashSet;
 use std::time::Duration;
+
+/// Share of `/home` that snapshots (timeline + USB-send staging) may occupy
+/// before the qgroup cap stops new snapshots. Raised from the original 20%
+/// so a pre-update snapshot plus one in-flight USB offload staging snapshot
+/// fit together on small (256 GiB) disks without tripping the limiter.
+pub const HOME_QUOTA_LIMIT_PCT: u32 = 35;
+
+/// Snapper timeline retention for the `root` config: hourly/daily caps keep
+/// the steady-state snapshot count bounded under the quota above.
+pub const SNAPPER_ROOT_TIMELINE_LIMITS: &[(&str, &str)] = &[
+    ("TIMELINE_CREATE", "yes"),
+    ("TIMELINE_LIMIT_HOURLY", "5"),
+    ("TIMELINE_LIMIT_DAILY", "7"),
+];
+
+/// Snapper timeline retention for the `home` config. Home churns faster
+/// than `/`, so the hourly window is wider but the daily cap matches root
+/// to hold total usage under the shared quota.
+pub const SNAPPER_HOME_TIMELINE_LIMITS: &[(&str, &str)] = &[
+    ("TIMELINE_CREATE", "yes"),
+    ("TIMELINE_LIMIT_HOURLY", "8"),
+    ("TIMELINE_LIMIT_DAILY", "7"),
+];
+
+/// `snapper -c <config> create-config <path>` argv (idempotent; snapper
+/// refuses when the config already exists, which callers treat as success).
+pub fn snapper_create_config_argv(config: &str, path: &str) -> Vec<String> {
+    vec![
+        "snapper".to_string(),
+        "-c".to_string(),
+        config.to_string(),
+        "create-config".to_string(),
+        path.to_string(),
+    ]
+}
+
+/// `snapper -c <config> set-config K=V …` argv for the timeline limits.
+pub fn snapper_set_config_argv(config: &str, limits: &[(&str, &str)]) -> Vec<String> {
+    let mut argv = vec![
+        "snapper".to_string(),
+        "-c".to_string(),
+        config.to_string(),
+        "set-config".to_string(),
+    ];
+    argv.extend(limits.iter().map(|(key, value)| format!("{key}={value}")));
+    argv
+}
+
+/// Pre-update/pre-polish snapshot: `snapper -c <config> create --type pre
+/// --description <description> --print-number`. The printed number feeds
+/// [`post_snapshot_argv`].
+pub fn pre_snapshot_argv(config: &str, description: &str) -> Vec<String> {
+    vec![
+        "snapper".to_string(),
+        "-c".to_string(),
+        config.to_string(),
+        "create".to_string(),
+        "--type".to_string(),
+        "pre".to_string(),
+        "--description".to_string(),
+        description.to_string(),
+        "--print-number".to_string(),
+    ]
+}
+
+/// Post-update/post-polish snapshot paired with a pre snapshot number.
+pub fn post_snapshot_argv(config: &str, pre_number: u64, description: &str) -> Vec<String> {
+    vec![
+        "snapper".to_string(),
+        "-c".to_string(),
+        config.to_string(),
+        "create".to_string(),
+        "--type".to_string(),
+        "post".to_string(),
+        "--pre-number".to_string(),
+        pre_number.to_string(),
+        "--description".to_string(),
+        description.to_string(),
+    ]
+}
+
+/// Snapshot-then-send USB offload plan.
+///
+/// `btrfs send` requires a read-only snapshot — it cannot stream a live,
+/// mounted subvolume. The old launcher sent `/home` directly, which btrfs
+/// rejects (or worse, streams an inconsistent view). The safe order is:
+/// freeze a read-only snapshot of `/home` under `staging_dir`, send the
+/// *snapshot* to the USB target, then delete the staging snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SnapshotSendPlan {
+    /// Read-only staging snapshot path, e.g. `/home/.snapshots/kyth-send`.
+    pub snapshot_path: String,
+    /// `btrfs subvolume snapshot -r /home <snapshot_path>`
+    pub snapshot_argv: Vec<String>,
+    /// `btrfs send <snapshot_path>` streamed at `usb_target` (never the live
+    /// subvolume: `btrfs send` requires a read-only snapshot).
+    pub send_argv: Vec<String>,
+    /// `btrfs subvolume delete <snapshot_path>` (cleanup after send).
+    pub cleanup_argv: Vec<String>,
+}
+
+pub fn snapshot_then_send_plan(
+    home: &str,
+    staging_name: &str,
+    usb_target: &str,
+) -> SnapshotSendPlan {
+    let snapshot_path = format!("{}/.snapshots/{staging_name}", home.trim_end_matches('/'));
+    SnapshotSendPlan {
+        snapshot_argv: vec![
+            "btrfs".to_string(),
+            "subvolume".to_string(),
+            "snapshot".to_string(),
+            "-r".to_string(),
+            home.to_string(),
+            format!("{}/.snapshots/{staging_name}", home.trim_end_matches('/')),
+        ],
+        send_argv: vec![
+            "btrfs".to_string(),
+            "send".to_string(),
+            format!("{}/.snapshots/{staging_name}", home.trim_end_matches('/')),
+            usb_target.to_string(),
+        ],
+        cleanup_argv: vec![
+            "btrfs".to_string(),
+            "subvolume".to_string(),
+            "delete".to_string(),
+            format!("{}/.snapshots/{staging_name}", home.trim_end_matches('/')),
+        ],
+        snapshot_path,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct SnapshotRow {
@@ -265,5 +409,67 @@ mod tests {
         assert_eq!(rows[0].row_type, "deployment");
         assert_eq!(rows[1].row_type, "rollback");
         assert_eq!(rows[1].id, "sha256:rollb");
+    }
+
+    #[test]
+    fn quota_cap_covers_timeline_plus_one_staging_snapshot() {
+        // Documented budget: the cap must leave room for a pre-update
+        // snapshot alongside one in-flight USB offload staging snapshot.
+        // 35% of even a 256 GiB disk dwarfs both; anything at or below the
+        // old 20% risks tripping the limiter mid-update on small disks.
+        assert!(HOME_QUOTA_LIMIT_PCT > 20);
+        assert_eq!(HOME_QUOTA_LIMIT_PCT, 35);
+    }
+
+    #[test]
+    fn pre_and_post_snapshots_pair_by_number() {
+        let pre = pre_snapshot_argv("root", "before kyth update");
+        assert_eq!(
+            pre,
+            vec![
+                "snapper",
+                "-c",
+                "root",
+                "create",
+                "--type",
+                "pre",
+                "--description",
+                "before kyth update",
+                "--print-number"
+            ]
+        );
+        let post = post_snapshot_argv("root", 42, "after kyth update");
+        assert!(post.windows(2).any(|pair| pair == ["--pre-number", "42"]));
+        assert!(post.windows(2).any(|pair| pair == ["--type", "post"]));
+        let home_cfg = snapper_set_config_argv("home", SNAPPER_HOME_TIMELINE_LIMITS);
+        assert!(home_cfg.iter().any(|arg| arg == "TIMELINE_LIMIT_HOURLY=8"));
+        assert!(home_cfg.iter().any(|arg| arg == "TIMELINE_LIMIT_DAILY=7"));
+        let root_cfg = snapper_set_config_argv("root", SNAPPER_ROOT_TIMELINE_LIMITS);
+        assert!(root_cfg.iter().any(|arg| arg == "TIMELINE_LIMIT_HOURLY=5"));
+        assert_eq!(
+            snapper_create_config_argv("home", "/home"),
+            vec!["snapper", "-c", "home", "create-config", "/home"]
+        );
+    }
+
+    #[test]
+    fn usb_offload_sends_a_snapshot_never_the_live_subvolume() {
+        let plan =
+            snapshot_then_send_plan("/home", "kyth-send", "/run/media/alice/BACKUP/home.btrfs");
+        assert_eq!(plan.snapshot_path, "/home/.snapshots/kyth-send");
+        // Freeze first: read-only snapshot of /home.
+        assert_eq!(
+            &plan.snapshot_argv[..4],
+            ["btrfs", "subvolume", "snapshot", "-r"]
+        );
+        assert_eq!(plan.snapshot_argv[4], "/home");
+        // Send the snapshot — the live subvolume must not appear as the
+        // send source (btrfs send requires a read-only snapshot).
+        assert!(plan.send_argv.iter().any(|arg| arg == "send"));
+        assert!(plan.send_argv.iter().any(|arg| arg == &plan.snapshot_path));
+        assert!(!plan.send_argv.iter().any(|arg| arg == "/home"));
+        // Cleanup removes the staging snapshot afterwards.
+        assert_eq!(plan.cleanup_argv[..3], ["btrfs", "subvolume", "delete"]);
+        assert_eq!(plan.cleanup_argv[3], plan.snapshot_path);
     }
 }

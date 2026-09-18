@@ -12,7 +12,7 @@
 use std::time::Duration;
 
 /// Bump with the app list; the filename below derives from this.
-pub const SENTINEL_VERSION: u32 = 13;
+pub const SENTINEL_VERSION: u32 = 14;
 /// First-boot pull of several large runtimes/apps; must not share the
 /// generic 120 s command bound (`COMMAND_TIMEOUT` in `runtime_bin.rs`).
 /// The unit allows 3600 s; 1800 s leaves headroom for retries on next boot.
@@ -20,16 +20,35 @@ pub const INSTALL_TIMEOUT: Duration = Duration::from_secs(1800);
 /// Install for all users, consistent with `kyth-flathub-setup.service`.
 pub const REMOTE: &str = "flathub";
 
-/// Game-ready first boot only: no general desktop, creator, or admin
-/// utilities — those stay available from the System Hub.
-pub const APPS: &[&str] = &[
-    "com.valvesoftware.Steam",
+/// First boot installs Steam only: a six-app pull on metered/slow first
+/// boot delayed login-ready by gigabytes. Everything else stays one click
+/// away in the System Hub (see `ON_DEMAND_APPS` + `hub_install_args`).
+pub const APPS: &[&str] = &["com.valvesoftware.Steam"];
+
+/// Former first-boot apps, now on-demand Hub installs: same flags, installed
+/// only when the user picks them in Hub > Apps.
+pub const ON_DEMAND_APPS: &[&str] = &[
     "net.lutris.Lutris",
     "com.heroicgameslauncher.hgl",
     "org.videolan.VLC",
     "com.brave.Browser",
     "org.libreoffice.LibreOffice",
 ];
+
+/// Args after the `flatpak` program for one on-demand Hub install of `app`.
+/// Rejects anything outside [`ON_DEMAND_APPS`] + [`APPS`] so the Hub cannot
+/// be driven to install an arbitrary ref.
+pub fn hub_install_args(app: &str) -> Option<Vec<String>> {
+    if !APPS.contains(&app) && !ON_DEMAND_APPS.contains(&app) {
+        return None;
+    }
+    Some(
+        ["install", "--system", "--or-update", "-y", REMOTE, app]
+            .iter()
+            .map(|part| (*part).to_string())
+            .collect(),
+    )
+}
 
 /// Versioned stamp written only on full success; a flaky first-online pull
 /// leaves it unset so the next boot retries.
@@ -72,7 +91,20 @@ mod tests {
         );
         // Pinned to what `kyth-default-flatpaks.service` conditions on;
         // bump both together with the app list.
-        assert_eq!(path, "/var/lib/kyth/default-flatpaks-v13-done");
+        assert_eq!(path, "/var/lib/kyth/default-flatpaks-v14-done");
+    }
+
+    #[test]
+    fn first_boot_is_steam_only_and_rest_is_on_demand() {
+        assert_eq!(APPS, &["com.valvesoftware.Steam"]);
+        for app in ON_DEMAND_APPS {
+            let args = hub_install_args(app).expect("{app} must be installable on demand");
+            assert!(args.contains(&"--system".to_string()));
+            assert!(args.contains(&"--or-update".to_string()));
+            assert!(args.contains(&app.to_string()));
+        }
+        assert!(hub_install_args("org.evil.App").is_none());
+        assert!(hub_install_args("com.valvesoftware.Steam").is_some());
     }
 
     #[test]

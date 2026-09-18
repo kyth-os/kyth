@@ -8,6 +8,10 @@
 # nor their units ship in this image, so advertising USB-quirks/airscan config
 # would promise hardware that cannot work. If those stacks are added later,
 # this fragment must grow their real units first.
-systemctl enable cups.service 2>/dev/null || true
-systemctl enable avahi-daemon.service 2>/dev/null || true
+# Socket activation (not enable): cups and avahi-daemon stay dormant until a
+# print job or mDNS lookup actually arrives, instead of idling on every boot.
+systemctl enable cups.socket 2>/dev/null || true
+systemctl enable avahi-daemon.socket 2>/dev/null || true
+systemctl disable cups.service 2>/dev/null || true
+systemctl disable avahi-daemon.service 2>/dev/null || true
 # auto_add via print.toml stays cups-browsed purged (Avahi ipp everywhere only)

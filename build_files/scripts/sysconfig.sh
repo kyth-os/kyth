@@ -84,11 +84,12 @@ MIGRATESERVICEEOF
 systemctl enable kyth-migrate-display-manager.service 2>/dev/null || true
 
 # Service masks/disables that are intentionally runtime-layer policy.
-# NetworkManager-wait-online.service is deliberately NOT disabled here — it is
-# enabled later in branding/31-ujust-recipes.sh (which runs after this script
-# in the Dockerfile) so kyth-flathub-setup/kyth-default-flatpaks don't race DNS
-# at boot. Do not re-add a disable for it here; the two would silently fight
-# over the same unit depending on layer order.
+# NetworkManager-wait-online.service stays DISABLED image-wide: it stalls
+# every boot on metered/slow/offline links, and every Kyth network waiter
+# already skips cleanly offline (Wants= without After= plus an offline skip
+# in the binary). branding/31-ujust-recipes.sh enforces the disable there
+# too; do not re-add an enable in either place.
+systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl mask systemd-remount-fs.service
 # boot.automount: systemd-gpt-auto-generator speculatively claims /boot for the
 # EFI System Partition (nvme0n1p2) on GPT+ostree layouts where the ESP is not

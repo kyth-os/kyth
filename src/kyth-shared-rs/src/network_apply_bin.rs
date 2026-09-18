@@ -8,7 +8,9 @@
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use kyth_shared::system::network_preset::{apply_preset, config_path, load, TTL_PATH, TTL_SECS};
+use kyth_shared::system::network_preset::{
+    apply_firewall_zone, apply_preset, config_path, load, TTL_PATH, TTL_SECS,
+};
 
 fn py_bool(value: bool) -> &'static str {
     if value {
@@ -26,12 +28,26 @@ fn main() -> std::process::ExitCode {
                 .first()
                 .map(PathBuf::as_path)
                 .unwrap_or_else(|| Path::new(""));
-            println!(
-                "kyth-apply-network: wrote {} doh={} dns={}",
-                dest.display(),
-                py_bool(preset.doh),
-                preset.dns,
-            );
+            // The zone is best-effort here: DNS must not break where
+            // firewalld is absent (containers), but a failure is loud.
+            match apply_firewall_zone(&preset.firewall_zone) {
+                Ok(zone) => println!(
+                    "kyth-apply-network: wrote {} doh={} dns={} {}",
+                    dest.display(),
+                    py_bool(preset.doh),
+                    preset.dns,
+                    zone,
+                ),
+                Err(error) => {
+                    eprintln!("kyth-apply-network: WARNING: {error}");
+                    println!(
+                        "kyth-apply-network: wrote {} doh={} dns={} (zone not enforced)",
+                        dest.display(),
+                        py_bool(preset.doh),
+                        preset.dns,
+                    );
+                }
+            }
             if let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) {
                 let _ = std::fs::write(TTL_PATH, (now.as_secs() + TTL_SECS).to_string());
             }

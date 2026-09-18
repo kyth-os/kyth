@@ -32,6 +32,13 @@ pub(crate) struct BootcInstallInput {
     /// silently fall back to plaintext when encryption was requested.
     #[serde(default)]
     pub encryption: String,
+    /// TPM recovery acknowledgement for `tpm2` installs. TPM-bound LUKS has
+    /// no passphrase: a board swap, TPM reset, or PCR change makes the disk
+    /// permanently unrecoverable unless a recovery key was escrowed (Hub
+    /// shows the escrow flow and sets this only after the user confirms).
+    /// `tpm2` without this acknowledgement fails closed.
+    #[serde(default)]
+    pub tpm_recovery_ack: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -85,6 +92,12 @@ pub(crate) fn build_plan(input: BootcInstallInput) -> Result<BootcInstallPlan, S
         return Err(format!(
             "encryption unsupported: '{encryption}' is not a supported encryption mode (expected 'none' or 'tpm2')."
         ));
+    }
+    if encryption == "tpm2" && !input.tpm_recovery_ack {
+        return Err(
+            "TPM encryption needs a recovery plan first: TPM-bound LUKS has no passphrase, so a board swap, TPM reset, or PCR change permanently destroys access unless a recovery key was escrowed. Confirm the recovery-key escrow step before installing."
+                .to_string(),
+        );
     }
     let target = if subcommand == "to-disk" {
         crate::installer_plan::normalize_device_path(&input.target)
@@ -170,6 +183,7 @@ mod tests {
             root_subvolume: false,
             wipe: false,
             encryption: "none".to_string(),
+            tpm_recovery_ack: false,
         }
     }
 
@@ -246,6 +260,7 @@ mod tests {
     fn tpm2_encryption_selects_tpm2_luks_block_setup() {
         let plan = build_plan(BootcInstallInput {
             encryption: "tpm2".to_string(),
+            tpm_recovery_ack: true,
             wipe: true,
             ..input("to-disk")
         })
@@ -276,9 +291,20 @@ mod tests {
     }
 
     #[test]
+    fn tpm2_without_recovery_ack_fails_closed() {
+        let error = build_plan(BootcInstallInput {
+            encryption: "tpm2".to_string(),
+            ..input("to-disk")
+        })
+        .expect_err("tpm2 without a recovery plan must fail closed");
+        assert!(error.contains("recovery plan"), "unexpected error: {error}");
+    }
+
+    #[test]
     fn filesystem_install_cannot_honor_encryption() {
         let error = build_plan(BootcInstallInput {
             encryption: "tpm2".to_string(),
+            tpm_recovery_ack: true,
             target: "/mnt/kyth".to_string(),
             ..input("to-filesystem")
         })

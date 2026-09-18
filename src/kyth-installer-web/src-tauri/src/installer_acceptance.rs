@@ -230,6 +230,7 @@ mod tests {
             root_subvolume: false,
             wipe: true,
             encryption: "none".into(),
+            tpm_recovery_ack: false,
         })
         .expect("bootc wipe plan");
         assert!(bootc.destructive);

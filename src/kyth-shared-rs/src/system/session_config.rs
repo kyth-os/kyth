@@ -67,22 +67,108 @@ pub fn chromium_flags_paths(home: &Path) -> Vec<PathBuf> {
 
 /// Best-effort rewrite of VS Code's argv.json: missing parents are
 /// created, a missing or unreadable file starts empty, and write
-/// failures are swallowed.
+/// failures are swallowed. Merges keys into the existing object (unknown
+/// user keys are preserved) and snapshots the previous file first.
 pub fn write_code_argv_file(path: &Path) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    let _ = snapshot_before_write(path);
     let existing = std::fs::read_to_string(path).ok();
     let _ = std::fs::write(path, update_code_argv(existing.as_deref()));
 }
 
-/// Best-effort rewrite of one flags file.
+/// Best-effort rewrite of one flags file: snapshots the previous file,
+/// then merges the password-store flag (other flags are preserved).
 pub fn write_chromium_flags_file(path: &Path) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    let _ = snapshot_before_write(path);
     let existing = std::fs::read_to_string(path).unwrap_or_default();
     let _ = std::fs::write(path, update_chromium_flags(Some(&existing)));
+}
+
+/// Timestamped backup of `path` next to itself (`<name>.YYYYmmdd-HHMMSS.bak`).
+/// Returns the snapshot path. Missing source files are a no-op (`Ok` with the
+/// would-be name); callers ignore the result on a best-effort path.
+pub fn snapshot_before_write(path: &Path) -> std::io::Result<PathBuf> {
+    let stamp = snapshot_stamp();
+    let file_name = path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let backup = path.with_file_name(format!("{file_name}.{stamp}.bak"));
+    if path.exists() {
+        std::fs::copy(path, &backup)?;
+    }
+    Ok(backup)
+}
+
+/// UTC `YYYYmmdd-HHMMSS` stamp for snapshot filenames. Reads
+/// `/proc` clock-free via `SystemTime`; falls back to the epoch on error.
+pub fn snapshot_stamp() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0);
+    const DAYS_TO_CIVIL: fn(u64) -> (i64, u32, u32) = |days| {
+        let z = days as i64 + 719_468;
+        let era = z.div_euclid(146_097);
+        let doe = z.rem_euclid(146_097);
+        let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+        let year = yoe + era * 400;
+        let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+        let mp = (5 * doy + 2) / 153;
+        let day = (doy - (153 * mp + 2) / 5 + 1) as u32;
+        let month = (if mp < 10 { mp + 3 } else { mp - 9 }) as u32;
+        (if month <= 2 { year + 1 } else { year }, month, day)
+    };
+    let (year, month, day) = DAYS_TO_CIVIL(secs / 86_400);
+    let rest = secs % 86_400;
+    format!(
+        "{year:04}{month:02}{day:02}-{:02}{:02}{:02}",
+        rest / 3_600,
+        rest % 3_600 / 60,
+        rest % 60
+    )
+}
+
+/// Restore `path` from a snapshot created by [`snapshot_before_write`].
+/// `--force-restore` flows here: the snapshot wins wholesale, no merging.
+pub fn restore_snapshot(path: &Path, backup: &Path) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let bytes = std::fs::read(backup)?;
+    std::fs::write(path, bytes)
+}
+
+/// Minimum Plasma release a config migration is written for. Older sessions
+/// keep their files untouched: migrating forward under Plasma 5 (or an
+/// unparseable version string) corrupts keys the running shell still owns.
+pub const MIN_PLASMA_MIGRATION_VERSION: (u64, u64) = (6, 0);
+
+/// Parse `plasmashell --version`-style output (`"plasmashell 6.1.5"`) into
+/// `(major, minor)`. Returns `None` when nothing parseable is present.
+pub fn parse_plasma_version(output: &str) -> Option<(u64, u64)> {
+    for token in output.split(|char: char| !(char.is_ascii_alphanumeric() || char == '.')) {
+        let mut parts = token.split('.');
+        if let (Some(major), Some(minor)) = (parts.next(), parts.next()) {
+            if let (Ok(major), Ok(minor)) = (major.parse(), minor.parse()) {
+                return Some((major, minor));
+            }
+        }
+    }
+    None
+}
+
+/// Gate for Plasma config migrations: only run when the running Plasma is at
+/// least [`MIN_PLASMA_MIGRATION_VERSION`]. Unknown versions fail closed.
+pub fn should_run_plasma_migration(version_output: &str) -> bool {
+    parse_plasma_version(version_output)
+        .is_some_and(|version| version >= MIN_PLASMA_MIGRATION_VERSION)
 }
 
 /// Enable KWallet integration for VS Code and Brave under home.
@@ -139,5 +225,42 @@ mod tests {
             assert_eq!(content.matches("password-store=").count(), 1, "{path:?}");
             assert!(content.contains("--password-store=kwallet5"));
         }
+    }
+
+    #[test]
+    fn snapshots_are_timestamped_and_restore_force_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("argv.json");
+        std::fs::write(&path, r#"{"theme":"dark"}"#).unwrap();
+        let backup = snapshot_before_write(&path).unwrap();
+        let name = backup.file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("argv.json."));
+        assert!(name.ends_with(".bak"));
+        assert_eq!(
+            std::fs::read_to_string(&backup).unwrap(),
+            r#"{"theme":"dark"}"#
+        );
+        // Merge path preserves the user's theme key while adding the store.
+        write_code_argv_file(&path);
+        let merged = std::fs::read_to_string(&path).unwrap();
+        assert!(merged.contains("dark"));
+        assert!(merged.contains("kwallet5"));
+        // Force restore brings back the exact pre-write bytes.
+        std::fs::write(&path, "clobbered").unwrap();
+        restore_snapshot(&path, &backup).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            r#"{"theme":"dark"}"#
+        );
+    }
+
+    #[test]
+    fn plasma_migration_gate_rejects_old_and_unknown_versions() {
+        assert!(should_run_plasma_migration("plasmashell 6.1.5"));
+        assert!(should_run_plasma_migration("plasmashell 6.0"));
+        assert!(!should_run_plasma_migration("plasmashell 5.27.11"));
+        assert!(!should_run_plasma_migration(""));
+        assert!(!should_run_plasma_migration("not a version"));
+        assert_eq!(parse_plasma_version("plasmashell 6.1.5"), Some((6, 1)));
     }
 }

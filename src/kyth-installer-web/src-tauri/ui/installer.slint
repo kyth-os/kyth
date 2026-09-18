@@ -53,10 +53,10 @@ export component InstallerWindow inherits Window {
     in-out property <string> username: "";
     in-out property <string> password: "";
     in-out property <string> mok-password: "";
-    in-out property <bool> confirm-backup: false;
+    in-out property <bool> acknowledged-irreversible: false;
     in-out property <bool> confirm-erase: false;
     in-out property <bool> confirm-current: false;
-    in-out property <bool> start-enabled: selected-disk != "" && username != "" && password != "" && confirm-backup && confirm-erase && (install-mode != "manual" || manual-committed) && (install-mode != "wipe" || confirm-current) && (install-mode != "alongside" || target-partition != "") && (install-mode != "resize_ntfs" || target-partition != "") && (install-mode != "free_space" || free-region-end != free-region-start);
+    in-out property <bool> start-enabled: selected-disk != "" && username != "" && password != "" && acknowledged-irreversible && confirm-erase && (install-mode != "manual" || manual-committed) && (install-mode != "wipe" || confirm-current) && (install-mode != "alongside" || target-partition != "") && (install-mode != "resize_ntfs" || target-partition != "") && (install-mode != "free_space" || free-region-end != free-region-start);
     in-out property <bool> busy: false;
     in-out property <float> progress: 0;
     in-out property <string> event-log: "Waiting for installer events…";
@@ -245,7 +245,7 @@ export component InstallerWindow inherits Window {
                                     }
                                 }
                             }
-                            CheckBox { text: "I have backed up anything I want to keep."; checked <=> confirm-backup; }
+                            CheckBox { text: "This installation cannot be undone. I have backed up anything I want to keep and I acknowledge this irreversible step."; checked <=> acknowledged-irreversible; }
                             CheckBox { text: "I understand the selected target may be erased."; checked <=> confirm-erase; }
                             CheckBox { text: "I verified the target and am booted from installation media."; checked <=> confirm-current; }
                         }

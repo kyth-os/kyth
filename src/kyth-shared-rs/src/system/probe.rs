@@ -36,6 +36,7 @@ pub fn disk_ttl() -> HashMap<&'static str, f64> {
         ("controllers-detect", 120.0),
         ("display-detect", 30.0),
         ("hardware-probes", 30.0),
+        ("hardware-snapshot", 600.0),
         ("ntfs-drives", 30.0),
         ("secureboot-state", 300.0),
         ("hardware-summary", 30.0),
@@ -43,6 +44,84 @@ pub fn disk_ttl() -> HashMap<&'static str, f64> {
         ("audit-cache", 30.0),
         ("firmware-cache", 300.0),
     ])
+}
+
+/// How often the user timer refreshes (`kyth-probe-user.timer`): 10 minutes.
+/// The user run reads fresh-enough system-cache sections instead of
+/// re-collecting them (see `fresh_system_sections`), so a short interval
+/// would only duplicate the system service's work every boot.
+pub const USER_REFRESH_INTERVAL_SECS: u64 = 600;
+
+/// Sections that need the network: skipped (never collected as null) when
+/// there is no default route, so offline runs keep the last good values
+/// instead of blanking them.
+pub const NETWORKED_SECTIONS: &[&str] = &["flatpak-updates", "network-summary"];
+
+/// True when the machine has a default route (v4 or v6): `/proc/net/route`
+/// carries a `00000000` destination, or `/proc/net/ipv6_route` a zero prefix
+/// with a non-loopback next hop. Pure over the two proc files so tests can
+/// inject fixtures; [`has_default_route`] reads the live files.
+pub fn has_default_route_in(route_v4: &str, route_v6: &str) -> bool {
+    for line in route_v4.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.get(1) == Some(&"00000000") {
+            return true;
+        }
+    }
+    for line in route_v6.lines().skip(1) {
+        let fields: Vec<&str> = line.split_whitespace().collect();
+        if fields.len() >= 5
+            && fields[0].chars().all(|char| char == '0')
+            && fields[4] != "00000000000000000000000000000000"
+        {
+            return true;
+        }
+    }
+    false
+}
+
+/// Live default-route check for collectors and the Hub.
+pub fn has_default_route() -> bool {
+    let v4 = std::fs::read_to_string("/proc/net/route").unwrap_or_default();
+    let v6 = std::fs::read_to_string("/proc/net/ipv6_route").unwrap_or_default();
+    has_default_route_in(&v4, &v6)
+}
+
+/// Fresh-enough system-cache sections for the user timer: the user run merges
+/// these into its own cache instead of re-collecting expensive/system-owned
+/// data (bootc status, flatpak listings, hardware). TTL-honored — stale or
+/// missing sections are simply absent so the user run collects them itself.
+pub fn fresh_system_sections() -> serde_json::Map<String, Value> {
+    fresh_system_sections_in(&system_cache_path())
+}
+
+fn fresh_system_sections_in(system_path: &Path) -> serde_json::Map<String, Value> {
+    let mut fresh = serde_json::Map::new();
+    let Some(doc) = load_cache_file(system_path) else {
+        return fresh;
+    };
+    let Some(sections) = doc.get("sections").and_then(Value::as_object) else {
+        return fresh;
+    };
+    let now = now_unix();
+    for (key, entry) in sections {
+        let ttl = disk_ttl().get(key.as_str()).copied().unwrap_or(0.0);
+        let ts = entry.get("ts").and_then(Value::as_f64).unwrap_or(-1.0);
+        let age = now - ts;
+        if age < 0.0 || age > ttl {
+            continue;
+        }
+        if let Some(data) = entry.get("data").filter(|value| !value.is_null()) {
+            fresh.insert(key.clone(), data.clone());
+        }
+    }
+    fresh
+}
+
+/// Read one section from the SYSTEM cache only, honoring its TTL. What the
+/// user timer and the Hub prefer before falling back to a live collection.
+pub fn read_system_section(key: &str) -> Option<Value> {
+    read_section_in(key, &[system_cache_path()])
 }
 
 fn user_runtime_cache_path() -> PathBuf {
@@ -277,7 +356,22 @@ fn collect_hardware() -> Option<(Value, Value)> {
 /// missing optional utility cannot prevent the rest of the cache from being
 /// refreshed.
 pub fn collect_snapshot() -> serde_json::Map<String, Value> {
+    collect_snapshot_skipping(&[])
+}
+
+/// [`collect_snapshot`], skipping `skip`: the user timer passes the keys it
+/// already has fresh from the system cache so expensive sections (bootc,
+/// flatpak, hardware) are not collected twice per cycle.
+pub fn collect_snapshot_skipping(skip: &[&str]) -> serde_json::Map<String, Value> {
     let mut sections = serde_json::Map::new();
+    let skipped = |key: &str| skip.contains(&key);
+    if skipped("bootc-status-data")
+        && skipped("bootc-status-text")
+        && skipped("bootc-branch")
+        && skipped("kernel-flavor")
+    {
+        // Fast path needs nothing below; fall through to the per-key gates.
+    }
     let status_data = crate::system::bootc_query::fetch_status_data();
     let status_text = crate::system::bootc_query::fetch_status_text();
     let reference = status_data
@@ -305,7 +399,17 @@ pub fn collect_snapshot() -> serde_json::Map<String, Value> {
         Value::String(crate::system::bootc::current_kernel_flavor()),
     );
     sections.insert("flatpak-apps".into(), collect_flatpak_apps());
-    sections.insert("flatpak-updates".into(), collect_flatpak_updates());
+    // Networked sections are skipped entirely without a default route: the
+    // caller merges fresh system-cache values underneath (user timer) or
+    // keeps the previous cache entry, instead of blanking it with null.
+    if has_default_route() {
+        sections.insert("flatpak-updates".into(), collect_flatpak_updates());
+        sections.insert(
+            "network-summary".into(),
+            serde_json::to_value(crate::system::network_identity::get_network_identity())
+                .unwrap_or(Value::Null),
+        );
+    }
     if let Some((nvidia, hardware)) = collect_hardware() {
         sections.insert("nvidia-detect".into(), nvidia);
         sections.insert("hardware-summary".into(), hardware.clone());
@@ -321,8 +425,8 @@ pub fn collect_snapshot() -> serde_json::Map<String, Value> {
             .unwrap_or(Value::Null),
     );
     sections.insert(
-        "network-summary".into(),
-        serde_json::to_value(crate::system::network_identity::get_network_identity())
+        "hardware-snapshot".into(),
+        serde_json::to_value(crate::system::gpu::hardware_snapshot_section())
             .unwrap_or(Value::Null),
     );
     sections

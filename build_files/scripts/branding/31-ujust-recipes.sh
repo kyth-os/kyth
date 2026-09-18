@@ -33,18 +33,15 @@ install -m 0644 /ctx/kyth-scx-loader.service /usr/lib/systemd/system/scx_loader.
 systemctl enable kyth-local-bin-migrate.service 2>/dev/null || true
 systemctl enable kyth-duperemove.timer 2>/dev/null || true
 systemctl --global enable kyth-proton-cachyos-update.timer 2>/dev/null || true
-# Without wait-online, network-online.target is reached instantly and the
-# flatpak units below race DNS at boot and fail. Enabling it only delays
-# units ordered After=network-online.target, not the rest of boot.
-# nm-online exits 1 when there is no connectivity; treat that as success
-# so an offline/Wi-Fi-first boot does not list this unit as failed.
-# Flathub/default-flatpaks already skip when there is no default route.
-install -d /usr/lib/systemd/system/NetworkManager-wait-online.service.d
-cat > /usr/lib/systemd/system/NetworkManager-wait-online.service.d/10-kyth-offline.conf <<'NMWONLINE'
-[Service]
-SuccessExitStatus=1
-NMWONLINE
-systemctl enable NetworkManager-wait-online.service 2>/dev/null || true
+# No NetworkManager-wait-online.service here on purpose: it stalls every boot
+# up to its timeout on metered/slow/offline links, and every Kyth network
+# waiter already skips cleanly offline (flathub-setup exits 0 with no default
+# route; default-flatpaks gates on the flathub-setup ExecCondition;
+# update-watcher/probe timers retry). Those units carry Wants= (not After=)
+# on network-online.target so an unreached target never marks them failed.
+# Do NOT re-add a wait-online enable here or in sysconfig.sh; the two would
+# silently fight over the same unit depending on layer order.
+systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl enable kyth-flathub-setup.service 2>/dev/null || true
 systemctl enable kyth-default-flatpaks.service 2>/dev/null || true
 systemctl enable kyth-hw-setup.service 2>/dev/null || true

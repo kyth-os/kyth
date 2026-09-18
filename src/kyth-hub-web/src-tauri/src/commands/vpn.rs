@@ -12,6 +12,7 @@ use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 use url::Url;
 
 use crate::InstallStatus;
+use kyth_shared::system::network_preset;
 
 static JOBS: OnceLock<Mutex<HashMap<String, Arc<VpnRuntime>>>> = OnceLock::new();
 
@@ -110,6 +111,51 @@ fn terminate_child(runtime: &VpnRuntime) {
         kyth_shared::system::process::kill_process_group(&mut child);
         // Reap so a disconnected openconnect never lingers as a zombie.
         let _ = child.wait();
+    }
+}
+
+/// Fail-closed lockdown (Hub opt-in `vpn_fail_closed`): flip firewalld to
+/// the `block` zone through the same sudo/askpass path openconnect uses,
+/// so traffic cannot silently return to the raw LAN when the tunnel drops
+/// unexpectedly. Best-effort with a loud status: without an admin prompt
+/// answer there is no lockdown, and the user is told so.
+fn set_vpn_lockdown(runtime: &VpnRuntime, lockdown: bool) {
+    let preset = network_preset::load(network_preset::config_path(None::<&std::path::Path>));
+    if !preset.vpn_fail_closed {
+        return;
+    }
+    let zone = if lockdown {
+        "block".to_string()
+    } else {
+        preset.firewall_zone.clone()
+    };
+    let mut command = std::process::Command::new("sudo");
+    command
+        .arg("-A")
+        .arg("firewall-cmd")
+        .arg(format!("--set-default-zone={zone}"))
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+        command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+    }
+    let ok = kyth_shared::system::process::run_bounded_command(
+        command,
+        std::time::Duration::from_secs(60),
+    )
+    .map(|output| output.status.success())
+    .unwrap_or(false);
+    if !ok {
+        status(
+            runtime,
+            "warning",
+            if lockdown {
+                "VPN dropped but the network lockdown needs an admin password; traffic may leave the tunnel."
+            } else {
+                "VPN ended but restoring the firewall zone needs an admin password; check your zone."
+            },
+        );
     }
 }
 
@@ -228,6 +274,9 @@ fn start_process(
                         }
                     } else if kyth_shared::system::vpn_saml::line_is_connected(&line) {
                         status(&runtime, "connected", "VPN connection established.");
+                        // Tunnel is up: lift any fail-closed lockdown from an
+                        // earlier drop (no-op unless the Hub opted in).
+                        set_vpn_lockdown(&runtime, false);
                     } else if !redacted.trim().is_empty() {
                         status(&runtime, "connecting", redacted);
                     }
@@ -304,6 +353,9 @@ fn start_process(
             status(&runtime, "disconnected", "VPN connection ended.");
         } else {
             status(&runtime, "failed", "VPN connection ended unexpectedly.");
+            // Unexpected drop with fail-closed opted in: block the raw LAN
+            // before background traffic can leak out of the dead tunnel.
+            set_vpn_lockdown(&runtime, true);
         }
     });
 }
@@ -691,6 +743,8 @@ pub(crate) fn vpn_disconnect(job: String) -> Result<String, String> {
     runtime.generation.fetch_add(1, Ordering::SeqCst);
     terminate_child(&runtime);
     status(&runtime, "complete", "VPN disconnected.");
+    // Clean user disconnect lifts any fail-closed lockdown.
+    set_vpn_lockdown(&runtime, false);
     Ok("VPN disconnected.".into())
 }
 

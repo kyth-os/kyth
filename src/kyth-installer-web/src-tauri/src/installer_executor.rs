@@ -81,6 +81,7 @@ mod tests {
                 root_subvolume: false,
                 wipe: true,
                 encryption: "none".to_string(),
+                tpm_recovery_ack: false,
             },
             configuration: ConfigurationInput {
                 target_root: "/mnt/target".to_string(),
@@ -127,6 +128,7 @@ mod tests {
                 root_subvolume: false,
                 wipe: true,
                 encryption: "none".into(),
+                tpm_recovery_ack: false,
             },
             configuration: ConfigurationInput {
                 target_root: "/mnt/target".into(),

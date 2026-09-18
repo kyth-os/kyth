@@ -1,11 +1,11 @@
 [Unit]
 Description=Add Flathub remote for Flatpak
 Documentation=https://github.com/kyth-os/kyth
-After=network-online.target
-# Wants= (not Requires=): a failed/unreached network-online.target would
-# otherwise list this unit as failed on every offline boot. The ExecStart
-# loop already no-ops when Flathub is present and exits 0 if there is no
-# default route (see below).
+# Wants= without After=: the binary no-ops when Flathub is present and exits
+# 0 with no default route (offline skip, see below), so blocking boot on
+# network-online.target only stalls offline/metered boots — and without
+# wait-online that target is instant anyway. A Wants= keeps best-effort
+# ordering when the network happens to be up without failing offline.
 Wants=network-online.target
 # Flatpak remotes live in /var — only configurable at runtime, not build time.
 # This service is idempotent: --if-not-exists means it exits immediately if

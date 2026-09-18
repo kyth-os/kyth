@@ -73,4 +73,8 @@ BTENABLEUNITEOF
 
 systemctl enable bluetooth.service 2>/dev/null || true
 systemctl enable kyth-bluetooth-enable.service 2>/dev/null || true
-systemctl enable avahi-daemon.service 2>/dev/null || true
+# Socket activation (not enable): avahi-daemon stays dormant until an mDNS
+# lookup actually arrives instead of idling on every boot (cups pulls it in
+# via avahi-daemon.socket the same way — see branding/77-print-scan.sh).
+systemctl enable avahi-daemon.socket 2>/dev/null || true
+systemctl disable avahi-daemon.service 2>/dev/null || true

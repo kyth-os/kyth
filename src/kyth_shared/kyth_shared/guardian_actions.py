@@ -133,6 +133,103 @@ def flush_dns(run: Run) -> tuple[bool, str]:
     return False, "DNS cache flush unavailable"
 
 
+_TUNNEL_PREFIXES = ("tun", "wg", "tailscale", "ppp")
+
+
+def _vpn_tunnel_links(status_output: str) -> list[str]:
+    """Interface names from `resolvectl status` `Link <index> (<name>):` lines
+    whose name looks like a tunnel. Mirrors Rust `vpn_tunnel_links`."""
+    links: list[str] = []
+    for line in status_output.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("Link "):
+            continue
+        rest = stripped[len("Link "):]
+        if "(" in rest and ")" in rest:
+            name = rest.split("(", 1)[1].split(")", 1)[0].strip()
+        else:
+            name = ""
+        if name.startswith(_TUNNEL_PREFIXES) and name not in links:
+            links.append(name)
+    return sorted(links)
+
+
+def check_vpn_dns_leak(run: Run) -> tuple[bool, str]:
+    """Report non-tunnel resolvers while a VPN tunnel is up; never rewrites
+    DNS on its own. Mirrors Rust `check_vpn_dns_leak_live`."""
+    completed = run(("resolvectl", "status"), 6)
+    if completed is None or completed.returncode != 0:
+        return False, "resolvectl unavailable"
+    links = _vpn_tunnel_links(completed.stdout or "")
+    if not links:
+        return True, "no VPN tunnel link up; nothing to leak"
+    current = ""
+    leaks: list[str] = []
+    for line in (completed.stdout or "").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("Link "):
+            rest = stripped[len("Link "):]
+            current = (
+                rest.split("(", 1)[1].split(")", 1)[0].strip()
+                if "(" in rest and ")" in rest
+                else ""
+            )
+        elif stripped.startswith("DNS Servers:") and current not in links:
+            leaks.extend(f"{current}={server}" for server in stripped.split(":", 1)[1].split())
+    if leaks:
+        return False, "VPN DNS leak: non-tunnel resolvers in use: " + " ".join(leaks)
+    return True, "VPN DNS clean on " + ",".join(links)
+
+
+def _vpn_preset() -> tuple[bool, str]:
+    """Read the Hub network preset: (exclusive-opt-in, resolver IP)."""
+    import os
+    import tomllib
+
+    path = os.environ.get("KYTH_NETWORK_PRESET", "/etc/kyth/network.toml")
+    try:
+        with open(path, "rb") as handle:
+            value = tomllib.load(handle)
+    except (OSError, ValueError):
+        value = {}
+    if not value.get("vpn_dns_exclusive", False):
+        return False, ""
+    dns = {"cloudflare": "1.1.1.1", "google": "8.8.8.8"}.get(
+        str(value.get("dns", "quad9")), "9.9.9.9"
+    )
+    if str(value.get("dns", "quad9")) == "off":
+        dns = ""
+    return True, dns
+
+
+def apply_vpn_dns_exclusive(run: Run) -> tuple[bool, str]:
+    """Pin tunnel links to the VPN resolver. Hub opt-in only: refuses unless
+    `vpn_dns_exclusive` is set in network.toml. Mirrors Rust
+    `apply_vpn_dns_exclusive_live`."""
+    opted_in, vpn_dns = _vpn_preset()
+    if not opted_in:
+        return False, "VPN DNS exclusivity is Hub opt-in; refusing to rewrite link DNS unasked"
+    if not vpn_dns:
+        return False, "DNS preset is off; nothing to pin"
+    completed = run(("resolvectl", "status"), 6)
+    if completed is None or completed.returncode != 0:
+        return False, "resolvectl unavailable"
+    links = _vpn_tunnel_links(completed.stdout or "")
+    if not links:
+        return False, "no VPN tunnel link found"
+    for link in links:
+        dns = run(("resolvectl", "dns", link, vpn_dns), 6)
+        domain = run(("resolvectl", "domain", link, "~."), 6)
+        if (
+            dns is None
+            or dns.returncode != 0
+            or domain is None
+            or domain.returncode != 0
+        ):
+            return False, "resolvectl update failed"
+    return True, "VPN DNS pinned on " + ",".join(links)
+
+
 def recapture_network(run: Run) -> tuple[bool, str]:
     """Re-toggle NetworkManager to clear captive-portal / local-only state.
 
@@ -279,6 +376,8 @@ ACTION_EXECUTORS: dict[str, Callable[[Run], tuple[bool, str]]] = {
     "audio.sink-fallback": restore_audio_sink,
     "power.profile-fix": reset_power_profile,
     "network.dns-flush": flush_dns,
+    "network.vpn-dns-leak-check": check_vpn_dns_leak,
+    "network.vpn-dns-exclusive": apply_vpn_dns_exclusive,
     "network.captive-fix": recapture_network,
     "network.vpn-fix": restore_autoconnect_vpn,
     "controller.repair": restart_joycond,

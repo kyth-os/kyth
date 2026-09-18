@@ -70,6 +70,34 @@ pub fn up_argv(preset: &TailscalePreset) -> Vec<String> {
     argv
 }
 
+/// Scoped firewalld zone for `tailscale0`: only the explicit ports below are
+/// reachable from the tailnet — never the whole `trusted` zone. Port-opening
+/// policy: anything beyond [`TAILSCALE_PORTS`] is temporary
+/// (`firewall-cmd --zone=tailscale --add-port=… --timeout=…`) and must be
+/// documented where it is opened.
+pub const TAILSCALE_ZONE: &str = "tailscale";
+
+/// Explicit tailnet-reachable ports: `(port, protocol)`. 41641/udp is
+/// Tailscale's WireGuard transport; nothing else is permanently open.
+pub const TAILSCALE_PORTS: &[(u16, &str)] = &[(41641, "udp")];
+
+/// Render the scoped `tailscale` firewalld zone file.
+pub fn render_firewall_zone() -> String {
+    let mut ports = String::new();
+    for (port, proto) in TAILSCALE_PORTS {
+        ports.push_str(&format!("  <port port=\"{port}\" protocol=\"{proto}\"/>\n"));
+    }
+    format!(
+        "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
+         <zone>\n\
+         \x20 <short>tailscale</short>\n\
+         \x20 <description>Scoped KythOS Tailscale mesh zone: WireGuard transport only. \
+         Extra ports are temporary (--timeout) and documented at open time.</description>\n\
+         {ports}\
+         </zone>\n"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -98,5 +126,15 @@ mod tests {
             up_argv(&TailscalePreset::default()),
             vec!["tailscale", "up"]
         );
+    }
+
+    #[test]
+    fn firewall_zone_is_scoped_to_explicit_ports() {
+        assert_eq!(TAILSCALE_ZONE, "tailscale");
+        assert_eq!(TAILSCALE_PORTS, &[(41641, "udp")]);
+        let xml = render_firewall_zone();
+        assert!(xml.contains("<short>tailscale</short>"));
+        assert!(xml.contains("port=\"41641\" protocol=\"udp\""));
+        assert!(!xml.contains("trusted"));
     }
 }

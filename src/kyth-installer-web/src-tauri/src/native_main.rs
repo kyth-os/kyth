@@ -57,7 +57,7 @@ struct InstallState {
     password: String,
     mok_password: String,
     kernel: String,
-    confirm_backup: bool,
+    acknowledged_irreversible: bool,
     confirm_erase: bool,
     confirm_current: bool,
     manual_committed: bool,
@@ -81,7 +81,7 @@ impl Default for InstallState {
             password: String::new(),
             mok_password: String::new(),
             kernel: "fedora".into(),
-            confirm_backup: false,
+            acknowledged_irreversible: false,
             confirm_erase: false,
             confirm_current: false,
             manual_committed: false,
@@ -107,7 +107,7 @@ impl InstallState {
             "password": self.password,
             "mok_password": self.mok_password,
             "kernel": self.kernel,
-            "confirm_backup": self.confirm_backup,
+            "acknowledged-irreversible": self.acknowledged_irreversible,
             "confirm_erase": self.confirm_erase,
             "confirm_current": self.confirm_current,
         })
@@ -117,7 +117,7 @@ impl InstallState {
         !self.disk.is_empty()
             && !self.username.trim().is_empty()
             && !self.password.is_empty()
-            && self.confirm_backup
+            && self.acknowledged_irreversible
             && self.confirm_erase
             && (self.install_mode != "manual" || self.manual_committed)
             && (self.install_mode != "wipe" || self.confirm_current)
@@ -126,6 +126,74 @@ impl InstallState {
                 || (!self.resize_partition.is_empty() && self.resize_gib >= 32))
             && (self.install_mode != "free_space" || self.free_region_end > self.free_region_start)
             && (self.install_mode != "resize_ntfs" || self.resize_gib >= 32)
+    }
+}
+
+/// Shown wherever the irreversible acknowledgement is requested. The old
+/// "I have backed up anything I want to keep" label understated the
+/// stakes: once the installer commits, erased and resized partitions
+/// cannot be restored by the installer.
+pub const IRREVERSIBLE_NOTICE: &str = "This installation cannot be undone. \
+Once partitioning starts, erased or resized data cannot be restored. \
+Back up anything you want to keep before acknowledging this irreversible step.";
+
+/// True when the machine is on AC power: no battery reports `Discharging`
+/// and no `AC`/`ADP` supply reports offline. Desktops, VMs, and containers
+/// without a power-supply tree read as on-AC (nothing to gate on).
+/// Pure over an explicit sysfs root so it is unit-testable.
+pub fn on_ac_power_in(root: &std::path::Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return true;
+    };
+    let mut saw_battery = false;
+    let mut ac_online = false;
+    let mut saw_ac = false;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let status_path = entry.path().join("status");
+        let online_path = entry.path().join("online");
+        if name.starts_with("BAT") {
+            saw_battery = true;
+            if let Ok(status) = std::fs::read_to_string(&status_path) {
+                if status.trim() == "Discharging" {
+                    return false;
+                }
+            }
+        } else if name.starts_with("AC") || name.starts_with("ADP") {
+            saw_ac = true;
+            if let Ok(online) = std::fs::read_to_string(&online_path) {
+                if online.trim() == "1" {
+                    ac_online = true;
+                }
+            }
+        }
+    }
+    if saw_battery {
+        // A battery exists and none reports Discharging: charging, full,
+        // or unknown — but only trustworthy when the adapter is confirmed
+        // online, or when there is no adapter node to consult.
+        !saw_ac || ac_online
+    } else {
+        true
+    }
+}
+
+pub fn on_ac_power() -> bool {
+    on_ac_power_in(std::path::Path::new("/sys/class/power_supply"))
+}
+
+/// AC-power preflight for install start and shrink commits. A power loss
+/// mid-partitioning leaves a half-written table that cannot be undone, so
+/// battery-powered machines are refused with an actionable message.
+pub fn ac_power_preflight() -> Result<(), String> {
+    if on_ac_power() {
+        Ok(())
+    } else {
+        Err(
+            "Connect AC power before installing: losing power mid-install \
+cannot be undone and can leave the disk unbootable."
+                .to_string(),
+        )
     }
 }
 
@@ -898,7 +966,7 @@ fn request_from_window(window: &InstallerWindow, state: &Arc<Mutex<InstallState>
     request.username = window.get_username().to_string();
     request.password = window.get_password().to_string();
     request.mok_password = window.get_mok_password().to_string();
-    request.confirm_backup = window.get_confirm_backup();
+    request.acknowledged_irreversible = window.get_acknowledged_irreversible();
     request.confirm_erase = window.get_confirm_erase();
     request.confirm_current = window.get_confirm_current();
     request.manual_committed = window.get_manual_committed();
@@ -1485,6 +1553,10 @@ fn main() -> Result<(), slint::PlatformError> {
                 window.set_error_text(SharedString::from("Select a valid target, complete the required confirmations, and choose a supported guided install mode."));
                 return;
             }
+            if let Err(error) = ac_power_preflight() {
+                window.set_error_text(SharedString::from(error));
+                return;
+            }
             let plan = match validated_install_plan(&request) {
                 Ok(plan) => plan,
                 Err(error) => { window.set_error_text(SharedString::from(error)); return; }
@@ -1529,6 +1601,46 @@ fn main() -> Result<(), slint::PlatformError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn irreversible_acknowledgement_gates_install_start() {
+        // The request carries the renamed kebab-case key; the old
+        // `confirm_backup` name must be gone from the wire shape.
+        let mut state = InstallState::default();
+        state.disk = "/dev/sda".into();
+        state.username = "alice".into();
+        state.password = "secret".into();
+        state.confirm_erase = true;
+        state.acknowledged_irreversible = true;
+        assert!(state.can_start());
+        let request = state.as_request();
+        assert_eq!(request["acknowledged-irreversible"], true);
+        assert!(request.get("confirm_backup").is_none());
+        state.acknowledged_irreversible = false;
+        assert!(!state.can_start());
+        // The user-facing copy must say the quiet part out loud.
+        assert!(IRREVERSIBLE_NOTICE.contains("cannot be undone"));
+    }
+
+    #[test]
+    fn ac_power_preflight_reads_sysfs() {
+        let dir = tempfile::tempdir().unwrap();
+        // No power-supply tree (desktop/VM): nothing to gate on.
+        assert!(on_ac_power_in(&dir.path().join("missing")));
+        // Discharging battery refuses, even with an adapter node present.
+        let root = dir.path().join("ps");
+        std::fs::create_dir_all(root.join("BAT0")).unwrap();
+        std::fs::create_dir_all(root.join("AC")).unwrap();
+        std::fs::write(root.join("BAT0/status"), "Discharging\n").unwrap();
+        std::fs::write(root.join("AC/online"), "1\n").unwrap();
+        assert!(!on_ac_power_in(&root));
+        // Charging battery with the adapter online passes.
+        std::fs::write(root.join("BAT0/status"), "Charging\n").unwrap();
+        assert!(on_ac_power_in(&root));
+        // Charging battery with the adapter offline fails closed.
+        std::fs::write(root.join("AC/online"), "0\n").unwrap();
+        assert!(!on_ac_power_in(&root));
+    }
 
     #[test]
     fn installer_steps_round_trip_in_order() {

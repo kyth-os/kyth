@@ -16,6 +16,30 @@ write_config /etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'NMEOF'
 wifi.powersave = 3
 NMEOF
 
+# ── WiFi MAC privacy + connectivity pin ────────────────────────────────────
+# Stable per-network randomized MACs (not the permanent hardware address, not
+# a rotating one that breaks captive-portal/MAC-allowlist reauth):
+# wifi.cloned-mac-address=stable + ipv6.addr-gen-mode=stable-privacy. An
+# explicit operator override (/etc/kyth/wifi-mac.conf with
+# KYTH_WIFI_MAC=permanent|random) still wins via the dispatcher below.
+write_config /etc/NetworkManager/conf.d/wifi-mac-privacy.conf <<'NMEOF'
+[device]
+wifi.scan-rand-mac-address=yes
+
+[connection]
+wifi.cloned-mac-address=stable
+ethernet.cloned-mac-address=stable
+ipv6.addr-gen-mode=stable-privacy
+NMEOF
+
+# Pin the connectivity-check URI so NM upgrades cannot silently move it.
+# Fedora default, written explicitly: hotspot.txt with a 300 s interval.
+write_config /etc/NetworkManager/conf.d/connectivity-pinned.conf <<'NMEOF'
+[connectivity]
+uri=http://fedoraproject.org/static/hotspot.txt
+interval=300
+NMEOF
+
 write_config /etc/NetworkManager/dispatcher.d/99-kyth-wifi-powersave 0755 <<'NMPSEOF'
 #!/usr/bin/env bash
 # kyth wifi powersave scope: power_save off on AC or while gaming, on otherwise.
@@ -66,6 +90,11 @@ write_config /etc/NetworkManager/dispatcher.d/90-kyth-prefer-last-wifi 0755 <<'N
 # Prefer the just-connected wifi network by raising its autoconnect priority.
 # Never touches other profiles: disabling their autoconnect stranded users
 # whose remembered home/work networks stopped reconnecting after one travel SSID.
+# The boost is CAPPED at +10 and never lowers an existing higher priority:
+# an uncapped 100 permanently outranked every manually-prioritized network
+# (office > home) after one travel connection.
+# Explicit operator override wins: /etc/kyth/wifi-mac.conf with
+# KYTH_WIFI_MAC=permanent|random forces that cloned-mac-address instead.
 set -u
 
 action="${2:-${NM_DISPATCHER_ACTION:-}}"
@@ -85,9 +114,24 @@ case "${type}" in
     *) exit 0 ;;
 esac
 
-nmcli connection modify "${uuid}" \
-    connection.autoconnect yes \
-    connection.autoconnect-priority 100 >/dev/null 2>&1 || exit 0
+if [[ -f /etc/kyth/wifi-mac.conf ]]; then
+    # shellcheck disable=SC1091
+    source /etc/kyth/wifi-mac.conf
+    case "${KYTH_WIFI_MAC:-}" in
+        permanent|random)
+            nmcli connection modify "${uuid}" \
+                wifi.cloned-mac-address "${KYTH_WIFI_MAC}" >/dev/null 2>&1 || true
+            ;;
+    esac
+fi
+
+current="$(nmcli -g connection.autoconnect-priority connection show "${uuid}" 2>/dev/null || echo 0)"
+[[ "${current}" =~ ^-?[0-9]+$ ]] || current=0
+if [[ "${current}" -lt 10 ]]; then
+    nmcli connection modify "${uuid}" \
+        connection.autoconnect yes \
+        connection.autoconnect-priority 10 >/dev/null 2>&1 || exit 0
+fi
 NMDISPEOF
 
 install -d -m 0755 /usr/libexec

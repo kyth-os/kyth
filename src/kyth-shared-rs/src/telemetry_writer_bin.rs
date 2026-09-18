@@ -33,6 +33,17 @@ fn settings() -> (u64, u64) {
 
 fn main() -> std::process::ExitCode {
     let once = std::env::args().any(|arg| arg == "--once");
+    // The opt-out is enforced HERE, in the only place that ingests: a
+    // disabled config exits cleanly before touching sessions or the DB
+    // (Restart=on-failure does not restart clean exits). Single source of
+    // truth is /etc/kyth/telemetry-opt.toml — no second flag file.
+    let opt = kyth_shared::system::telemetry_opt::load(
+        kyth_shared::system::telemetry_opt::config_path(None::<&std::path::Path>),
+    );
+    if !opt.enabled {
+        eprintln!("kyth-telem: telemetry disabled by opt config; collecting nothing");
+        return std::process::ExitCode::SUCCESS;
+    }
     let home = home();
     let sessions = kyth_shared::system::telemetry_writer::sessions_path();
     if let Err(error) =

@@ -191,6 +191,68 @@ fn value_i64(params: &Value, key: &str, default: i64) -> i64 {
     }
 }
 
+/// Surfaced on every destructive commit path. Shrinking, deleting, or
+/// reformatting a partition destroys data the installer cannot restore.
+pub(crate) const IRREVERSIBLE_WARNING: &str =
+    "This operation cannot be undone: shrinking, deleting, or reformatting \
+a partition destroys data the installer cannot restore. Verify the target, \
+connect AC power, and keep a GPT backup on external media before committing.";
+
+/// True when `path` names a file on external media (`/run/media/…` or
+/// `/mnt/…`) — the only acceptable home for a GPT backup, since a backup
+/// on the disk being repartitioned dies with it.
+pub(crate) fn path_on_external_media(path: &str) -> bool {
+    let path = path.trim();
+    if !path.starts_with('/') || path.contains("..") {
+        return false;
+    }
+    matches!(path, _ if path.starts_with("/run/media/") || path.starts_with("/mnt/"))
+}
+
+/// Shrink-commit preconditions for a `resize` op, attested by the daemon in
+/// the op params at commit time from live checks:
+///
+/// * `gpt_backup_path`: absolute path of the GPT backup file
+///   (`sgdisk --backup=…`) on external media. Required for every shrink —
+///   a failed shrink without a table backup is unrecoverable.
+/// * `ntfs_verified_clean`: fresh re-verification that an NTFS volume's
+///   dirty bit is clear, taken immediately pre-shrink (not at probe time —
+///   Windows may have run since). Required for `ntfs`/`ntfs3`.
+/// * `on_ac_power`: adapter confirmed online at commit time. Required for
+///   every shrink — power loss mid-shrink cannot be undone.
+///
+/// Every refusal names the missing attestation and carries
+/// [`IRREVERSIBLE_WARNING`].
+pub(crate) fn validate_shrink_preconditions(fstype: &str, params: &Value) -> Vec<String> {
+    let mut errors = Vec::new();
+    let backup = value_string(params, "gpt_backup_path");
+    if backup.is_empty() {
+        errors.push(format!(
+            "Shrink partition: a GPT backup file path is required before this shrink commits. {IRREVERSIBLE_WARNING}"
+        ));
+    } else if !path_on_external_media(&backup) {
+        errors.push(format!(
+            "Shrink partition: GPT backup {backup:?} must be on external media (/run/media/…, /mnt/…) — \
+a backup on the disk being shrunk is lost with it. {IRREVERSIBLE_WARNING}"
+        ));
+    }
+    if matches!(fstype, "ntfs" | "ntfs3")
+        && !matches!(params.get("ntfs_verified_clean"), Some(Value::Bool(true)))
+    {
+        errors.push(format!(
+            "Shrink partition: the NTFS dirty bit must be re-verified clear immediately pre-shrink \
+(Windows may have run since the probe). {IRREVERSIBLE_WARNING}"
+        ));
+    }
+    if !matches!(params.get("on_ac_power"), Some(Value::Bool(true))) {
+        errors.push(format!(
+            "Shrink partition: AC power must be confirmed online before this shrink commits — \
+losing power mid-shrink cannot be undone. {IRREVERSIBLE_WARNING}"
+        ));
+    }
+    errors
+}
+
 fn last_mountpoint_indices(journal: &PartitionJournal) -> HashMap<String, usize> {
     let mut last = HashMap::new();
     for operation in &journal.ops {
@@ -438,6 +500,10 @@ pub(crate) fn validate(
                 };
                 let mut valid = true;
                 if operation.kind == "resize" {
+                    // Destructive shrink gate: GPT backup on external media,
+                    // fresh NTFS clean-bit re-verification, AC power. Every
+                    // refusal carries the cannot-be-undone warning.
+                    errors.extend(validate_shrink_preconditions(&fs, params));
                     let new_size = value_i64(params, "new_size_bytes", -1);
                     if new_size <= 0 {
                         errors.push("Resize partition: invalid new size.".to_string());
@@ -1109,6 +1175,100 @@ mod tests {
             alongside_candidate: !current,
             ntfs_resize_candidate: false,
         }
+    }
+
+    fn resize_journal(partition: &str, params: serde_json::Value) -> PartitionJournal {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        let mut full = params;
+        full["partition"] = serde_json::Value::String(partition.to_string());
+        journal.add_op("resize", full);
+        // A btrfs root elsewhere so validation reaches the shrink gate
+        // instead of stopping at "no root partition".
+        journal.add_op(
+            "create",
+            json!({
+                "partition": "/dev/sda9",
+                "start_bytes": 96 * 1024 * 1024 * 1024,
+                "size_bytes": 31 * 1024 * 1024 * 1024,
+                "fs_type": "btrfs",
+                "mountpoint": "/",
+            }),
+        );
+        journal
+    }
+
+    #[test]
+    fn shrink_commits_require_gpt_backup_ac_and_ntfs_reverification() {
+        let parts = vec![partition("/dev/sda2", "ntfs", false)];
+        // Bare shrink: refused on all three attestations, every refusal
+        // saying the operation cannot be undone.
+        let journal = resize_journal(
+            "/dev/sda2",
+            json!({"new_size_bytes": 32 * 1024 * 1024 * 1024}),
+        );
+        let errors = validate(&journal, &parts, "gpt", 128 * 1024 * 1024 * 1024);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("GPT backup file path is required")),
+            "{errors:?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("dirty bit must be re-verified")),
+            "{errors:?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("AC power must be confirmed")),
+            "{errors:?}"
+        );
+        assert!(
+            errors
+                .iter()
+                .all(|error| error.contains("cannot be undone")),
+            "{errors:?}"
+        );
+        // Same-disk GPT backup path is refused: it dies with the disk.
+        let journal = resize_journal(
+            "/dev/sda2",
+            json!({"new_size_bytes": 32 * 1024 * 1024 * 1024, "gpt_backup_path": "/root/gpt.bak", "ntfs_verified_clean": true, "on_ac_power": true}),
+        );
+        let errors = validate(&journal, &parts, "gpt", 128 * 1024 * 1024 * 1024);
+        assert!(
+            errors.iter().any(|error| error.contains("external media")),
+            "{errors:?}"
+        );
+        // Fully attested shrink passes the gate.
+        let journal = resize_journal(
+            "/dev/sda2",
+            json!({"new_size_bytes": 32 * 1024 * 1024 * 1024, "gpt_backup_path": "/run/media/alice/BACKUP/sda-gpt.bak", "ntfs_verified_clean": true, "on_ac_power": true}),
+        );
+        let errors = validate(&journal, &parts, "gpt", 128 * 1024 * 1024 * 1024);
+        assert!(errors.is_empty(), "{errors:?}");
+        // Non-NTFS shrink needs no clean-bit attestation, but still needs
+        // the backup and AC power.
+        let ext4 = vec![partition("/dev/sda2", "ext4", false)];
+        let journal = resize_journal(
+            "/dev/sda2",
+            json!({"new_size_bytes": 32 * 1024 * 1024 * 1024, "gpt_backup_path": "/mnt/usb/sda-gpt.bak", "on_ac_power": true}),
+        );
+        let errors = validate(&journal, &ext4, "gpt", 128 * 1024 * 1024 * 1024);
+        assert!(errors.is_empty(), "{errors:?}");
+    }
+
+    #[test]
+    fn external_media_paths_are_absolute_and_escapeless() {
+        assert!(path_on_external_media(
+            "/run/media/alice/BACKUP/sda-gpt.bak"
+        ));
+        assert!(path_on_external_media("/mnt/usb/sda-gpt.bak"));
+        assert!(!path_on_external_media("/root/gpt.bak"));
+        assert!(!path_on_external_media("run/media/alice/x"));
+        assert!(!path_on_external_media("/run/media/../etc/shadow"));
+        assert!(!path_on_external_media(""));
     }
 
     #[test]

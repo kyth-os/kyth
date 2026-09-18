@@ -810,5 +810,73 @@ class GuardianUsefulnessTests(unittest.TestCase):
             self.assertEqual(guardian.main(["fix", "shell.run"]), 1)
 
 
+class GuardianVpnDnsTests(unittest.TestCase):
+    """Mirror of the Rust VPN-DNS guardian executors (leak check + exclusive pin)."""
+
+    STATUS = (
+        "Link 2 (wlp0s0):\n"
+        "  DNS Servers: 192.168.1.1\n"
+        "Link 5 (tun0):\n"
+        "  DNS Servers: 10.8.0.1\n"
+    )
+
+    def _run(self, stdout="", returncode=0):
+        def fake_run(argv, timeout):
+            return _completed(argv, returncode=returncode, stdout=stdout)
+
+        return fake_run
+
+    def test_tunnel_link_parsing(self):
+        from kyth_shared import guardian_actions as actions
+
+        self.assertEqual(
+            actions._vpn_tunnel_links("Link 2 (wlp0s0):\nLink 5 (tun0):\nLink 7 (wg0):\n"),
+            ["tun0", "wg0"],
+        )
+        self.assertEqual(actions._vpn_tunnel_links("Link 2 (wlp0s0):\n"), [])
+
+    def test_leak_check_flags_off_tunnel_resolvers(self):
+        from kyth_shared import guardian_actions as actions
+
+        ok, message = actions.check_vpn_dns_leak(self._run("Link 2 (wlp0s0):\n"))
+        self.assertTrue(ok)
+        self.assertIn("nothing to leak", message)
+        ok, _ = actions.check_vpn_dns_leak(self._run(self.STATUS))
+        self.assertFalse(ok)
+        ok, message = actions.check_vpn_dns_leak(
+            self._run("Link 5 (tun0):\n  DNS Servers: 10.8.0.1\n")
+        )
+        self.assertTrue(ok)
+        self.assertIn("tun0", message)
+
+    def test_exclusive_pin_requires_opt_in(self):
+        from kyth_shared import guardian_actions as actions
+
+        ok, message = actions.apply_vpn_dns_exclusive(self._run(self.STATUS))
+        self.assertFalse(ok)
+        self.assertIn("opt-in", message)
+
+    def test_exclusive_pin_rewrites_tunnel_links(self):
+        from kyth_shared import guardian_actions as actions
+
+        calls: list[tuple] = []
+
+        def fake_run(argv, timeout):
+            calls.append(tuple(argv))
+            if argv[:2] == ("resolvectl", "status"):
+                return _completed(argv, stdout=self.STATUS)
+            return _completed(argv)
+
+        with tempfile.TemporaryDirectory() as directory:
+            preset = pathlib.Path(directory) / "network.toml"
+            preset.write_text('vpn_dns_exclusive = true\ndns = "quad9"\n')
+            with patch.dict(os.environ, {"KYTH_NETWORK_PRESET": str(preset)}):
+                ok, message = actions.apply_vpn_dns_exclusive(fake_run)
+        self.assertTrue(ok, message)
+        self.assertIn("tun0", message)
+        self.assertIn(("resolvectl", "dns", "tun0", "9.9.9.9"), calls)
+        self.assertIn(("resolvectl", "domain", "tun0", "~."), calls)
+
+
 if __name__ == "__main__":
     unittest.main()

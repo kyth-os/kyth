@@ -295,7 +295,7 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("Wants=network-online.target kyth-flathub-setup.service", body)
         self.assertNotIn("Requires=network-online.target", body)
         self.assertIn("ExecCondition=", body)
-        self.assertIn("grep -qx flathub", body)
+        self.assertIn("kyth-runtime flathub-setup", body)
         self.assertIn("will retry next boot", body)
         self.assertNotIn("ExecStartPost=/bin/touch", body)
 
@@ -339,8 +339,8 @@ class BootStabilityUnitTests(unittest.TestCase):
         body = (ROOT / "build_files/scripts/branding/31-ujust-recipes.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn("NetworkManager-wait-online.service.d", body)
-        self.assertIn("SuccessExitStatus=1", body)
+        self.assertIn("systemctl disable NetworkManager-wait-online.service", body)
+        self.assertNotIn("systemctl enable NetworkManager-wait-online.service", body)
 
     def test_storage_maint_is_timer_only(self) -> None:
         body = (ROOT / "build_files/kyth-storage-maint.service").read_text(

@@ -17,6 +17,76 @@ use kyth_shared::atomic_io::atomic_write_text;
 use kyth_shared::desktop_polish::{self, FOLDER_METADATA, MIME_DEFAULTS, USER_FOLDERS};
 use kyth_shared::system::desktop_plasma::{kreadconfig_argv, kwriteconfig_argv};
 use kyth_shared::system::process::{run_bounded, run_bounded_command};
+use kyth_shared::system::session_config::{
+    restore_snapshot, should_run_plasma_migration, snapshot_before_write,
+};
+
+/// Best-effort snapshot of every `~/.config` file this binary may rewrite,
+/// taken once per run before any write. Returns the snapshot directory.
+fn snapshot_config_dir(home: &Path) -> PathBuf {
+    let stamp = kyth_shared::system::session_config::snapshot_stamp();
+    let snapshot_dir = home.join(format!(".local/share/kyth/config-snapshots/{stamp}"));
+    let _ = fs::create_dir_all(&snapshot_dir);
+    for rel in [
+        ".config/Code/argv.json",
+        ".config/brave-flags.conf",
+        ".config/BraveSoftware/Brave-Browser/brave-flags.conf",
+        ".config/ksplashrc",
+        ".config/plasma-localerc",
+        ".config/dolphinrc",
+        ".local/share/applications/com.brave.Browser.desktop",
+    ] {
+        let source = home.join(rel);
+        if source.is_file() {
+            let target = snapshot_dir.join(rel.replace('/', "__"));
+            let _ = snapshot_before_write(&source)
+                .and(fs::copy(&source, &target).map(|_| PathBuf::new()));
+        }
+    }
+    snapshot_dir
+}
+
+/// `--force-restore <snapshot-dir>`: copy every snapshotted file back into
+/// `~/.config`, no merging. Prints what was restored; exits 0 on success.
+fn force_restore(home: &Path, snapshot_dir: &Path) -> ExitCode {
+    let Ok(entries) = fs::read_dir(snapshot_dir) else {
+        eprintln!(
+            "kyth-user-polish: snapshot dir not found: {}",
+            snapshot_dir.display()
+        );
+        return ExitCode::from(1);
+    };
+    let mut restored = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(rel) = name
+            .split_once("__")
+            .map(|(head, tail)| format!("{head}/{tail}").replace("__", "/"))
+        else {
+            continue;
+        };
+        match restore_snapshot(&home.join(&rel), &entry.path()) {
+            Ok(()) => restored += 1,
+            Err(error) => eprintln!("kyth-user-polish: restore {rel}: {error}"),
+        }
+    }
+    println!("kyth-user-polish: restored {restored} files from snapshot");
+    ExitCode::SUCCESS
+}
+
+/// Plasma version gate for config migrations: unknown or pre-6 Plasma keeps
+/// its files untouched (see `session_config::should_run_plasma_migration`).
+fn plasma_migration_allowed() -> bool {
+    let output = run_bounded(
+        &["plasmashell".to_string(), "--version".to_string()],
+        Duration::from_secs(5),
+    )
+    .ok()
+    .filter(|result| result.status.success())
+    .map(|result| String::from_utf8_lossy(&result.stdout).into_owned())
+    .unwrap_or_default();
+    should_run_plasma_migration(&output)
+}
 
 const WALLPAPER: &str = "/usr/share/wallpapers/kyth/contents/images/1920x1080.svg";
 const KSPLASH_THEME: &str = "org.kythos.desktop";
@@ -675,11 +745,23 @@ fn run_optional(program: &str, args: &[&str]) {
 fn main() -> ExitCode {
     let args = env::args().skip(1).collect::<Vec<_>>();
     let force = args.iter().any(|arg| arg == "--force");
+    let restore_dir = args
+        .windows(2)
+        .find(|pair| pair[0] == "--force-restore")
+        .map(|pair| pair[1].clone());
+    if let Some(dir) = restore_dir {
+        return force_restore(&home(), Path::new(&dir));
+    }
     if args.iter().any(|arg| arg != "--force") {
-        eprintln!("Usage: kyth-user-polish [--force]");
+        eprintln!("Usage: kyth-user-polish [--force] [--force-restore <snapshot-dir>]");
         return ExitCode::from(2);
     }
     let home = home();
+    let snapshot_dir = snapshot_config_dir(&home);
+    eprintln!(
+        "kyth-user-polish: pre-write snapshot at {}",
+        snapshot_dir.display()
+    );
     let stamp_name = format!("user-polish-{}", desktop_polish::VERSION);
     let first_polish = !has_polish_stamp(&home);
     if already_run(&home, &stamp_name) && !force {
@@ -705,7 +787,11 @@ fn main() -> ExitCode {
         );
     }
     if let Some(binary) = which("kwriteconfig6") {
-        apply_plasma(&binary, &home, force);
+        if plasma_migration_allowed() {
+            apply_plasma(&binary, &home, force);
+        } else {
+            eprintln!("kyth-user-polish: skipping Plasma migration (needs Plasma 6+)");
+        }
     }
     rewrite_brave(&home);
     run_optional("kyth-set-kickoff-icon", &[]);

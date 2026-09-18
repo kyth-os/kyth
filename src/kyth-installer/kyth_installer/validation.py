@@ -209,8 +209,20 @@ def validate_install_request(body: dict, context: InstallerContext, *, strict_lo
         or not disk_info.get("current")
         or bool(body.get("confirm_current"))
     )
-    if not (body.get("confirm_backup") and body.get("confirm_erase") and current_ok):
-        raise InstallRequestError("Please confirm the on-screen acknowledgements before starting the install.")
+    # Canonical acknowledgement: "acknowledged-irreversible" (kebab, matching
+    # the native shell wire key). Legacy "confirm_backup" answer files keep
+    # working so existing media is not bricked, but new clients must send the
+    # explicit irreversible acknowledgement.
+    acknowledged = (
+        body.get("acknowledged-irreversible")
+        or body.get("acknowledged_irreversible")
+        or body.get("confirm_backup")
+    )
+    if not (acknowledged and body.get("confirm_erase") and current_ok):
+        raise InstallRequestError(
+            "This installation cannot be undone. Please acknowledge the "
+            "on-screen irreversible-action confirmation before starting the install."
+        )
 
     password_hash = _hash_password_for_request(body.get("password", ""))
 
