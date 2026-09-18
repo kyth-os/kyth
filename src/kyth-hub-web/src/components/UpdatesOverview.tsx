@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import {
+  cancelInstall,
+  cancelUpdateJob,
   checkForUpdates,
   fetchUpdatesSnapshot,
+  getInFlightJob,
   invalidateSharedReads,
   invokeApplyStaged,
   invokeBootcRollback,
@@ -69,10 +72,51 @@ export function UpdatesOverview() {
   const [loaded, setLoaded] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
   const { status, busy, run } = useSectionAction("update");
+  // A tracked backend job survives reloads (reattached from storage) but
+  // component state does not — mirror the slots so Cancel and the running
+  // guidance stay available even when this mount never launched anything.
+  const [updateTracked, setUpdateTracked] = useState(() => getInFlightJob("update") !== undefined);
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelNote, setCancelNote] = useState<string | null>(null);
+
+  function syncTrackedJobs(): void {
+    setUpdateTracked(getInFlightJob("update") !== undefined);
+  }
 
   function startAction(id: string, pendingLabel: string, action: () => Promise<string>): void {
     setLastAction(id);
-    void run(id, pendingLabel, action);
+    setCancelNote(null);
+    if (id === "stage" || id === "apply" || id === "rollback") setUpdateTracked(true);
+    void run(id, pendingLabel, action).finally(syncTrackedJobs);
+  }
+
+  // Cancel never routes through `run`: the buttons above stay disabled while
+  // `busy`, and Cancel must stay enabled exactly then.
+  async function cancelRunning(kind: "update" | "apps"): Promise<void> {
+    const localRunActive = busy !== null;
+    setCancelling(true);
+    setCancelNote("Cancelling…");
+    try {
+      const result = kind === "update" ? await cancelUpdateJob() : await cancelInstall();
+      if (result === "Nothing to cancel.") {
+        setCancelNote("There is no running update to cancel.");
+      } else if (localRunActive) {
+        // The local run is still polling the same job: its settle message
+        // (e.g. the honest cancelled-stage text) lands as the action status,
+        // so don't pin the raw result here too.
+        setCancelNote(null);
+      } else if (result === "Cancelled.") {
+        setCancelNote("The update was cancelled. The status above is refreshed — follow whatever it offers next.");
+      } else {
+        setCancelNote(result);
+      }
+    } catch (error) {
+      setCancelNote(`Failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      syncTrackedJobs();
+      setCancelling(false);
+      await refresh().catch(() => undefined);
+    }
   }
 
   useEffect(() => {
@@ -194,11 +238,16 @@ export function UpdatesOverview() {
   const staged = updateStatus?.staged ?? false;
   const pendingCount = numericPending(pending);
   const systemUpdateAvailable = updateStatus?.check_state === "available" && !staged;
-  const checkFailed = updateStatus?.check_state === "error" || Boolean(updateStatus?.blocked_reason);
+  // "blocked" (e.g. a quarantined update held back for safety) and "busy"
+  // (a mutating operation in flight) are backend states, not read failures:
+  // neither may render as up-to-date nor as a connection error.
+  const isBlocked = updateStatus?.check_state === "blocked";
+  const backendBusy = updateStatus?.check_state === "busy";
+  const checkFailed = updateStatus?.check_state === "error" || (Boolean(updateStatus?.blocked_reason) && !isBlocked);
   const appUpdatesAvailable = pendingCount > 0;
   const hasReadings = snapshot !== null || updateStatus !== null || pending !== null || health !== null;
   const actionFailed = status?.startsWith("Failed:") ?? false;
-  const canStage = !staged && (
+  const canStage = !staged && !isBlocked && (
     systemUpdateAvailable
     || checkFailed
     || (actionFailed && (lastAction === "check" || lastAction === "stage"))
@@ -209,20 +258,24 @@ export function UpdatesOverview() {
     ? "Reading status"
     : staged
       ? "Restart required"
-      : checkFailed
-        ? "Check unavailable"
-        : systemUpdateAvailable
-          ? "Update available"
-          : appUpdatesAvailable
-            ? "App updates available"
-            : updateStatus?.check_state === "uptodate"
-              ? "Up to date"
-              : hasReadings
-                ? "Ready to check"
-                : "Status unavailable";
-  const overallTone: GuidanceTone = !loaded || !hasReadings
+      : backendBusy
+        ? "Update in progress"
+        : isBlocked
+          ? "Update blocked"
+          : checkFailed
+            ? "Check unavailable"
+            : systemUpdateAvailable
+              ? "Update available"
+              : appUpdatesAvailable
+                ? "App updates available"
+                : updateStatus?.check_state === "uptodate"
+                  ? "Up to date"
+                  : hasReadings
+                    ? "Ready to check"
+                    : "Status unavailable";
+  const overallTone: GuidanceTone = !loaded || !hasReadings || backendBusy
     ? "muted"
-    : staged || systemUpdateAvailable || appUpdatesAvailable || checkFailed
+    : staged || systemUpdateAvailable || appUpdatesAvailable || checkFailed || isBlocked
       ? "warn"
       : "ok";
 
@@ -275,6 +328,28 @@ export function UpdatesOverview() {
         next: "The rollback takes effect after a restart.",
       };
     }
+    if (backendBusy) {
+      return {
+        tone: "muted",
+        icon: "↓",
+        title: "An update operation is in progress",
+        message: updateStatus?.detail || "A system update operation is running on this computer.",
+        next: updateTracked
+          ? "It will finish on its own; you can also choose “Cancel update” below to stop it."
+          : "It will finish on its own. Your current system stays usable meanwhile.",
+        progress: true,
+      };
+    }
+    if (busy === null && updateTracked && !staged) {
+      return {
+        tone: "muted",
+        icon: "↓",
+        title: "An update is still running",
+        message: "A previous update action is still running in the background. Its progress resumes here.",
+        next: "You can wait for it to finish or choose “Cancel update” below to stop it.",
+        progress: true,
+      };
+    }
     if (actionFailed) {
       const failure = (status ?? "").replace(/^Failed:\s*/, "");
       return {
@@ -292,6 +367,15 @@ export function UpdatesOverview() {
         title: "Update ready — restart to finish",
         message: "The update has been downloaded and safely prepared for the next startup.",
         next: "Choose “Restart to apply” when you’re ready. Save open work first.",
+      };
+    }
+    if (isBlocked) {
+      return {
+        tone: "warn",
+        icon: "!",
+        title: "This update is blocked",
+        message: updateStatus?.blocked_reason || updateStatus?.detail || "The update was held back for safety.",
+        next: "Your system stays on its current version. Open Repair to review the blocked update, or choose “Check for updates” to look again.",
       };
     }
     if (checkFailed) {
@@ -350,7 +434,9 @@ export function UpdatesOverview() {
 
   const primaryAction = staged
     ? { id: "apply", label: busy === "apply" ? "Restarting…" : "Restart to apply", pending: "Applying the staged update…", action: apply }
-    : systemUpdateAvailable
+    : isBlocked
+      ? { id: "check", label: busy === "check" ? "Checking…" : "Check for updates", pending: "Checking for updates…", action: check }
+      : systemUpdateAvailable
       ? { id: "stage", label: busy === "stage" ? "Downloading…" : actionFailed && lastAction === "stage" ? "Try again" : "Download and stage", pending: "Downloading and staging…", action: stage }
       : checkFailed
         ? { id: "check", label: busy === "check" ? "Checking…" : "Try again", pending: "Checking for updates…", action: check }
@@ -365,6 +451,10 @@ export function UpdatesOverview() {
   const channel = snapshot?.channel ?? "Not identified";
   const version = snapshot?.booted?.version ?? snapshot?.booted?.image ?? "Not identified";
   const lastCheck = updateStatus?.detail && !checkFailed ? updateStatus.detail : "The latest check result will appear here.";
+  // Update-domain jobs (stage/apply/rollback/switch) are cancellable while
+  // running — including a job reattached after a reload, which has no local
+  // `busy` anymore. App updates run in the install domain instead.
+  const showUpdateCancel = busy === "stage" || busy === "apply" || busy === "rollback" || (busy === null && updateTracked);
 
   return (
     <section className="updates-overview" aria-label="Updates overview">
@@ -425,8 +515,22 @@ export function UpdatesOverview() {
               onClick={() => startAction("rollback", "Preparing rollback…", rollback)}
             />
           )}
+          {showUpdateCancel && (
+            <ActionButton
+              label={cancelling ? "Cancelling…" : "Cancel update"}
+              disabled={cancelling || !loaded}
+              onClick={() => void cancelRunning("update")}
+            />
+          )}
+          {busy === "apps" && (
+            <ActionButton
+              label={cancelling ? "Cancelling…" : "Cancel"}
+              disabled={cancelling || !loaded}
+              onClick={() => void cancelRunning("apps")}
+            />
+          )}
         </div>
-        <ActionStatus status={status} />
+        <ActionStatus status={cancelNote ?? status} />
       </div>
 
       <details className="updates-details">

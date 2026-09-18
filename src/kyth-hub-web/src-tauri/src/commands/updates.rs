@@ -274,15 +274,19 @@ pub(crate) struct UpdateActionLaunch {
 }
 
 fn start_update_job(
+    job_slug: &str,
     operation: &str,
     argv: Vec<String>,
     timeout: Duration,
 ) -> Result<UpdateActionLaunch, String> {
     kyth_shared::commands::normalize_command(&argv)
         .map_err(|_| "update produced an invalid command".to_string())?;
+    // The slug (not the display label) owns the id: frontend reattach only
+    // trusts `<prefix>-<nanos>` ids, so a label with spaces would strand the
+    // job (and its Cancel) across a reload.
     let job = format!(
         "update-{}-{}",
-        operation,
+        job_slug,
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap_or_default()
@@ -393,7 +397,13 @@ pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
     if !std::path::Path::new("/usr/bin/kyth-safe-upgrade").exists() {
         return Err("The native KythOS update helper is not installed on this system.".to_string());
     }
+    // Admission check like rollback/switch/apply below: kyth-safe-upgrade
+    // takes the shared bootc lock for the whole stage, so refuse a second
+    // mutating launch here instead of stacking two sudo prompts that
+    // serialize anyway.
+    kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
+        "stage",
         "Download and stage",
         vec!["sudo", "-A", "/usr/bin/kyth-safe-upgrade"]
             .into_iter()
@@ -410,6 +420,7 @@ pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
     // instead of stacking two sudo prompts that serialize anyway.
     kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
+        "rollback",
         "Rollback",
         vec!["sudo", "-A", "/usr/bin/bootc", "rollback"]
             .into_iter()
@@ -440,6 +451,7 @@ pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, 
     // lock for the whole switch.
     kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
+        "switch",
         "Switch channel",
         argv,
         timeout_for(JobTimeoutClass::UpdateMutating),
@@ -454,6 +466,7 @@ pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
     // Finalize flips the boot target: serialize against upgrade/switch too.
     kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
+        "apply",
         "Apply staged update",
         vec!["sudo", "-A", "/usr/libexec/kyth-finalize-staged", "reboot"]
             .into_iter()
@@ -598,7 +611,7 @@ pub(crate) struct UpdateHealthResponse {
     pub(crate) detail: String,
 }
 
-fn native_health_fallback() -> Option<(String, String, String)> {
+fn native_health_fallback() -> Option<(String, String, String, i64)> {
     // Prefer the same disk cache used by the rest of the Hub, but recover on
     // systems whose probe service has not populated it yet. This is still a
     // bounded native read and runs inside update_health's blocking worker.
@@ -628,12 +641,15 @@ fn native_health_fallback() -> Option<(String, String, String)> {
             "healthy".to_string(),
             format!("Native boot checks passed for {digest}; no persistent boot-health record was available."),
             digest,
+            0,
         ))
     } else {
+        let count = failures.len() as i64;
         Some((
             "unhealthy".to_string(),
             format!("Native boot checks failed: {}", failures.join("; ")),
             digest,
+            count,
         ))
     }
 }
@@ -645,12 +661,21 @@ fn update_health_response() -> UpdateHealthResponse {
         && state.last_healthy_digest.is_empty()
         && state.updated_at == 0
     {
-        if let Some((status, detail, digest)) = native_health_fallback() {
+        if let Some((status, detail, digest, failures)) = native_health_fallback() {
+            // The live booted digest is the digest under evaluation
+            // (pending), not a known-good one: only a passing native
+            // check may claim it as last-healthy, and the failure count
+            // is the failed native checks — not the empty record's zero.
+            let last_healthy_digest = if status == "healthy" {
+                digest.clone()
+            } else {
+                String::new()
+            };
             return UpdateHealthResponse {
                 status,
-                pending_digest: state.pending_digest,
-                last_healthy_digest: digest,
-                failures: state.failures,
+                pending_digest: digest,
+                last_healthy_digest,
+                failures,
                 quarantined: state.quarantined.len(),
                 detail,
             };

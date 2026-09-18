@@ -25,10 +25,13 @@ pub struct UpdateSnapshot {
 
 impl UpdateSnapshot {
     /// Match Python's `UpdateSnapshot.system_state` projection used by the
-    /// welcome screen and notification policy.
+    /// welcome screen and notification policy, with one deliberate
+    /// divergence: a quarantined result is `blocked` here, never `uptodate`.
+    /// Quarantine means the update was held back after failed boots — telling
+    /// the Updates page "up to date" hides a safety hold the user must see.
     pub fn system_state(&self) -> &'static str {
         if self.result == "quarantined" && self.staged_digest.is_empty() {
-            return "uptodate";
+            return "blocked";
         }
         if matches!(self.result.as_str(), "skipped" | "error") && self.staged_digest.is_empty() {
             return "unknown";
@@ -150,12 +153,25 @@ fn project_cached_status(
                 .unwrap_or_else(|| "staged image pending".to_string());
         }
     }
+    // A quarantined (blocked) update stays on the current system by safety
+    // hold: surface the reason as blocking so the page never renders it as
+    // "up to date" or as a retryable connection error.
+    let mut blocked_reason: Option<String> = None;
+    if check_state == "blocked" {
+        let reason = if detail.is_empty() || detail == "No recent update check." {
+            "This update was quarantined after failed boots and is held back for safety."
+                .to_string()
+        } else {
+            detail.clone()
+        };
+        blocked_reason = Some(reason);
+    }
     UpdateStatus {
         booted,
         staged,
         rollback,
         remote_digest,
-        blocked_reason: None,
+        blocked_reason,
         retry_cmd: None,
         check_state,
         detail,
@@ -163,6 +179,35 @@ fn project_cached_status(
 }
 
 pub fn check_update_status() -> UpdateStatus {
+    // A mutating bootc operation in flight (upgrade/switch/rollback,
+    // finalize) owns the sysroot: status reads deliberately return None
+    // rather than racing it. Say so — "Could not read bootc status" reads
+    // as a connection failure for what is actually normal busy progress.
+    // Cached deployment facts are still reported; only the state is busy.
+    if crate::system::bootc_query::active_operation().is_some() {
+        let data = crate::system::probe::read_section("bootc-status-data");
+        let staged = data
+            .as_ref()
+            .is_some_and(|value| crate::system::bootc::deployment_present(value, "staged"));
+        let rollback = data
+            .as_ref()
+            .is_some_and(|value| crate::system::bootc::deployment_present(value, "rollback"));
+        let booted = data
+            .as_ref()
+            .and_then(crate::system::registry::booted_image_digest);
+        return UpdateStatus {
+            booted,
+            staged,
+            rollback,
+            remote_digest: None,
+            blocked_reason: None,
+            retry_cmd: None,
+            check_state: "busy".to_string(),
+            detail:
+                "A system update operation is in progress. Status will refresh when it finishes."
+                    .to_string(),
+        };
+    }
     // The probe cache is an optimization, not the source of truth. The Hub
     // can be opened before kyth-probe has produced its first snapshot, so use
     // the same bounded bootc query fallback as availability and health.
@@ -208,7 +253,8 @@ mod tests {
             result: "quarantined".into(),
             ..Default::default()
         };
-        assert_eq!(snapshot.system_state(), "uptodate");
+        // A quarantined update is a safety hold, never "up to date".
+        assert_eq!(snapshot.system_state(), "blocked");
         snapshot.result = "checked".into();
         snapshot.booted_digest = "sha256:a".into();
         snapshot.remote_digest = "sha256:b".into();
@@ -239,9 +285,62 @@ mod tests {
     }
 
     #[test]
+    fn blocked_status_carries_a_reason_and_never_claims_uptodate() {
+        let data = serde_json::json!({
+            "status": {
+                "booted": {"image": {"imageDigest": "sha256:booted"}},
+                "staged": null,
+                "rollback": null
+            }
+        });
+        let watcher = UpdateSnapshot {
+            result: "quarantined".into(),
+            reason: Some("digest sha256:bad failed 3 boots".into()),
+            ts: 100,
+            booted_digest: "sha256:booted".into(),
+            ..Default::default()
+        };
+        let status = project_cached_status(Some(&data), Some(&watcher));
+        assert_eq!(status.check_state, "blocked");
+        assert_ne!(status.check_state, "uptodate");
+        let reason = status.blocked_reason.expect("blocked state needs a reason");
+        assert!(reason.contains("sha256:bad"), "reason was: {reason}");
+    }
+
+    #[test]
+    fn blocked_status_without_detail_still_explains_the_hold() {
+        let data = serde_json::json!({
+            "status": {
+                "booted": {"image": {"imageDigest": "sha256:booted"}},
+                "staged": null,
+                "rollback": null
+            }
+        });
+        let watcher = UpdateSnapshot {
+            result: "quarantined".into(),
+            ..Default::default()
+        };
+        let status = project_cached_status(Some(&data), Some(&watcher));
+        assert_eq!(status.check_state, "blocked");
+        let reason = status.blocked_reason.expect("blocked state needs a reason");
+        assert!(
+            reason.to_lowercase().contains("quarantine"),
+            "reason was: {reason}"
+        );
+    }
+
+    #[test]
     fn returns_status() {
         let s = check_update_status();
-        assert!(["available", "uptodate", "error", "idle", "checking"]
-            .contains(&s.check_state.as_str()));
+        assert!([
+            "available",
+            "uptodate",
+            "error",
+            "idle",
+            "checking",
+            "blocked",
+            "busy"
+        ]
+        .contains(&s.check_state.as_str()));
     }
 }

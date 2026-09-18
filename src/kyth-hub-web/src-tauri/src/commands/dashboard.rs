@@ -22,10 +22,17 @@ pub(crate) async fn probe_backend(section: String) -> ProbeResponse {
             }),
             _ => kyth_shared::system::probe::read_section(&section),
         };
+        // A miss used to read as loaded-empty (`data: None, error: None`).
+        // Signal it so callers can tell "no data yet" from "empty data".
+        let error = if data.is_none() {
+            Some(format!("No probe data for section '{section}' yet."))
+        } else {
+            None
+        };
         ProbeResponse {
             key: section,
             data,
-            error: None,
+            error,
         }
     })
     .await

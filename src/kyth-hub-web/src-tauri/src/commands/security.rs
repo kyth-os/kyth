@@ -188,7 +188,7 @@ pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityAction
         "bash".to_string(),
         "-c".to_string(),
         format!(
-            "flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak install -y flathub {flatpak_id}"
+            "flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak install --user -y flathub {flatpak_id}"
         ),
     ];
     let job = start_job("sec-install", &format!("Installing {name}…"))?;
@@ -222,9 +222,12 @@ pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActi
     let tool = validated_sec_tool(&flatpak_id)?;
     let name = tool.name.to_string();
     let launch_detail = format!("Uninstalling {name}…");
+    // Pin the user scope: an unscoped uninstall can target (or prompt for)
+    // the system installation instead of the per-user one this grid manages.
     let argv = vec![
         "flatpak".to_string(),
         "uninstall".to_string(),
+        "--user".to_string(),
         "-y".to_string(),
         flatpak_id,
     ];
@@ -254,6 +257,11 @@ pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActi
 #[tauri::command]
 pub(crate) fn sec_host_tool_launch(flatpak_id: String) -> Result<String, String> {
     let tool = validated_sec_tool(&flatpak_id)?;
+    // A detached `flatpak run` of a missing app fails where nobody reads
+    // it, so check first instead of reporting "launched" for nothing.
+    if !kyth_shared::system::software_catalog::is_flatpak_installed(tool.flatpak) {
+        return Err(format!("{} is not installed.", tool.name));
+    }
     kyth_shared::system::process::spawn_detached(
         Command::new("flatpak").args(["run", tool.flatpak]),
     )

@@ -161,7 +161,20 @@ fn guardian_check(investigate: bool) -> Result<GuardianActionLaunch, String> {
             Ok(output) if output.status.success() => {
                 ("complete", "Guardian check complete.".to_string())
             }
-            Ok(output) => ("failed", commands::process::bounded_text(&output.stderr)),
+            Ok(output) => {
+                // An empty stderr would surface as a blank failure in the
+                // UI; fall back to the exit code like guardian_control does.
+                let detail = commands::process::bounded_text(&output.stderr);
+                let detail = if detail.is_empty() {
+                    match output.status.code() {
+                        Some(code) => format!("Guardian check failed (exit {code})."),
+                        None => "Guardian check stopped before it could complete.".to_string(),
+                    }
+                } else {
+                    detail
+                };
+                ("failed", detail)
+            }
             Err(error) => ("failed", format!("Could not start Guardian: {error}")),
         };
         guardian_checks().finish(&job_for_thread, state, detail);
@@ -341,11 +354,31 @@ fn smb_mount(share: String) -> Result<String, String> {
     }
 
     let argv = kyth_shared::system::smb::smb_mount_command(share);
-    kyth_shared::system::process::spawn_detached(
-        std::process::Command::new(&argv[0]).args(&argv[1..]),
-    )
-    .map_err(|error| format!("could not start the desktop share mount: {error}"))?;
-    Ok(format!("Mount request sent for {share}."))
+    // `gio mount` may need auth or fail outright; a detached spawn reports
+    // success for a mount that never happened. Run it bounded and report
+    // its real exit status instead.
+    let output =
+        kyth_shared::system::process::run_bounded(&argv, std::time::Duration::from_secs(30))
+            .map_err(|error| {
+                if error.kind() == std::io::ErrorKind::TimedOut {
+                    format!("Mounting {share} took too long and was stopped.")
+                } else {
+                    format!("could not start the desktop share mount: {error}")
+                }
+            })?;
+    if output.status.success() {
+        Ok(format!("Mounted {share}."))
+    } else {
+        let detail = commands::process::bounded_text(&output.stderr);
+        if detail.is_empty() {
+            Err(format!(
+                "Could not mount {share} (exit {}).",
+                output.status.code().unwrap_or(-1)
+            ))
+        } else {
+            Err(format!("Could not mount {share}: {detail}"))
+        }
+    }
 }
 
 /// Non-secret metadata saved by the legacy Hub after its root helper has
@@ -1147,11 +1180,6 @@ async fn installed_flatpaks() -> Vec<kyth_shared::system::software_catalog::Inst
 #[tauri::command]
 fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
-    let scope = kyth_shared::system::software_catalog::installed_flatpaks()
-        .into_iter()
-        .find(|app| app.id == app_id)
-        .map(|app| app.scope)
-        .ok_or_else(|| "that Flatpak is not installed".to_string())?;
     let job = format!(
         "flatpak-uninstall-{}",
         std::time::SystemTime::now()
@@ -1163,6 +1191,21 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     let cancel = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
+        // Resolve scope inside the worker: the full `flatpak list` scan
+        // blocks, so doing it on the command thread hitches the UI, and a
+        // scope read up front can go stale before the worker acts on it.
+        let scope = kyth_shared::system::software_catalog::installed_flatpaks()
+            .into_iter()
+            .find(|app| app.id == app_id)
+            .map(|app| app.scope);
+        let Some(scope) = scope else {
+            app_installs().finish(
+                &job_for_thread,
+                "failed",
+                "That Flatpak is not installed.".to_string(),
+            );
+            return;
+        };
         let result: Result<(bool, String), String> = if scope == "system" {
             privileged_flatpak_uninstall(&app_id).map(|detail| (true, detail))
         } else {
@@ -1406,8 +1449,11 @@ fn compatibility_games() -> Vec<CompatibilityGameResponse> {
 
 #[tauri::command]
 async fn telemetry_recent(limit: Option<u32>) -> Vec<kyth_shared::system::telemetry::SessionRow> {
+    // The webview supplies the limit; clamp it so a crafted value cannot
+    // turn a small chart query into a full-table dump.
+    let limit = limit.unwrap_or(15).min(200) as usize;
     tauri::async_runtime::spawn_blocking(move || {
-        kyth_shared::system::telemetry::recent_sessions(limit.unwrap_or(15) as usize)
+        kyth_shared::system::telemetry::recent_sessions(limit)
     })
     .await
     .unwrap_or_default()
@@ -1699,6 +1745,9 @@ fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
 #[tauri::command]
 fn exe_handler_launch_flatpak(app_id: String) -> Result<(), String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
+    if !kyth_shared::system::software_catalog::is_flatpak_installed(&app_id) {
+        return Err("That Linux application is not installed.".to_string());
+    }
     let mut run = Command::new("flatpak");
     run.args(["run", "--user", &app_id])
         .stdin(std::process::Stdio::null())

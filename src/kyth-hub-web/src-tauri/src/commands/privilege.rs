@@ -354,12 +354,24 @@ pub(crate) fn privileged_action_status(job: String) -> crate::InstallStatus {
     }
 }
 
-/// Dismiss a running privileged job. The in-flight socket request still
-/// completes against the root service, but its result no longer updates UI
-/// state once cancelled.
+/// Cancel a running privileged job. The worker only does socket I/O against
+/// the root-owned service, so there is no child to kill and a cancel cannot
+/// preempt it: a still-running job is reported as still running (with an
+/// honest note) instead of a `cancelled` state the operation would
+/// immediately contradict. Its real outcome still lands via `finish` and
+/// reaches the poller unchanged.
 #[tauri::command]
 pub(crate) fn privileged_action_cancel(job: String) -> crate::InstallStatus {
-    jobs().cancel(&job);
+    let running = jobs()
+        .status(&job)
+        .is_some_and(|(state, _)| state == kyth_shared::system::jobs::STATE_RUNNING);
+    if running {
+        return crate::InstallStatus {
+            id: job,
+            state: kyth_shared::system::jobs::STATE_RUNNING.into(),
+            detail: "Cancel requested, but the privileged operation cannot be interrupted and is still running; its result will be reported when it finishes.".into(),
+        };
+    }
     privileged_action_status(job)
 }
 

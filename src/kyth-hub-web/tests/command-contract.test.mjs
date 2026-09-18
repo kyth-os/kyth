@@ -135,7 +135,7 @@ test("Updates page has one action owner and no duplicate legacy section", async 
   const page = await readFile(resolve(root, "src/pages/Updates.tsx"), "utf8");
   assert.doesNotMatch(page, /UpdatesSection|HubPage|Detailed update tools/);
   assert.doesNotMatch(updatesOverview, /update-watcher|Check now|Refresh status/);
-  assert.match(updatesOverview, /const canStage = !staged && \(/);
+  assert.match(updatesOverview, /const canStage = !staged && !isBlocked && \(/);
   assert.match(updatesOverview, /lastAction === "check" \|\| lastAction === "stage"/);
   assert.doesNotMatch(updatesOverview, /disabled=\{busy !== null \|\| blocked\}/, "a failed check must not disable the safe staging retry");
 });
@@ -342,11 +342,53 @@ test("persisted slots carry timestamps and stale ones are dropped", () => {
 });
 
 test("mutating Hub update launches serialize on the shared bootc lock", () => {
-  for (const command of ["bootc_rollback", "bootc_switch_branch", "apply_staged"]) {
+  for (const command of ["bootc_upgrade", "bootc_rollback", "bootc_switch_branch", "apply_staged"]) {
     const fn = updatesRust.match(new RegExp(`fn ${command}\\b[\\s\\S]*?start_update_job`))?.[0] ?? "";
     assert.notEqual(fn, "", `${command} not found`);
     assert.match(fn, /with_bootc_lock/, `${command} must admission-check the shared bootc lock before launching`);
   }
+});
+
+test("update job ids survive reload reattach (slug, never a label with spaces)", () => {
+  // The frontend only reattaches `<prefix>-<nanos>` ids across a reload; an
+  // id built from a display label ("Download and stage") fails the pattern
+  // and strands the job with no Cancel. Every launch site must pass a slug.
+  const slugs = [...updatesRust.matchAll(/start_update_job\(\s*"([^"]+)"/g)].map((match) => match[1]);
+  assert.ok(slugs.length >= 4, `expected update launch slugs, found ${slugs.length}`);
+  for (const slug of slugs) {
+    assert.match(slug, /^[a-z][a-z0-9-]*$/, `update job slug ${JSON.stringify(slug)} must match the reattach pattern`);
+  }
+  assert.match(service, /JOB_ID_PATTERN/, "the reattach pattern must stay strict");
+});
+
+test("Updates page renders a working Cancel wired to the update job", () => {
+  assert.match(updatesOverview, /cancelUpdateJob/, "the page must import the update cancel path");
+  assert.match(updatesOverview, /getInFlightJob\("update"\)/, "Cancel must cover jobs reattached after a reload");
+  assert.match(updatesOverview, /Cancel update/, "a running update needs a visible Cancel");
+  assert.match(updatesOverview, /cancelRunning\("update"\)/, "Cancel must invoke the update cancel path");
+  // Cancel must stay enabled exactly when the mutating buttons disable.
+  assert.match(updatesOverview, /disabled=\{cancelling \|\| !loaded\}/, "Cancel must not share the busy-disabled gate");
+  assert.match(updatesOverview, /<ActionStatus status=\{cancelNote \?\? status\}/, "cancel progress must surface in the status row");
+});
+
+test("a cancelled stage warns that staged content may still be pending", () => {
+  assert.match(updateMessages, /may already be staged/, "cancelling a stage must warn about reboot-pending content");
+  assert.match(updateMessages, /No changes were made/, "non-stage cancels keep the clean no-op message");
+});
+
+test("blocked updates render as blocked with a reason, never up-to-date", () => {
+  assert.match(updatesOverview, /check_state === "blocked"/, "the page must recognise the blocked state");
+  assert.match(updatesOverview, /Update blocked/, "blocked must not read as up-to-date");
+  assert.match(updatesOverview, /blocked_reason \|\| updateStatus\?\.detail/, "blocked must show its reason");
+  assert.match(updatesOverview, /!isBlocked/, "staging must stay unavailable while blocked");
+  const label = updatesOverview.match(/const overallLabel =[\s\S]*?;/)?.[0] ?? "";
+  assert.ok(label.indexOf("isBlocked") !== -1 && label.indexOf("isBlocked") < label.indexOf('"uptodate"'), "blocked must win over up-to-date in the status chip");
+});
+
+test("reads during an operation render as busy, not a connection error", () => {
+  assert.match(updatesOverview, /check_state === "busy"/, "the page must recognise the busy state");
+  assert.match(updatesOverview, /Update in progress/, "busy must not read as a connection failure");
+  assert.match(updatesOverview, /An update operation is in progress/, "busy needs its own guidance card");
 });
 
 test("a second launch into an occupied domain is rejected", () => {

@@ -68,6 +68,12 @@ export function friendlyActionError(action: string, error: unknown): string {
 export function friendlyActionResult(action: string, detail: string): string {
   const lower = detail.toLowerCase();
   if (lower.includes("cancelled") || lower.includes("canceled")) {
+    // A cancelled stage is not a clean no-op: bootc may already have pulled
+    // and staged layers before the kill landed, so a restart can still apply
+    // staged content. Point at the page state instead of promising nothing.
+    if (action === "stage") {
+      return "The download was cancelled. Part of the update may already be staged — if this page offers a restart, restarting will still apply that staged content.";
+    }
     return "No changes were made.";
   }
   if (action === "stage") {
