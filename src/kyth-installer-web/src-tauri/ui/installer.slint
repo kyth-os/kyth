@@ -29,6 +29,8 @@ export component InstallerWindow inherits Window {
     in-out property <string> manual-filesystem: "btrfs";
     in-out property <string> manual-mountpoint: "/";
     in-out property <string> manual-size-gib: "32";
+    in-out property <string> manual-gpt-backup: "";
+    in-out property <bool> manual-ntfs-clean: false;
     in-out property <string> manual-pending-index: "0";
     in-out property <string> manual-pending: "No pending partition operations.";
     in-out property <bool> manual-committed: false;
@@ -238,6 +240,12 @@ export component InstallerWindow inherits Window {
                                         LineEdit { text <=> manual-mountpoint; placeholder-text: "/"; }
                                         Text { text: "Size (GiB)"; color: #9fb1d1; font-size: 11px; vertical-alignment: center; }
                                         LineEdit { text <=> manual-size-gib; placeholder-text: "32"; }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 6px;
+                                        Text { text: "GPT backup (external media)"; color: #9fb1d1; font-size: 11px; vertical-alignment: center; }
+                                        LineEdit { text <=> manual-gpt-backup; placeholder-text: "/run/media/…/gpt.bak"; }
+                                        CheckBox { text: "NTFS re-verified clean"; checked <=> manual-ntfs-clean; }
                                     }
                                     HorizontalLayout {
                                         spacing: 6px;

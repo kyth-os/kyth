@@ -502,9 +502,14 @@ pub(crate) fn validate(
                 if operation.kind == "resize" {
                     // Destructive shrink gate: GPT backup on external media,
                     // fresh NTFS clean-bit re-verification, AC power. Every
-                    // refusal carries the cannot-be-undone warning.
-                    errors.extend(validate_shrink_preconditions(&fs, params));
+                    // refusal carries the cannot-be-undone warning. A grow
+                    // (new size at or above the current size) cannot destroy
+                    // data, so it skips the shrink attestations.
                     let new_size = value_i64(params, "new_size_bytes", -1);
+                    let current_size = end.saturating_sub(start);
+                    if new_size > 0 && (current_size <= 0 || new_size < current_size) {
+                        errors.extend(validate_shrink_preconditions(&fs, params));
+                    }
                     if new_size <= 0 {
                         errors.push("Resize partition: invalid new size.".to_string());
                         valid = false;
@@ -1254,6 +1259,15 @@ mod tests {
         let journal = resize_journal(
             "/dev/sda2",
             json!({"new_size_bytes": 32_i64 * 1024 * 1024 * 1024, "gpt_backup_path": "/mnt/usb/sda-gpt.bak", "on_ac_power": true}),
+        );
+        let errors = validate(&journal, &ext4, "gpt", 128 * 1024 * 1024 * 1024);
+        assert!(errors.is_empty(), "{errors:?}");
+        // A grow (new size above current) destroys nothing, so it skips the
+        // shrink attestations entirely: 64 GiB -> 80 GiB with no backup, no
+        // NTFS flag, no AC attestation must not raise the shrink gate.
+        let journal = resize_journal(
+            "/dev/sda2",
+            json!({"new_size_bytes": 80_i64 * 1024 * 1024 * 1024}),
         );
         let errors = validate(&journal, &ext4, "gpt", 128 * 1024 * 1024 * 1024);
         assert!(errors.is_empty(), "{errors:?}");

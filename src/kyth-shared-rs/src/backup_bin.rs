@@ -9,6 +9,9 @@
 //! * The restic repo must live on external media (`/run/media/…`,
 //!   `/mnt/…`). The historical same-disk default is refused unless the
 //!   config records `allow_same_disk = true`.
+//! * An external repo must sit under a live mount from `/proc/mounts`
+//!   (same strictness as `kyth-save-sync`): otherwise the backup would land
+//!   in an unmounted stub dir on the root filesystem.
 //! * Any restic failure (init/backup/forget/check) yields a nonzero exit —
 //!   a silent "backup ran" with nothing written is worse than no backup.
 //! * `rclone sync` mirrors deletions, so it is skipped when any earlier
@@ -28,6 +31,7 @@ use kyth_shared::system::backup_config::{
     on_battery, repo_has_snapshots, validate_forget_policy, validate_repo,
 };
 use kyth_shared::system::process::run_bounded;
+use kyth_shared::system::save_cloud::repo_mount_ready;
 use kyth_shared::system::snapshot::{snapshot_then_send_plan, statvfs_usage, validate_send_target};
 
 /// Run `argv` with a timeout, returning true on exit 0. Every failure is
@@ -48,19 +52,6 @@ fn run(argv: &[String], timeout_secs: u64, label: &str) -> bool {
             false
         }
     }
-}
-
-fn external_mounts() -> Vec<String> {
-    let text = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
-    let mut mounts = external_mounts_from_proc_mounts(&text);
-    // /run/media subdirectories are per-user removable media even when the
-    // exact device mount point is one level up.
-    for entry in ["/run/media", "/mnt"] {
-        if Path::new(entry).is_dir() && !mounts.iter().any(|mount| mount == entry) {
-            mounts.push(entry.to_string());
-        }
-    }
-    mounts
 }
 
 fn first_usb_dir() -> Option<PathBuf> {
@@ -94,11 +85,29 @@ fn main() -> std::process::ExitCode {
     if !config.on_battery && on_battery() {
         println!("kyth-backup: on battery, skipping btrfs send");
     }
-    // Fail closed on the foot-gun layout before writing anything.
-    let mounts = external_mounts();
+    // Fail closed on the foot-gun layout before writing anything: the repo
+    // must live on external media, and an external repo must sit under a
+    // live mount (save-sync strictness) — otherwise the backup lands in an
+    // unmounted stub dir on the root filesystem.
+    let proc_mounts = std::fs::read_to_string("/proc/mounts").unwrap_or_default();
+    let mut mounts = external_mounts_from_proc_mounts(&proc_mounts);
+    // /run/media subdirectories are per-user removable media even when the
+    // exact device mount point is one level up.
+    for entry in ["/run/media", "/mnt"] {
+        if Path::new(entry).is_dir() && !mounts.iter().any(|mount| mount == entry) {
+            mounts.push(entry.to_string());
+        }
+    }
     let mount_refs: Vec<&str> = mounts.iter().map(String::as_str).collect();
     if let Err(error) = validate_repo(&config, &mount_refs) {
         eprintln!("kyth-backup: {error}");
+        return std::process::ExitCode::FAILURE;
+    }
+    if !repo_mount_ready(&config.repo, &proc_mounts) {
+        eprintln!(
+            "kyth-backup: repo {:?} is on external media that is not mounted; refusing to back up into an unmounted directory.",
+            config.repo
+        );
         return std::process::ExitCode::FAILURE;
     }
     if !config.password_file.trim().is_empty() && !Path::new(&config.password_file).is_file() {

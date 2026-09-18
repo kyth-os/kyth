@@ -128,6 +128,14 @@ def default_validation_dependencies() -> ValidationDependencies:
     )
 
 
+#: Filesystems that always signal somebody else's data: the alongside path
+#: formats the target with mkfs.btrfs, so accepting one of these as a
+#: "target partition" would destroy a Windows/macOS/data volume outright.
+_UNSAFE_ALONGSIDE_FSTYPES = frozenset({
+    "ntfs", "ntfs3", "bitlocker", "apfs", "hfsplus", "hfs", "exfat",
+})
+
+
 def _validate_partition_target(
     disk: str,
     target: str,
@@ -153,6 +161,24 @@ def _validate_partition_target(
         raise RuntimeError(f"The selected {label} is mounted, read-only, or has active encrypted/LVM mappings.")
     if _safe_int(part.get("size_bytes")) < MIN_KYTHOS_BYTES:
         raise RuntimeError(f"The {label} is too small. At least {MIN_KYTHOS_GIB} GiB is required.")
+    # Content gate: the alongside/manual commit formats this partition with
+    # mkfs.btrfs, so anything that looks like somebody's data must be refused
+    # here — at preview AND at commit — not discovered after the format.
+    fstype = str(part.get("fstype") or "").strip().lower()
+    volume_label = str(part.get("label") or "").strip()
+    if fstype in _UNSAFE_ALONGSIDE_FSTYPES:
+        raise RuntimeError(
+            f"The selected {label} holds a {fstype} filesystem"
+            + (f" labeled {volume_label!r}" if volume_label else "")
+            + " and installing there would destroy its contents. Back up its data, "
+              "or choose an empty partition, unallocated space, or the Windows-shrink option."
+        )
+    if fstype and fstype != "btrfs" and volume_label:
+        raise RuntimeError(
+            f"The selected {label} is a labeled {fstype} volume ({volume_label!r}) that "
+            "appears to hold data, and installing there would format it. Back up its "
+            "contents, clear the partition first, or choose a different target."
+        )
     return part
 
 
@@ -162,8 +188,22 @@ def _validate_efi_target(
     discovered: str | None,
     *,
     dependencies: ValidationDependencies | None = None,
+    install_disk: str | None = None,
+    snapshot_parts: dict | None = None,
 ) -> str:
-    """Revalidate the exact ESP that the install will mount."""
+    """Revalidate the exact ESP that the install will mount.
+
+    When ``install_disk`` is given, the ESP must live on that disk: a
+    cross-disk ESP (or the live ISO's own ESP leaking in through a stale
+    request) would point the bootloader step at someone else's partition.
+
+    A caller-supplied (requested) ESP is untrusted input and is always
+    re-verified with a live re-scan. A discovered ESP comes from the
+    target-scoped ``find_efi_partition()`` probe, so it is confirmed against
+    the snapshot's own partition data when provided (keeping validation
+    pure / probe-free); without snapshot data it falls back to a live
+    re-scan rather than trusting a bare device string.
+    """
     dependencies = dependencies or default_validation_dependencies()
 
     requested = _normal_device_path(config.get("efi_partition"))
@@ -172,13 +212,26 @@ def _validate_efi_target(
         raise RuntimeError("Alongside installation requires an EFI system partition on the system.")
     if efi == target:
         raise RuntimeError("The EFI system partition and KythOS target partition must be different.")
-    if not requested:
-        return efi
     efi_disk = dependencies.parent_disk(efi)
     if not efi_disk:
         raise RuntimeError("Could not determine which disk contains the EFI system partition.")
+    if install_disk is not None and efi_disk != install_disk:
+        raise RuntimeError(
+            "The selected EFI system partition is not on the target disk "
+            f"({efi} is on {efi_disk}, the install targets {install_disk}). "
+            "Select the ESP on the install disk or erase the disk."
+        )
+    if not requested and snapshot_parts is not None:
+        efi_info = snapshot_parts.get(efi)
+        if not efi_info or not efi_info.get("efi"):
+            raise RuntimeError("The EFI system partition is no longer a valid EFI System Partition.")
+        if efi_info.get("read_only"):
+            raise RuntimeError("The selected EFI System Partition is read-only and cannot receive the KythOS bootloader.")
+        return efi
     efi_info = next((part for part in dependencies.list_partitions(efi_disk) if part.get("name") == efi), None)
     if not efi_info or not efi_info.get("efi"):
+        if not requested:
+            raise RuntimeError("The EFI system partition is no longer a valid EFI System Partition.")
         raise RuntimeError("The selected EFI partition is no longer a valid EFI System Partition.")
     if efi_info.get("read_only"):
         raise RuntimeError("The selected EFI System Partition is read-only and cannot receive the KythOS bootloader.")
@@ -235,6 +288,8 @@ def _validate_install_target(
         _validate_efi_target(
             config, target, snapshot.efi_partition,
             dependencies=dependencies,
+            install_disk=disk,
+            snapshot_parts=snapshot.partitions_by_name,
         )
         return disk, target
 
@@ -256,6 +311,8 @@ def _validate_install_target(
         _validate_efi_target(
             config, target, snapshot.efi_partition,
             dependencies=dependencies,
+            install_disk=disk,
+            snapshot_parts=snapshot.partitions_by_name,
         )
         return disk, target
 
@@ -422,7 +479,7 @@ def build_plan_report(
             required = MIN_KYTHOS_BYTES + (BIOS_BOOT_BYTES if needs_bios else 0)
         else:
             effective = snapshot or dependencies.probe_storage(
-                disk, include_partitions=mode != "wipe",
+                disk, include_partitions=True,
             )
             is_gpt = effective.is_gpt
             needs_bios = (

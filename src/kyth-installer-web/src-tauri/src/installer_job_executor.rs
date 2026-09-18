@@ -64,6 +64,23 @@ impl NativeInstallRequest {
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(default)
         };
+        // The irreversible acknowledgement is a daemon-side gate, not just a
+        // frontend checkbox: the Slint shell sends `acknowledged-irreversible`
+        // and the web frontend sends `acknowledged_irreversible`. A start
+        // request without either must fail closed before any worker starts.
+        let acknowledged = object
+            .get("acknowledged-irreversible")
+            .and_then(serde_json::Value::as_bool)
+            .or_else(|| {
+                object
+                    .get("acknowledged_irreversible")
+                    .and_then(serde_json::Value::as_bool)
+            })
+            .unwrap_or(false);
+        if !acknowledged {
+            return Err("installation cannot start until the irreversible step is acknowledged: once partitioning starts, erased or resized data cannot be restored."
+                .to_string());
+        }
         let username = text("username", "");
         let password_hash = {
             let supplied_hash = text("password_hash", "");
@@ -1652,12 +1669,14 @@ mod tests {
         let request = NativeInstallRequest::from_http(serde_json::json!({
             "disk": "sda",
             "encryption": "tpm2",
+            "acknowledged-irreversible": true,
         }))
         .expect("frontend request should decode");
         assert_eq!(request.execution.bootc.encryption, "tpm2");
 
         let default = NativeInstallRequest::from_http(serde_json::json!({
             "disk": "sda",
+            "acknowledged_irreversible": true,
         }))
         .expect("frontend request should decode");
         assert_eq!(default.execution.bootc.encryption, "none");
@@ -1668,7 +1687,8 @@ mod tests {
         let mut bad = request(false);
         bad.execution.bootc.encryption = "luks".into();
         let error = NativePhaseExecutor::from_request(bad)
-            .expect_err("unsupported encryption must fail closed");
+            .err()
+            .expect("unsupported encryption must fail closed");
         assert!(
             error.contains("encryption unsupported"),
             "unexpected error: {error}"
@@ -1679,10 +1699,32 @@ mod tests {
     fn frontend_cachyos_kernel_alias_is_normalized_for_native_secure_boot() {
         let request = NativeInstallRequest::from_http(serde_json::json!({
             "kernel": " CachyOS ",
+            "acknowledged-irreversible": true,
         }))
         .expect("frontend request should decode");
 
         assert_eq!(request.execution.secure_boot.kernel, "cachy");
+    }
+
+    #[test]
+    fn start_without_irreversible_acknowledgement_fails_closed() {
+        let error = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+        }))
+        .err()
+        .expect("missing ack must fail closed");
+        assert!(
+            error.contains("irreversible step is acknowledged"),
+            "unexpected error: {error}"
+        );
+        // Either spelling satisfies the gate (Slint vs web frontend).
+        for key in ["acknowledged-irreversible", "acknowledged_irreversible"] {
+            let mut body = serde_json::Map::new();
+            body.insert("disk".to_string(), serde_json::json!("sda"));
+            body.insert(key.to_string(), serde_json::json!(true));
+            NativeInstallRequest::from_http(serde_json::Value::Object(body))
+                .expect("ack spelling should decode");
+        }
     }
 
     #[test]

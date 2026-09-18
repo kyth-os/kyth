@@ -1054,6 +1054,8 @@ fn manual_action(
     pending_index: i64,
     free_region_start: u64,
     free_region_end: u64,
+    gpt_backup_path: String,
+    ntfs_verified_clean: bool,
 ) {
     std::thread::spawn(move || {
         let failure_weak = weak.clone();
@@ -1159,14 +1161,26 @@ fn manual_action(
                     fail("Select a partition to shrink.".to_string());
                     return;
                 }
-                (
-                    "/api/disk/resize",
-                    json!({
-                        "disk": disk.clone(),
-                        "partition": partition,
-                        "new_size_bytes": size_bytes,
-                    }),
-                )
+                // Shrink attestations for the commit gate: the GPT backup
+                // path and NTFS re-verification come from the manual editor
+                // inputs; AC power is attested live here (and re-stamped by
+                // the daemon at commit when absent).
+                let mut resize_body = serde_json::Map::new();
+                resize_body.insert("disk".to_string(), json!(disk.clone()));
+                resize_body.insert("partition".to_string(), json!(partition));
+                resize_body.insert("new_size_bytes".to_string(), json!(size_bytes));
+                if !gpt_backup_path.trim().is_empty() {
+                    resize_body
+                        .insert("gpt_backup_path".to_string(), json!(gpt_backup_path.trim()));
+                }
+                if ntfs_verified_clean {
+                    resize_body.insert(
+                        "ntfs_verified_clean".to_string(),
+                        json!(ntfs_verified_clean),
+                    );
+                }
+                resize_body.insert("on_ac_power".to_string(), json!(on_ac_power()));
+                ("/api/disk/resize", Value::Object(resize_body))
             }
             "remove-pending" => {
                 if pending_index < 0 {
@@ -1544,6 +1558,8 @@ fn main() -> Result<(), slint::PlatformError> {
                     .unwrap_or(-1),
                 free_region_start,
                 free_region_end,
+                window.get_manual_gpt_backup().to_string(),
+                window.get_manual_ntfs_clean(),
             );
         }
     });
@@ -1636,6 +1652,7 @@ mod tests {
         state.username = "alice".into();
         state.password = "secret".into();
         state.confirm_erase = true;
+        state.confirm_current = true;
         state.acknowledged_irreversible = true;
         assert!(state.can_start());
         let request = state.as_request();
@@ -1656,6 +1673,7 @@ mod tests {
         state.username = "alice".into();
         state.password = "secret".into();
         state.confirm_erase = true;
+        state.confirm_current = true;
         state.acknowledged_irreversible = true;
         let request = state.as_request();
         assert_eq!(request["encryption"], "none");

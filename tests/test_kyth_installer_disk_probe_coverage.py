@@ -17,7 +17,9 @@ class InstallerDiskProbeCoverageTests(unittest.TestCase):
     def test_running_system_disk_returns_mount_source_or_empty_on_failure(self):
         with mock.patch.object(disk, "_findmnt_source", return_value="/dev/mapper/root"):
             self.assertEqual(_probe._running_system_disk(), "/dev/mapper/root")
-        with mock.patch.object(disk, "_findmnt_source", side_effect=OSError):
+        with mock.patch.object(disk, "_findmnt_source", side_effect=OSError), \
+             mock.patch.object(_probe, "_running_system_disk_from_mountinfo", return_value=""), \
+             mock.patch.object(_probe, "_running_system_disk_from_cmdline", return_value=""):
             self.assertEqual(_probe._running_system_disk(), "")
 
     def test_live_usb_resolves_parent_name_direct_disk_and_child_disk(self):

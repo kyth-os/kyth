@@ -871,11 +871,29 @@ class GuardianVpnDnsTests(unittest.TestCase):
             preset = pathlib.Path(directory) / "network.toml"
             preset.write_text('vpn_dns_exclusive = true\ndns = "quad9"\n')
             with patch.dict(os.environ, {"KYTH_NETWORK_PRESET": str(preset)}):
-                ok, message = actions.apply_vpn_dns_exclusive(fake_run)
+                with patch.object(os, "geteuid", return_value=0):
+                    ok, message = actions.apply_vpn_dns_exclusive(fake_run)
         self.assertTrue(ok, message)
         self.assertIn("tun0", message)
         self.assertIn(("resolvectl", "dns", "tun0", "9.9.9.9"), calls)
         self.assertIn(("resolvectl", "domain", "tun0", "~."), calls)
+
+    def test_exclusive_pin_refuses_honestly_without_privilege(self):
+        from kyth_shared import guardian_actions as actions
+
+        def fake_run(argv, timeout):
+            if argv[:2] == ("resolvectl", "status"):
+                return _completed(argv, stdout=self.STATUS)
+            return _completed(argv)
+
+        with tempfile.TemporaryDirectory() as directory:
+            preset = pathlib.Path(directory) / "network.toml"
+            preset.write_text('vpn_dns_exclusive = true\ndns = "quad9"\n')
+            with patch.dict(os.environ, {"KYTH_NETWORK_PRESET": str(preset)}):
+                with patch.object(os, "geteuid", return_value=1000):
+                    ok, message = actions.apply_vpn_dns_exclusive(fake_run)
+        self.assertFalse(ok)
+        self.assertIn("admin privilege", message)
 
 
 if __name__ == "__main__":

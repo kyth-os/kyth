@@ -17,11 +17,106 @@ def _running_system_disk() -> str:
     # logical volume, or a LUKS dm-crypt mapping) — callers resolve this up
     # to the physical disk via _disk._parent_disk(), which walks every layer of
     # device-mapper indirection rather than assuming a single PKNAME hop.
+    #
+    # The findmnt probe is primary; two probe-independent fallbacks follow so
+    # a degraded tool environment cannot silently clear the running-disk
+    # identity (which would drop the `current` flag in list_disks() and
+    # disable the running-disk refusal). Every layer swallows its own
+    # failure and the function returns "" only when all three agree nothing
+    # is knowable — list_disks() treats that as fully degraded and offers no
+    # disks rather than offering every disk unflagged.
     try:
-        return _disk._findmnt_source("/")
+        source = _disk._findmnt_source("/")
+        if source:
+            return source
     except (OSError, ValueError, RuntimeError) as exc:
         _logger.debug("_running_system_disk probe failed: %s", exc, exc_info=True)
+    for fallback in (_running_system_disk_from_mountinfo, _running_system_disk_from_cmdline):
+        label = getattr(fallback, "__name__", type(fallback).__name__)
+        try:
+            source = fallback()
+        except (OSError, ValueError, RuntimeError) as exc:
+            _logger.debug("_running_system_disk fallback %s failed: %s", label, exc, exc_info=True)
+            continue
+        if source:
+            _logger.debug("_running_system_disk resolved via %s: %s", label, source)
+            return source
+    return ""
+
+
+def _running_system_disk_from_mountinfo() -> str:
+    """Resolve the "/" mount SOURCE from /proc/self/mountinfo (no subprocess).
+
+    Returns "" when the file is unreadable, has no "/" entry, or the root
+    source is not a block device (e.g. "overlay" in containers).
+    """
+    try:
+        with open("/proc/self/mountinfo", "r", encoding="utf-8", errors="replace") as handle:
+            lines = handle.read().splitlines()
+    except OSError:
         return ""
+    for line in lines:
+        fields = line.split()
+        try:
+            separator = fields.index("-")
+        except ValueError:
+            continue
+        # mountinfo: id parent maj:min root MOUNT_POINT opts ... - fstype SOURCE superopts
+        if len(fields) <= max(4, separator + 2):
+            continue
+        if fields[4] != "/":
+            continue
+        source = fields[separator + 2]
+        return source if source.startswith("/dev/") else ""
+    return ""
+
+
+def _running_system_disk_from_cmdline(cmdline: str | None = None) -> str:
+    """Resolve the root device from /proc/cmdline's root= token (no lsblk/findmnt).
+
+    `cmdline` is injectable so tests can exercise parsing without the live
+    file. UUID=/LABEL=/PARTUUID=/PARTLABEL= values resolve via a single blkid
+    lookup; anything unresolvable (e.g. dracut `root=live:...`) returns "".
+    """
+    if cmdline is None:
+        try:
+            from pathlib import Path as _Path
+
+            cmdline = _Path("/proc/cmdline").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            return ""
+    for token in (cmdline or "").split():
+        if not token.startswith("root="):
+            continue
+        value = token[len("root="):].strip()
+        if not value:
+            continue
+        if value.startswith("/dev/"):
+            return value
+        for prefix in ("UUID=", "LABEL=", "PARTUUID=", "PARTLABEL="):
+            if value.startswith(prefix) and len(value) > len(prefix):
+                resolved = _blkid_device(f"{prefix}{value[len(prefix):]}")
+                if resolved:
+                    return resolved
+                break
+    return ""
+
+
+def _blkid_device(match: str) -> str:
+    """Return the first device matching a blkid TYPE=VALUE selector, or ""."""
+    try:
+        result = _disk.run_command(
+            ["blkid", "-l", "-t", match, "-o", "device"],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        _logger.debug("_blkid_device probe failed for %s: %s", match, exc, exc_info=True)
+        return ""
+    for line in (result.stdout or "").splitlines():
+        device = line.strip().split(":")[0].strip()
+        if device.startswith("/dev/"):
+            return device
+    return ""
 
 
 

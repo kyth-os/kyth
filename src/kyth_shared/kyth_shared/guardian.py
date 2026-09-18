@@ -163,7 +163,7 @@ RECIPES: dict[str, Recipe] = {
                "safe", False, True, 1800, "network", "Reports non-tunnel resolvers while a VPN tunnel is up; never rewrites DNS on its own."),
         Recipe("network.vpn-dns-exclusive", "Pin VPN link to exclusive DNS", "network",
                ("resolvectl", "status"),
-               "confirm", False, False, 3600, "network", "Hub opt-in only (vpn_dns_exclusive): pins tunnel links to the VPN resolver with the ~. domain."),
+               "confirm", True, False, 3600, "network", "Hub opt-in only (vpn_dns_exclusive): pins tunnel links to the VPN resolver with the ~. domain. Needs admin privilege for the resolvectl link rewrite."),
         Recipe("network.dns-flush", "Flush DNS cache", "network",
                ("resolvectl", "flush-caches"),
                "safe", False, True, 1800, "network", "Flushes systemd-resolved cache after portal/DNS change."),

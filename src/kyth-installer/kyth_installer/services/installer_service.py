@@ -159,14 +159,24 @@ class InstallerService:
         _disk, journal, error = self._journal_for(body)
         if error:
             return error
-        # Destructive journals (fresh table or partition deletion) need the
-        # same on-screen acknowledgements as start_install: committing without
-        # them would erase data the user never confirmed away.
+        # Destructive journals (fresh table, partition deletion, format, or
+        # resize) need the same on-screen acknowledgements as start_install:
+        # committing without them would erase data the user never confirmed
+        # away. Format/resize mutate filesystems in place — they are
+        # irreversible exactly like a delete.
         destructive = any(
-            isinstance(op, dict) and op.get("kind") in ("new_table", "delete")
+            isinstance(op, dict) and op.get("kind") in ("new_table", "delete", "format", "resize")
             for op in getattr(journal, "ops", None) or []
         )
-        if destructive and not (body.get("confirm_erase") and body.get("confirm_backup")):
+        # Canonical acknowledgement: "acknowledged-irreversible" (kebab,
+        # matching the native shell wire key and start_install). Legacy
+        # "confirm_backup" answer files keep working.
+        acknowledged = (
+            body.get("acknowledged-irreversible")
+            or body.get("acknowledged_irreversible")
+            or body.get("confirm_backup")
+        )
+        if destructive and not (body.get("confirm_erase") and acknowledged):
             return {
                 "ok": False,
                 "message": "Please confirm the on-screen acknowledgements before starting the install.",

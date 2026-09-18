@@ -134,13 +134,44 @@ class InstallerDiskQueryCoverageTests(unittest.TestCase):
             {"name": "/dev/sda3", "start_bytes": 300 * 1024**3, "size_bytes": 80 * 1024**3},
         ]
         with mock.patch.object(disk, "list_partitions", return_value=after):
+            # Geometry selects the new partition even though it is not the
+            # highest-numbered match for a stale scan...
             created = _query._latest_partition_on_disk(
                 "/dev/sda",
-                set(),  # empty before — previously would pick sda3 by max number
-                start_bytes=200 * 1024**3,
-                size_bytes=50 * 1024**3,
+                {"/dev/sda1", "/dev/sda2"},
+                start_bytes=300 * 1024**3,
+                size_bytes=80 * 1024**3,
             )
-        self.assertEqual(created, "/dev/sda2")
+        self.assertEqual(created, "/dev/sda3")
+
+    def test_latest_partition_never_returns_preexisting_partitions(self):
+        parts = [
+            {"name": "/dev/sda1", "start_bytes": 1024**2, "size_bytes": 100 * 1024**3},
+            {"name": "/dev/sda2", "start_bytes": 200 * 1024**3, "size_bytes": 50 * 1024**3},
+        ]
+        with mock.patch.object(disk, "list_partitions", return_value=parts):
+            # Empty `before` (fresh disk / flaky pre-create scan) with a
+            # unique geometry match still resolves — there is nothing known
+            # pre-existing to protect.
+            self.assertEqual(_query._latest_partition_on_disk(
+                "/dev/sda", set(),
+                start_bytes=200 * 1024**3, size_bytes=50 * 1024**3,
+            ), "/dev/sda2")
+            # But a geometry match on a name recorded in `before` is NEVER
+            # returned: handing it back would let the caller mkfs (or flag)
+            # a pre-existing Windows/data partition.
+            self.assertIsNone(_query._latest_partition_on_disk(
+                "/dev/sda", {"/dev/sda1", "/dev/sda2"},
+                start_bytes=200 * 1024**3, size_bytes=50 * 1024**3,
+            ))
+            # ...while a genuinely new geometry match is still returned.
+            self.assertEqual(
+                _query._latest_partition_on_disk(
+                    "/dev/sda", {"/dev/sda1"},
+                    start_bytes=200 * 1024**3, size_bytes=50 * 1024**3,
+                ),
+                "/dev/sda2",
+            )
 
     def test_latest_partition_empty_before_without_geometry_fails_closed(self):
         parts = [

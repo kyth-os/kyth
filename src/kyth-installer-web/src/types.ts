@@ -16,6 +16,7 @@ export interface InstallRequest {
   resize_gib: number; free_region_start: number; free_region_end: number; hostname: string;
   timezone: string; locale: string; keymap: string; username: string; password: string; mok_password: string; kernel: string;
   confirm_backup: boolean; confirm_erase: boolean; confirm_current: boolean;
+  encryption: string; tpm_recovery_ack: boolean; acknowledged_irreversible: boolean;
 }
 
 export type InstallerEvent =

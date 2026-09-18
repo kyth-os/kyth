@@ -289,12 +289,29 @@ class Journal:
         currently mounted or carrying active LVM/LUKS mappings. A
         set_mountpoint("/", name) op is checked too since it schedules an
         eventual reformat at install time even without an explicit
-        format/delete/resize op staged for it here."""
+        format/delete/resize op staged for it here.
+
+        A staged new_table wipes the whole disk, so it is rejected when ANY
+        partition on the disk is mounted or in use — not just partitions
+        with their own delete/format/resize op.
+        """
         errors = []
         last_mountpoint_op_index = self._last_mountpoint_op_index()
+        wipes_table = any(
+            isinstance(op, dict) and op.get("kind") == "new_table"
+            for op in self.ops
+        )
         for part in current_parts:
             name = part.get("name")
+            if not name:
+                continue
             if not (part.get("current") or part.get("in_use")):
+                continue
+            if wipes_table:
+                errors.append(
+                    f"Cannot create a new partition table on {self.disk} — "
+                    f"{name} is currently mounted or in use."
+                )
                 continue
             for op in self.ops:
                 kind = op["kind"]
@@ -798,6 +815,16 @@ class Journal:
         died, which is the only way a later recovery pass can tell a completed
         wipe from a half-written partition table.
         """
+        # Validate first, mutate never on failure: the service calls
+        # validate() separately, but that leaves a TOCTOU window (and direct
+        # commit() callers skip validation entirely). Re-running the pure
+        # checks here against a fresh live scan means a stale or hand-built
+        # journal can never reach the first destructive op.
+        errors = self.validate()
+        if errors:
+            raise RuntimeError(
+                "Partition validation failed: " + "; ".join(errors)
+            )
         rust_response = self._rust_commit(log, record=record)
         if rust_response is not None:
             if not rust_response.get("ok"):

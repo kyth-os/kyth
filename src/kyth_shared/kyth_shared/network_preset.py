@@ -27,14 +27,17 @@ def load_network_preset(path: Path | None = None) -> dict[str, Any]:
         with p.open("rb") as _f:
             data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
-        return {"dns": "quad9", "doh": True, "firewall_zone": "home"}
+        return {"dns": "quad9", "doh": True, "firewall_zone": "public"}
     dns = str(data.get("dns", "quad9"))
     if dns not in ("quad9","cloudflare","off","google"):
         dns="quad9"
     doh = bool(data.get("doh", True))
-    zone = str(data.get("firewall_zone", "home"))
-    if zone not in ("home","public","work"):
-        zone="home"
+    # `block` is the VPN lockdown target: it must round-trip, never be
+    # downgraded to a trusting zone. Unknown zones fail closed to `public`,
+    # mirroring the Rust preset default.
+    zone = str(data.get("firewall_zone", "public"))
+    if zone not in ("home","public","work","block"):
+        zone="public"
     # Round-trip the Hub VPN opt-ins (and strict DoT): dropping unknown keys
     # here would wipe flags the Rust Hub toggles just persisted.
     return {
@@ -53,7 +56,7 @@ def save_network_preset(cfg: dict[str, Any], path: Path | None = None) -> Path:
     lines=["# Kyth network preset — DoT + firewalld, offline\n"]
     lines.append(f'dns = "{cfg.get("dns","quad9")}"')
     lines.append(f'doh = {str(bool(cfg.get("doh", True))).lower()}')
-    lines.append(f'firewall_zone = "{cfg.get("firewall_zone","home")}"')
+    lines.append(f'firewall_zone = "{cfg.get("firewall_zone","public")}"')
     lines.append(f'dns_strict = {str(bool(cfg.get("dns_strict", False))).lower()}')
     lines.append(f'vpn_dns_exclusive = {str(bool(cfg.get("vpn_dns_exclusive", False))).lower()}')
     lines.append(f'vpn_fail_closed = {str(bool(cfg.get("vpn_fail_closed", False))).lower()}')

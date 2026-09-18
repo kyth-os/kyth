@@ -45,6 +45,107 @@ fn installer_log_path() -> PathBuf {
 
 type NativeSupervisor = JobSupervisor<NativePhaseExecutor>;
 
+/// Live AC-power attestation from sysfs for shrink commits. Mirrors the
+/// Slint shell's `on_ac_power_in`: no battery discharging and no offline
+/// AC/ADP supply means on-AC; machines without a power-supply tree (desktops,
+/// VMs) read as on-AC because there is nothing to gate on. Pure over an
+/// explicit sysfs root so it is unit-testable.
+fn ac_online_in(root: &Path) -> bool {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return true;
+    };
+    let mut saw_battery = false;
+    let mut ac_online = false;
+    let mut saw_ac = false;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with("BAT") {
+            saw_battery = true;
+            if let Ok(status) = std::fs::read_to_string(entry.path().join("status")) {
+                if status.trim() == "Discharging" {
+                    return false;
+                }
+            }
+        } else if name.starts_with("AC") || name.starts_with("ADP") {
+            saw_ac = true;
+            if let Ok(online) = std::fs::read_to_string(entry.path().join("online")) {
+                if online.trim() == "1" {
+                    ac_online = true;
+                }
+            }
+        }
+    }
+    if saw_battery {
+        !saw_ac || ac_online
+    } else {
+        true
+    }
+}
+
+/// Build the staged params for a `/api/disk/resize` op, carrying the shrink
+/// attestations the commit gate demands. A GPT backup path that is not on
+/// external media fails here with an honest error instead of at commit time.
+/// Pure over the request value so it is unit-testable without live disks.
+fn resize_op_params(
+    partition: &str,
+    new_size_bytes: u64,
+    value: &serde_json::Value,
+) -> Result<serde_json::Value, serde_json::Value> {
+    let mut params = serde_json::json!({"partition": partition, "new_size_bytes": new_size_bytes});
+    if let Some(backup) = value
+        .get("gpt_backup_path")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|backup| !backup.is_empty())
+    {
+        if !super::installer_journal::path_on_external_media(backup) {
+            return Err(
+                serde_json::json!({"ok": false, "message": format!("GPT backup {backup:?} must be on external media (/run/media/…, /mnt/…) — a backup on the disk being shrunk is lost with it.")}),
+            );
+        }
+        params["gpt_backup_path"] = serde_json::Value::String(backup.to_string());
+    }
+    if let Some(ntfs_clean) = value
+        .get("ntfs_verified_clean")
+        .and_then(serde_json::Value::as_bool)
+    {
+        params["ntfs_verified_clean"] = serde_json::Value::Bool(ntfs_clean);
+    }
+    if let Some(ac) = value
+        .get("on_ac_power")
+        .and_then(serde_json::Value::as_bool)
+    {
+        params["on_ac_power"] = serde_json::Value::Bool(ac);
+    }
+    Ok(params)
+}
+
+/// Stamp `on_ac_power` from a live sysfs read onto every staged resize op
+/// that does not already carry an explicit attestation. Runs at commit time,
+/// when the journal's shrink gate actually evaluates power state.
+fn stamp_shrink_power_attestation(journal: &mut super::installer_journal::PartitionJournal) {
+    stamp_shrink_power_attestation_in(journal, Path::new("/sys/class/power_supply"));
+}
+
+fn stamp_shrink_power_attestation_in(
+    journal: &mut super::installer_journal::PartitionJournal,
+    power_root: &Path,
+) {
+    if journal
+        .ops
+        .iter()
+        .all(|op| op.kind != "resize" || op.params.get("on_ac_power").is_some())
+    {
+        return;
+    }
+    let online = ac_online_in(power_root);
+    for op in &mut journal.ops {
+        if op.kind == "resize" && op.params.get("on_ac_power").is_none() {
+            op.params["on_ac_power"] = serde_json::Value::Bool(online);
+        }
+    }
+}
+
 struct NativeJournalRegistry {
     active: Mutex<Option<super::installer_journal::PartitionJournal>>,
 }
@@ -276,10 +377,11 @@ impl NativeJournalRegistry {
                                 serde_json::json!({"ok": false, "message": "A new size is required."}),
                             );
                         };
-                        (
-                            "resize",
-                            serde_json::json!({"partition": partition, "new_size_bytes": new_size_bytes}),
-                        )
+                        let params = match resize_op_params(&partition, new_size_bytes, &value) {
+                            Ok(params) => params,
+                            Err(error) => return (400, error),
+                        };
+                        ("resize", params)
                     }
                     "/api/disk/format" => {
                         let fs_type = value
@@ -324,10 +426,17 @@ impl NativeJournalRegistry {
                 )
             }
             "/api/disk/commit" => {
-                let journal = match Self::journal_for(&mut active, &disk) {
+                let mut journal = match Self::journal_for(&mut active, &disk) {
                     Ok(journal) => journal.clone(),
                     Err(error) => return (400, error),
                 };
+                // Commit-time AC attestation for shrinks: the journal demands
+                // `on_ac_power`, and the daemon — root on the target machine —
+                // is the trustworthy party to confirm it. Stamp it live here
+                // (per the documented "confirmed online at commit time"
+                // contract) so a resize staged while on AC is not bricked,
+                // and an explicit client `false` is never overridden.
+                stamp_shrink_power_attestation(&mut journal);
                 match super::installer_journal::commit_request(
                     super::installer_journal::JournalCommitInput { journal },
                 ) {
@@ -1781,7 +1890,7 @@ mod tests {
     #[test]
     fn native_start_boundary_builds_typed_executor() {
         let request = start_request(
-            r#"{"disk":"sda","install_mode":"wipe","source_imgref":"oci:/image","target_imgref":"kyth:latest","hostname":"kyth"}"#,
+            r#"{"disk":"sda","install_mode":"wipe","source_imgref":"oci:/image","target_imgref":"kyth:latest","hostname":"kyth","acknowledged-irreversible":true}"#,
         );
         let executor = native_executor_from_start(&request).expect("native plan should validate");
         assert_eq!(executor.storage_plan().disk, "/dev/sda");
@@ -1791,7 +1900,7 @@ mod tests {
     #[test]
     fn native_start_boundary_keeps_start_route_native() {
         let request = start_request(
-            r#"{"disk":"sda","install_mode":"wipe","username":"alice","password_hash":"$6$hash"}"#,
+            r#"{"disk":"sda","install_mode":"wipe","username":"alice","password_hash":"$6$hash","acknowledged-irreversible":true}"#,
         );
         let native = native_request_from_start(&request).expect("native request should decode");
         assert_eq!(native.storage.disk, "sda");
@@ -1911,5 +2020,79 @@ mod tests {
             .as_array()
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn resize_stage_carries_shrink_attestations_and_rejects_same_disk_backup() {
+        use super::resize_op_params;
+        // Same-disk backup path fails fast with an honest error, not at commit.
+        let error = resize_op_params(
+            "/dev/sda2",
+            32 * 1024 * 1024 * 1024,
+            &serde_json::json!({"gpt_backup_path": "/root/gpt.bak"}),
+        )
+        .expect_err("same-disk backup must fail");
+        assert!(error["message"]
+            .as_str()
+            .unwrap()
+            .contains("external media"));
+        // External backup path + NTFS/AC attestations ride into staged params.
+        let params = resize_op_params(
+            "/dev/sda2",
+            32 * 1024 * 1024 * 1024,
+            &serde_json::json!({
+                "gpt_backup_path": "/run/media/alice/BACKUP/sda-gpt.bak",
+                "ntfs_verified_clean": true,
+                "on_ac_power": true,
+            }),
+        )
+        .expect("external backup must stage");
+        assert_eq!(
+            params["gpt_backup_path"],
+            "/run/media/alice/BACKUP/sda-gpt.bak"
+        );
+        assert_eq!(params["ntfs_verified_clean"], true);
+        assert_eq!(params["on_ac_power"], true);
+        // Bare resize stages without attestations; AC is stamped at commit.
+        let params = resize_op_params("/dev/sda2", 32 * 1024 * 1024 * 1024, &serde_json::json!({}))
+            .expect("bare resize must stage");
+        assert!(params.get("gpt_backup_path").is_none());
+        assert!(params.get("on_ac_power").is_none());
+    }
+
+    #[test]
+    fn shrink_power_stamp_attests_live_and_never_overrides_explicit() {
+        use super::super::installer_journal::PartitionJournal;
+        use super::{ac_online_in, stamp_shrink_power_attestation_in};
+        // Empty power tree reads as on-AC (desktop/VM: nothing to gate on).
+        let empty = tempdir().unwrap();
+        assert!(ac_online_in(empty.path()));
+        // A discharging battery reads as off-AC.
+        let battery = tempdir().unwrap();
+        let bat = battery.path().join("BAT0");
+        fs::create_dir_all(&bat).unwrap();
+        fs::write(bat.join("status"), "Discharging\n").unwrap();
+        assert!(!ac_online_in(battery.path()));
+
+        let mut journal = PartitionJournal::new("/dev/sda").unwrap();
+        journal.add_op(
+            "resize",
+            serde_json::json!({"partition": "/dev/sda2", "new_size_bytes": 1}),
+        );
+        stamp_shrink_power_attestation_in(&mut journal, battery.path());
+        assert_eq!(journal.ops[0].params["on_ac_power"], false);
+
+        // An explicit client attestation is never overridden.
+        let mut journal = PartitionJournal::new("/dev/sda").unwrap();
+        journal.add_op(
+            "resize",
+            serde_json::json!({
+                "partition": "/dev/sda2",
+                "new_size_bytes": 1,
+                "on_ac_power": true,
+            }),
+        );
+        stamp_shrink_power_attestation_in(&mut journal, battery.path());
+        assert_eq!(journal.ops[0].params["on_ac_power"], true);
     }
 }

@@ -44,6 +44,22 @@ def list_disks():
     # instead of each independently re-walking ancestry from scratch.
     tree = _disk._lsblk_tree()
     running_disk = _disk._running_system_disk()
+    if not running_disk:
+        # Fail closed: without a running-disk identity the `current` flag
+        # cannot fire and the running-disk refusal cannot work — every disk
+        # in the scan is a potential live/system disk. Offer nothing rather
+        # than an unflagged list; callers surface "Invalid disk."
+        _logger.warning(
+            "disk scan refused: running-system disk is unknown "
+            "(findmnt, /proc/self/mountinfo and /proc/cmdline all failed). "
+            "No install target is offered until discovery recovers."
+        )
+        print(
+            "disk scan failed: could not determine the running system disk. "
+            "No storage changes were made.",
+            file=sys.stderr,
+        )
+        return []
     protected = _disk._protected_install_disks(tree=tree, running_disk=running_disk)
     current_disk = _disk._parent_disk(running_disk, tree=tree)
     disks = []
@@ -353,6 +369,10 @@ def _latest_partition_on_disk(
     (empty ``before``) cannot pick an existing Windows/data partition by
     "highest number in the set-difference". Fall back to a unique
     name-set difference only. Ambiguous results fail closed (``None``).
+
+    A name already present in ``before`` is NEVER returned, even when it is
+    the only geometry match: handing a pre-existing partition back to a
+    caller that is about to mkfs it would format someone else's data.
     """
     after_parts = [p for p in _disk.list_partitions(disk, strict=True) if p.get("name")]
     if not after_parts:
@@ -375,10 +395,11 @@ def _latest_partition_on_disk(
         created = [name for name in matches if name not in before]
         if len(created) == 1:
             return created[0]
-        if len(matches) == 1:
-            return matches[0]
-        # Geometry missing from lsblk (START not yet populated): fall through
-        # to a unique name-set difference. Multiple unmatched names stay None.
+        # Geometry matched zero partitions, several new ones, or ONLY
+        # pre-existing ones (stale/empty `before`, or a real collision with
+        # a Windows/data partition): fail closed. Returning the
+        # pre-existing match here used to hand mkfs a foreign partition.
+        return None
     created = [part["name"] for part in after_parts if part["name"] not in before]
     if len(created) != 1:
         return None

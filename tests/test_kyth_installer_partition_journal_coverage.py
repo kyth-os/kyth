@@ -268,9 +268,13 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         journal = self._journal()
         journal.add_op("format", {"partition": "/dev/sda2", "fs_type": "btrfs", "label": "ROOT"})
         journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+        parts = [{"name": "/dev/sda2", "fstype": "btrfs",
+                  "start_bytes": 100 * 1024**2, "size_bytes": 50 * 1024**3}]
         with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(
             journal, "_save_snapshot"
-        ), mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda2"}]):
+        ), mock.patch.object(journal_mod, "list_partitions", return_value=parts), mock.patch.object(
+            journal_mod, "_parent_disk", return_value="/dev/sda"
+        ):
             root = journal.commit(mock.MagicMock())
         self.assertEqual(root, "/dev/sda2")
         self.assertTrue(journal.committed)
@@ -391,8 +395,13 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         journal = self._journal(dry_run=True)
         journal.add_op("delete", {"partition": "/dev/sda1"})
         journal.add_op("resize", {"partition": "/dev/sda2", "new_size_bytes": 1024**3})
+        # commit() validates before mutating, so the journal needs a root to
+        # be committable: the create op below satisfies validation and
+        # dispatches alongside the delete/resize under test.
+        journal.add_op("create", {"start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+                                  "fs_type": "btrfs", "mountpoint": "/"})
         # commit should dispatch delete and resize even in dry_run (uses 99 and mocked helpers)
-        with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(journal, "_save_snapshot"), mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}, {"name": "/dev/sda2"}]), mock.patch.object(journal_mod, "_partition_number", return_value=1), mock.patch.object(journal_mod, "_partition_start_bytes", return_value=0), mock.patch.object(journal_mod, "shrink_filesystem"):
+        with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(journal, "_save_snapshot"), mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}, {"name": "/dev/sda2"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"), mock.patch.object(journal_mod, "_partition_number", return_value=1), mock.patch.object(journal_mod, "_partition_start_bytes", return_value=0), mock.patch.object(journal_mod, "shrink_filesystem"):
             journal.commit(mock.Mock())
             self.assertTrue(journal.committed)
             journal._disk_service.delete_partition.assert_called()
@@ -400,7 +409,12 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         # non-dry_run commit must call _require_parted (568)
         journal2 = self._journal(dry_run=False)
         journal2.add_op("delete", {"partition": "/dev/sda1"})
-        with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(journal2, "_save_snapshot"), mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}]), mock.patch.object(journal_mod, "_partition_number", return_value=1), mock.patch.object(journal_mod, "_require_parted") as req:
+        # commit() validates before mutating: stage the root assignment first
+        # (on the btrfs partition, before its deletion) so the journal is
+        # committable and the test reaches the _require_parted assertion.
+        journal2.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal2.ops[:] = sorted(journal2.ops, key=lambda op: 0 if op["kind"] == "set_mountpoint" else 1)
+        with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(journal2, "_save_snapshot"), mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1", "fstype": "btrfs", "start_bytes": 1024**2, "size_bytes": 50 * 1024**3}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"), mock.patch.object(journal_mod, "_partition_number", return_value=1), mock.patch.object(journal_mod, "_require_parted") as req:
             journal2.commit(mock.Mock())
             req.assert_called()
 
@@ -553,6 +567,11 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
 
     def test_commit_surfaces_native_failure_without_falling_back_to_disk(self):
         journal = self._journal(dry_run=False)
+        # commit() validates before mutating: a committable op is needed so
+        # the test reaches the mocked native failure instead of stopping at
+        # validation.
+        journal.add_op("create", {"start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+                                  "fs_type": "btrfs", "mountpoint": "/"})
         with mock.patch.object(
             journal, "_rust_commit", return_value={"ok": False, "message": "native commit failed", "irreversible": True}
         ):

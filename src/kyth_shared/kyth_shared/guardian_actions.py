@@ -6,6 +6,7 @@ with validated identifiers — no ``bash -c`` and no ``|| true`` success.
 """
 from __future__ import annotations
 
+import os
 import re
 import time
 from typing import Any, Callable
@@ -211,6 +212,14 @@ def apply_vpn_dns_exclusive(run: Run) -> tuple[bool, str]:
         return False, "VPN DNS exclusivity is Hub opt-in; refusing to rewrite link DNS unasked"
     if not vpn_dns:
         return False, "DNS preset is off; nothing to pin"
+    # Per-link `resolvectl dns/domain` rewrites need admin privilege. Say so
+    # up front instead of running into a cryptic "update failed".
+    if hasattr(os, "geteuid") and os.geteuid() != 0:
+        return (
+            False,
+            "pinning VPN DNS needs admin privilege (resolvectl link configuration); "
+            "run with authentication",
+        )
     completed = run(("resolvectl", "status"), 6)
     if completed is None or completed.returncode != 0:
         return False, "resolvectl unavailable"
@@ -226,7 +235,11 @@ def apply_vpn_dns_exclusive(run: Run) -> tuple[bool, str]:
             or domain is None
             or domain.returncode != 0
         ):
-            return False, "resolvectl update failed"
+            return (
+                False,
+                "resolvectl link update failed; pinning VPN DNS needs admin "
+                "privilege — run with authentication",
+            )
     return True, "VPN DNS pinned on " + ",".join(links)
 
 

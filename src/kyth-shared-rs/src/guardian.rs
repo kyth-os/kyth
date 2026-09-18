@@ -121,7 +121,7 @@ pub fn recipes() -> &'static [Recipe] {
         Recipe { id: "memory.pressure-relief", title: "Memory pressure high", component: "memory", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 3600, verification: "memory", recovery: "High PSI / low MemAvailable — close heavy apps; Guardian pauses auto-fixes until pressure drops." },
         Recipe { id: "network.vpn-fix", title: "Restart always-on VPN connection", component: "network", command: &["nmcli", "-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "network", recovery: "Re-establishes an autoconnect VPN after a captive-portal hop; idle VPN profiles are left alone." },
         Recipe { id: "network.vpn-dns-leak-check", title: "Check VPN DNS for leaks", component: "network", command: &["resolvectl", "status"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "network", recovery: "Reports non-tunnel resolvers while a VPN tunnel is up; never rewrites DNS on its own." },
-        Recipe { id: "network.vpn-dns-exclusive", title: "Pin VPN link to exclusive DNS", component: "network", command: &["resolvectl", "status"], risk: "confirm", requires_auth: false, automatic: false, cooldown: 3600, verification: "network", recovery: "Hub opt-in only (vpn_dns_exclusive): pins tunnel links to the VPN resolver with the ~. domain." },
+        Recipe { id: "network.vpn-dns-exclusive", title: "Pin VPN link to exclusive DNS", component: "network", command: &["resolvectl", "status"], risk: "confirm", requires_auth: true, automatic: false, cooldown: 3600, verification: "network", recovery: "Hub opt-in only (vpn_dns_exclusive): pins tunnel links to the VPN resolver with the ~. domain. Needs admin privilege for the resolvectl link rewrite." },
         Recipe { id: "network.dns-flush", title: "Flush DNS cache", component: "network", command: &["resolvectl", "flush-caches"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "network", recovery: "Flushes systemd-resolved cache after portal/DNS change." },
         Recipe { id: "update.review-health", title: "Review update health", component: "updates", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 3600, verification: "updates", recovery: "Run ujust update-health; rollback remains controlled by boot health." },
     ]
@@ -288,7 +288,13 @@ pub fn apply_vpn_dns_exclusive_live() -> Result<String, &'static str> {
             vpn_exclusive_domain_argv(&preset, link),
         ] {
             let args: Vec<&str> = argv.iter().map(String::as_str).collect();
-            run_ok(&args, Duration::from_secs(6)).map_err(|_| "resolvectl update failed")?;
+            // Honest failure, not a bare "update failed": per-link
+            // `resolvectl dns/domain` rewrites need admin privilege, and an
+            // unprivileged run must say so instead of looking like a
+            // resolved malfunction.
+            run_ok(&args, Duration::from_secs(6)).map_err(|_| {
+                "resolvectl link update failed; pinning VPN DNS needs admin privilege — run with authentication"
+            })?;
         }
     }
     Ok(format!("VPN DNS pinned on {}", links.join(",")))

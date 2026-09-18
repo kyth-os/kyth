@@ -69,42 +69,45 @@ def _storage_state(body: dict, context: InstallerContext) -> tuple[dict, dict]:
     from .storage_snapshot import StorageSnapshot as _Snapshot  # local to avoid cycle
 
     # Probe once; reuse for every branch below and for plan validation.
+    # Wipe included: the BitLocker/ESP preflight needs the live partition
+    # list to fail closed at preview time, not only at commit. Without
+    # partitions here the preview reports "valid" and the commit then
+    # refuses — exactly the misleading shape this snapshot exists to avoid.
     _snapshot: _Snapshot | None = None
-    if mode != "wipe":
+    try:
+        # Each piece is try-guarded so a mock with limited side_effect
+        # (e.g. pre-push unit tests that only stub list_partitions)
+        # doesn't cause StopIteration → snapshot=None → extra calls.
         try:
-            # Each piece is try-guarded so a mock with limited side_effect
-            # (e.g. pre-push unit tests that only stub list_partitions)
-            # doesn't cause StopIteration → snapshot=None → extra calls.
-            try:
-                _parts = tuple(disk.list_partitions(target_disk))
-            except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
-                _parts = ()
-            try:
-                _free = tuple(disk.list_free_space(target_disk)) if mode == "free_space" else ()
-            except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
-                _free = ()
-            try:
-                _efi_part = disk.find_efi_partition(target_disk)
-            except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
-                _efi_part = body.get("efi_partition", "") or None
-            try:
-                _is_gpt = plan._is_gpt_disk(target_disk) if mode in ("alongside", "manual") else False
-            except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
-                _is_gpt = False
-            _snapshot = _Snapshot(
-                disks=tuple(disks.values()),
-                partitions=_parts,
-                free_regions=_free,
-                efi_partition=_efi_part,
-                is_gpt=_is_gpt,
-            )
-            # If we got no partitions (mock exhausted or real error), don't use
-            # snapshot — fallback to per-call live probes so side_effect sequence
-            # stays compatible with unit tests that expect exact call counts.
-            if not _parts:
-                _snapshot = None
+            _parts = tuple(disk.list_partitions(target_disk))
         except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
+            _parts = ()
+        try:
+            _free = tuple(disk.list_free_space(target_disk)) if mode == "free_space" else ()
+        except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
+            _free = ()
+        try:
+            _efi_part = disk.find_efi_partition(target_disk)
+        except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
+            _efi_part = body.get("efi_partition", "") or None
+        try:
+            _is_gpt = plan._is_gpt_disk(target_disk) if mode in ("alongside", "manual") else False
+        except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
+            _is_gpt = False
+        _snapshot = _Snapshot(
+            disks=tuple(disks.values()),
+            partitions=_parts,
+            free_regions=_free,
+            efi_partition=_efi_part,
+            is_gpt=_is_gpt,
+        )
+        # If we got no partitions (mock exhausted or real error), don't use
+        # snapshot — fallback to per-call live probes so side_effect sequence
+        # stays compatible with unit tests that expect exact call counts.
+        if not _parts:
             _snapshot = None
+    except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
+        _snapshot = None
 
     def _part_names() -> set[str]:
         if _snapshot is not None:
@@ -305,6 +308,10 @@ def validate_partition_install_request(
                 "EFI partition and target partition must be different."
             )
         efi_disk = disk._parent_disk(normalized_efi)
+        if efi_disk != target_disk:
+            raise InstallRequestError(
+                "The selected EFI partition is not on the target disk."
+            )
         efi_info = next(
             (
                 part

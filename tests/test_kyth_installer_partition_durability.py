@@ -124,13 +124,22 @@ class PartitionStepBracketingTests(unittest.TestCase):
         journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/home"})
         steps: list[tuple[str, str, str]] = []
 
-        journal.commit(lambda _msg: None, record=lambda *args: steps.append(args))
+        sda1 = {"name": "/dev/sda1", "fstype": "ext4",
+                "start_bytes": 100 * 1024**3, "size_bytes": 50 * 1024**3}
+        with mock.patch("kyth_installer.partition_ops_journal.list_partitions", return_value=[sda1]), \
+             mock.patch("kyth_installer.partition_ops_journal._parent_disk", return_value="/dev/sda"):
+            journal.commit(lambda _msg: None, record=lambda *args: steps.append(args))
 
         self.assertNotIn("set_mountpoint", {kind for kind, _status, _target in steps})
 
     def test_commit_without_a_recorder_still_works(self):
         journal, service = build_journal()
         journal.add_op("new_table", {"table_type": "gpt"})
+        # commit() validates before mutating: the journal needs a root.
+        # 4 MiB clears the automatic 1 MiB BIOS boot reservation new_table
+        # makes on GPT.
+        journal.add_op("create", {"start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+                                  "fs_type": "btrfs", "mountpoint": "/"})
 
         journal.commit(lambda _msg: None)
 
@@ -140,6 +149,10 @@ class PartitionStepBracketingTests(unittest.TestCase):
         """Bookkeeping must not destroy a disk mid-partition."""
         journal, service = build_journal()
         journal.add_op("new_table", {"table_type": "gpt"})
+        # commit() validates before mutating: the journal needs a root (see
+        # above for the 4 MiB offset).
+        journal.add_op("create", {"start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+                                  "fs_type": "btrfs", "mountpoint": "/"})
 
         def explode(*_args):
             raise OSError("read-only transaction report")

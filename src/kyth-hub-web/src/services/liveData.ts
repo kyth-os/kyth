@@ -1152,7 +1152,10 @@ export async function openVpnApp(): Promise<string> {
 }
 export async function startVpnConnection(profile: { gateway: string; protocol: string; osEmulation: string; username: string; password: string }): Promise<string> {
   if (!inTauriShell()) throw new Error("VPN connections require the installed Kyth Hub.");
-  return await invoke<string>("vpn_connect", profile);
+  // The Tauri binding is snake_case (`os_emulation`): map the camelCase
+  // profile field at the boundary or the invoke fails to deserialize.
+  const { gateway, protocol, osEmulation, username, password } = profile;
+  return await invoke<string>("vpn_connect", { gateway, protocol, os_emulation: osEmulation, username, password });
 }
 export interface VpnConnectionStatus { id: string; state: "connecting" | "authentication_required" | "connected" | "disconnected" | "failed" | "complete" | "failed_lockdown" | "failed_lockdown_open" | "connected_firewall_open" | "complete_firewall_open" | "unknown"; detail: string; }
 export async function fetchVpnConnectionStatus(job: string): Promise<VpnConnectionStatus | null> {
@@ -1171,7 +1174,8 @@ export async function fetchVpnProtectionStatus(): Promise<VpnProtectionStatus | 
 }
 export async function setVpnProtection(protection: { vpnFailClosed: boolean; vpnDnsExclusive: boolean }): Promise<string> {
   if (!inTauriShell()) throw new Error("VPN protection toggles require the installed Kyth Hub.");
-  return await invoke<string>("set_vpn_protection", { vpnFailClosed: protection.vpnFailClosed, vpnDnsExclusive: protection.vpnDnsExclusive });
+  // The Tauri binding is snake_case: map camelCase fields at the boundary.
+  return await invoke<string>("set_vpn_protection", { vpn_fail_closed: protection.vpnFailClosed, vpn_dns_exclusive: protection.vpnDnsExclusive });
 }
 export async function fetchVpnSavedProfile(): Promise<VpnSavedProfile | null> {
   if (!inTauriShell()) return null;

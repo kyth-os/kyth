@@ -183,6 +183,7 @@ class InstallerStorageTests(unittest.TestCase):
         }
 
         with patch.object(self.disk, "_protected_install_disks", return_value={"/dev/sdb"}), \
+             patch.object(self.disk, "_running_system_disk", return_value="/dev/nvme0n1p1"), \
              patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             disks = self.disk.list_disks()
 
@@ -211,7 +212,7 @@ class InstallerStorageTests(unittest.TestCase):
             {"name": "/dev/sdb", "size": 64 * 1024**3, "model": "Writable", "type": "disk", "ro": False},
         ]}
         with patch.object(self.disk, "_protected_install_disks", return_value=set()), \
-             patch.object(self.disk, "_running_system_disk", return_value=""), \
+             patch.object(self.disk, "_running_system_disk", return_value="/dev/sdb1"), \
              patch.object(self.disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload), returncode=0)):
             disks = self.disk.list_disks()
 
@@ -633,10 +634,17 @@ class InstallerPlanTests(unittest.TestCase):
             {"name": "/dev/nvme0n1p1", "parttype": self.plan.BIOS_BOOT_GUID},
             {"name": partition},
         ]
+        # The post-mkpart snapshot must carry the new partition's geometry:
+        # _latest_partition_on_disk only ever returns names absent from the
+        # pre-create scan whose start/size match the requested gap — it never
+        # hands back a pre-existing partition. p3 starts at 128 GiB with
+        # 256 GiB; shrinking by 64 GiB leaves the KythOS gap at
+        # [320 GiB, 384 GiB).
         list_partitions_mock = MagicMock(side_effect=[
             existing,
             existing,
-            existing + [{"name": "/dev/nvme0n1p4"}],
+            existing + [{"name": "/dev/nvme0n1p4",
+                         "start_bytes": 320 * 1024**3, "size_bytes": 64 * 1024**3}],
         ])
         mock_disk_service_cls = MagicMock()
         mock_disk_service = mock_disk_service_cls.return_value
@@ -703,7 +711,12 @@ class InstallerPlanTests(unittest.TestCase):
             {"name": partition},
         ]
         list_partitions_mock = MagicMock(side_effect=[
-            existing, existing, existing + [{"name": "/dev/nvme0n1p4"}],
+            existing, existing,
+            # Post-mkpart snapshot carries the new partition's geometry (see
+            # above): _latest_partition_on_disk never returns pre-existing
+            # partitions, so a bare name here correctly resolves to None.
+            existing + [{"name": "/dev/nvme0n1p4",
+                         "start_bytes": 320 * 1024**3, "size_bytes": 64 * 1024**3}],
         ])
         mock_disk_service_cls = MagicMock()
         mock_disk_service = mock_disk_service_cls.return_value
