@@ -182,5 +182,141 @@ class InstallerImageSourceTests(unittest.TestCase):
                 )
 
 
+class SignatureBundleUnitTests(unittest.TestCase):
+    """Direct unit coverage for the cosign-bundle verification helpers."""
+
+    def _write_bundle(self, directory: str, name: str, payload: object) -> Path:
+        path = Path(directory) / name
+        if isinstance(payload, bytes):
+            path.write_bytes(payload)
+        else:
+            path.write_text(json.dumps(payload))
+        return path
+
+    def _verified_metadata(self, raw: bytes, source_image: str) -> dict:
+        return {
+            "signature": "verified",
+            "signature_digest": "sha256:" + hashlib.sha256(raw).hexdigest(),
+            "source_image": source_image,
+        }
+
+    def _bundle_bytes(self, digest: str, **overrides: object) -> bytes:
+        payload = {
+            "schema_version": 1,
+            "digest": digest,
+            "release_digest": digest,
+            "signatures": ["c2lnbmF0dXJlLW9uZQ=="],
+        }
+        payload.update(overrides)
+        return json.dumps(payload).encode("utf-8")
+
+    def test_registry_source_detection(self):
+        signed = imagesrc._registry_signed_source
+        self.assertFalse(signed("oci:/usr/share/kyth/image"))
+        self.assertFalse(signed("containers-storage:localhost/kyth"))
+        self.assertFalse(signed("dir:/tmp/layout"))
+        self.assertFalse(signed("ostree:default"))
+        self.assertFalse(signed("docker://localhost:5000/kyth:dev"))
+        self.assertFalse(signed("localhost/kyth:testing"))
+        self.assertFalse(signed("127.0.0.1:5000/kyth:testing"))
+        self.assertFalse(signed("[::1]:5000/kyth:testing"))
+        self.assertTrue(signed("docker://ghcr.io/kyth-os/kyth:testing"))
+        self.assertTrue(signed("ghcr.io/kyth-os/kyth:testing"))
+
+    def test_base64_signature_shapes(self):
+        valid = imagesrc._valid_base64_signature
+        self.assertTrue(valid("c2lnbmF0dXJlLW9uZQ=="))
+        self.assertFalse(valid(""))
+        self.assertFalse(valid(None))
+        self.assertFalse(valid(42))
+        self.assertFalse(valid("x" * (128 * 1024 + 1)))
+        self.assertFalse(valid("has spaces"))
+        self.assertFalse(valid("unicode-\u00e9"))
+
+    def test_local_state_accepts_loopback_source(self):
+        metadata = {"signature": "local", "source_image": "docker://localhost:5000/kyth:dev"}
+        imagesrc._verify_signature_bundle("sha256:abc", "sha256:abc", metadata)
+
+    def test_unknown_signature_state_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "unknown signature state"):
+            imagesrc._verify_signature_bundle("sha256:abc", "sha256:abc", {})
+        with self.assertRaisesRegex(RuntimeError, "unknown signature state"):
+            imagesrc._verify_signature_bundle(
+                "sha256:abc", "sha256:abc", {"signature": "pending"}
+            )
+
+    def test_missing_bundle_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            missing = Path(directory) / "absent.json"
+            metadata = self._verified_metadata(b"{}", "ghcr.io/x")
+            with self.assertRaisesRegex(RuntimeError, "missing or unsafe"):
+                imagesrc._verify_signature_bundle(
+                    "sha256:abc", "sha256:abc", metadata, bundle_path=missing
+                )
+
+    def test_unreadable_bundle_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bundle = self._write_bundle(directory, "bundle.json", {"schema_version": 1})
+            raw = bundle.read_bytes()
+            metadata = self._verified_metadata(raw, "ghcr.io/x")
+            with (
+                mock.patch.object(Path, "read_bytes", side_effect=OSError("denied")),
+                self.assertRaisesRegex(RuntimeError, "could not read"),
+            ):
+                imagesrc._verify_signature_bundle(
+                    "sha256:abc", "sha256:abc", metadata, bundle_path=bundle
+                )
+
+    def test_oversize_bundle_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            raw = b"0" * (4 * 1024 * 1024 + 1)
+            bundle = self._write_bundle(directory, "big.json", raw)
+            metadata = self._verified_metadata(raw, "ghcr.io/x")
+            with self.assertRaisesRegex(RuntimeError, "too large"):
+                imagesrc._verify_signature_bundle(
+                    "sha256:abc", "sha256:abc", metadata, bundle_path=bundle
+                )
+
+    def test_malformed_and_wrong_schema_bundles_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            bad = self._write_bundle(directory, "bad.json", b"{nope")
+            metadata = self._verified_metadata(b"{nope", "ghcr.io/x")
+            with self.assertRaisesRegex(RuntimeError, "invalid"):
+                imagesrc._verify_signature_bundle(
+                    "sha256:abc", "sha256:abc", metadata, bundle_path=bad
+                )
+            raw = self._bundle_bytes("sha256:abc", schema_version=2)
+            wrong = self._write_bundle(directory, "wrong.json", json.loads(raw))
+            metadata = self._verified_metadata(raw, "ghcr.io/x")
+            with self.assertRaisesRegex(RuntimeError, "unsupported schema"):
+                imagesrc._verify_signature_bundle(
+                    "sha256:abc", "sha256:abc", metadata, bundle_path=wrong
+                )
+
+    def test_digest_mismatch_and_missing_signatures_rejected(self):
+        digest = "sha256:" + "a" * 64
+        with tempfile.TemporaryDirectory() as directory:
+            payload = {
+                "schema_version": 1,
+                "digest": "sha256:" + "b" * 64,
+                "release_digest": digest,
+                "signatures": ["c2lnbmF0dXJlLW9uZQ=="],
+            }
+            raw = json.dumps(payload).encode("utf-8")
+            bundle = self._write_bundle(directory, "bundle.json", payload)
+            metadata = self._verified_metadata(raw, "ghcr.io/x")
+            with self.assertRaisesRegex(RuntimeError, "does not cover"):
+                imagesrc._verify_signature_bundle(
+                    digest, digest, metadata, bundle_path=bundle
+                )
+            raw = self._bundle_bytes(digest, signatures=[])
+            unsigned = self._write_bundle(directory, "unsigned.json", json.loads(raw))
+            metadata = self._verified_metadata(raw, "ghcr.io/x")
+            with self.assertRaisesRegex(RuntimeError, "no verifiable signature"):
+                imagesrc._verify_signature_bundle(
+                    digest, digest, metadata, bundle_path=unsigned
+                )
+
+
 if __name__ == "__main__":
     unittest.main()
