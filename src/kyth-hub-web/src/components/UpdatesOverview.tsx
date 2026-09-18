@@ -68,7 +68,7 @@ export function UpdatesOverview() {
   const [readings, setReadings] = useState<UpdatesSnapshot>(emptyReadings);
   const [loaded, setLoaded] = useState(false);
   const [lastAction, setLastAction] = useState<string | null>(null);
-  const { status, busy, run } = useSectionAction();
+  const { status, busy, run } = useSectionAction("update");
 
   function startAction(id: string, pendingLabel: string, action: () => Promise<string>): void {
     setLastAction(id);

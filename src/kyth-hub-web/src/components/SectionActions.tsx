@@ -1,6 +1,7 @@
 import { useState } from "react";
 
-import { cancelHubAction, confirmUserAction, runHubRecipeAction } from "../services/liveData";
+import { cancelHubAction, confirmUserAction, getInFlightJob, runHubRecipeAction } from "../services/liveData";
+import type { JobDomain } from "../services/liveData";
 
 /** Shared "run a mutating system action, then say what happened" helper.
  *
@@ -9,11 +10,20 @@ import { cancelHubAction, confirmUserAction, runHubRecipeAction } from "../servi
  * `invoke` that returns a human-readable string (or throws one). The
  * backend commands are the gate, not this: each validates its own input,
  * runs in the background, and keeps progress in the Hub. */
-export function useSectionAction() {
+export function useSectionAction(trackedDomain?: JobDomain) {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Component state is lost on reload, but a tracked backend job keeps
+  // running (reattached from persisted in-flight ids) — surface that
+  // instead of a blank slate.
+  const [resumedNote, setResumedNote] = useState<string | null>(() =>
+    trackedDomain !== undefined && getInFlightJob(trackedDomain) !== undefined
+      ? "A previous action is still running; its progress resumes here."
+      : null,
+  );
 
   async function run(id: string, pendingLabel: string, action: () => Promise<string>) {
+    setResumedNote(null);
     setBusy(id);
     setStatus(pendingLabel);
     try {
@@ -26,7 +36,7 @@ export function useSectionAction() {
     }
   }
 
-  return { status, busy, run };
+  return { status: resumedNote ?? status, busy, run };
 }
 
 export function ActionButton({
