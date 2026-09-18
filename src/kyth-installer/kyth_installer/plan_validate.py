@@ -14,6 +14,8 @@ from .config import BIOS_BOOT_BYTES, BIOS_BOOT_GUID, MIN_KYTHOS_BYTES, MIN_KYTHO
 from .disk import (
     _normal_device_path,
     _safe_int,
+    storage_preflight,
+    validate_storage_preflight,
 )
 
 if TYPE_CHECKING:
@@ -84,6 +86,18 @@ class ReportDependencies:
     validate_install: Callable[..., tuple[str, str | None]]
     validate_resize: Callable[..., tuple[str, str, int]]
     validate_free_space: Callable[..., tuple[str, int, int]]
+
+
+def _check_storage_preflight(snapshot, mode: str) -> None:
+    """Shared ESP-preservation / BitLocker preflight over a probed snapshot.
+
+    Same detection source as the typed Rust preflight
+    (``installer_storage::storage_preflight_from_snapshot``): ``list_partitions``
+    dicts with identical indicators. Locked BitLocker fails closed in every
+    mode; non-wipe modes require an existing ESP to preserve.
+    """
+    parts = snapshot.partitions_by_name.values() if snapshot is not None else []
+    validate_storage_preflight(storage_preflight(list(parts)), mode)
 
 
 def validate_storage_intent(
@@ -197,6 +211,10 @@ def _validate_install_target(
             raise RuntimeError(f"This disk is too small for KythOS. At least {MIN_KYTHOS_GIB} GiB is required.")
         return disk, None
 
+    # Shared ESP-preservation / BitLocker preflight before any guided target
+    # checks (same detection source as the typed Rust preflight).
+    _check_storage_preflight(snapshot, mode)
+
     if mode == "alongside":
         target = _normal_device_path(config.get("target_partition"))
         if not target:
@@ -266,6 +284,7 @@ def validate_resize_ntfs_target(
     snapshot = snapshot or dependencies.probe_storage(disk)
     if disk not in snapshot.disks_by_name:
         raise RuntimeError("The selected disk is not a safe install target.")
+    _check_storage_preflight(snapshot, "resize_ntfs")
     if dependencies.parent_disk(partition) != disk:
         raise RuntimeError("The selected NTFS partition does not belong to the selected disk.")
     part = snapshot.partitions_by_name.get(partition)
@@ -324,6 +343,7 @@ def validate_free_space_target(
     snapshot = snapshot or dependencies.probe_storage(disk, include_free_space=True)
     if disk not in snapshot.disks_by_name:
         raise RuntimeError("The selected disk is not a safe install target.")
+    _check_storage_preflight(snapshot, "free_space")
     required = (
         MIN_KYTHOS_BYTES + BIOS_BOOT_BYTES
         if _needs_bios_boot(snapshot, uefi_boot=uefi_boot)

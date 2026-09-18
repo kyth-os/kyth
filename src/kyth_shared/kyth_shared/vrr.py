@@ -1,8 +1,11 @@
 """VRR + Night color — vrr.toml per-output store with KWin apply path.
 
-Maps ``adaptive|always|never`` onto global ``[Wayland] VrrPolicy`` (1/2/0) via
-``kwriteconfig6``, and writes ``[NightColor]`` from the night section. Per-output
-overrides prefer ``kscreen-doctor`` when a live session is available.
+VRR is applied per-output via ``kscreen-doctor`` (``output.<name>.vrrpolicy.*``)
+so unlisted panels keep the compositor default. The global ``[Wayland]
+VrrPolicy`` default (Automatic) is owned by the image sysconfig fragment, not
+by this per-user tool. NightColor is only touched when the user explicitly
+enables it in vrr.toml — the mode selector is never forced, so a user's
+location-based schedule is left alone.
 """
 from __future__ import annotations
 
@@ -101,16 +104,6 @@ def _reconfigure_kwin() -> None:
             logger.debug("kwin reconfigure via %s failed", name, exc_info=True)
 
 
-def _global_policy_from_outputs(outputs: dict[str, dict[str, str]]) -> str:
-    """Pick a global VrrPolicy: prefer Always if any, else Adaptive if any, else Never."""
-    modes = {entry.get("vrr", "adaptive") for entry in outputs.values()}
-    if "always" in modes:
-        return _VRR_TO_POLICY["always"]
-    if "adaptive" in modes or not modes:
-        return _VRR_TO_POLICY["adaptive"]
-    return _VRR_TO_POLICY["never"]
-
-
 def _write_kwin_key(group: str, key: str, value: str, *, value_type: str | None = None) -> bool:
     bin_name = _kwriteconfig_bin()
     if not bin_name:
@@ -127,8 +120,10 @@ def _write_kwin_key(group: str, key: str, value: str, *, value_type: str | None 
 
 
 def _apply_per_output_vrr(outputs: dict[str, dict[str, str]]) -> list[str]:
-    if not outputs or not shutil.which("kscreen-doctor"):
-        return []
+    if not outputs:
+        return ["no per-output VRR entries"]
+    if not shutil.which("kscreen-doctor"):
+        return ["kscreen-doctor unavailable: per-output VRR not applied"]
     listed = run(["kscreen-doctor", "-o"], capture_output=True, timeout=8, check=False)
     if listed.returncode != 0:
         return ["kscreen-doctor -o failed"]
@@ -159,32 +154,32 @@ def _apply_per_output_vrr(outputs: dict[str, dict[str, str]]) -> list[str]:
 
 
 def apply_vrr(cfg: dict[str, Any] | None = None) -> list[str]:
-    """Apply vrr.toml to KWin NightColor + VrrPolicy. Returns applied notes."""
+    """Apply vrr.toml per-output VRR + opt-in NightColor. Returns applied notes."""
     if cfg is None:
         cfg = load_vrr()
     applied: list[str] = []
     outputs = cfg.get("outputs") or {}
-    policy = _global_policy_from_outputs(outputs) if outputs else _VRR_TO_POLICY["adaptive"]
-    if not outputs:
-        # No per-output entries: keep Automatic (matches /etc/xdg/kwinrc default).
-        policy = _VRR_TO_POLICY["adaptive"]
 
-    if _write_kwin_key("Wayland", "VrrPolicy", policy):
-        applied.append(f"Wayland.VrrPolicy={policy} ({_POLICY_TO_VRR.get(policy, policy)})")
-
-    night = cfg.get("night") or {}
-    enabled = bool(night.get("enabled", False))
-    temp = int(night.get("temperature", 4500))
-    if _write_kwin_key("NightColor", "Active", str(enabled).lower(), value_type="bool"):
-        applied.append(f"NightColor.Active={enabled}")
-    # Mode=1 is location-based in older KWin; Mode=2 is constant temperature.
-    # Constant is the predictable offline choice for a toml-driven toggle.
-    if _write_kwin_key("NightColor", "Mode", "2"):
-        applied.append("NightColor.Mode=2")
-    if _write_kwin_key("NightColor", "NightTemperature", str(temp)):
-        applied.append(f"NightColor.NightTemperature={temp}")
-
+    # Per-output VRR only: no global Wayland VrrPolicy write. The system-wide
+    # Automatic default lives in /etc/xdg/kwinrc (image sysconfig); writing it
+    # from here would stomp multi-monitor setups where panels disagree.
     applied.extend(_apply_per_output_vrr(outputs))
+
+    # NightColor is opt-in only: with enabled=false (the default) leave the
+    # user's Active/Mode/Temperature exactly as they are. In particular never
+    # force Mode (constant-temperature) over a location-based schedule.
+    night = cfg.get("night") or {}
+    if bool(night.get("enabled", False)):
+        try:
+            temp = int(night.get("temperature", 4500))
+        except (TypeError, ValueError):
+            temp = 4500
+        temp = max(2000, min(6500, temp))
+        if _write_kwin_key("NightColor", "Active", "true", value_type="bool"):
+            applied.append("NightColor.Active=True")
+        if _write_kwin_key("NightColor", "NightTemperature", str(temp)):
+            applied.append(f"NightColor.NightTemperature={temp}")
+
     _reconfigure_kwin()
     try:
         import time

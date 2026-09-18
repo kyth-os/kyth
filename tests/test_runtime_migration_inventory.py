@@ -77,7 +77,7 @@ class InventoryTest(unittest.TestCase):
         # installer authority is active.
         self.assertEqual(report["summary"]["p0_open_entries"], 0)
         self.assertEqual(report["p0_open"], [])
-        self.assertEqual(report["summary"]["active_entries"], 192)
+        self.assertEqual(report["summary"]["active_entries"], 191)
         self.assertEqual(report["summary"]["active_python_entries"], 0)
         self.assertEqual(report["summary"]["superseded_entries"], 127)
         self.assertFalse(

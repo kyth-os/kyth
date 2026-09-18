@@ -106,16 +106,41 @@ def _ensure_user_folders(home: str) -> OperationResult:
     return OperationResult("user-folders", OperationStatus.APPLIED)
 
 
-def _enable_bluetooth(home: str, run: Callable[..., object]) -> OperationResult:
+def _bluetooth_user_blocked(home: str) -> str:
+    """Return a reason when the user explicitly disabled bluetooth, else ''."""
     config = os.path.join(home, ".config", "bluedevilglobalrc")
-    if os.path.isfile(config):
-        with open(config, encoding="utf-8") as stream:
-            lines = stream.readlines()
-        lines = [
-            line for line in lines
-            if not re.match(r"^[0-9a-fA-F:]+_powered=false$", line.strip())
-        ]
-        atomic_write_text(config, "".join(lines), encoding="utf-8")
+    try:
+        if os.path.isfile(config):
+            with open(config, encoding="utf-8") as stream:
+                for line in stream:
+                    name, sep, value = line.strip().partition("=")
+                    if sep and name.endswith("_powered") and value.strip().lower() == "false":
+                        return "user disabled bluetooth in bluedevilglobalrc"
+    except OSError:
+        pass
+    if shutil.which("rfkill"):
+        try:
+            res = run_command(
+                ["rfkill", "list", "bluetooth"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if res.returncode == 0 and "Soft blocked: yes" in (res.stdout or ""):
+                return "bluetooth rfkill soft-blocked by user"
+        except (OSError, ValueError):
+            pass
+    return ""
+
+
+def _enable_bluetooth(home: str, run: Callable[..., object]) -> OperationResult:
+    # Login-time enable is conditional: an explicit user block (per-adapter
+    # _powered=false in bluedevilglobalrc, or an rfkill soft-block) means the
+    # user turned bluetooth off — powering it back on every login would fight
+    # them. Never strip the _powered=false entries either.
+    blocked = _bluetooth_user_blocked(home)
+    if blocked:
+        return OperationResult("bluetooth", OperationStatus.SKIPPED, blocked)
     if not shutil.which("bluetoothctl"):
         return OperationResult("bluetooth", OperationStatus.UNAVAILABLE, "bluetoothctl not installed")
     run(["bluetoothctl", "power", "on"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)

@@ -134,12 +134,73 @@ fn arg_value(args: &[String], name: &str) -> Option<String> {
         .find_map(|pair| (pair[0] == name).then(|| pair[1].clone()))
 }
 
+fn valid_child_token(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 512
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-'))
+}
+
+/// Load the session token handed over through `--tokens-file`.
+///
+/// The launcher writes this file mode 0600 for exactly the child's uid so
+/// the token never crosses argv. Anything unexpected yields an empty token,
+/// which the transport rejects visibly. (Mirrored from main.rs.)
+fn load_tokens_file(path: &str) -> (String, String) {
+    let empty = (String::new(), String::new());
+    if path.is_empty() || path.len() > 4096 || path.contains('\0') {
+        return empty;
+    }
+    let file_path = std::path::Path::new(path);
+    let metadata = std::fs::symlink_metadata(file_path)
+        .ok()
+        .filter(|metadata| !metadata.file_type().is_symlink() && metadata.is_file());
+    let Some(metadata) = metadata else {
+        return empty;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if metadata.permissions().mode() & 0o077 != 0 {
+            return empty;
+        }
+    }
+    if metadata.len() == 0 || metadata.len() > 8192 {
+        return empty;
+    }
+    let Ok(content) = std::fs::read_to_string(file_path) else {
+        return empty;
+    };
+    let value: serde_json::Value = serde_json::from_str(&content).unwrap_or_default();
+    let bootstrap = value
+        .get("bootstrap_token")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let session = value
+        .get("session_token")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    if !valid_child_token(bootstrap) || !valid_child_token(session) {
+        return empty;
+    }
+    (bootstrap.to_string(), session.to_string())
+}
+
 fn connection_args() -> ConnectionArgs {
     let args = std::env::args().collect::<Vec<_>>();
     ConnectionArgs {
         socket_path: arg_value(&args, "--socket-path"),
         session_token: arg_value(&args, "--session-token")
+            .filter(|value| !value.is_empty())
             .or_else(|| std::env::var("KYTH_INSTALLER_SESSION_TOKEN").ok())
+            .filter(|value| !value.is_empty())
+            .or_else(|| {
+                arg_value(&args, "--tokens-file").and_then(|path| {
+                    let (_, session) = load_tokens_file(&path);
+                    (!session.is_empty()).then_some(session)
+                })
+            })
             .unwrap_or_default(),
     }
 }
@@ -1505,6 +1566,46 @@ mod tests {
         assert_eq!(
             disk_inventory(&[]).0,
             "Installer returned no disk inventory"
+        );
+    }
+
+    fn write_tokens_file(directory: &std::path::Path, contents: &str, mode: u32) -> String {
+        use std::os::unix::fs::PermissionsExt;
+        let path = directory.join("child-tokens.json");
+        std::fs::write(&path, contents).expect("tokens fixture");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(mode))
+            .expect("tokens fixture mode");
+        path.to_str().expect("fixture path").to_string()
+    }
+
+    #[test]
+    fn tokens_file_hands_session_token_to_the_shell() {
+        let directory = tempfile::tempdir().expect("tokens fixture directory");
+        let path = write_tokens_file(
+            directory.path(),
+            r#"{"bootstrap_token":"boot-123","session_token":"sess-456"}"#,
+            0o600,
+        );
+        assert_eq!(
+            load_tokens_file(&path),
+            ("boot-123".to_string(), "sess-456".to_string())
+        );
+    }
+
+    #[test]
+    fn tokens_file_fails_closed_on_loose_or_malformed_input() {
+        let directory = tempfile::tempdir().expect("tokens fixture directory");
+        let loose = write_tokens_file(
+            directory.path(),
+            r#"{"bootstrap_token":"boot","session_token":"sess"}"#,
+            0o644,
+        );
+        assert_eq!(load_tokens_file(&loose), (String::new(), String::new()));
+        let malformed = write_tokens_file(directory.path(), "not-json", 0o600);
+        assert_eq!(load_tokens_file(&malformed), (String::new(), String::new()));
+        assert_eq!(
+            load_tokens_file(directory.path().join("absent.json").to_str().unwrap()),
+            (String::new(), String::new())
         );
     }
 }

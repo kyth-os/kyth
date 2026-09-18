@@ -62,6 +62,16 @@ fn main() -> std::process::ExitCode {
             Ok(_) => {}
             Err(error) => eprintln!("kyth-telem: scan failed: {error}"),
         }
+        match kyth_shared::system::telemetry_writer::enforce_retention(
+            &conn,
+            kyth_shared::system::telemetry_writer::current_unix_time(),
+        ) {
+            Ok((sessions, frames)) if sessions + frames > 0 => {
+                eprintln!("kyth-telem: pruned {sessions} session(s), {frames} orphan frame(s)")
+            }
+            Ok(_) => {}
+            Err(error) => eprintln!("kyth-telem: retention failed: {error}"),
+        }
         if once {
             break;
         }

@@ -64,6 +64,18 @@ class RustMigrationAcceptanceContractTest(unittest.TestCase):
         self.assertNotIn("podman build", self.artifact_workflow)
         self.assertNotIn("Build ISO with Titanoboa", self.artifact_workflow)
 
+    def test_artifact_workflow_is_callable_and_runs_nightly(self):
+        self.assertIn("workflow_call:", self.artifact_workflow)
+        self.assertIn("schedule:", self.artifact_workflow)
+        self.assertIn("cron:", self.artifact_workflow)
+        # Nightly runs the promoted testing image, not a dispatch artifact.
+        self.assertIn("ghcr.io/kyth-os/kyth:testing", self.artifact_workflow)
+        self.assertIn("iso-testing", self.artifact_workflow)
+        # The nightly run must fail on a nonzero acceptance exit: it gates
+        # nothing, so silence would hide regressions.
+        self.assertNotIn("continue-on-error", self.artifact_workflow)
+        self.assertNotIn("|| true", self.artifact_workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -330,7 +330,7 @@ lint:
         echo "shellcheck could not be found. Please install it."
         exit 1
     fi
-    /usr/bin/find . -iname "*.sh" -type f -exec shellcheck "{}" ';'
+    /usr/bin/find . \( -path './tmp' -o -path './output' -o -path '*/node_modules' -o -path './venv' -o -path './.venv*' \) -prune -o -iname "*.sh" -type f -exec shellcheck "{}" ';'
 
 # Runs shfmt on all Bash scripts
 [group('Quality')]
@@ -341,7 +341,7 @@ format:
         echo "shfmt could not be found. Please install it."
         exit 1
     fi
-    /usr/bin/find . -iname "*.sh" -type f -exec shfmt --write "{}" ';'
+    /usr/bin/find . \( -path './tmp' -o -path './output' -o -path '*/node_modules' -o -path './venv' -o -path './.venv*' \) -prune -o -iname "*.sh" -type f -exec shfmt --write "{}" ';'
 
 # Format every tracked Rust project using its Cargo manifest.
 [group('Quality')]

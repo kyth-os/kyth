@@ -82,10 +82,72 @@ expected_digest="${INSTALL_SOURCE_IMAGE##*@}"
 release_digest="${embedded_digest}"
 [[ "${expected_digest}" == sha256:* ]] && release_digest="${expected_digest}"
 target_image="ghcr.io/kyth-os/kyth:${SOURCE_TAG}"
+
+# ── Registry signature gate: cosign-verify at ISO build time ─────────────────
+# The installer daemon re-verifies this digest AND the embedded signature
+# bundle before any bootc install. Loopback registries and non-registry
+# transports are unsigned dev inputs: recorded explicitly as "local", never
+# as verified.
+signature_bundle="/usr/share/kyth/image.sig.bundle.json"
+signature_state="local"
+signature_digest=""
+cosign_registry_ref=""
+case "${source_imgref}" in
+	docker://localhost:*|docker://127.0.0.1:*|docker://\[::1\]*)
+		echo "NOTE: live installer source is a loopback test registry; skipping cosign verification (recorded as unsigned local source)." >&2
+		;;
+	docker://*)
+		cosign_registry_ref="${source_imgref#docker://}"
+		cosign_registry_ref="${cosign_registry_ref%@*}"
+		;;
+	*)
+		echo "NOTE: live installer source is a non-registry transport (${source_imgref%%:*}); skipping cosign verification (recorded as unsigned local source)." >&2
+		;;
+esac
+if [ -n "${cosign_registry_ref}" ]; then
+	cosign_transient=""
+	if ! command -v cosign >/dev/null 2>&1; then
+		# Transient, distro-signed verification tool only: removed again
+		# below so it never lands in the live image.
+		if command -v dnf5 >/dev/null 2>&1; then
+			dnf5 install -y cosign
+		else
+			dnf install -y cosign
+		fi
+		cosign_transient="yes"
+	fi
+	cosign_identity="${KYTH_COSIGN_IDENTITY:-^https://github.com/.+/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$}"
+	cosign_issuer="https://token.actions.githubusercontent.com"
+	cosign verify \
+		--certificate-identity-regexp "${cosign_identity}" \
+		--certificate-oidc-issuer "${cosign_issuer}" \
+		"${cosign_registry_ref}@${embedded_digest}" \
+		|| { echo "ERROR: cosign verification failed for ${cosign_registry_ref}@${embedded_digest}" >&2; exit 1; }
+	signatures="$(cosign download signature "${cosign_registry_ref}@${embedded_digest}")" \
+		|| { echo "ERROR: could not download signature bundle for ${cosign_registry_ref}@${embedded_digest}" >&2; exit 1; }
+	[ -n "${signatures}" ] \
+		|| { echo "ERROR: empty signature bundle for ${cosign_registry_ref}@${embedded_digest}" >&2; exit 1; }
+	signatures_json="$(printf '%s\n' "${signatures}" | sed -e 's/^/"/' -e 's/$/"/' | paste -sd, -)"
+	printf '{"schema_version":1,"digest":"%s","release_digest":"%s","source_image":"%s","identity":"%s","issuer":"%s","signatures":[%s]}\n' \
+		"${embedded_digest}" "${release_digest}" "${INSTALL_SOURCE_IMAGE}" \
+		"${cosign_identity}" "${cosign_issuer}" "${signatures_json}" \
+		>"${signature_bundle}"
+	chmod 0644 "${signature_bundle}"
+	signature_digest="sha256:$(sha256sum "${signature_bundle}" | awk '{print $1}')"
+	signature_state="verified"
+	if [ -n "${cosign_transient}" ]; then
+		if command -v dnf5 >/dev/null 2>&1; then
+			dnf5 remove -y cosign
+		else
+			dnf remove -y cosign
+		fi
+	fi
+fi
 printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\nKYTH_INSTALLER_SOCKET=/run/kyth-installer/api.sock\nKYTH_INSTALLER_SOCKET_GROUP=liveuser\nKYTH_INSTALLER_TOKEN_FILE=/run/kyth-installer/session-token\n' \
 	"${target_image}" "${embedded_digest}" >/etc/kyth-installer.env
-printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"%s","source_image":"%s"}\n' \
+printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"%s","source_image":"%s","signature":"%s","signature_digest":"%s"}\n' \
 	"${embedded_digest}" "${release_digest}" "${target_image}" "${INSTALL_SOURCE_IMAGE}" \
+	"${signature_state}" "${signature_digest}" \
 	>/usr/share/kyth/image-source.json
 
 # Install live-only packages in one transaction so dependency solving and
@@ -208,6 +270,21 @@ chown liveuser:liveuser \
     /home/liveuser/.config/kscreenlockerrc
 [ -f /home/liveuser/Desktop/install-kyth.desktop ] && \
     chmod +x /home/liveuser/Desktop/install-kyth.desktop
+# Live-session ephemerality notice: the live desktop runs on an in-memory
+# overlay, so files, settings, and installed apps vanish on reboot. This
+# runs only on live boots (livesys-session-extra never executes on an
+# installed system), so the notice cannot leak onto installed machines.
+mkdir -p /etc/motd.d /etc/issue.d
+cat > /etc/motd.d/kyth-live-session <<'MOTDEOF'
+*******************************************************************************
+ KythOS live session — everything here is ephemeral.
+ Files, settings, and installed apps are lost on reboot.
+ To keep anything, install KythOS to this computer first.
+*******************************************************************************
+MOTDEOF
+printf '%s\n' '' 'KythOS live session — ephemeral: all changes are lost on reboot.' '' \
+    > /etc/issue.d/kyth-live-session.conf
+chmod 0644 /etc/motd.d/kyth-live-session /etc/issue.d/kyth-live-session.conf
 EOF
 chmod +x /var/lib/livesys/livesys-session-extra
 
@@ -331,6 +408,12 @@ Relogin=false
 EOF
 
 # ── Disable services inappropriate for live ───────────────────────────────────
+# Live-only differences are scoped to the live kernel cmdline (kyth.live=1,
+# see installer/iso.yaml): the live payload image IS the installed system,
+# so a hard mask (ln -sf /dev/null) would persist into installed systems and
+# block those units there forever. Each unit instead gets a drop-in that
+# skips it only on live boots; installed boots follow normal enablement.
+# `disable` keeps them from auto-starting anywhere by default.
 for unit in \
 	ostree-remount.service \
 	rpm-ostree-countme.service rpm-ostree-countme.timer \
@@ -344,7 +427,9 @@ for unit in \
 	plasma-setup.service scxd.service \
 	fwupd.service fwupd-refresh.service fwupd-refresh.timer; do
 	systemctl disable "${unit}" 2>/dev/null || true
-	ln -sf /dev/null "/etc/systemd/system/${unit}"
+	mkdir -p "/etc/systemd/system/${unit}.d"
+	printf '%s\n' '[Unit]' 'ConditionKernelCommandLine=!kyth.live=1' \
+		>"/etc/systemd/system/${unit}.d/kyth-live-only.conf"
 done
 
 # The acceptance unit is intentionally present in the installed image. Keep

@@ -18,7 +18,23 @@ def _build_bootc_install_cmd(
     tgt_ref: str,
     target: str,
     extra_flags: list[str] | None = None,
+    encryption: str = "none",
 ) -> list[str]:
+    # Encryption is explicit and fail-closed: "none" emits plaintext
+    # --block-setup direct deliberately, "tpm2" selects TPM2-bound LUKS, and
+    # anything else (or encryption on to-filesystem, where bootc offers no
+    # block-setup knob) raises instead of silently installing plaintext.
+    mode = (encryption or "none").strip().lower()
+    if mode not in ("none", "tpm2"):
+        raise RuntimeError(
+            f"encryption unsupported: {encryption!r} is not a supported encryption mode "
+            "(expected 'none' or 'tpm2')."
+        )
+    if mode == "tpm2" and subcmd == "to-filesystem":
+        raise RuntimeError(
+            "encryption unsupported for bootc to-filesystem installs: "
+            "encryption requires a to-disk install."
+        )
     cmd: list[str] = [
         "bootc",
         "install",
@@ -28,6 +44,8 @@ def _build_bootc_install_cmd(
         "--target-imgref",
         tgt_ref,
     ]
+    if subcmd == "to-disk":
+        cmd.extend(["--block-setup", "tpm2-luks" if mode == "tpm2" else "direct"])
     if subcmd == "to-filesystem":
         cmd.append("--acknowledge-destructive")
     if extra_flags:

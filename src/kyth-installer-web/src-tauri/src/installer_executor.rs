@@ -80,6 +80,7 @@ mod tests {
                 skip_finalize: false,
                 root_subvolume: false,
                 wipe: true,
+                encryption: "none".to_string(),
             },
             configuration: ConfigurationInput {
                 target_root: "/mnt/target".to_string(),
@@ -125,6 +126,7 @@ mod tests {
                 skip_finalize: false,
                 root_subvolume: false,
                 wipe: true,
+                encryption: "none".into(),
             },
             configuration: ConfigurationInput {
                 target_root: "/mnt/target".into(),

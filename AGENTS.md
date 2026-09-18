@@ -18,9 +18,10 @@ If you are about to open a PR, stop and push to `testing` instead. Promotion to 
 
 ## Live-desktop validation
 
-`build_files/scripts/validate.sh` defaults to `--fast` on a live Plasma
-session (WAYLAND_DISPLAY/DISPLAY/KDE) — it skips the heavy 600s
-`unittest discover` and only runs linters/syntax/security gates under
+`build_files/scripts/validate.sh` runs the full suite everywhere by default;
+`--fast` (skip the heavy 600s `unittest discover`) is strictly opt-in via
+the flag — there is no live-desktop autodetection, so local and CI runs see
+the same behavior. Linters/syntax/security gates always run under
 `systemd-run --scope CPUWeight=10 MemoryHigh=35% MemoryMax=55%`. The full
 suite is CI-gated (`validation.yml` → `build.yml`).
 

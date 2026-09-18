@@ -16,6 +16,10 @@ pub const CONFIG_FILENAME: &str = "sched-profiles.toml";
 pub const CONFIG_SECTION: &str = "scheduler";
 pub const STATUS_FILENAME: &str = "kyth-sched-status.json";
 pub const GAMING_CACHE_TTL: f64 = 60.0;
+/// `poll_interval` bounds: below this the daemon busy-loops against systemd
+/// and sysfs; above it gaming transitions feel stuck.
+pub const POLL_INTERVAL_MIN: f64 = 2.0;
+pub const POLL_INTERVAL_MAX: f64 = 60.0;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SchedConfig {
@@ -59,6 +63,36 @@ fn config_float(config: &BTreeMap<String, Json>, key: &str, fallback: f64) -> f6
         .unwrap_or(fallback)
 }
 
+/// Clamp a configured poll interval into `[POLL_INTERVAL_MIN,
+/// POLL_INTERVAL_MAX]`; non-finite values fall back to the default.
+pub fn clamp_poll_interval(value: f64) -> f64 {
+    if !value.is_finite() {
+        return SchedConfig::default().poll_interval;
+    }
+    value.clamp(POLL_INTERVAL_MIN, POLL_INTERVAL_MAX)
+}
+
+/// Collect per-UID query verdicts under a shared wall-clock deadline: the
+/// serial per-UID chain (each query can block for seconds on a dead user
+/// bus) stops at the first UID past the deadline instead of stalling the
+/// whole poll iteration.
+pub fn filter_uids_with_deadline(
+    uids: &[u32],
+    deadline: std::time::Instant,
+    query: &dyn Fn(u32) -> bool,
+) -> Vec<u32> {
+    let mut matched = Vec::new();
+    for uid in uids {
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        if query(*uid) {
+            matched.push(*uid);
+        }
+    }
+    matched
+}
+
 /// Load and merge the profile config: user file, system fallback,
 /// defaults. Mirrors `BaseDaemon.load_config` for this daemon.
 pub fn load_sched_config() -> SchedConfig {
@@ -72,7 +106,7 @@ pub fn load_sched_config() -> SchedConfig {
     SchedConfig {
         desktop_scheduler: config_string(&merged, "desktop_scheduler", "default"),
         gaming_scheduler: config_string(&merged, "gaming_scheduler", "scx_rusty"),
-        poll_interval: config_float(&merged, "poll_interval", 5.0),
+        poll_interval: clamp_poll_interval(config_float(&merged, "poll_interval", 5.0)),
         integrate_perf_mode: merged
             .get("integrate_perf_mode")
             .is_some_and(|value| match value {
@@ -388,6 +422,36 @@ mod tests {
         assert_eq!(config.gaming_scheduler, "scx_rusty");
         assert_eq!(config.poll_interval, 5.0);
         assert!(config.integrate_perf_mode);
+    }
+
+    #[test]
+    fn poll_interval_is_clamped_to_the_supported_range() {
+        assert_eq!(clamp_poll_interval(5.0), 5.0);
+        assert_eq!(clamp_poll_interval(2.0), 2.0);
+        assert_eq!(clamp_poll_interval(60.0), 60.0);
+        assert_eq!(clamp_poll_interval(0.5), POLL_INTERVAL_MIN);
+        assert_eq!(clamp_poll_interval(0.0), POLL_INTERVAL_MIN);
+        assert_eq!(clamp_poll_interval(-10.0), POLL_INTERVAL_MIN);
+        assert_eq!(clamp_poll_interval(120.0), POLL_INTERVAL_MAX);
+        assert_eq!(clamp_poll_interval(f64::INFINITY), 5.0);
+        assert_eq!(clamp_poll_interval(f64::NAN), 5.0);
+    }
+
+    #[test]
+    fn uid_queries_stop_at_the_shared_deadline() {
+        let query = |_: u32| true;
+        let future = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        assert_eq!(
+            filter_uids_with_deadline(&[1000, 1001, 1002], future, &query),
+            vec![1000, 1001, 1002]
+        );
+        let past = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        assert!(filter_uids_with_deadline(&[1000, 1001], past, &query).is_empty());
+        let selective = |uid: u32| uid == 1001;
+        assert_eq!(
+            filter_uids_with_deadline(&[1000, 1001, 1002], future, &selective),
+            vec![1001]
+        );
     }
 
     #[test]

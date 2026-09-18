@@ -37,6 +37,47 @@ class InstallerBootcCommandCoverageTests(unittest.TestCase):
         self.assertEqual(added[-2:], ["--skip-fetch-check", "/dev/sdb"])
         self.assertNotIn("--acknowledge-destructive", command)
 
+    def test_disk_command_defaults_to_explicit_direct_block_setup(self):
+        with patch.object(bootc_cmd, "SKIP_FETCH_CHECK", False):
+            command = bootc_cmd._build_bootc_install_cmd(
+                "to-disk", "source", "target", "/dev/sda"
+            )
+        self.assertIn("--block-setup", command)
+        self.assertEqual(
+            command[command.index("--block-setup") + 1], "direct"
+        )
+
+    def test_disk_command_tpm2_selects_tpm2_luks(self):
+        with patch.object(bootc_cmd, "SKIP_FETCH_CHECK", False):
+            command = bootc_cmd._build_bootc_install_cmd(
+                "to-disk", "source", "target", "/dev/sda",
+                ["--wipe"], encryption="tpm2",
+            )
+        self.assertEqual(
+            command[command.index("--block-setup") + 1], "tpm2-luks"
+        )
+        self.assertIn("--wipe", command)
+
+    def test_unknown_encryption_fails_closed_not_plaintext(self):
+        with self.assertRaisesRegex(RuntimeError, "encryption unsupported"):
+            bootc_cmd._build_bootc_install_cmd(
+                "to-disk", "source", "target", "/dev/sda",
+                encryption="luks",
+            )
+
+    def test_filesystem_install_rejects_encryption(self):
+        with self.assertRaisesRegex(RuntimeError, "encryption unsupported"):
+            bootc_cmd._build_bootc_install_cmd(
+                "to-filesystem", "source", "target", "/mnt/root",
+                encryption="tpm2",
+            )
+        # Plaintext filesystem installs carry no block-setup knob.
+        with patch.object(bootc_cmd, "SKIP_FETCH_CHECK", False):
+            command = bootc_cmd._build_bootc_install_cmd(
+                "to-filesystem", "source", "target", "/mnt/root"
+            )
+        self.assertNotIn("--block-setup", command)
+
     @patch("kyth_installer.install._as_root", side_effect=lambda argv: ["root", *argv])
     @patch.object(bootc_cmd, "get_rx_bytes", return_value=42)
     @patch.object(bootc_cmd, "StreamingCommandRunner")

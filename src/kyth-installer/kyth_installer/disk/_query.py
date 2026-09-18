@@ -1,4 +1,4 @@
-"""query — _partition_mountpoints, _is_active_mount, _descendant_mountpoints, list_disks, list_partitions, list_free_space, _partition_number, _partition_size_bytes, _partition_start_bytes, _partitions_after, _latest_partition_on_disk, list_filesystems"""
+"""query — _partition_mountpoints, _is_active_mount, _descendant_mountpoints, list_disks, list_partitions, list_free_space, _partition_number, _partition_size_bytes, _partition_start_bytes, _partitions_after, _latest_partition_on_disk, list_filesystems, storage_preflight, validate_storage_preflight"""
 
 from __future__ import annotations
 
@@ -11,6 +11,9 @@ from ..config import EFI_PART_GUID, MIN_KYTHOS_BYTES
 from kyth_shared import human_bytes as _human_size
 
 _logger = logging.getLogger(__name__)
+
+#: Microsoft basic-data GUID: the Windows-indicator partition type.
+WINDOWS_DATA_GUID = "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7"
 
 def _partition_mountpoints(child: dict) -> list[str]:
     mounts = child.get("mountpoints")
@@ -138,6 +141,61 @@ def list_partitions(disk: str, *, strict: bool = False):
             ) from exc
     return parts
 
+
+def storage_preflight(parts) -> dict:
+    """Derive ESP-preservation / Windows-indicator / BitLocker state.
+
+    Consumes ``list_partitions`` dicts — the same lsblk projection the typed
+    Rust preflight (``installer_storage::storage_preflight_from_snapshot``)
+    parses — so both paths share one detection source with identical
+    indicators.
+    """
+    report = {
+        "esp_present": False,
+        "esp_name": "",
+        "windows_present": False,
+        "bitlocker_locked": False,
+        "checked_partitions": 0,
+    }
+    for part in parts or []:
+        if not isinstance(part, dict):
+            continue
+        report["checked_partitions"] += 1
+        if part.get("efi") and not report["esp_present"]:
+            report["esp_present"] = True
+            report["esp_name"] = part.get("name") or ""
+        fstype = str(part.get("fstype") or "").lower()
+        parttype = str(part.get("parttype") or "").lower()
+        label = str(part.get("label") or "").lower()
+        if fstype in ("ntfs", "ntfs3") or parttype == WINDOWS_DATA_GUID or "windows" in label:
+            report["windows_present"] = True
+        # An explicit BitLocker type, or an NTFS volume with active mappings:
+        # the locked-BitLocker shape _encryption_check warns on.
+        if fstype == "bitlocker" or (fstype in ("ntfs", "ntfs3") and part.get("in_use")):
+            report["bitlocker_locked"] = True
+    return report
+
+
+def validate_storage_preflight(report: dict, install_mode: str = "alongside") -> None:
+    """Fail closed on locked BitLocker; require ESP preservation off-wipe.
+
+    Mirrors ``installer_storage::validate_storage_preflight``: locked
+    BitLocker blocks every mode, and every mode where bootc does not own the
+    whole-disk layout requires an existing ESP to preserve (``wipe``
+    recreates it via ``bootc to-disk``).
+    """
+    report = report or {}
+    if report.get("bitlocker_locked"):
+        raise RuntimeError(
+            "This disk has a locked BitLocker volume. Suspend or disable BitLocker "
+            "in Windows (manage-bde -off) and wait for decryption before installing."
+        )
+    if install_mode != "wipe" and not report.get("esp_present"):
+        raise RuntimeError(
+            "No EFI system partition was found on the target disk. The installer "
+            "preserves the existing ESP instead of formatting it; select a disk "
+            "with an ESP or erase the disk."
+        )
 
 
 def list_free_space(disk: str) -> list[dict]:

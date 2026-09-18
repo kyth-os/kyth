@@ -129,6 +129,135 @@ fn oci_layout_parts(reference: &str) -> Option<(PathBuf, String)> {
     }
 }
 
+fn metadata_path() -> PathBuf {
+    PathBuf::from(configured(
+        "KYTH_SOURCE_METADATA",
+        "/usr/share/kyth/image-source.json",
+    ))
+}
+
+fn signature_bundle_path() -> PathBuf {
+    PathBuf::from(configured(
+        "KYTH_SOURCE_SIGNATURE",
+        "/usr/share/kyth/image.sig.bundle.json",
+    ))
+}
+
+/// True when the ISO build-time source needed a registry cosign signature.
+///
+/// Loopback registries and non-registry transports are unsigned dev inputs;
+/// everything else must carry a verified signature bundle.
+fn registry_signed_source(source_image: &str) -> bool {
+    let image = source_image
+        .strip_prefix("docker://")
+        .unwrap_or(source_image);
+    if image.starts_with("oci:")
+        || image.starts_with("containers-storage:")
+        || image.starts_with("dir:")
+        || image.starts_with("ostree:")
+    {
+        return false;
+    }
+    !(image.starts_with("localhost:")
+        || image.starts_with("localhost/")
+        || image.starts_with("127.0.0.1")
+        || image.starts_with("[::1]"))
+}
+
+fn valid_base64_signature(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128 * 1024
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'+' | b'/' | b'='))
+}
+
+/// Verify the cosign signature bundle embedded at ISO build time.
+///
+/// `metadata.signature` is `"verified"` for registry builds — the bundle
+/// file's sha256 must equal `metadata.signature_digest` and the bundle's
+/// subject digest must equal the release digest — or `"local"` for unsigned
+/// loopback / non-registry dev sources. `"local"` is only accepted when the
+/// build-time source image itself is loopback/local; a registry image
+/// claiming to be local fails closed. Unknown states fail closed.
+fn verify_embedded_signature(
+    metadata: &Value,
+    digest: &str,
+    release_digest: &str,
+    bundle_path: &Path,
+) -> Result<(), String> {
+    let state = metadata
+        .get("signature")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if state == "local" {
+        let source_image = metadata
+            .get("source_image")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        if registry_signed_source(source_image) {
+            return Err(
+                "embedded image claims an unsigned local source but was built from a registry image"
+                    .to_string(),
+            );
+        }
+        return Ok(());
+    }
+    if state != "verified" {
+        return Err("embedded-image metadata has an unknown signature state".to_string());
+    }
+    regular_file(bundle_path)
+        .map_err(|error| format!("embedded signature bundle is missing or unsafe: {error}"))?;
+    let raw = fs::read(bundle_path)
+        .map_err(|error| format!("could not read embedded signature bundle: {error}"))?;
+    if raw.len() > MAX_PROBE_OUTPUT {
+        return Err("embedded signature bundle is too large".to_string());
+    }
+    let Some(bundle_hex) = bundle_path.to_str().and_then(|path| {
+        command_output("/usr/bin/sha256sum", &[path])
+            .ok()?
+            .split_whitespace()
+            .next()
+            .map(str::to_string)
+    }) else {
+        return Err("sha256sum returned no bundle digest".to_string());
+    };
+    let calculated = format!("sha256:{bundle_hex}");
+    let expected = metadata
+        .get("signature_digest")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if expected.is_empty() || expected != calculated {
+        return Err(
+            "embedded signature bundle does not match the digest pinned by this ISO release"
+                .to_string(),
+        );
+    }
+    let bundle: Value = serde_json::from_slice(&raw)
+        .map_err(|error| format!("embedded signature bundle is invalid: {error}"))?;
+    if bundle.get("schema_version").and_then(Value::as_u64) != Some(1) {
+        return Err("embedded signature bundle has an unsupported schema".to_string());
+    }
+    if bundle.get("digest").and_then(Value::as_str) != Some(digest)
+        || bundle.get("release_digest").and_then(Value::as_str) != Some(release_digest)
+    {
+        return Err("embedded signature bundle does not cover this ISO release digest".to_string());
+    }
+    let signed = bundle
+        .get("signatures")
+        .and_then(Value::as_array)
+        .is_some_and(|signatures| {
+            !signatures.is_empty()
+                && signatures
+                    .iter()
+                    .all(|entry| entry.as_str().is_some_and(valid_base64_signature))
+        });
+    if !signed {
+        return Err("embedded signature bundle carries no verifiable signature".to_string());
+    }
+    Ok(())
+}
+
 fn regular_file(path: &Path) -> Result<(), String> {
     let metadata = fs::symlink_metadata(path)
         .map_err(|error| format!("could not inspect source metadata: {error}"))?;
@@ -142,6 +271,20 @@ fn regular_file(path: &Path) -> Result<(), String> {
 }
 
 fn embedded_digest(reference: &str, target: &str) -> Result<String, String> {
+    embedded_digest_with_paths(
+        reference,
+        target,
+        &metadata_path(),
+        &signature_bundle_path(),
+    )
+}
+
+fn embedded_digest_with_paths(
+    reference: &str,
+    target: &str,
+    metadata_path: &Path,
+    bundle_path: &Path,
+) -> Result<String, String> {
     let (root, tag) = oci_layout_parts(reference)
         .ok_or_else(|| "embedded OCI image reference is invalid".to_string())?;
     let root_metadata = fs::symlink_metadata(&root)
@@ -203,13 +346,9 @@ fn embedded_digest(reference: &str, target: &str) -> Result<String, String> {
         return Err("embedded OCI manifest failed its SHA-256 integrity check".to_string());
     }
 
-    let metadata_path = PathBuf::from(configured(
-        "KYTH_SOURCE_METADATA",
-        "/usr/share/kyth/image-source.json",
-    ));
-    regular_file(&metadata_path)?;
+    regular_file(metadata_path)?;
     let metadata: Value = serde_json::from_slice(
-        &fs::read(&metadata_path)
+        &fs::read(metadata_path)
             .map_err(|error| format!("could not read embedded-image metadata: {error}"))?,
     )
     .map_err(|error| format!("embedded-image metadata is invalid: {error}"))?;
@@ -226,6 +365,20 @@ fn embedded_digest(reference: &str, target: &str) -> Result<String, String> {
             "embedded OCI image does not match the digest pinned by this ISO release".to_string(),
         );
     }
+    // The release digest is the ISO build's pinned expectation: manifest,
+    // metadata, release, and configured digests must all agree, and the
+    // build-time cosign bundle must still cover that digest.
+    let release_digest = metadata
+        .get("release_digest")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if release_digest != digest {
+        return Err(
+            "embedded OCI image does not match the release digest pinned by this ISO release"
+                .to_string(),
+        );
+    }
+    verify_embedded_signature(&metadata, digest, release_digest, bundle_path)?;
     if let Some(metadata_target) = metadata.get("target_image").and_then(Value::as_str) {
         if !metadata_target.is_empty() && metadata_target != target {
             return Err(
@@ -323,5 +476,195 @@ mod tests {
         assert!(value.get("kind").and_then(Value::as_str).is_some());
         assert!(value.get("message").and_then(Value::as_str).is_some());
         assert!(value.get("digest").and_then(Value::as_str).is_some());
+    }
+
+    struct EmbeddedFixture {
+        _directory: tempfile::TempDir,
+        reference: String,
+        digest: String,
+        metadata_path: PathBuf,
+        bundle_path: PathBuf,
+    }
+
+    fn sha256_hex(path: &Path) -> String {
+        command_output(
+            "/usr/bin/sha256sum",
+            &[path.to_str().expect("fixture path is UTF-8")],
+        )
+        .expect("sha256sum fixture probe")
+        .split_whitespace()
+        .next()
+        .expect("sha256sum fixture digest")
+        .to_string()
+    }
+
+    fn embedded_fixture(source_image: &str) -> EmbeddedFixture {
+        let directory = tempfile::tempdir().expect("fixture directory");
+        let root = directory.path().join("image");
+        let manifest = br#"{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{}}"#;
+        let blob_dir = root.join("blobs").join("sha256");
+        fs::create_dir_all(&blob_dir).expect("fixture blob directory");
+        fs::write(root.join("oci-layout"), r#"{"imageLayoutVersion":"1.0.0"}"#)
+            .expect("fixture layout");
+        // Write the blob first so its content-addressed name is real.
+        let probe = blob_dir.join("probe");
+        fs::write(&probe, manifest).expect("fixture probe blob");
+        let hex = sha256_hex(&probe);
+        let digest = format!("sha256:{hex}");
+        fs::rename(&probe, blob_dir.join(&hex)).expect("fixture manifest blob");
+        fs::write(
+            root.join("index.json"),
+            serde_json::json!({"manifests": [{
+                "digest": digest,
+                "annotations": {"org.opencontainers.image.ref.name": "latest"},
+            }]})
+            .to_string(),
+        )
+        .expect("fixture index");
+        let reference = format!("oci:{}:latest", root.display());
+        let bundle_path = directory.path().join("image.sig.bundle.json");
+        let bundle = serde_json::json!({
+            "schema_version": 1,
+            "digest": digest,
+            "release_digest": digest,
+            "source_image": source_image,
+            "identity": "test-identity",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "signatures": ["c2lnbmF0dXJlLW9uZQ=="],
+        });
+        fs::write(&bundle_path, bundle.to_string()).expect("fixture bundle");
+        let bundle_digest = format!("sha256:{}", sha256_hex(&bundle_path));
+        let metadata_path = directory.path().join("image-source.json");
+        fs::write(
+            &metadata_path,
+            serde_json::json!({
+                "schema_version": 1,
+                "digest": digest,
+                "release_digest": digest,
+                "target_image": "ghcr.io/kyth-os/kyth:testing",
+                "source_image": source_image,
+                "signature": "verified",
+                "signature_digest": bundle_digest,
+            })
+            .to_string(),
+        )
+        .expect("fixture metadata");
+        EmbeddedFixture {
+            _directory: directory,
+            reference,
+            digest,
+            metadata_path,
+            bundle_path,
+        }
+    }
+
+    #[test]
+    fn embedded_digest_requires_release_and_signature_agreement() {
+        let fixture = embedded_fixture("ghcr.io/kyth-os/kyth:testing");
+        let digest = embedded_digest_with_paths(
+            &fixture.reference,
+            "ghcr.io/kyth-os/kyth:testing",
+            &fixture.metadata_path,
+            &fixture.bundle_path,
+        )
+        .expect("verified embedded source should validate");
+        assert_eq!(digest, fixture.digest);
+    }
+
+    #[test]
+    fn embedded_digest_rejects_release_digest_mismatch() {
+        let fixture = embedded_fixture("ghcr.io/kyth-os/kyth:testing");
+        let mut metadata: Value =
+            serde_json::from_slice(&fs::read(&fixture.metadata_path).expect("fixture metadata"))
+                .expect("fixture metadata JSON");
+        metadata["release_digest"] = serde_json::json!(
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+        );
+        fs::write(&fixture.metadata_path, metadata.to_string()).expect("fixture metadata");
+        let error = embedded_digest_with_paths(
+            &fixture.reference,
+            "ghcr.io/kyth-os/kyth:testing",
+            &fixture.metadata_path,
+            &fixture.bundle_path,
+        )
+        .expect_err("release digest mismatch must fail closed");
+        assert!(error.contains("release digest"), "{error}");
+    }
+
+    #[test]
+    fn embedded_digest_rejects_tampered_signature_bundle() {
+        let fixture = embedded_fixture("ghcr.io/kyth-os/kyth:testing");
+        fs::write(&fixture.bundle_path, r#"{"schema_version":1}"#).expect("fixture bundle");
+        let error = embedded_digest_with_paths(
+            &fixture.reference,
+            "ghcr.io/kyth-os/kyth:testing",
+            &fixture.metadata_path,
+            &fixture.bundle_path,
+        )
+        .expect_err("tampered bundle must fail closed");
+        assert!(error.contains("signature"), "{error}");
+    }
+
+    #[test]
+    fn embedded_digest_rejects_bundle_covering_another_digest() {
+        let fixture = embedded_fixture("ghcr.io/kyth-os/kyth:testing");
+        let bundle: Value =
+            serde_json::from_slice(&fs::read(&fixture.bundle_path).expect("fixture bundle"))
+                .expect("fixture bundle JSON");
+        let mut metadata: Value =
+            serde_json::from_slice(&fs::read(&fixture.metadata_path).expect("fixture metadata"))
+                .expect("fixture metadata JSON");
+        // Re-point the bundle at another digest and re-pin it, so only the
+        // subject check can catch the mismatch.
+        let mut other = bundle.clone();
+        other["digest"] = serde_json::json!(
+            "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+        );
+        fs::write(&fixture.bundle_path, other.to_string()).expect("fixture bundle");
+        metadata["signature_digest"] =
+            serde_json::json!(format!("sha256:{}", sha256_hex(&fixture.bundle_path)));
+        fs::write(&fixture.metadata_path, metadata.to_string()).expect("fixture metadata");
+        let error = embedded_digest_with_paths(
+            &fixture.reference,
+            "ghcr.io/kyth-os/kyth:testing",
+            &fixture.metadata_path,
+            &fixture.bundle_path,
+        )
+        .expect_err("bundle subject mismatch must fail closed");
+        assert!(error.contains("signature bundle"), "{error}");
+    }
+
+    #[test]
+    fn embedded_digest_accepts_unsigned_local_dev_source_only() {
+        let fixture = embedded_fixture("docker://localhost:5000/kyth:dev");
+        let mut metadata: Value =
+            serde_json::from_slice(&fs::read(&fixture.metadata_path).expect("fixture metadata"))
+                .expect("fixture metadata JSON");
+        metadata["signature"] = serde_json::json!("local");
+        metadata["signature_digest"] = serde_json::json!("");
+        fs::write(&fixture.metadata_path, metadata.to_string()).expect("fixture metadata");
+        embedded_digest_with_paths(
+            &fixture.reference,
+            "ghcr.io/kyth-os/kyth:testing",
+            &fixture.metadata_path,
+            &fixture.bundle_path,
+        )
+        .expect("loopback dev source stays installable");
+
+        let registry = embedded_fixture("ghcr.io/kyth-os/kyth:testing");
+        let mut metadata: Value =
+            serde_json::from_slice(&fs::read(&registry.metadata_path).expect("fixture metadata"))
+                .expect("fixture metadata JSON");
+        metadata["signature"] = serde_json::json!("local");
+        metadata["signature_digest"] = serde_json::json!("");
+        fs::write(&registry.metadata_path, metadata.to_string()).expect("fixture metadata");
+        let error = embedded_digest_with_paths(
+            &registry.reference,
+            "ghcr.io/kyth-os/kyth:testing",
+            &registry.metadata_path,
+            &registry.bundle_path,
+        )
+        .expect_err("registry image claiming local must fail closed");
+        assert!(error.contains("unsigned local"), "{error}");
     }
 }

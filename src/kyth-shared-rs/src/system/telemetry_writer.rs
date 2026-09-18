@@ -17,6 +17,10 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_FRAMES_PER_SESSION: usize = 36_000;
+/// Sessions older than this are pruned by [`enforce_retention`].
+pub const TELEMETRY_RETENTION_DAYS: i64 = 90;
+/// Only the newest sessions are kept by [`enforce_retention`].
+pub const TELEMETRY_MAX_SESSIONS: i64 = 500;
 
 const SCHEMA: &str = r#"
 CREATE TABLE IF NOT EXISTS sessions (
@@ -100,6 +104,9 @@ pub fn open_database(path: impl AsRef<Path>) -> Result<Connection, String> {
     conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;")
         .map_err(|error| format!("could not configure telemetry database: {error}"))?;
     initialize_database(&conn)?;
+    // Drop frames left behind by an interrupted ingest: without this they
+    // accumulate against sessions that will never exist.
+    delete_orphan_frames(&conn)?;
     Ok(conn)
 }
 
@@ -421,6 +428,54 @@ fn derive_game_name_with_proc(stem: &str) -> (String, String) {
     )
 }
 
+/// Whether `source_file` already has a session row: duplicates are dropped
+/// by the scanner (their data is already ingested) while malformed files
+/// are kept for inspection.
+pub fn source_ingested(conn: &Connection, source_file: &str) -> Result<bool, String> {
+    let existing: Option<i64> = conn
+        .query_row(
+            "SELECT 1 FROM sessions WHERE source_file = ?1 LIMIT 1",
+            [source_file],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|error| format!("could not check telemetry duplicate: {error}"))?;
+    Ok(existing.is_some())
+}
+
+/// Delete frames referencing sessions that do not exist. Returns how many
+/// rows were removed.
+pub fn delete_orphan_frames(conn: &Connection) -> Result<usize, String> {
+    let removed = conn
+        .execute(
+            "DELETE FROM frames WHERE session_id NOT IN (SELECT id FROM sessions)",
+            [],
+        )
+        .map_err(|error| format!("could not delete orphan telemetry frames: {error}"))?;
+    Ok(removed)
+}
+
+/// Prune sessions older than [`TELEMETRY_RETENTION_DAYS`] and anything past
+/// the newest [`TELEMETRY_MAX_SESSIONS`], then drop newly orphaned frames.
+/// Returns `(sessions_removed, frames_removed)`.
+pub fn enforce_retention(conn: &Connection, now_unix: i64) -> Result<(usize, usize), String> {
+    let cutoff = now_unix - TELEMETRY_RETENTION_DAYS.saturating_mul(86_400);
+    let aged = conn
+        .execute(
+            "DELETE FROM sessions WHERE started_at < ?1",
+            params![cutoff],
+        )
+        .map_err(|error| format!("could not prune old telemetry sessions: {error}"))?;
+    let over = conn
+        .execute(
+            "DELETE FROM sessions WHERE id NOT IN (SELECT id FROM sessions ORDER BY started_at DESC, id DESC LIMIT ?1)",
+            params![TELEMETRY_MAX_SESSIONS],
+        )
+        .map_err(|error| format!("could not trim telemetry sessions: {error}"))?;
+    let orphans = delete_orphan_frames(conn)?;
+    Ok((aged + over, orphans))
+}
+
 pub fn scan_directory(
     conn: &mut Connection,
     directory: impl AsRef<Path>,
@@ -451,8 +506,14 @@ pub fn scan_directory(
         if age.is_none_or(|value| value < std::time::Duration::from_secs(min_file_age)) {
             continue;
         }
+        // The CSV has served its purpose once ingested: remove it so the
+        // landing zone does not grow without bound. Duplicates (already in
+        // the database) are removed too; malformed files are kept.
         if ingest_csv(conn, &path, ingested_at)? {
+            let _ = std::fs::remove_file(&path);
             count += 1;
+        } else if source_ingested(conn, &path.to_string_lossy()).unwrap_or(false) {
+            let _ = std::fs::remove_file(&path);
         }
     }
     Ok(count)
@@ -542,5 +603,129 @@ mod tests {
             .unwrap(),
             0
         );
+    }
+
+    fn seed_session(conn: &Connection, source: &str, started_at: i64) {
+        conn.execute(
+            "INSERT INTO sessions (game_name, source_file, started_at, ended_at, ingested_at) VALUES (?1, ?2, ?3, ?3, ?3)",
+            params![source, source, started_at],
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn scan_removes_ingested_csv_but_keeps_malformed_ones() {
+        let directory = tempdir().unwrap();
+        let sessions = directory.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let good = sessions.join("good_2025-01-15_14:22:01.csv");
+        std::fs::write(&good, "gpu\nAMD\ntime,fps,frametime\n0,60,16.6\n1,58,35\n").unwrap();
+        let bad = sessions.join("bad.csv");
+        std::fs::write(&bad, "gpu\nAMD\ntime,fps\n0,nan\n").unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        assert_eq!(
+            scan_directory(
+                &mut conn,
+                &sessions,
+                0,
+                SystemTime::now() + std::time::Duration::from_secs(20),
+                200
+            )
+            .unwrap(),
+            1
+        );
+        assert!(!good.exists(), "ingested CSV must be removed");
+        assert!(bad.exists(), "malformed CSV must be kept");
+    }
+
+    #[test]
+    fn duplicate_csv_is_dropped_without_reingest() {
+        let directory = tempdir().unwrap();
+        let sessions = directory.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let csv = sessions.join("dup_2025-01-15_14:22:01.csv");
+        let body = "gpu\nAMD\ntime,fps,frametime\n0,60,16.6\n1,58,35\n";
+        std::fs::write(&csv, body).unwrap();
+        let mut conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let now = SystemTime::now() + std::time::Duration::from_secs(20);
+        assert_eq!(
+            scan_directory(&mut conn, &sessions, 0, now, 200).unwrap(),
+            1
+        );
+        // Same content reappears (e.g. restored from backup): already in the
+        // database, so it is dropped without counting as a new ingest.
+        std::fs::write(&csv, body).unwrap();
+        assert_eq!(
+            scan_directory(&mut conn, &sessions, 0, now, 201).unwrap(),
+            0
+        );
+        assert!(!csv.exists());
+        let sessions_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(sessions_count, 1);
+    }
+
+    #[test]
+    fn retention_prunes_old_sessions_and_trims_to_the_cap() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        let now = 1_800_000_000i64;
+        let old = now - (TELEMETRY_RETENTION_DAYS + 1) * 86_400;
+        seed_session(&conn, "old.csv", old);
+        for index in 0..TELEMETRY_MAX_SESSIONS + 5 {
+            seed_session(&conn, &format!("game-{index}.csv"), now - index);
+        }
+        // Frames ride along with their session (schema cascades on delete).
+        conn.execute(
+            "INSERT INTO frames (session_id, ts, fps) VALUES ((SELECT id FROM sessions WHERE source_file = 'old.csv'), 0.0, 60.0)",
+            [],
+        )
+        .unwrap();
+        let (sessions_removed, _) = enforce_retention(&conn, now).unwrap();
+        assert_eq!(sessions_removed, 6, "1 aged + 5 over the cap");
+        let remaining: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(remaining, TELEMETRY_MAX_SESSIONS);
+        assert!(
+            !source_ingested(&conn, "old.csv").unwrap(),
+            "aged session must be gone"
+        );
+        assert!(
+            source_ingested(&conn, "game-0.csv").unwrap(),
+            "newest session must survive"
+        );
+    }
+
+    #[test]
+    fn orphan_frames_are_cleaned_up() {
+        let conn = Connection::open_in_memory().unwrap();
+        initialize_database(&conn).unwrap();
+        seed_session(&conn, "game.csv", 1_800_000_000);
+        let live: i64 = conn
+            .query_row("SELECT id FROM sessions LIMIT 1", [], |row| row.get(0))
+            .unwrap();
+        conn.execute(
+            "INSERT INTO frames (session_id, ts, fps) VALUES (?1, 0.0, 60.0)",
+            params![live],
+        )
+        .unwrap();
+        // Simulate a frame left behind by an interrupted ingest (foreign
+        // keys normally prevent this): relax enforcement just for the seed.
+        conn.execute_batch("PRAGMA foreign_keys=OFF").unwrap();
+        conn.execute(
+            "INSERT INTO frames (session_id, ts, fps) VALUES (424242, 0.0, 60.0)",
+            [],
+        )
+        .unwrap();
+        conn.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        assert_eq!(delete_orphan_frames(&conn).unwrap(), 1);
+        let frames: i64 = conn
+            .query_row("SELECT COUNT(*) FROM frames", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(frames, 1);
     }
 }

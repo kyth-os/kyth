@@ -1,6 +1,6 @@
 use serde_json::{json, Value};
 use std::path::Path;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MODEL_MANIFEST: &str = "/usr/share/kyth/guardian-model.json";
 const ALLOWED_PROBES: &[&str] = &[
@@ -117,9 +117,9 @@ fn disk_usage(path: &str) -> Option<(u64, u64)> {
     ))
 }
 
-fn firmware_metadata_fault() -> Option<String> {
-    let (ok, output) = run_output("fwupdmgr", &["get-updates"], 8)?;
-    if ok || output.is_empty() {
+fn firmware_fault_from(probe: &Option<(bool, String)>) -> Option<String> {
+    let (ok, output) = probe.as_ref()?;
+    if *ok || output.is_empty() {
         return None;
     }
     let lower = output.to_ascii_lowercase();
@@ -137,11 +137,80 @@ fn firmware_metadata_fault() -> Option<String> {
         ]
         .iter()
         .any(|needle| lower.contains(needle)))
-    .then_some(output)
+    .then(|| output.clone())
+}
+
+/// One concurrent sweep of the slow subprocess probes. `None` means the
+/// probe was skipped (shared deadline passed) or failed to spawn; the
+/// symptom logic below treats that as "no evidence", same as before.
+struct SlowProbes {
+    flatpak: Option<(bool, String)>,
+    firmware: Option<(bool, String)>,
+    net_state: Option<(bool, String)>,
+    vpn_listed: Option<(bool, String)>,
+    vpn_active: Option<(bool, String)>,
+    dns: Option<(bool, String)>,
+}
+
+fn bounded_probe(
+    deadline: Instant,
+    nominal_secs: u64,
+    program: &str,
+    args: &[&str],
+) -> Option<(bool, String)> {
+    let budget =
+        kyth_shared::guardian::shared_probe_timeout(deadline, Duration::from_secs(nominal_secs))?;
+    run_output(program, args, budget.as_secs().max(1))
+}
+
+fn collect_slow_probes(deadline: Instant) -> SlowProbes {
+    std::thread::scope(|scope| {
+        let flatpak = scope.spawn(|| {
+            bounded_probe(
+                deadline,
+                10,
+                "flatpak",
+                &["list", "--app", "--columns=application"],
+            )
+        });
+        let firmware = scope.spawn(|| bounded_probe(deadline, 8, "fwupdmgr", &["get-updates"]));
+        let net_state =
+            scope.spawn(|| bounded_probe(deadline, 5, "nmcli", &["-t", "-f", "STATE", "general"]));
+        let vpn_listed = scope.spawn(|| {
+            bounded_probe(
+                deadline,
+                5,
+                "nmcli",
+                &["-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"],
+            )
+        });
+        let vpn_active = scope.spawn(|| {
+            bounded_probe(
+                deadline,
+                5,
+                "nmcli",
+                &["-t", "-f", "NAME,TYPE", "connection", "show", "--active"],
+            )
+        });
+        let dns = scope.spawn(|| bounded_probe(deadline, 5, "resolvectl", &["status"]));
+        SlowProbes {
+            flatpak: flatpak.join().ok().flatten(),
+            firmware: firmware.join().ok().flatten(),
+            net_state: net_state.join().ok().flatten(),
+            vpn_listed: vpn_listed.join().ok().flatten(),
+            vpn_active: vpn_active.join().ok().flatten(),
+            dns: dns.join().ok().flatten(),
+        }
+    })
 }
 
 fn collect_symptoms() -> Vec<Value> {
     let mut symptoms = Vec::new();
+    // Slow subprocess probes (flatpak, fwupdmgr, nmcli, resolvectl) run
+    // concurrently under one shared deadline instead of serially, so the
+    // sweep costs max(probes) rather than sum(probes) against the unit's
+    // start timeout.
+    let slow = collect_slow_probes(Instant::now() + Duration::from_secs(90));
     let audio_down = ["pipewire.service", "wireplumber.service"]
         .iter()
         .filter(|unit| !unit_active(unit, true))
@@ -168,7 +237,7 @@ fn collect_symptoms() -> Vec<Value> {
             ));
         }
     }
-    if let Some((true, state)) = run_output("nmcli", &["-t", "-f", "STATE", "general"], 5) {
+    if let Some((true, state)) = slow.net_state.as_ref() {
         let state = state.trim();
         if state == "connected (local only)" {
             symptoms.push(symptom(
@@ -220,9 +289,7 @@ fn collect_symptoms() -> Vec<Value> {
             &["plasma.restart-user"],
         ));
     }
-    if let Some((ok, output)) =
-        run_output("flatpak", &["list", "--app", "--columns=application"], 10)
-    {
+    if let Some((ok, output)) = slow.flatpak.as_ref() {
         if !ok {
             symptoms.push(symptom(
                 "flatpak",
@@ -371,7 +438,7 @@ fn collect_symptoms() -> Vec<Value> {
             }
         }
     }
-    if let Some(output) = firmware_metadata_fault() {
+    if let Some(output) = firmware_fault_from(&slow.firmware) {
         symptoms.push(symptom(
             "firmware",
             "Firmware metadata refresh needed",
@@ -379,21 +446,12 @@ fn collect_symptoms() -> Vec<Value> {
             &["firmware.refresh"],
         ));
     }
-    let network_up =
-        run_output("nmcli", &["-t", "-f", "STATE", "general"], 5).is_some_and(|(ok, state)| {
-            ok && matches!(state.trim(), "connected" | "connected (local only)")
-        });
+    let network_up = slow.net_state.as_ref().is_some_and(|(ok, state)| {
+        *ok && matches!(state.trim(), "connected" | "connected (local only)")
+    });
     if network_up {
-        if let Some((true, listed)) = run_output(
-            "nmcli",
-            &["-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"],
-            5,
-        ) {
-            if let Some((true, active)) = run_output(
-                "nmcli",
-                &["-t", "-f", "NAME,TYPE", "connection", "show", "--active"],
-                5,
-            ) {
+        if let Some((true, listed)) = slow.vpn_listed.as_ref() {
+            if let Some((true, active)) = slow.vpn_active.as_ref() {
                 let active_vpn = active
                     .lines()
                     .filter_map(|line| line.rsplit_once(":vpn").map(|(name, _)| name.to_string()))
@@ -417,7 +475,7 @@ fn collect_symptoms() -> Vec<Value> {
                 }
             }
         }
-        if let Some((false, output)) = run_output("resolvectl", &["status"], 5) {
+        if let Some((false, output)) = slow.dns.as_ref() {
             if symptoms.iter().any(|item| {
                 item["component"] == "network"
                     && item["evidence"]

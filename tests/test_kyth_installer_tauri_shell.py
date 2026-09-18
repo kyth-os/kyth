@@ -98,15 +98,26 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertEqual(config["build"]["frontendDist"], "../dist")
         self.assertIn("127.0.0.1:7777", config["app"]["security"]["csp"])
         rust = SHELL_RS.read_text()
-        self.assertIn('const BACKEND_URL: &str = "http://127.0.0.1:7777";', rust)
-        self.assertIn("installer_connection", rust)
-        self.assertIn("installer_validate_plan", rust)
-        self.assertIn("installer_recovery_guidance", rust)
-        self.assertIn("installer_request", rust)
-        self.assertIn("installer_stream", rust)
-        self.assertIn("allowlisted_path", rust)
-        self.assertNotIn("Command::new", rust)
-        self.assertNotIn("std::fs", rust)
+        # Test-only fixture helpers live in the cfg(test) module at the end
+        # of the file; the bridge assertions apply to shipped code only.
+        production = rust.split("#[cfg(test)]")[0]
+        self.assertIn('const BACKEND_URL: &str = "http://127.0.0.1:7777";', production)
+        self.assertIn("installer_connection", production)
+        self.assertIn("installer_validate_plan", production)
+        self.assertIn("installer_recovery_guidance", production)
+        self.assertIn("installer_request", production)
+        self.assertIn("installer_stream", production)
+        self.assertIn("allowlisted_path", production)
+        self.assertNotIn("Command::new", production)
+        # The only filesystem read allowed in the unprivileged shell is the
+        # launcher-written 0600 tokens file (--tokens-file): no writes, no
+        # directory access, no generic bridge.
+        self.assertNotIn("std::fs::write", production)
+        self.assertNotIn("OpenOptions", production)
+        self.assertNotIn("create_dir", production)
+        self.assertNotIn("remove_file", production)
+        self.assertIn("--tokens-file", rust)
+        self.assertIn("load_tokens_file", rust)
 
     def test_launcher_starts_the_daemon_and_execs_the_native_shell(self):
         launcher = LAUNCHER.read_text()

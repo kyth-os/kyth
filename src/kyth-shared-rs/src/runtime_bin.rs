@@ -36,7 +36,11 @@ fn argv(program: &str, args: &[String]) -> Vec<String> {
 }
 
 fn run(program: &str, args: &[String]) -> io::Result<ExitCode> {
-    let output = run_bounded(&argv(program, args), COMMAND_TIMEOUT)?;
+    run_timeout(program, args, COMMAND_TIMEOUT)
+}
+
+fn run_timeout(program: &str, args: &[String], timeout: Duration) -> io::Result<ExitCode> {
+    let output = run_bounded(&argv(program, args), timeout)?;
     let stdout = redact_sensitive_text(&String::from_utf8_lossy(&output.stdout));
     let stderr = redact_sensitive_text(&String::from_utf8_lossy(&output.stderr));
     if !stdout.is_empty() {
@@ -1816,21 +1820,23 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
             run("kdeconnect-app", &[])
         }
         "default-flatpaks" => {
-            let apps = [
-                "com.valvesoftware.Steam",
-                "net.lutris.Lutris",
-                "com.heroicgameslauncher.hgl",
-                "org.videolan.VLC",
-                "com.brave.Browser",
-                "org.libreoffice.LibreOffice",
-            ];
-            run(
+            // System-wide, idempotent install with its own long timeout:
+            // a multi-GB first-boot pull must not share the 120 s bound.
+            // The versioned sentinel is stamped only on full success so a
+            // flaky first-online pull retries on the next boot.
+            let args = kyth_shared::default_flatpaks::install_args();
+            let result = run_timeout(
                 "flatpak",
-                &std::iter::once("install".to_string())
-                    .chain(std::iter::once("-y".to_string()))
-                    .chain(apps.into_iter().map(str::to_string))
-                    .collect::<Vec<_>>(),
-            )
+                &args,
+                kyth_shared::default_flatpaks::INSTALL_TIMEOUT,
+            )?;
+            if result != ExitCode::SUCCESS {
+                return Ok(result);
+            }
+            let sentinel = kyth_shared::default_flatpaks::sentinel_path();
+            write_atomic(Path::new(&sentinel), b"done\n")?;
+            println!("Default Flatpaks installed.");
+            Ok(ExitCode::SUCCESS)
         }
         "flathub-setup" => run(
             "flatpak",

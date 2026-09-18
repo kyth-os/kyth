@@ -2668,37 +2668,6 @@
     {
       "current_implementation": "data",
       "cutover": "replace installed kyth-guardian entry point after parity gates",
-      "exec_start": [],
-      "function_inventory": [
-        {
-          "name": "Unit:kyth-guardian.path",
-          "owner": "native::kyth-guardian",
-          "ownership": "native"
-        }
-      ],
-      "installed_implementation": "rust",
-      "migration_priority": 2,
-      "name": "kyth-guardian",
-      "owner": "native::kyth-guardian",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-guardian.path",
-      "priority": 0,
-      "reason": "native Rust crate or installed unit is already declared/packaged",
-      "resolved_target": "build_files/kyth-guardian.path",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "read-only",
-      "rollback": "restore previous installed kyth-guardian entry point",
-      "runtime_active": true,
-      "runtime_authority": "shell-orchestration",
-      "runtime_scope": "system-service",
-      "status": "done-native",
-      "surface": "systemd-unit"
-    },
-    {
-      "current_implementation": "data",
-      "cutover": "replace installed kyth-guardian entry point after parity gates",
       "exec_start": [
         "/usr/bin/kyth-guardian check"
       ],
@@ -10348,10 +10317,40 @@
     },
     {
       "current_implementation": "shell",
+      "cutover": "replace installed installer-build-hash.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/installer-build-hash.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "installer-build-hash.sh",
+      "owner": "fixture::build_files/scripts/installer-build-hash.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/installer-build-hash.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/installer-build-hash.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed installer-build-hash.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
       "cutover": "replace installed kernel-repair.sh entry point after parity gates",
       "function_inventory": [
         {
-          "name": "fi",
+          "name": "__main__",
           "owner": "fixture::build_files/scripts/kernel-repair.sh",
           "ownership": "build-only"
         }
@@ -11616,7 +11615,7 @@
       "cutover": "replace installed plymouth-initramfs.sh entry point after parity gates",
       "function_inventory": [
         {
-          "name": "__main__",
+          "name": "verify_branded_initramfs",
           "owner": "fixture::build_files/scripts/plymouth-initramfs.sh",
           "ownership": "build-only"
         }
@@ -12156,7 +12155,7 @@
       "cutover": "replace installed 07-kwin-vrr-policy-automatic-fullscreen-direct-scanou.sh entry point after parity gates",
       "function_inventory": [
         {
-          "name": "__main__",
+          "name": "END",
           "owner": "fixture::build_files/scripts/sysconfig/desktop/07-kwin-vrr-policy-automatic-fullscreen-direct-scanou.sh",
           "ownership": "build-only"
         }
@@ -12816,7 +12815,12 @@
       "cutover": "replace installed 15-bluetooth-enable-adapter-on-every-boot.sh entry point after parity gates",
       "function_inventory": [
         {
-          "name": "__main__",
+          "name": "skip_section",
+          "owner": "fixture::build_files/scripts/sysconfig/hardware/15-bluetooth-enable-adapter-on-every-boot.sh",
+          "ownership": "build-only"
+        },
+        {
+          "name": "END",
           "owner": "fixture::build_files/scripts/sysconfig/hardware/15-bluetooth-enable-adapter-on-every-boot.sh",
           "ownership": "build-only"
         }

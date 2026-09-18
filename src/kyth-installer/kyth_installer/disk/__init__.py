@@ -54,6 +54,8 @@ from ._query import (  # noqa: F401
     _partitions_after,
     _latest_partition_on_disk,
     list_filesystems,
+    storage_preflight,
+    validate_storage_preflight,
 )
 
 from ._lookup import (  # noqa: F401

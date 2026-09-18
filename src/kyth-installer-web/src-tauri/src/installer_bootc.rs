@@ -24,6 +24,14 @@ pub(crate) struct BootcInstallInput {
     pub root_subvolume: bool,
     #[serde(default)]
     pub wipe: bool,
+    /// Requested root-device encryption for `to-disk` installs.
+    ///
+    /// Accepted values are `"none"` (explicit plaintext, the default) and
+    /// `"tpm2"` (TPM2-bound LUKS via `bootc install to-disk --block-setup
+    /// tpm2-luks`). Any other value fails closed: the installer must never
+    /// silently fall back to plaintext when encryption was requested.
+    #[serde(default)]
+    pub encryption: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -72,6 +80,12 @@ pub(crate) fn build_plan(input: BootcInstallInput) -> Result<BootcInstallPlan, S
     }
     let source_imgref = safe_reference(&input.source_imgref, "source image reference")?;
     let target_imgref = safe_reference(&input.target_imgref, "target image reference")?;
+    let encryption = input.encryption.trim().to_ascii_lowercase();
+    if !matches!(encryption.as_str(), "" | "none" | "tpm2") {
+        return Err(format!(
+            "encryption unsupported: '{encryption}' is not a supported encryption mode (expected 'none' or 'tpm2')."
+        ));
+    }
     let target = if subcommand == "to-disk" {
         crate::installer_plan::normalize_device_path(&input.target)
             .ok_or_else(|| "bootc disk target must be a safe device path.".to_string())?
@@ -89,6 +103,15 @@ pub(crate) fn build_plan(input: BootcInstallInput) -> Result<BootcInstallPlan, S
         target_imgref,
     ];
     if subcommand == "to-filesystem" {
+        // `to-filesystem` writes into an already-prepared mountpoint, so
+        // bootc offers no block-setup knob there. Refuse encryption rather
+        // than silently installing plaintext.
+        if encryption == "tpm2" {
+            return Err(
+                "encryption unsupported for bootc to-filesystem installs: encryption requires a to-disk install."
+                    .to_string(),
+            );
+        }
         argv.push("--acknowledge-destructive".to_string());
         if input.skip_finalize {
             argv.push("--skip-finalize".to_string());
@@ -98,6 +121,19 @@ pub(crate) fn build_plan(input: BootcInstallInput) -> Result<BootcInstallPlan, S
         }
     } else {
         argv.extend(["--filesystem".to_string(), "btrfs".to_string()]);
+        // The requested encryption mode is always explicit on the bootc
+        // command line: `direct` for plaintext, `tpm2-luks` for TPM2-bound
+        // LUKS. Plaintext is therefore a deliberate choice, never a silent
+        // fallback when encryption was requested.
+        match encryption.as_str() {
+            "" | "none" => {
+                argv.extend(["--block-setup".to_string(), "direct".to_string()]);
+            }
+            "tpm2" => {
+                argv.extend(["--block-setup".to_string(), "tpm2-luks".to_string()]);
+            }
+            _ => unreachable!("encryption modes are validated above"),
+        }
         if input.wipe {
             argv.push("--wipe".to_string());
         }
@@ -133,6 +169,7 @@ mod tests {
             skip_finalize: false,
             root_subvolume: false,
             wipe: false,
+            encryption: "none".to_string(),
         }
     }
 
@@ -190,5 +227,65 @@ mod tests {
         })
         .expect_err("unsafe image reference must fail");
         assert!(error.contains("image reference"));
+    }
+
+    #[test]
+    fn encryption_defaults_to_explicit_plaintext_block_setup() {
+        let plan = build_plan(input("to-disk")).expect("disk plan should validate");
+        assert!(plan
+            .argv
+            .windows(2)
+            .any(|pair| pair == ["--block-setup", "direct"]));
+        assert!(!plan
+            .argv
+            .windows(2)
+            .any(|pair| pair == ["--block-setup", "tpm2-luks"]));
+    }
+
+    #[test]
+    fn tpm2_encryption_selects_tpm2_luks_block_setup() {
+        let plan = build_plan(BootcInstallInput {
+            encryption: "tpm2".to_string(),
+            wipe: true,
+            ..input("to-disk")
+        })
+        .expect("tpm2 disk plan should validate");
+        assert!(plan
+            .argv
+            .windows(2)
+            .any(|pair| pair == ["--block-setup", "tpm2-luks"]));
+        assert!(!plan
+            .argv
+            .windows(2)
+            .any(|pair| pair == ["--block-setup", "direct"]));
+    }
+
+    #[test]
+    fn unknown_encryption_fails_closed_instead_of_plaintext() {
+        for mode in ["luks", "tpm", "aes-256", "yes"] {
+            let error = build_plan(BootcInstallInput {
+                encryption: mode.to_string(),
+                ..input("to-disk")
+            })
+            .expect_err("unknown encryption mode must fail closed");
+            assert!(
+                error.contains("encryption unsupported"),
+                "unexpected error: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn filesystem_install_cannot_honor_encryption() {
+        let error = build_plan(BootcInstallInput {
+            encryption: "tpm2".to_string(),
+            target: "/mnt/kyth".to_string(),
+            ..input("to-filesystem")
+        })
+        .expect_err("to-filesystem cannot honor encryption");
+        assert!(
+            error.contains("encryption unsupported"),
+            "unexpected error: {error}"
+        );
     }
 }

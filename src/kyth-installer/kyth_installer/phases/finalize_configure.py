@@ -44,6 +44,15 @@ def configure_installed_system(
             create_installer_user(
                 config_root, deploy_root, username, request.password_hash, log, progress,
             )
+        else:
+            # Fail-closed: an installed system with no login account is a
+            # lockout. The installer UI requires credentials up front, so
+            # reaching this branch means a headless/answer-file invocation
+            # omitted them — fail the install rather than ship it.
+            raise RuntimeError(
+                "Install request has no user credentials; refusing to finish "
+                "an install with no login account."
+            )
 
         checks = validate_installed_target(Path(etc), request, root=Path(config_root))
         context.assurance_checks.extend(check.as_dict() for check in checks)

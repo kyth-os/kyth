@@ -92,10 +92,22 @@ def create_installer_user(
     config_root, deploy_root, username, password_hash, log, progress,
     *, creator, ensure_accounts, format_error,
 ) -> None:
+    """Create the installed system's initial user. Fail-closed.
+
+    A system with no user is a lockout: there would be no way to log in
+    after first boot. User-creation failure therefore raises instead of
+    warning and continuing — the install fails rather than shipping an
+    inaccessible system.
+    """
     run_command = phase_dependency("run_command")
     as_root = phase_dependency("_as_root")
     executor = PrivilegedExecutor(run_command=run_command, as_root=as_root)
     log(f"Creating user: {username}")
+    if not username:
+        raise RuntimeError(
+            "No install user was configured; refusing to finish an install "
+            "with no login account."
+        )
     try:
         if shutil.which("kyth-installer-exec"):
             payload = {
@@ -129,8 +141,12 @@ def create_installer_user(
         ensure_accounts(deploy_root, log)
         progress(97)
     except OSError as exc:
-        log(f"Warning: user creation failed: {format_error(exc)}")
-        log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
+        raise OSError(
+            f"User creation failed, refusing to finish an install with no "
+            f"login account: {format_error(exc)}"
+        ) from exc
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
-        log(f"Warning: user creation failed: {exc}")
-        log("You can create a user after first boot with: sudo useradd -m -G wheel USERNAME")
+        raise RuntimeError(
+            f"User creation failed, refusing to finish an install with no "
+            f"login account: {exc}"
+        ) from exc

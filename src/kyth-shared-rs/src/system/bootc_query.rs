@@ -320,6 +320,32 @@ pub fn image_digest(data: &Value, section: &str) -> Option<(String, String)> {
     Some((full[7..].chars().take(12).collect(), full[7..].to_string()))
 }
 
+/// Read the human-readable image version for one bootc status section.
+///
+/// bootc reports the OCI `org.opencontainers.image.version` label (when the
+/// publisher sets one) alongside each deployment. The exact key varies by
+/// bootc release, so probe the known shapes and return the first non-empty
+/// value. `None` means the version is unavailable — callers must treat the
+/// release as unorderable, never as version zero.
+pub fn image_version_from_status(data: &Value, section: &str) -> Option<String> {
+    for path in [
+        vec!["status", section, "image", "imageVersion"],
+        vec!["status", section, "image", "version"],
+        vec!["status", section, "imageVersion"],
+        vec!["status", section, "version"],
+    ] {
+        if let Some(v) = nested_get(data, &path.to_vec()) {
+            if let Some(s) = v.as_str() {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -56,4 +56,4 @@ fi
 systemctl --global enable kyth-telem.service 2>/dev/null || true
 systemctl --global enable kyth-probe.timer 2>/dev/null || true
 systemctl --global enable kyth-guardian.timer 2>/dev/null || true
-systemctl --global enable kyth-guardian.path 2>/dev/null || true
+# kyth-guardian.path removed (probe-cache check storm); timer only.

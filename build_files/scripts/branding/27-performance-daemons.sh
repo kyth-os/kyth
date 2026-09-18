@@ -39,7 +39,8 @@ install -m 0644 /ctx/kyth-probe.timer /usr/lib/systemd/system/kyth-probe.timer
 
 install -m 0644 /ctx/kyth-guardian.service /usr/lib/systemd/user/kyth-guardian.service
 install -m 0644 /ctx/kyth-guardian.timer /usr/lib/systemd/user/kyth-guardian.timer
-install -m 0644 /ctx/kyth-guardian.path /usr/lib/systemd/user/kyth-guardian.path
+# kyth-guardian.path was removed: the probe-cache path trigger caused a
+# check storm, so guardian runs on its 15-min timer only.
 # kyth-guardian is the native Rust binary copied from the hub-web-builder
 # stage. The legacy Python launcher remains source-only during migration.
 install -Dm0644 /ctx/config/guardian-model.json /usr/share/kyth/guardian-model.json

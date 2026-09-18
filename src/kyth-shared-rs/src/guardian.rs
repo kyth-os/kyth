@@ -355,16 +355,47 @@ fn executor_supported(id: &str) -> bool {
 }
 
 /// Persist Guardian state for the native service and the Tauri command path.
-/// The write remains atomic so a concurrent Hub read sees either the previous
-/// state or the complete new state.
+///
+/// Writers (timer service vs. Hub-initiated repairs) serialize on an
+/// exclusive flock of the state file itself, so overlapping runs never
+/// interleave a torn write; the payload still lands via an atomic rename,
+/// so a concurrent Hub read sees either the previous state or the complete
+/// new state.
 pub fn save_state(state: &Value) -> Result<(), String> {
-    let path = state_path();
+    save_state_to(state, &state_path())
+}
+
+/// `save_state` against an explicit path — same "explicit path for tests"
+/// shape as `load_state_from`.
+pub fn save_state_to(state: &Value, path: &Path) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "invalid Guardian state path".to_string())?;
     std::fs::create_dir_all(parent)
         .map_err(|_| "could not create Guardian state directory".to_string())?;
-    let temp = path.with_extension("json.tmp");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(path)
+        .map_err(|_| "could not lock Guardian state".to_string())?;
+    rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive)
+        .map_err(|_| "could not lock Guardian state".to_string())?;
+    let result = save_state_locked(state, path);
+    drop(lock);
+    result
+}
+
+/// Sibling temporary name that is unique per process and instant, so two
+/// writers racing in the same directory never share a staging file.
+pub fn temp_state_name(stem: &str, pid: u32, nonce: u128) -> String {
+    format!(".{stem}.tmp-{pid}-{nonce}")
+}
+
+fn save_state_locked(state: &Value, path: &Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "invalid Guardian state path".to_string())?;
     let mut normalized = state.clone();
     if let Some(history) = normalized.get_mut("history").and_then(Value::as_array_mut) {
         coalesce_recommendations(history);
@@ -373,13 +404,46 @@ pub fn save_state(state: &Value) -> Result<(), String> {
             history.drain(0..keep_from);
         }
     }
-    std::fs::write(
-        &temp,
-        serde_json::to_vec_pretty(&normalized)
-            .map_err(|_| "could not encode Guardian state".to_string())?,
-    )
-    .map_err(|_| "could not write Guardian state".to_string())?;
-    std::fs::rename(temp, path).map_err(|_| "could not commit Guardian state".to_string())
+    let bytes = serde_json::to_vec_pretty(&normalized)
+        .map_err(|_| "could not encode Guardian state".to_string())?;
+    let stem = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("guardian.json");
+    // `create_new` retries on collision: pid + nanos is unique in practice,
+    // but two saves in the same tick must not truncate each other's stage.
+    let temp = (0..8)
+        .find_map(|_| {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|span| span.as_nanos())
+                .unwrap_or(0);
+            let candidate = parent.join(temp_state_name(stem, std::process::id(), nonce));
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&candidate)
+                .ok()
+                .map(|_| candidate)
+        })
+        .ok_or_else(|| "could not stage Guardian state".to_string())?;
+    let staged = (|| {
+        std::fs::write(&temp, &bytes).map_err(|_| "could not write Guardian state".to_string())?;
+        // fsync the payload before the rename so a crash never leaves a
+        // torn state file behind.
+        std::fs::File::open(&temp)
+            .and_then(|file| file.sync_all())
+            .map_err(|_| "could not sync Guardian state".to_string())?;
+        std::fs::rename(&temp, path).map_err(|_| "could not commit Guardian state".to_string())?;
+        if let Ok(directory) = std::fs::File::open(parent) {
+            let _ = directory.sync_all();
+        }
+        Ok::<(), String>(())
+    })();
+    if staged.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    staged
 }
 
 fn coalesce_recommendations(history: &mut Vec<Value>) {
@@ -600,20 +664,50 @@ fn empty_state() -> Value {
 /// Port of `guardian.py`'s `load_state()` from an explicit path — `path`
 /// overrides `state_path()`, same "explicit path for tests" shape as
 /// `system::probe::read_section_in`.
+///
+/// Reads take a shared flock so they never observe a half-renamed write.
+/// Corrupt JSON is never silently reset: the payload is preserved at
+/// `guardian.json.corrupt` and the corruption is logged, then an empty
+/// state is returned.
 pub fn load_state_from(path: &Path) -> Value {
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return empty_state();
+    let mut file = match std::fs::OpenOptions::new().read(true).open(path) {
+        Ok(file) => file,
+        Err(_) => return empty_state(),
     };
-    let Ok(value) = serde_json::from_str::<Value>(&raw) else {
-        return empty_state();
-    };
-    if !value.is_object() {
+    let _ = rustix::fs::flock(&file, rustix::fs::FlockOperation::LockShared);
+    let mut raw = String::new();
+    if std::io::Read::read_to_string(&mut file, &mut raw).is_err() {
         return empty_state();
     }
-    if !value.get("history").is_some_and(Value::is_array) {
-        return empty_state();
+    drop(file);
+    match serde_json::from_str::<Value>(&raw) {
+        Ok(value) if value.is_object() && value.get("history").is_some_and(Value::is_array) => {
+            value
+        }
+        _ => {
+            let backup = path.with_extension("json.corrupt");
+            let _ = std::fs::write(&backup, raw.as_bytes());
+            eprintln!(
+                "kyth-guardian: corrupt state at {} backed up to {}; starting fresh",
+                path.display(),
+                backup.display()
+            );
+            empty_state()
+        }
     }
-    value
+}
+
+/// Wall-clock budget left for one slow probe under a shared collection
+/// deadline: the probe runs with `min(nominal, remaining)`, and is skipped
+/// (`None`) once the deadline has passed. Keeps the serial tail of
+/// `guardian_bin::collect_symptoms` bounded however many slow probes pile
+/// up; see the concurrent spawn there.
+pub fn shared_probe_timeout(deadline: std::time::Instant, nominal: Duration) -> Option<Duration> {
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    if remaining.is_zero() {
+        return None;
+    }
+    Some(remaining.min(nominal))
 }
 
 /// `load_state_from` against the real on-disk `state_path()` — what every
@@ -767,6 +861,69 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let state = load_state_from(&dir.path().join("guardian.json"));
         assert_eq!(state, empty_state());
+        assert!(!dir.path().join("guardian.json.corrupt").exists());
+    }
+
+    #[test]
+    fn corrupt_state_is_backed_up_not_silently_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guardian.json");
+        std::fs::write(&path, "{ torn json").unwrap();
+        let state = load_state_from(&path);
+        assert_eq!(state, empty_state());
+        let backup = dir.path().join("guardian.json.corrupt");
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), "{ torn json");
+    }
+
+    #[test]
+    fn wrong_shaped_state_is_backed_up_not_silently_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guardian.json");
+        std::fs::write(&path, r#"{"history": {}}"#).unwrap();
+        assert_eq!(load_state_from(&path), empty_state());
+        assert!(dir.path().join("guardian.json.corrupt").is_file());
+    }
+
+    #[test]
+    fn save_state_to_roundtrips_and_leaves_no_staging_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guardian.json");
+        let state = serde_json::json!({ "schema_version": 1, "history": [], "occurrences": {} });
+        save_state_to(&state, &path).unwrap();
+        save_state_to(&state, &path).unwrap();
+        assert_eq!(load_state_from(&path), state);
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn temp_names_carry_pid_and_instant() {
+        let name = temp_state_name("guardian.json", 4242, 123456789);
+        assert!(name.starts_with(".guardian.json.tmp-"));
+        assert!(name.contains("4242"));
+        assert!(name.contains("123456789"));
+        assert_ne!(
+            temp_state_name("guardian.json", 4242, 1),
+            temp_state_name("guardian.json", 4242, 2)
+        );
+    }
+
+    #[test]
+    fn shared_probe_timeout_clamps_to_the_deadline() {
+        let generous = std::time::Instant::now() + Duration::from_secs(60);
+        assert_eq!(
+            shared_probe_timeout(generous, Duration::from_secs(10)),
+            Some(Duration::from_secs(10))
+        );
+        let tight = std::time::Instant::now() + Duration::from_millis(100);
+        let budget = shared_probe_timeout(tight, Duration::from_secs(10)).unwrap();
+        assert!(budget <= Duration::from_secs(10));
+        let past = std::time::Instant::now() - Duration::from_secs(1);
+        assert_eq!(shared_probe_timeout(past, Duration::from_secs(10)), None);
     }
 
     /// Advisory recipes are notifications: `guardian.py` gives them an empty

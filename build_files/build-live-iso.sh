@@ -133,4 +133,12 @@ mv "${WORK}/KYTHOS-44-LIVE.iso" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 sudo chown "$(id -u):$(id -g)" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 test -r "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 test -w "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
+# 8.5 GiB hard ceiling, matching the CI gate in build-live-iso.yml.
+iso_size="$(stat -c%s "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso")"
+iso_limit=$((8 * 1024 * 1024 * 1024 + 512 * 1024 * 1024))
+echo "==> ISO size: $((iso_size / 1024 / 1024)) MiB (limit $((iso_limit / 1024 / 1024)) MiB)"
+if ((iso_size > iso_limit)); then
+	echo "ERROR: ISO exceeds the 8.5 GiB ceiling by $(((iso_size - iso_limit) / 1024 / 1024)) MiB" >&2
+	exit 1
+fi
 echo "==> KythOS live ISO ready: ${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"

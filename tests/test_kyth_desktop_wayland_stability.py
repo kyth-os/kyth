@@ -208,32 +208,85 @@ class DesktopStackTests(unittest.TestCase):
 
 
 class VrrApplyTests(unittest.TestCase):
-    def test_apply_writes_vrrpolicy_and_nightcolor(self):
+    def test_apply_is_per_output_only_and_never_forces_nightcolor_mode(self):
         from kyth_shared import vrr as vrr_mod
 
         calls: list[list[str]] = []
 
         def fake_run(args, **_kwargs):
             calls.append(list(args))
+            if args[:2] == ["kscreen-doctor", "-o"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="Output: 1 DP-1\nconnected\nenabled\n",
+                    stderr="",
+                )
             return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        def fake_which(name):
+            if name == "kscreen-doctor":
+                return "/usr/bin/kscreen-doctor"
+            return None
 
         with mock.patch.object(vrr_mod, "_kwriteconfig_bin", return_value="kwriteconfig6"), mock.patch.object(
             vrr_mod, "run", side_effect=fake_run
         ), mock.patch.object(vrr_mod, "_reconfigure_kwin"), mock.patch.object(
             vrr_mod, "_atomic_write_text"
-        ), mock.patch.object(vrr_mod.shutil, "which", return_value=None):
+        ), mock.patch.object(
+            vrr_mod.shutil, "which", side_effect=fake_which
+        ):
             notes = vrr_mod.apply_vrr(
                 {
                     "outputs": {"DP-1": {"vrr": "always"}},
                     "night": {"enabled": True, "temperature": 4200},
                 }
             )
-        self.assertTrue(any("VrrPolicy=2" in n for n in notes))
+        self.assertTrue(any("DP-1.vrrpolicy.always" in n for n in notes))
         self.assertTrue(any("NightColor.Active=True" in n for n in notes))
         self.assertTrue(any("NightTemperature=4200" in n for n in notes))
         groups_keys = {(c[c.index("--group") + 1], c[c.index("--key") + 1]) for c in calls if "--group" in c}
-        self.assertIn(("Wayland", "VrrPolicy"), groups_keys)
+        # Per-output only: no global Wayland VrrPolicy write from this tool.
+        self.assertNotIn(("Wayland", "VrrPolicy"), groups_keys)
+        # NightColor mode is never forced (would clobber location schedules).
+        self.assertNotIn(("NightColor", "Mode"), groups_keys)
+        self.assertIn(("NightColor", "Active"), groups_keys)
         self.assertIn(("NightColor", "NightTemperature"), groups_keys)
+
+    def test_night_disabled_leaves_nightcolor_untouched(self):
+        from kyth_shared import vrr as vrr_mod
+
+        calls: list[list[str]] = []
+
+        def fake_run(args, **_kwargs):
+            calls.append(list(args))
+            if args[:2] == ["kscreen-doctor", "-o"]:
+                return SimpleNamespace(
+                    returncode=0,
+                    stdout="Output: 1 DP-1\nconnected\nenabled\n",
+                    stderr="",
+                )
+            return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        def fake_which(name):
+            if name == "kscreen-doctor":
+                return "/usr/bin/kscreen-doctor"
+            return None
+
+        with mock.patch.object(vrr_mod, "_kwriteconfig_bin", return_value="kwriteconfig6"), mock.patch.object(
+            vrr_mod, "run", side_effect=fake_run
+        ), mock.patch.object(vrr_mod, "_reconfigure_kwin"), mock.patch.object(
+            vrr_mod, "_atomic_write_text"
+        ), mock.patch.object(
+            vrr_mod.shutil, "which", side_effect=fake_which
+        ):
+            notes = vrr_mod.apply_vrr(
+                {
+                    "outputs": {"DP-1": {"vrr": "adaptive"}},
+                    "night": {"enabled": False, "temperature": 4500},
+                }
+            )
+        self.assertTrue(any("DP-1.vrrpolicy.automatic" in n for n in notes))
+        self.assertFalse(any("NightColor" in arg for call in calls for arg in call))
 
 
 class ScalingApplyTests(unittest.TestCase):

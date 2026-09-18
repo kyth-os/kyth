@@ -4,17 +4,68 @@ set -euo pipefail
 
 source "../../lib/config-helpers.sh"
 
-# ── WiFi — disable power management ──────────────────────────────────────────
-# Linux WiFi power-save throttles the radio when idle, reducing signal
-# sensitivity and causing apparent "weak signal" even close to the AP.
-# NetworkManager powersave=2 disables it at the connection level (all adapters).
+# ── WiFi power management — on by default, off on AC or while gaming ──────────
+# Blanket powersave=off trades battery for latency on every machine, including
+# laptops on battery where the radio is the biggest idle drain. Default to
+# powersave on (3); the dispatcher below turns the radio's power_save off while
+# on AC power or while a game runs, and back on otherwise.
 write_config /etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'NMEOF'
 [connection]
-wifi.powersave = 2
+# 3 = enable powersave (battery-friendly default). Scoped off on AC / gaming
+# by 99-kyth-wifi-powersave (dispatcher.d) — do not force 2 here.
+wifi.powersave = 3
 NMEOF
+
+write_config /etc/NetworkManager/dispatcher.d/99-kyth-wifi-powersave 0755 <<'NMPSEOF'
+#!/usr/bin/env bash
+# kyth wifi powersave scope: power_save off on AC or while gaming, on otherwise.
+set -u
+
+iface="${1:-${DEVICE_IFACE:-}}"
+action="${2:-${NM_DISPATCHER_ACTION:-}}"
+case "${action}" in
+    up|connectivity-change) ;;
+    *) exit 0 ;;
+esac
+[[ -n "${iface}" ]] || exit 0
+command -v iw >/dev/null 2>&1 || exit 0
+[[ -d "/sys/class/net/${iface}/wireless" || -d "/sys/class/net/${iface}/phy80211" ]] || exit 0
+
+# Explicit operator override wins: /etc/kyth/wifi-powersave.conf with
+# KYTH_WIFI_POWERSAVE=off|on.
+if [[ -f /etc/kyth/wifi-powersave.conf ]]; then
+    # shellcheck disable=SC1091
+    source /etc/kyth/wifi-powersave.conf
+    case "${KYTH_WIFI_POWERSAVE:-}" in
+        off) iw dev "${iface}" set power_save off >/dev/null 2>&1 || true; exit 0 ;;
+        on) iw dev "${iface}" set power_save on >/dev/null 2>&1 || true; exit 0 ;;
+    esac
+fi
+
+# Gaming opts out of powersave: kyth-game-launch marks /run/kyth/gaming-hint.
+if [[ -f /run/kyth/gaming-hint ]]; then
+    iw dev "${iface}" set power_save off >/dev/null 2>&1 || true
+    exit 0
+fi
+
+# On AC power the latency win is free; on battery keep the radio throttled.
+on_ac=1
+for psu in /sys/class/power_supply/AC* /sys/class/power_supply/ADP*; do
+    [[ -f "${psu}/online" ]] || continue
+    [[ "$(cat "${psu}/online" 2>/dev/null)" == "1" ]] || on_ac=0
+done
+if [[ "${on_ac}" -eq 1 ]]; then
+    iw dev "${iface}" set power_save off >/dev/null 2>&1 || true
+else
+    iw dev "${iface}" set power_save on >/dev/null 2>&1 || true
+fi
+NMPSEOF
 
 write_config /etc/NetworkManager/dispatcher.d/90-kyth-prefer-last-wifi 0755 <<'NMDISPEOF'
 #!/usr/bin/env bash
+# Prefer the just-connected wifi network by raising its autoconnect priority.
+# Never touches other profiles: disabling their autoconnect stranded users
+# whose remembered home/work networks stopped reconnecting after one travel SSID.
 set -u
 
 action="${2:-${NM_DISPATCHER_ACTION:-}}"
@@ -37,18 +88,6 @@ esac
 nmcli connection modify "${uuid}" \
     connection.autoconnect yes \
     connection.autoconnect-priority 100 >/dev/null 2>&1 || exit 0
-
-while IFS=: read -r other_uuid other_type; do
-    [[ -n "${other_uuid}" && "${other_uuid}" != "${uuid}" ]] || continue
-    case "${other_type}" in
-        802-11-wireless|wifi) ;;
-        *) continue ;;
-    esac
-
-    autoconnect="$(nmcli -g connection.autoconnect connection show "${other_uuid}" 2>/dev/null || true)"
-    [[ "${autoconnect}" == "yes" ]] || continue
-    nmcli connection modify "${other_uuid}" connection.autoconnect no >/dev/null 2>&1 || true
-done < <(nmcli -t -f UUID,TYPE connection show 2>/dev/null || true)
 NMDISPEOF
 
 install -d -m 0755 /usr/libexec

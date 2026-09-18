@@ -36,11 +36,14 @@ def _cases() -> list[dict]:
 def _snapshot() -> StorageSnapshot:
     return StorageSnapshot(
         disks=({"name": "/dev/sda", "size_bytes": 200 * 1024**3},),
-        partitions=({
-            "name": "/dev/sda2",
-            "fstype": "ntfs",
-            "size_bytes": 200 * 1024**3,
-        },),
+        partitions=(
+            {"name": "/dev/sda1", "fstype": "vfat", "efi": True},
+            {
+                "name": "/dev/sda2",
+                "fstype": "ntfs",
+                "size_bytes": 200 * 1024**3,
+            },
+        ),
         free_regions=({"start_bytes": 10, "end_bytes": 5},),
         efi_partition="/dev/sda1",
         is_gpt=False,

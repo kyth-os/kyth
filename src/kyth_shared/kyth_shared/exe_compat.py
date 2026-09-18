@@ -1,9 +1,11 @@
 """EXE compat checker — compat.json offline Wine/Bottles/Proton per exe sha256."""
 from __future__ import annotations
 
-import hashlib, json
+import hashlib, json, shutil
 from pathlib import Path
 from typing import Any
+
+from kyth_shared.commands import run as run_command
 
 DEFAULT_COMPAT_PATH = Path("/usr/share/kyth/compat.json")
 
@@ -16,6 +18,23 @@ def load_compat(path: Path | None = None) -> dict[str, Any]:
         return json.loads(p.read_text(encoding="utf-8"))
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         return {"entries": {}}
+
+def bottles_available() -> bool:
+    """True when a Bottles runner is actually installed (native or Flatpak)."""
+    if shutil.which("bottles-cli") or shutil.which("bottles"):
+        return True
+    flatpak = shutil.which("flatpak")
+    if flatpak:
+        try:
+            res = run_command(
+                [flatpak, "info", "com.usebottles.bottles"],
+                capture_output=True, timeout=10, check=False,
+            )
+            if res.returncode == 0:
+                return True
+        except (OSError, ValueError, RuntimeError):
+            pass
+    return False
 
 def check_exe(exe_path: Path | str, compat: dict[str, Any] | None = None) -> dict[str, str]:
     if compat is None:
@@ -36,4 +55,10 @@ def check_exe(exe_path: Path | str, compat: dict[str, Any] | None = None) -> dic
     for bad in ("easyanticheat","eac","vgc","battleye"):
         if bad in name:
             return {"status": "Blocked", "runner": "Anti-cheat", "reason": f"Contains {bad} — blocked"}
-    return {"status": "Works", "runner": "Bottles", "reason": "Offline DB: best-effort Wine"}
+    if bottles_available():
+        return {"status": "Works", "runner": "Bottles", "reason": "Offline DB: best-effort Wine"}
+    return {
+        "status": "Unknown",
+        "runner": "Wine (unverified)",
+        "reason": "Bottles is not installed, so this could not be verified — try Bottles, Lutris, or plain Wine",
+    }

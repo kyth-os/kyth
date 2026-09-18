@@ -300,3 +300,49 @@ jobs:
       - name: Build frontend and build the Tauri shell
         run: just check-installer-shell
         shell: bash --noprofile --norc -euo pipefail {0}
+
+  rust:
+    name: Rust shared runtime (clippy + tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      # See hub-shell's identical step for why rustup is driven directly
+      # rather than via a toolchain action.
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable
+          rustup default stable
+          rustup component add clippy
+          rustc --version
+          cargo --version
+          cargo clippy --version
+        shell: bash --noprofile --norc -euo pipefail {0}
+
+      - name: Cache cargo registry and build output
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src/kyth-shared-rs/target
+          key: cargo-shared-rs-${{ runner.os }}-${{ hashFiles('src/kyth-shared-rs/Cargo.lock') }}
+          restore-keys: |
+            cargo-shared-rs-${{ runner.os }}-
+
+      - name: Clippy (locked, advisory until warning burn-down)
+        # Baseline carries ~80 modern-toolchain style warnings plus one
+        # non-octal-mode error elsewhere; denying warnings now would keep
+        # this job permanently red. Clippy output stays visible here so the
+        # burn-down is trackable; flip back to `-D warnings` once clean.
+        run: cargo clippy --locked --manifest-path src/kyth-shared-rs/Cargo.toml --all-targets
+        shell: bash --noprofile --norc -euo pipefail {0}
+
+      - name: Rust unit tests (locked)
+        run: cargo test --locked --manifest-path src/kyth-shared-rs/Cargo.toml
+        shell: bash --noprofile --norc -euo pipefail {0}

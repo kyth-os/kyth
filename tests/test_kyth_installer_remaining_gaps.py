@@ -177,13 +177,15 @@ class FinalizePhaseCoverageTests(unittest.TestCase):
         self.assertIn("/var/home", append.call_args_list[0].args[1])
         self.assertIn(" none swap ", append.call_args_list[1].args[1])
 
-    def test_user_creation_failure_is_nonfatal(self):
+    def test_user_creation_failure_is_fatal(self):
+        # Fail-closed contract: a system with no login account is a
+        # lockout, so user-creation failure raises instead of warning.
         log = mock.MagicMock()
         progress = mock.MagicMock()
         with mock.patch.object(finalize, "_shared_create_installer_user", side_effect=OSError("bad user")):
-            finalize._create_installer_user("/config", "/deploy", "alice", "hash", log, progress)
+            with self.assertRaisesRegex(OSError, "refusing to finish an install"):
+                finalize._create_installer_user("/config", "/deploy", "alice", "hash", log, progress)
         progress.assert_not_called()
-        self.assertTrue(any("user creation failed" in str(call).lower() for call in log.call_args_list))
 
 
 class RunPhaseCoverageTests(unittest.TestCase):
@@ -282,30 +284,62 @@ class InstallerAppCoverageTests(unittest.TestCase):
         server = mock.MagicMock()
         proc = mock.MagicMock()
         proc.wait.side_effect = KeyboardInterrupt
-        with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
-            app, "_Server", return_value=server
-        ), mock.patch.object(app.threading, "Thread") as thread, mock.patch.object(
-            app.time, "sleep"
-        ), mock.patch.object(app.shutil, "which", side_effect=lambda name: name == "chromium-browser"), mock.patch.object(
-            app, "spawn_command", return_value=proc
-        ) as spawn, mock.patch.dict(os.environ, {}, clear=True):
-            app.main()
+        seen = {}
+        real_write = app._write_chromium_launcher
+
+        def spy_launcher(path, *, port, bootstrap_token, owner_uid=None):
+            real_write(path, port=port, bootstrap_token=bootstrap_token, owner_uid=owner_uid)
+            seen["mode"] = os.stat(path).st_mode & 0o777
+            seen["body"] = Path(path).read_text(encoding="utf-8")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "session-token"
+            with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
+                app, "SESSION_TOKEN_FILE", token_file
+            ), mock.patch.object(app, "_Server", return_value=server
+            ), mock.patch.object(app.threading, "Thread") as thread, mock.patch.object(
+                app.time, "sleep"
+            ), mock.patch.object(app.shutil, "which", side_effect=lambda name: name == "chromium-browser"), mock.patch.object(
+                app, "spawn_command", return_value=proc
+            ) as spawn, mock.patch(
+                "subprocess.run", side_effect=OSError("loginctl unavailable")
+            ), mock.patch.object(
+                app, "_write_chromium_launcher", side_effect=spy_launcher
+            ), mock.patch.dict(os.environ, {}, clear=True):
+                app.main()
         thread.return_value.start.assert_called_once()
         self.assertEqual(spawn.call_args.args[0][0], "chromium-browser")
+        # Secrets travel via the 0600 launcher file, never argv or URL.
+        command = spawn.call_args.args[0]
+        self.assertFalse(any("bootstrap_token=" in part for part in command))
+        self.assertEqual(seen["mode"], 0o600)
+        self.assertIn(app.config._bootstrap_token, seen["body"])
         proc.terminate.assert_called_once()
 
     def test_gui_main_preserves_display_environment_for_sudo_user(self):
         proc = mock.MagicMock()
-        with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
-            app, "_Server"
-        ), mock.patch.object(app.threading, "Thread"), mock.patch.object(app.time, "sleep"), mock.patch.object(
-            app.shutil, "which", return_value="/usr/bin/chromium"
-        ), mock.patch.object(app, "spawn_command", return_value=proc) as spawn, mock.patch.dict(
-            os.environ, {"SUDO_USER": "alice", "DISPLAY": ":0"}, clear=True
-        ):
-            app.main()
+        with tempfile.TemporaryDirectory() as tmp:
+            token_file = Path(tmp) / "session-token"
+            with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
+                app, "SESSION_TOKEN_FILE", token_file
+            ), mock.patch.object(app, "_Server"), mock.patch.object(
+                app.threading, "Thread"
+            ), mock.patch.object(app.time, "sleep"), mock.patch.object(
+                app.shutil, "which", return_value="/usr/bin/chromium"
+            ), mock.patch.object(
+                app, "spawn_command", return_value=proc
+            ) as spawn, mock.patch(
+                "subprocess.run", side_effect=OSError("loginctl unavailable")
+            ), mock.patch.dict(
+                os.environ, {"SUDO_USER": "alice", "DISPLAY": ":0"}, clear=True
+            ):
+                app.main()
         command = spawn.call_args.args[0]
         self.assertEqual(command[:5], ["sudo", "-u", "alice", "env", "DISPLAY=:0"])
+        # Tokens travel via --tokens-file, never argv.
+        self.assertIn("--tokens-file", command)
+        self.assertNotIn("--session-token", command)
+        self.assertNotIn("--bootstrap-token", command)
 
     def test_gui_main_uses_unix_service_and_cleans_up(self):
         proc = mock.MagicMock()
@@ -381,8 +415,11 @@ class InstallerAppCoverageTests(unittest.TestCase):
         )
         for environment, loginctl_results, expected_user in cases:
             with self.subTest(environment=environment):
-                with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
-                    app, "_Server"
+                with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+                    sys, "argv", ["kyth-installer"]
+                ), mock.patch.object(
+                    app, "SESSION_TOKEN_FILE", Path(tmp) / "session-token"
+                ), mock.patch.object(app, "_Server"
                 ), mock.patch.object(app.threading, "Thread"), mock.patch.object(app.time, "sleep"), mock.patch.object(
                     app.shutil, "which", return_value="/usr/bin/chromium"
                 ), mock.patch.object(app, "spawn_command", return_value=proc) as spawn, mock.patch(
@@ -396,8 +433,11 @@ class InstallerAppCoverageTests(unittest.TestCase):
 
     def test_gui_main_falls_back_when_session_owner_probes_fail(self):
         proc = mock.MagicMock()
-        with mock.patch.object(sys, "argv", ["kyth-installer"]), mock.patch.object(
-            app, "_Server"
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            sys, "argv", ["kyth-installer"]
+        ), mock.patch.object(
+            app, "SESSION_TOKEN_FILE", Path(tmp) / "session-token"
+        ), mock.patch.object(app, "_Server"
         ), mock.patch.object(app.threading, "Thread"), mock.patch.object(app.time, "sleep"), mock.patch.object(
             app.shutil, "which", return_value="/usr/bin/chromium"
         ), mock.patch.object(app, "spawn_command", return_value=proc), mock.patch(

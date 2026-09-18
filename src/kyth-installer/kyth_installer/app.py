@@ -69,6 +69,189 @@ def _write_session_token(path: os.PathLike[str] | str, token: str) -> None:
         os.close(fd)
 
 
+def _write_child_tokens(
+    path: os.PathLike[str] | str,
+    *,
+    bootstrap_token: str,
+    session_token: str,
+    owner_uid: int | None = None,
+) -> None:
+    """Hand backend tokens to the unprivileged GUI child via a 0600 file.
+
+    The child reads this file through ``--tokens-file``; tokens never appear
+    in argv (world-readable via /proc) or in a launcher URL. When the target
+    desktop user is known the file is chowned to them so a same-uid child can
+    read it while group/others still cannot.
+    """
+    if not bootstrap_token or not session_token:
+        raise ValueError("installer child tokens must both be non-empty")
+    payload = json.dumps(
+        {"bootstrap_token": bootstrap_token, "session_token": session_token},
+        separators=(",", ":"),
+    ).encode("ascii")
+    if len(payload) > 4096:
+        raise ValueError("installer child tokens are too large")
+    token_path = os.fspath(path)
+    parent = os.path.dirname(token_path)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    if os.path.lexists(token_path) and os.path.islink(token_path):
+        raise RuntimeError("installer child token path must not be a symlink")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(token_path, flags, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        if owner_uid is not None:
+            os.fchown(fd, owner_uid, -1)
+        os.write(fd, payload)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _write_chromium_launcher(
+    path: os.PathLike[str] | str,
+    *,
+    port: int,
+    bootstrap_token: str,
+    owner_uid: int | None = None,
+) -> None:
+    """Write the 0600 Chromium launcher page for the legacy browser fallback.
+
+    The bootstrap token lives inside this root-written file, so the Chromium
+    command line carries only a ``file://`` URL — never the token in argv or
+    in a ``?bootstrap_token=`` launcher URL. The page immediately navigates
+    to the backend, which consumes the one-time token and sets the session
+    cookie exactly as before.
+    """
+    if not bootstrap_token:
+        raise ValueError("installer bootstrap token must be non-empty")
+    page = (
+        "<!doctype html><html><head><meta charset=\"utf-8\">"
+        "<title>KythOS Installer</title></head><body>"
+        "<script>location.replace("
+        + json.dumps(f"http://127.0.0.1:{int(port)}/?bootstrap_token={bootstrap_token}")
+        + ");</script></body></html>\n"
+    ).encode("utf-8")
+    launcher_path = os.fspath(path)
+    parent = os.path.dirname(launcher_path)
+    os.makedirs(parent, mode=0o700, exist_ok=True)
+    if os.path.lexists(launcher_path) and os.path.islink(launcher_path):
+        raise RuntimeError("installer launcher path must not be a symlink")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(launcher_path, flags, 0o600)
+    try:
+        os.fchmod(fd, 0o600)
+        if owner_uid is not None:
+            os.fchown(fd, owner_uid, -1)
+        os.write(fd, page)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def _tokens_file_owner_uid(username: str) -> int | None:
+    """Resolve the desktop user's uid for child-token ownership, if known."""
+    if not username:
+        return None
+    try:
+        import pwd as _pwd
+
+        return int(_pwd.getpwnam(username).pw_uid)
+    except (KeyError, OSError, ValueError, AttributeError):
+        return None
+
+
+def _child_gui_command(
+    *,
+    installer_shell: str | None,
+    chromium_bin: str,
+    tokens_file: str,
+    launcher_file: str,
+    socket_path: str | None,
+) -> list[str]:
+    """Build the GUI child command without embedding secrets.
+
+    The native shell receives ``--tokens-file``; the Chromium fallback
+    receives a ``file://`` launcher page. Tokens travel via 0600 files only.
+    """
+    if installer_shell:
+        gui_cmd = [installer_shell, "--tokens-file", tokens_file]
+        if socket_path is not None:
+            gui_cmd.extend(["--socket-path", socket_path])
+        return gui_cmd
+    return [
+        chromium_bin,
+        f"--app=file://{launcher_file}",
+        "--disable-dev-shm-usage",
+        "--disable-extensions",
+        "--disable-translate",
+        "--no-first-run",
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--test-type",
+        "--password-store=basic",
+        "--window-size=1280,800",
+        "--window-position=0,0",
+    ]
+
+
+def _build_child_gui_command(
+    *,
+    installer_shell: str | None,
+    tokens_file: str,
+    launcher_file: str,
+    child_uid: int | None,
+) -> tuple[list[str], tuple[bool, bool]]:
+    """Write the child's 0600 token material and build its secret-free argv.
+
+    Native shell: writes the tokens file, returns ``--tokens-file`` argv.
+    Chromium fallback: writes the launcher page, returns ``file://`` argv.
+    Raises before returning when Unix transport is enabled but no native
+    shell exists; the caller tears down the just-started daemon.
+    The second return element reports ``(wrote_tokens, wrote_launcher)`` so
+    the caller can unlink single-use material afterwards.
+    """
+    bootstrap_token = config._bootstrap_token or ""
+    if installer_shell:
+        _write_child_tokens(
+            tokens_file,
+            bootstrap_token=bootstrap_token,
+            session_token=SESSION_TOKEN,
+            owner_uid=child_uid,
+        )
+        return _child_gui_command(
+            installer_shell=installer_shell,
+            chromium_bin="",
+            tokens_file=tokens_file,
+            launcher_file=launcher_file,
+            socket_path=str(SOCKET_PATH) if SOCKET_PATH is not None else None,
+        ), (True, False)
+    if SOCKET_PATH is not None:
+        raise RuntimeError(
+            "kyth-installer-native or kyth-installer-shell is required "
+            "when Unix transport is enabled"
+        )
+    chromium_bin = next(
+        (b for b in ("chromium", "chromium-browser", "chromium-bin") if shutil.which(b)),
+        "chromium",
+    )
+    # --no-sandbox remains only on the legacy Chromium fallback. The
+    # Tauri shell is unprivileged and uses WebKitGTK's normal sandbox.
+    _write_chromium_launcher(
+        launcher_file,
+        port=PORT,
+        bootstrap_token=bootstrap_token,
+        owner_uid=child_uid,
+    )
+    return _child_gui_command(
+        installer_shell=None,
+        chromium_bin=chromium_bin,
+        tokens_file=tokens_file,
+        launcher_file=launcher_file,
+        socket_path=None,
+    ), (False, True)
+
+
 def run_headless() -> None:
     parser = argparse.ArgumentParser(description="KythOS Installer Headless CLI")
     parser.add_argument("--headless", action="store_true", required=True)
@@ -264,42 +447,23 @@ def main() -> None:
         installer_shell = shutil.which("kyth-installer-native") or shutil.which("kyth-installer-shell")
     else:
         installer_shell = shutil.which("kyth-installer-shell") or shutil.which("kyth-installer-native")
-    if installer_shell:
-        gui_cmd = [
-            installer_shell,
-            "--bootstrap-token", config._bootstrap_token,
-            "--session-token", SESSION_TOKEN,
-        ]
-        if SOCKET_PATH is not None:
-            gui_cmd.extend(["--socket-path", str(SOCKET_PATH)])
-    else:
-        if SOCKET_PATH is not None:
-            if socket_service_started:
-                run_command(["systemctl", "stop", "kyth-installerd.service"], check=False, timeout=30)
-            if token_file is not None:
-                Path(token_file).unlink(missing_ok=True)
-            raise RuntimeError("kyth-installer-native or kyth-installer-shell is required when Unix transport is enabled")
-        chromium_bin = next(
-            (b for b in ("chromium", "chromium-browser", "chromium-bin") if shutil.which(b)),
-            "chromium",
-        )
-        # --no-sandbox remains only on the legacy Chromium fallback. The
-        # Tauri shell is unprivileged and uses WebKitGTK's normal sandbox.
-        gui_cmd = [
-            chromium_bin,
-            f"--app=http://127.0.0.1:{PORT}/?bootstrap_token={config._bootstrap_token}",
-            "--disable-dev-shm-usage",
-            "--disable-extensions",
-            "--disable-translate",
-            "--no-first-run",
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-            "--test-type",
-            "--password-store=basic",
-            "--window-size=1280,800",
-            "--window-position=0,0",
-        ]
+    # Tokens reach the GUI child through 0600 files only: the native shell
+    # gets --tokens-file and the Chromium fallback gets a file:// launcher
+    # page. Neither argv nor a launcher URL ever carries a secret.
+    child_dir = Path(SESSION_TOKEN_FILE).parent
+    tokens_file = str(child_dir / "child-tokens.json")
+    launcher_file = str(child_dir / "launcher.html")
+    child_uid = _tokens_file_owner_uid(sudo_user)
+    wrote_tokens = False
+    wrote_launcher = False
     try:
+        gui_cmd, wrote = _build_child_gui_command(
+            installer_shell=installer_shell,
+            tokens_file=tokens_file,
+            launcher_file=launcher_file,
+            child_uid=child_uid,
+        )
+        wrote_tokens, wrote_launcher = wrote
         if sudo_user:
             gui_env = []
             for key in (
@@ -335,6 +499,11 @@ def main() -> None:
             run_command(["systemctl", "stop", "kyth-installerd.service"], check=False, timeout=30)
         if token_file is not None:
             Path(token_file).unlink(missing_ok=True)
+        # Child token material is single-use: remove it when the GUI exits.
+        if wrote_tokens:
+            Path(tokens_file).unlink(missing_ok=True)
+        if wrote_launcher:
+            Path(launcher_file).unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

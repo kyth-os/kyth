@@ -15,6 +15,7 @@ ARG BASE_IMAGE=ghcr.io/kyth-os/kyth:latest
 # resulting clients are unprivileged. The native installer daemon owns the
 # root-facing Unix socket and all destructive installer operations.
 FROM registry.fedoraproject.org/fedora:44 AS installer-web-builder
+ARG INSTALLER_BUILD_HASH=unset
 RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
         cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \
         webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel gtk3-devel dbus-devel && \
@@ -34,6 +35,11 @@ COPY src/kyth-shared-rs /build/kyth-shared-rs
 # than editing the crate. See the top-level Dockerfile's identical comment.
 COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
 COPY src/kyth-installer-web /build/kyth-installer-web
+# Bust the builder cache whenever installer inputs change: without this,
+# Docker/Podman reuses stale npm/cargo layers because the COPY cache keys
+# only cover the copied trees, not their content at this layer. (The ARG
+# must be re-declared in this stage; the pre-FROM scope does not propagate.)
+RUN : "cache-bust:installer-web=${INSTALLER_BUILD_HASH}"
 WORKDIR /build/kyth-installer-web
 RUN rm -f node_modules && npm ci && npm run build
 WORKDIR /build/kyth-installer-web/src-tauri
@@ -49,6 +55,7 @@ RUN cargo build --release --locked && \
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG INSTALL_SOURCE_IMAGE=${BASE_IMAGE}
+ARG INSTALLER_BUILD_HASH=unset
 ARG SOURCE_TAG=latest
 
 COPY --from=installer-web-builder /build/kyth-installer-shell /usr/bin/kyth-installer-shell

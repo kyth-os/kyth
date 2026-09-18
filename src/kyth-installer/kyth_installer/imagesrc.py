@@ -5,6 +5,7 @@ reachability preflight, and kernel-flavor image derivation.
 import hashlib
 import json
 import logging
+import os
 import socket
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +14,92 @@ from .config import SOURCE_DIGEST, SOURCE_IMAGE, SOURCE_METADATA_FILE, TARGET_IM
 from .runner import run_command
 
 _logger = logging.getLogger(__name__)
+
+#: Override for the embedded cosign bundle (tests point this at a fixture).
+def _signature_bundle_path() -> Path:
+    return Path(os.environ.get("KYTH_SOURCE_SIGNATURE", "/usr/share/kyth/image.sig.bundle.json"))
+
+
+def _registry_signed_source(source_image: str) -> bool:
+    """True when the ISO build-time source needed a registry cosign signature.
+
+    Loopback registries and non-registry transports are unsigned dev inputs;
+    everything else must carry a verified signature bundle.
+    """
+    image = source_image.removeprefix("docker://")
+    if image.startswith(("oci:", "containers-storage:", "dir:", "ostree:")):
+        return False
+    return not (
+        image.startswith(("localhost:", "localhost/"))
+        or image.startswith("127.0.0.1")
+        or image.startswith("[::1]")
+    )
+
+
+def _valid_base64_signature(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(value)
+        and len(value) <= 128 * 1024
+        and all(char.isascii() and (char.isalnum() or char in "+/=") for char in value)
+    )
+
+
+def _verify_signature_bundle(
+    digest: str,
+    release_digest: str,
+    metadata: dict,
+    *,
+    bundle_path: Path | None = None,
+) -> None:
+    """Verify the cosign signature bundle embedded at ISO build time.
+
+    ``metadata["signature"]`` is ``"verified"`` for registry builds — the
+    bundle file's sha256 must equal ``metadata["signature_digest"]`` and the
+    bundle's subject digest must equal the release digest — or ``"local"``
+    for unsigned loopback / non-registry dev sources. ``"local"`` is only
+    accepted when the build-time source image itself is loopback/local; a
+    registry image claiming to be local fails closed.
+    """
+    state = str(metadata.get("signature") or "")
+    if state == "local":
+        if _registry_signed_source(str(metadata.get("source_image") or "")):
+            raise RuntimeError(
+                "embedded image claims an unsigned local source but was built from a registry image"
+            )
+        return
+    if state != "verified":
+        raise RuntimeError("embedded-image metadata has an unknown signature state")
+    path = bundle_path if bundle_path is not None else _signature_bundle_path()
+    try:
+        if path.is_symlink() or not path.is_file():
+            raise RuntimeError(f"embedded signature bundle is missing or unsafe: {path}")
+        raw = path.read_bytes()
+    except OSError as exc:
+        raise RuntimeError(f"could not read embedded signature bundle: {exc}") from exc
+    if len(raw) > 4 * 1024 * 1024:
+        raise RuntimeError("embedded signature bundle is too large")
+    calculated = f"sha256:{hashlib.sha256(raw).hexdigest()}"
+    expected = str(metadata.get("signature_digest") or "")
+    if not expected or expected != calculated:
+        raise RuntimeError(
+            "embedded signature bundle does not match the digest pinned by this ISO release"
+        )
+    try:
+        bundle = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise RuntimeError(f"embedded signature bundle is invalid: {exc}") from exc
+    if not isinstance(bundle, dict) or bundle.get("schema_version") != 1:
+        raise RuntimeError("embedded signature bundle has an unsupported schema")
+    if bundle.get("digest") != digest or bundle.get("release_digest") != release_digest:
+        raise RuntimeError(
+            "embedded signature bundle does not cover this ISO release digest"
+        )
+    signatures = bundle.get("signatures")
+    if not signatures or not all(_valid_base64_signature(entry) for entry in signatures):
+        raise RuntimeError(
+            "embedded signature bundle carries no verifiable signature"
+        )
 
 
 @dataclass(frozen=True)
@@ -94,6 +181,7 @@ def _verify_oci_source(
     *,
     expected_digest: str = SOURCE_DIGEST,
     metadata_path: Path = SOURCE_METADATA_FILE,
+    bundle_path: Path | None = None,
 ) -> str:
     """Verify the selected OCI manifest blob and its release-pinned digest."""
     root, tag = _oci_layout_ref(imgref)
@@ -131,6 +219,15 @@ def _verify_oci_source(
         raise RuntimeError(
             "embedded OCI image does not match the digest pinned by this ISO release"
         )
+    # The release digest is the ISO build's pinned expectation: manifest,
+    # metadata, release, and configured digests must all agree, and the
+    # build-time cosign bundle must still cover that digest.
+    release_digest = str(metadata.get("release_digest") or "")
+    if release_digest != digest:
+        raise RuntimeError(
+            "embedded OCI image does not match the release digest pinned by this ISO release"
+        )
+    _verify_signature_bundle(digest, release_digest, metadata, bundle_path=bundle_path)
     metadata_target = str(metadata.get("target_image") or "")
     if metadata_target and metadata_target != TARGET_IMAGE:
         raise RuntimeError("embedded-image metadata does not match the configured update target")

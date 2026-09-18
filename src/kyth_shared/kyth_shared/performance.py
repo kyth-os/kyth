@@ -229,3 +229,81 @@ def get_gamescope_cmd(target_command: list[str]) -> list[str]:
     return gamescope_cmd
 
 
+#: Single power owner: power-profiles-daemon (PPD). Everything else follows the
+#: PPD profile instead of writing competing knobs.
+POWER_PROFILE_OWNER = "power-profiles-daemon"
+
+#: Launcher mode -> PPD profile.
+MODE_POWER_PROFILE = {
+    "gaming": "performance",
+    "performance": "performance",
+    "balanced": "balanced",
+    "powersave": "power-saver",
+}
+
+#: PPD profile -> follower EPP value (mirrors kyth-performance-mode).
+PPD_EPP_FOLLOWER = {
+    "performance": "performance",
+    "balanced": "balance_performance",
+    "power-saver": "power",
+}
+
+POWER_OWNER_STATE_FILE = Path("/run/kyth/power-owner.state")
+
+
+def apply_power_owner(mode: str) -> bool:
+    """Set the PPD profile for *mode*, then the follower EPP. Returns PPD ok."""
+    profile = MODE_POWER_PROFILE.get(mode, "balanced")
+    owned = set_power_profile(profile)
+    set_epp(PPD_EPP_FOLLOWER.get(profile, "balance_performance"))
+    return owned
+
+
+def save_power_state(path: Path | None = None) -> Path:
+    """Persist the current PPD profile + EPP for crash-safe restore."""
+    dest = Path(path) if path is not None else POWER_OWNER_STATE_FILE
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    profile = get_power_profile()
+    epp = get_current_epp()
+    dest.write_text(
+        "# Kyth power-owner state — restored on next apply/restore after a crash"
+        + os.linesep
+        + f"POWER_PROFILE={profile}"
+        + os.linesep
+        + f"EPP={epp}"
+        + os.linesep,
+        encoding="utf-8",
+    )
+    return dest
+
+
+def restore_power_state(path: Path | None = None) -> bool:
+    """Restore a saved PPD profile + EPP once, then drop the state file.
+
+    Missing state (normal boot, /run is tmpfs) is a no-op True. The file is
+    always removed after a restore attempt so a crash can only ever restore
+    once — no stale loop.
+    """
+    dest = Path(path) if path is not None else POWER_OWNER_STATE_FILE
+    try:
+        text = dest.read_text(encoding="utf-8")
+    except OSError:
+        return True
+    try:
+        values: dict[str, str] = {}
+        for line in text.splitlines():
+            if "=" in line and not line.startswith("#"):
+                key, _, val = line.partition("=")
+                values[key.strip()] = val.strip()
+        if values.get("POWER_PROFILE") and values["POWER_PROFILE"] != "n/a":
+            set_power_profile(values["POWER_PROFILE"])
+        if values.get("EPP") and values["EPP"] != "n/a":
+            set_epp(values["EPP"])
+    finally:
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+    return True
+
+

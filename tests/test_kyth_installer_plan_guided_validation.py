@@ -55,10 +55,12 @@ class GuidedPlanValidationTests(unittest.TestCase):
     def snapshot(self, *, filesystem="ntfs", efi="/dev/sda1", free=()):
         return StorageSnapshot(
             disks=({"name": "/dev/sda"},),
-            partitions=({
-                "name": "/dev/sda2", "fstype": filesystem,
-                "size_bytes": 200 * 1024**3,
-            },),
+            partitions=(
+                {"name": "/dev/sda1", "efi": True, "fstype": "vfat",
+                 "size_bytes": 512 * 1024**2},
+                {"name": "/dev/sda2", "fstype": filesystem,
+                 "size_bytes": 200 * 1024**3},
+            ),
             free_regions=tuple(free), efi_partition=efi, is_gpt=False,
         )
 
@@ -86,14 +88,19 @@ class GuidedPlanValidationTests(unittest.TestCase):
         cases = (
             (self.dependencies(parent_disk=lambda _partition: "/dev/sdb"), self.snapshot(), "does not belong"),
             (self.dependencies(), StorageSnapshot(
-                disks=({"name": "/dev/sda"},), partitions=(), free_regions=(),
+                disks=({"name": "/dev/sda"},), partitions=(
+                    {"name": "/dev/sda1", "efi": True, "fstype": "vfat",
+                     "size_bytes": 512 * 1024**2},
+                ), free_regions=(),
                 efi_partition="/dev/sda1", is_gpt=False,
             ), "not found"),
             (self.dependencies(), StorageSnapshot(
-                disks=({"name": "/dev/sda"},), partitions=({
-                    "name": "/dev/sda2", "fstype": "ntfs", "current": True,
-                    "size_bytes": 200 * 1024**3,
-                },), free_regions=(), efi_partition="/dev/sda1", is_gpt=False,
+                disks=({"name": "/dev/sda"},), partitions=(
+                    {"name": "/dev/sda1", "efi": True, "fstype": "vfat",
+                     "size_bytes": 512 * 1024**2},
+                    {"name": "/dev/sda2", "fstype": "ntfs", "current": True,
+                     "size_bytes": 200 * 1024**3},
+                ), free_regions=(), efi_partition="/dev/sda1", is_gpt=False,
             ), "mounted"),
             (self.dependencies(), self.snapshot(), "smaller than 64"),
         )
@@ -107,9 +114,11 @@ class GuidedPlanValidationTests(unittest.TestCase):
                 )
 
         gpt = StorageSnapshot(
-            disks=({"name": "/dev/sda"},), partitions=({
-                "name": "/dev/sda2", "fstype": "ntfs", "size_bytes": 200 * 1024**3,
-            },), free_regions=(), efi_partition="/dev/sda1", is_gpt=True,
+            disks=({"name": "/dev/sda"},), partitions=(
+                {"name": "/dev/sda1", "efi": True, "fstype": "vfat",
+                 "size_bytes": 512 * 1024**2},
+                {"name": "/dev/sda2", "fstype": "ntfs", "size_bytes": 200 * 1024**3},
+            ), free_regions=(), efi_partition="/dev/sda1", is_gpt=True,
         )
         with self.assertRaisesRegex(RuntimeError, "boot partition"):
             validate_resize_ntfs_target(
@@ -128,7 +137,11 @@ class GuidedPlanValidationTests(unittest.TestCase):
     def test_explicit_validation_rejects_partition_and_manual_invariants(self):
         snapshot = StorageSnapshot(
             disks=({"name": "/dev/sda", "size_bytes": 100 * 1024**3},),
-            partitions=({"name": "/dev/sda2", "size_bytes": 80 * 1024**3},),
+            partitions=(
+                {"name": "/dev/sda1", "efi": True, "fstype": "vfat",
+                 "size_bytes": 512 * 1024**2},
+                {"name": "/dev/sda2", "size_bytes": 80 * 1024**3},
+            ),
             free_regions=(), efi_partition="/dev/sda1", is_gpt=False,
         )
         journal = SimpleNamespace(committed=True, root_partition="/dev/sda2")
@@ -317,7 +330,10 @@ class GuidedPlanValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "No target disk"):
             _validate_install_target({}, dependencies=deps)
         # manual no root
-        snap = StorageSnapshot(disks=({"name": "/dev/sda"},), partitions=(), free_regions=(), efi_partition="/dev/sda1", is_gpt=False)
+        snap = StorageSnapshot(disks=({"name": "/dev/sda"},), partitions=(
+            {"name": "/dev/sda1", "efi": True, "fstype": "vfat",
+             "size_bytes": 512 * 1024**2},
+        ), free_regions=(), efi_partition="/dev/sda1", is_gpt=False)
         with self.assertRaisesRegex(RuntimeError, "No root partition"):
             _validate_install_target({"disk": "/dev/sda", "install_mode": "manual"}, object(), snapshot=snap, dependencies=deps)
         # manual root does not belong to disk
@@ -445,7 +461,10 @@ class GuidedPlanValidationTests(unittest.TestCase):
         start = 1024**2
         end = start + MIN_KYTHOS_BYTES
         free_snapshot = StorageSnapshot(
-            disks=({"name": "/dev/sda"},), partitions=(),
+            disks=({"name": "/dev/sda"},), partitions=(
+                {"name": "/dev/sda1", "efi": True, "fstype": "vfat",
+                 "size_bytes": 512 * 1024**2},
+            ),
             free_regions=({"start_bytes": start, "end_bytes": end},),
             efi_partition="/dev/sda1", is_gpt=True,
         )

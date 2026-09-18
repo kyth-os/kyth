@@ -34,6 +34,46 @@ pub(crate) fn uuid_argv(input: &UuidInput) -> Result<Vec<String>, String> {
     ])
 }
 
+/// lsblk columns shared with the Python compatibility path.
+///
+/// `kyth_installer.disk._query.list_partitions` reads this same projection;
+/// both consumers derive ESP / Windows-indicator / BitLocker state from
+/// identical snapshot fields, so the typed Rust preflight and the Python
+/// path share one detection source.
+pub(crate) const STORAGE_PROBE_COLUMNS: &str =
+    "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,PARTN,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO";
+
+pub(crate) fn storage_probe_argv(disk: Option<&str>) -> Result<Vec<String>, String> {
+    let mut argv = vec![
+        "/usr/bin/lsblk".into(),
+        "--json".into(),
+        "--bytes".into(),
+        "--paths".into(),
+        "--output".into(),
+        STORAGE_PROBE_COLUMNS.into(),
+    ];
+    if let Some(disk) = disk {
+        argv.push(device_path(disk)?);
+    }
+    Ok(argv)
+}
+
+/// Fixed blkid probe for BitLocker `TYPE` detection.
+///
+/// This is the same `blkid -o value -s TYPE <partition>` invocation the
+/// Python `_encryption_check` compat path uses: both read the same
+/// kernel-visible filesystem type as the single detection source.
+pub(crate) fn bitlocker_probe_argv(device: &str) -> Result<Vec<String>, String> {
+    Ok(vec![
+        "/usr/bin/blkid".into(),
+        "-o".into(),
+        "value".into(),
+        "-s".into(),
+        "TYPE".into(),
+        device_path(device)?,
+    ])
+}
+
 pub(crate) fn lookup_uuid(input: UuidInput) -> Result<String, String> {
     let argv = uuid_argv(&input)?;
     let output = Command::new(&argv[0])
@@ -76,5 +116,40 @@ mod tests {
             })
             .is_err());
         }
+    }
+
+    #[test]
+    fn storage_probe_argv_pins_shared_lsblk_projection() {
+        // Must stay identical to kyth_installer.disk._query.list_partitions'
+        // columns: the typed preflight and the Python path share one
+        // detection source.
+        assert!(STORAGE_PROBE_COLUMNS.contains("FSTYPE"));
+        assert!(STORAGE_PROBE_COLUMNS.contains("PARTTYPE"));
+        assert!(STORAGE_PROBE_COLUMNS.contains("LABEL"));
+        assert!(STORAGE_PROBE_COLUMNS.contains("MOUNTPOINTS"));
+        let argv = storage_probe_argv(Some("/dev/sda")).unwrap();
+        assert_eq!(
+            argv,
+            vec![
+                "/usr/bin/lsblk",
+                "--json",
+                "--bytes",
+                "--paths",
+                "--output",
+                STORAGE_PROBE_COLUMNS,
+                "/dev/sda"
+            ]
+        );
+        assert_eq!(storage_probe_argv(None).unwrap().len(), 6);
+        assert!(storage_probe_argv(Some("/dev/../etc/passwd")).is_err());
+    }
+
+    #[test]
+    fn bitlocker_probe_argv_matches_python_compat_invocation() {
+        assert_eq!(
+            bitlocker_probe_argv("/dev/sda2").unwrap(),
+            vec!["/usr/bin/blkid", "-o", "value", "-s", "TYPE", "/dev/sda2"]
+        );
+        assert!(bitlocker_probe_argv("sda2").is_err());
     }
 }

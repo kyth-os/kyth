@@ -197,7 +197,7 @@ class UserCreationTests(unittest.TestCase):
         accounts.assert_called_once_with("/deploy", mock.ANY)
         progress.assert_called_once_with(97)
 
-    def test_user_creation_os_error_is_actionable_and_nonfatal(self):
+    def test_user_creation_os_error_fails_the_install(self):
         log = mock.Mock()
         with (
             mock.patch.object(
@@ -207,11 +207,12 @@ class UserCreationTests(unittest.TestCase):
             mock.patch("kyth_installer.install._as_root", side_effect=lambda cmd: cmd),
             mock.patch("kyth_installer.install.ensure_system_accounts"),
         ):
-            finalize._create_installer_user("/target", "/deploy", "user", "hash", log, mock.Mock())
-        self.assertTrue(any("user creation failed" in call.args[0] for call in log.call_args_list))
-        self.assertTrue(any("sudo useradd" in call.args[0] for call in log.call_args_list))
+            with self.assertRaisesRegex(OSError, "no login account"):
+                finalize._create_installer_user(
+                    "/target", "/deploy", "user", "hash", log, mock.Mock()
+                )
 
-    def test_user_creation_generic_error_is_actionable_and_nonfatal(self):
+    def test_user_creation_generic_error_fails_the_install(self):
         log = mock.Mock()
         with (
             mock.patch.object(
@@ -221,8 +222,16 @@ class UserCreationTests(unittest.TestCase):
             mock.patch("kyth_installer.install._as_root", side_effect=lambda cmd: cmd),
             mock.patch("kyth_installer.install.ensure_system_accounts"),
         ):
-            finalize._create_installer_user("/target", "/deploy", "user", "hash", log, mock.Mock())
-        self.assertTrue(any("bad account" in call.args[0] for call in log.call_args_list))
+            with self.assertRaisesRegex(RuntimeError, "bad account"):
+                finalize._create_installer_user(
+                    "/target", "/deploy", "user", "hash", log, mock.Mock()
+                )
+
+    def test_missing_username_fails_the_install(self):
+        with self.assertRaisesRegex(RuntimeError, "no login account"):
+            finalize._create_installer_user(
+                "/target", "/deploy", "", "hash", mock.Mock(), mock.Mock()
+            )
 
 
 class ConfigureSystemTests(unittest.TestCase):
@@ -321,9 +330,43 @@ class ConfigureSystemTests(unittest.TestCase):
         ):
             finalize._configure_installed_system(
                 "/dev/sda3", "/dev/sda3", "/dev/sda", "fedora", "wipe",
-                "/config", "", log, mock.Mock(), context, _request(username="", password_hash=""),
+                "/config", "", log, mock.Mock(), context, _request(),
             )
         self.assertTrue(any("success artifacts" in call.args[0] for call in log.call_args_list))
+
+    def test_missing_user_credentials_fail_the_install(self):
+        from kyth_installer.phases import finalize_configure as fc
+
+        context = InstallerContext()
+        context.register_mount("/config")
+        log = mock.Mock()
+        with (
+            mock.patch("kyth_installer.install.run_command"),
+            mock.patch("kyth_installer.install.find_deploy_etc", return_value="/config/deploy/etc"),
+            mock.patch("kyth_installer.install.ensure_system_accounts"),
+            mock.patch.object(finalize, "_configure_hostname_timezone"),
+            mock.patch.object(finalize, "_create_installer_user") as create,
+            mock.patch.object(finalize, "validate_installed_target", return_value=[]),
+            mock.patch.object(finalize, "_persist_artifacts_to_target"),
+            mock.patch.object(finalize, "unmount_configuration"),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "no user credentials"):
+                fc.configure_installed_system(
+                    target_part="/dev/sda3", install_mode="wipe", config_root="/config",
+                    alongside_mount="", log=log, progress=mock.Mock(), context=context,
+                    request=_request(username="", password_hash=""),
+                    find_deploy_etc=mock.Mock(return_value="/config/deploy/etc"),
+                    ensure_system_accounts=mock.Mock(),
+                    configure_alongside_fstab=mock.Mock(),
+                    configure_manual_mounts=mock.Mock(),
+                    configure_hostname_timezone=mock.Mock(),
+                    create_installer_user=create,
+                    validate_installed_target=mock.Mock(return_value=[]),
+                    persist_artifacts=mock.Mock(),
+                    unmount_configuration=mock.Mock(),
+                    run_command=mock.Mock(),
+                )
+        create.assert_not_called()
 
 
 class ConfigureInstalledSystemRollbackTests(unittest.TestCase):

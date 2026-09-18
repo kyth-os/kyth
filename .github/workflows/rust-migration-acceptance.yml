@@ -2,6 +2,34 @@ name: Rust Migration Acceptance
 run-name: "Rust Migration Acceptance - ${{ inputs.image_ref }}"
 
 on:
+  workflow_call:
+    inputs:
+      artifact_run_id:
+        description: GitHub Actions run containing the exact ISO artifact
+        required: true
+        type: string
+      artifact_name:
+        description: Exact artifact name from artifact_run_id
+        required: true
+        type: string
+      source_sha:
+        description: Commit checked out for the source ledgers and image identity
+        required: true
+        type: string
+      image_ref:
+        description: Exact promoted image reference or digest
+        required: true
+        type: string
+      update_ref:
+        description: Optional distinct image reference for update/rollback
+        required: false
+        default: ""
+        type: string
+      timeout_minutes:
+        description: Disposable VM timeout
+        required: false
+        default: "90"
+        type: string
   workflow_dispatch:
     inputs:
       artifact_run_id:
@@ -30,6 +58,11 @@ on:
         required: false
         default: "90"
         type: string
+  # Nightly run against the promoted testing image: proves the exact
+  # install/update/rollback evidence flow keeps passing on what users
+  # actually download, without spending KVM time on every push.
+  schedule:
+    - cron: "30 3 * * *"
 
 permissions:
   actions: read
@@ -38,6 +71,9 @@ permissions:
 jobs:
   acceptance:
     name: Exact-image Rust migration acceptance
+    # The scheduled run carries no inputs artifact; the nightly job below
+    # resolves the promoted testing image and channel ISO instead.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 150
     steps:
@@ -136,6 +172,104 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rust-migration-acceptance-${{ github.run_id }}
+          path: ${{ runner.temp }}/kyth-acceptance/evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+  nightly:
+    name: Nightly acceptance (promoted testing image)
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    permissions:
+      actions: read
+      contents: read
+      packages: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: testing
+          persist-credentials: false
+
+      - name: Free disk space
+        uses: ./.github/actions/free-disk-space
+        with:
+          report: "true"
+          extra-docker-cleanup: "true"
+
+      - name: Install QEMU acceptance dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            qemu-system-x86 qemu-system-modules-spice qemu-utils ovmf socat skopeo
+
+      - name: Grant runner access to /dev/kvm
+        run: |
+          set -euo pipefail
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules >/dev/null
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          if [[ ! -r /dev/kvm || ! -w /dev/kvm ]]; then
+            echo "::error::/dev/kvm is not usable on this runner" >&2
+            exit 1
+          fi
+
+      - name: Resolve promoted testing image digest
+        id: image
+        run: |
+          set -euo pipefail
+          digest="$(skopeo inspect --no-creds \
+            docker://ghcr.io/kyth-os/kyth:testing | jq -r .Digest)"
+          [[ "${digest}" == sha256:* ]] || {
+            echo "::error::could not resolve promoted testing image digest" >&2
+            exit 1
+          }
+          echo "Promoted testing image: ghcr.io/kyth-os/kyth:testing@${digest}"
+          printf 'ref=%s\n' "ghcr.io/kyth-os/kyth:testing@${digest}" >>"${GITHUB_OUTPUT}"
+
+      - name: Download promoted testing ISO
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/kyth-acceptance/iso" \
+            "${RUNNER_TEMP}/kyth-acceptance/evidence"
+          gh release download iso-testing \
+            --pattern 'kyth-live-testing.iso' \
+            --pattern 'kyth-live-testing.iso-CHECKSUM' \
+            --dir "${RUNNER_TEMP}/kyth-acceptance/iso" --clobber
+
+      - name: Verify promoted testing ISO
+        id: iso
+        run: |
+          set -euo pipefail
+          iso="${RUNNER_TEMP}/kyth-acceptance/iso/kyth-live-testing.iso"
+          test -s "${iso}"
+          sha256sum --check --strict "${iso}-CHECKSUM"
+          printf 'iso=%s\n' "${iso}" >>"${GITHUB_OUTPUT}"
+
+      # A nonzero acceptance exit fails this job by design: the nightly run
+      # gates nothing, so silence here would hide regressions.
+      - name: Run nightly acceptance and preserve evidence
+        env:
+          ISO_PATH: ${{ steps.iso.outputs.iso }}
+          IMAGE_REF: ${{ steps.image.outputs.ref }}
+        run: |
+          set -euo pipefail
+          build_files/scripts/run-rust-migration-acceptance.sh \
+            --iso "${ISO_PATH}" \
+            --image-ref "${IMAGE_REF}" \
+            --artifacts "${RUNNER_TEMP}/kyth-acceptance/evidence" \
+            --timeout-minutes 90
+
+      - name: Upload nightly acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-migration-acceptance-nightly-${{ github.run_id }}
           path: ${{ runner.temp }}/kyth-acceptance/evidence
           if-no-files-found: warn
           retention-days: 14

@@ -9,30 +9,90 @@ use std::path::Path;
 pub const DEFAULT_CONFIG_PATH: &str = "/etc/kyth/auto-update.toml";
 pub const DEFAULT_ROLLOUT_RING: &str = "follow-image";
 
-/// Decode the rollout setting from captured TOML without performing I/O.
-pub fn rollout_ring_from_toml(raw: &str) -> String {
-    let Ok(value) = raw.parse::<toml::Value>() else {
-        return DEFAULT_ROLLOUT_RING.into();
+/// Rollout rings the updater accepts. Anything else in configuration is a
+/// hard error: silently following the default ring would stage updates from
+/// an unintended channel.
+pub const VALID_ROLLOUT_RINGS: [&str; 4] = ["follow-image", "canary", "testing", "stable"];
+
+/// Name of the environment variable that explicitly permits a staged image
+/// older than the booted one (downgrade). Refusing downgrades is the
+/// default; only an explicit opt-in bypasses the gate.
+pub const ALLOW_DOWNGRADE_ENV: &str = "KYTH_ALLOW_DOWNGRADE";
+
+/// Strictly validate one configured ring value.
+///
+/// A missing value falls back to `last_known` (or the fail-safe default when
+/// there is no last known ring). An explicitly configured but unknown value
+/// is an error: the caller must keep the last known ring instead of staging
+/// from an unintended channel.
+pub fn validate_rollout_ring(configured: Option<&str>, last_known: &str) -> Result<String, String> {
+    let Some(value) = configured.map(str::trim).filter(|value| !value.is_empty()) else {
+        return Ok(if last_known.is_empty() {
+            DEFAULT_ROLLOUT_RING.into()
+        } else {
+            last_known.into()
+        });
     };
-    let Some(section) = value.get("auto_update").and_then(toml::Value::as_table) else {
-        return DEFAULT_ROLLOUT_RING.into();
+    if VALID_ROLLOUT_RINGS.contains(&value) {
+        return Ok(value.into());
+    }
+    let keep = if last_known.is_empty() {
+        DEFAULT_ROLLOUT_RING
+    } else {
+        last_known
+    };
+    Err(format!(
+        "invalid rollout ring '{value}' (keeping last known ring '{keep}')"
+    ))
+}
+
+/// Decode the rollout setting from captured TOML without performing I/O.
+///
+/// Strict: an explicitly configured unknown ring is an error and the caller
+/// keeps `last_known`; only a missing key or malformed file falls back.
+pub fn rollout_ring_from_toml(raw: &str, last_known: &str) -> Result<String, String> {
+    let Ok(value) = raw.parse::<toml::Value>() else {
+        return Ok(if last_known.is_empty() {
+            DEFAULT_ROLLOUT_RING.into()
+        } else {
+            last_known.into()
+        });
+    };
+    let section = value.get("auto_update").and_then(toml::Value::as_table);
+    let Some(section) = section else {
+        return Ok(if last_known.is_empty() {
+            DEFAULT_ROLLOUT_RING.into()
+        } else {
+            last_known.into()
+        });
     };
     match section.get("rollout_ring") {
-        Some(toml::Value::String(value)) => value.clone(),
-        Some(toml::Value::Boolean(value)) => if *value { "True" } else { "False" }.into(),
-        Some(toml::Value::Integer(value)) => value.to_string(),
-        Some(toml::Value::Float(value)) => value.to_string(),
-        Some(toml::Value::Datetime(value)) => value.to_string(),
-        Some(_) | None => DEFAULT_ROLLOUT_RING.into(),
+        None => Ok(if last_known.is_empty() {
+            DEFAULT_ROLLOUT_RING.into()
+        } else {
+            last_known.into()
+        }),
+        Some(toml::Value::String(value)) => validate_rollout_ring(Some(value), last_known),
+        // Non-string TOML values can never name a valid ring; treat them as
+        // unknown values (error), not as absent keys (fallback).
+        Some(other) => validate_rollout_ring(Some(&other.to_string()), last_known),
     }
 }
 
-/// Read the configured rollout ring with the same fail-safe default as the
-/// Python helper. Missing, unreadable, and malformed files follow-image.
-pub fn load_rollout_ring(path: impl AsRef<Path>) -> String {
-    std::fs::read_to_string(path)
-        .map(|raw| rollout_ring_from_toml(&raw))
-        .unwrap_or_else(|_| DEFAULT_ROLLOUT_RING.into())
+/// Read the configured rollout ring with strict validation.
+///
+/// Missing and unreadable files keep the last known ring (fail-safe default
+/// when there is none). An explicitly configured unknown ring is an error;
+/// the stored state keeps the last known ring because staging never runs.
+pub fn load_rollout_ring(path: impl AsRef<Path>, last_known: &str) -> Result<String, String> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => rollout_ring_from_toml(&raw, last_known),
+        Err(_) => Ok(if last_known.is_empty() {
+            DEFAULT_ROLLOUT_RING.into()
+        } else {
+            last_known.into()
+        }),
+    }
 }
 
 /// The fixed remount attempts safe-upgrade makes, in order of preference.
@@ -110,6 +170,95 @@ pub fn validate_post_upgrade_state(
     Err("bootc did not stage an image".into())
 }
 
+/// Compare two image version strings segment by segment.
+///
+/// Each dot/hyphen-separated segment compares numerically when both sides
+/// are numeric, lexically otherwise. Missing segments compare less than
+/// present ones, so `44` < `44.1`. Returns `None` when either side is empty.
+pub fn compare_image_versions(booted: &str, staged: &str) -> Option<std::cmp::Ordering> {
+    if booted.trim().is_empty() || staged.trim().is_empty() {
+        return None;
+    }
+    let split = |version: &str| {
+        version
+            .split(['.', '-', '_', '+'])
+            .filter(|segment| !segment.is_empty())
+            .map(str::to_owned)
+            .collect::<Vec<_>>()
+    };
+    let booted = split(booted);
+    let staged = split(staged);
+    for pair in booted.iter().zip(staged.iter()) {
+        let ordering = match (pair.0.parse::<u64>(), pair.1.parse::<u64>()) {
+            (Ok(left), Ok(right)) => left.cmp(&right),
+            _ => pair.0.cmp(pair.1),
+        };
+        if ordering != std::cmp::Ordering::Equal {
+            return Some(ordering);
+        }
+    }
+    Some(booted.len().cmp(&staged.len()))
+}
+
+/// Whether an explicit downgrade opt-in is present.
+///
+/// The `auto_update.allow_downgrade` TOML key or a truthy
+/// `KYTH_ALLOW_DOWNGRADE` environment value (`1`/`true`/`yes`) permits
+/// staging an image older than the booted one. Anything else refuses.
+pub fn allow_downgrade_from_toml(raw: &str) -> bool {
+    if let Ok(value) = raw.parse::<toml::Value>() {
+        if let Some(section) = value.get("auto_update").and_then(toml::Value::as_table) {
+            if section
+                .get("allow_downgrade")
+                .and_then(toml::Value::as_bool)
+                == Some(true)
+            {
+                return true;
+            }
+        }
+    }
+    matches!(
+        std::env::var(ALLOW_DOWNGRADE_ENV)
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase()
+            .as_str(),
+        "1" | "true" | "yes"
+    )
+}
+
+/// Refuse a staged image older than the recorded booted release.
+///
+/// The caller records the booted version and digest *before* staging and the
+/// staged version and digest *after*; this gate compares them. An identical
+/// digest is always accepted (same image, not a downgrade). A staged version
+/// older than the booted one is refused unless `allow_downgrade` carries an
+/// explicit opt-in. Missing versions cannot be ordered, so they pass — the
+/// digest and quarantine gates above remain authoritative.
+pub fn validate_not_downgrade(
+    booted_version: Option<&str>,
+    booted_digest: Option<&str>,
+    staged_version: Option<&str>,
+    staged_digest: Option<&str>,
+    allow_downgrade: bool,
+) -> Result<(), String> {
+    if let (Some(booted), Some(staged)) = (booted_digest, staged_digest) {
+        if !booted.is_empty() && booted == staged {
+            return Ok(());
+        }
+    }
+    let (Some(booted), Some(staged)) = (booted_version, staged_version) else {
+        return Ok(());
+    };
+    match compare_image_versions(booted, staged) {
+        Some(std::cmp::Ordering::Greater) if !allow_downgrade => Err(format!(
+            "refusing staged downgrade from version '{booted}' to '{staged}'; \
+             set auto_update.allow_downgrade = true to permit it"
+        )),
+        _ => Ok(()),
+    }
+}
+
 /// Convert a registry check into the digest gate used by safe-upgrade.
 ///
 /// A local status failure remains fail-closed. A remote probe failure is
@@ -140,20 +289,29 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn parses_rollout_ring_and_safe_defaults() {
+    fn parses_rollout_ring_and_strict_unknowns() {
+        // Known rings resolve.
         assert_eq!(
-            rollout_ring_from_toml("[auto_update]\nrollout_ring = \"testing\"\n"),
-            "testing"
+            rollout_ring_from_toml("[auto_update]\nrollout_ring = \"testing\"\n", ""),
+            Ok("testing".into())
+        );
+        // Missing keys and malformed files keep the last known ring.
+        assert_eq!(
+            rollout_ring_from_toml("[other]\nvalue = 1\n", "stable"),
+            Ok("stable".into())
         );
         assert_eq!(
-            rollout_ring_from_toml("[auto_update]\nrollout_ring = true\n"),
-            "True"
+            rollout_ring_from_toml("not toml", ""),
+            Ok(DEFAULT_ROLLOUT_RING.into())
         );
-        assert_eq!(rollout_ring_from_toml("not toml"), DEFAULT_ROLLOUT_RING);
+        // Unknown explicit values error and name the ring that is kept.
         assert_eq!(
-            rollout_ring_from_toml("[other]\nvalue = 1\n"),
-            DEFAULT_ROLLOUT_RING
+            rollout_ring_from_toml("[auto_update]\nrollout_ring = \"nightly\"\n", "testing"),
+            Err("invalid rollout ring 'nightly' (keeping last known ring 'testing')".into())
         );
+        // Non-string TOML values are unknown values, not absent keys.
+        assert!(rollout_ring_from_toml("[auto_update]\nrollout_ring = true\n", "stable").is_err());
+        assert!(rollout_ring_from_toml("[auto_update]\nrollout_ring = 7\n", "").is_err());
     }
 
     #[test]
@@ -161,10 +319,21 @@ mod tests {
         let directory = tempdir().unwrap();
         let path = directory.path().join("auto-update.toml");
         fs::write(&path, "[auto_update]\nrollout_ring = \"canary\"\n").unwrap();
-        assert_eq!(load_rollout_ring(&path), "canary");
+        assert_eq!(load_rollout_ring(&path, ""), Ok("canary".into()));
+        // Unreadable files keep the last known ring.
         assert_eq!(
-            load_rollout_ring(directory.path().join("missing.toml")),
-            DEFAULT_ROLLOUT_RING
+            load_rollout_ring(directory.path().join("missing.toml"), "stable"),
+            Ok("stable".into())
+        );
+        assert_eq!(
+            load_rollout_ring(directory.path().join("missing.toml"), ""),
+            Ok(DEFAULT_ROLLOUT_RING.into())
+        );
+        // Unknown configured values error instead of silently following.
+        fs::write(&path, "[auto_update]\nrollout_ring = \"beta\"\n").unwrap();
+        assert_eq!(
+            load_rollout_ring(&path, "canary"),
+            Err("invalid rollout ring 'beta' (keeping last known ring 'canary')".into())
         );
     }
 
@@ -282,5 +451,80 @@ mod tests {
             ),
             Err("Could not read the current booted image digest.".into())
         );
+    }
+
+    #[test]
+    fn staged_older_than_booted_is_refused_without_explicit_opt_in() {
+        // Older staged version without opt-in is refused.
+        assert!(validate_not_downgrade(
+            Some("44.20260801.0"),
+            Some("sha256:booted"),
+            Some("43.20260701.0"),
+            Some("sha256:staged"),
+            false,
+        )
+        .is_err());
+        // Same comparison passes with the explicit allow-downgrade flag.
+        assert_eq!(
+            validate_not_downgrade(
+                Some("44.20260801.0"),
+                Some("sha256:booted"),
+                Some("43.20260701.0"),
+                Some("sha256:staged"),
+                true,
+            ),
+            Ok(())
+        );
+        // Newer staged versions always pass; identical digests always pass.
+        assert_eq!(
+            validate_not_downgrade(
+                Some("43"),
+                Some("sha256:a"),
+                Some("44.1"),
+                Some("sha256:b"),
+                false,
+            ),
+            Ok(())
+        );
+        assert_eq!(
+            validate_not_downgrade(
+                Some("44"),
+                Some("sha256:same"),
+                Some("43"),
+                Some("sha256:same"),
+                false,
+            ),
+            Ok(())
+        );
+        // Missing versions cannot be ordered, so they pass through to the
+        // digest and quarantine gates.
+        assert_eq!(
+            validate_not_downgrade(None, None, None, None, false),
+            Ok(())
+        );
+        // Numeric segments compare numerically, not lexically: 9 < 10.
+        assert!(validate_not_downgrade(
+            Some("44.10"),
+            Some("sha256:a"),
+            Some("44.9"),
+            Some("sha256:b"),
+            false,
+        )
+        .is_err());
+        assert_eq!(
+            compare_image_versions("44", "44.1"),
+            Some(std::cmp::Ordering::Less)
+        );
+    }
+
+    #[test]
+    fn downgrade_opt_in_requires_config_or_environment() {
+        assert!(allow_downgrade_from_toml(
+            "[auto_update]\nallow_downgrade = true\n"
+        ));
+        assert!(!allow_downgrade_from_toml(
+            "[auto_update]\nrollout_ring = \"stable\"\n"
+        ));
+        assert!(!allow_downgrade_from_toml("not toml"));
     }
 }

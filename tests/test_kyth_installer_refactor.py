@@ -18,13 +18,16 @@ class InstallerRefactorTests(unittest.TestCase):
         target = f"{disk}p2"
         snapshot = StorageSnapshot(
             disks=({"name": disk, "size_bytes": 128 * 1024**3},),
-            partitions=({
-                "name": target,
-                "size_bytes": 64 * 1024**3,
-                "efi": False,
-                "current": False,
-                "in_use": False,
-            },),
+            partitions=(
+                {"name": f"{disk}p1", "fstype": "vfat", "efi": True},
+                {
+                    "name": target,
+                    "size_bytes": 64 * 1024**3,
+                    "efi": False,
+                    "current": False,
+                    "in_use": False,
+                },
+            ),
             free_regions=(),
             efi_partition=f"{disk}p1",
             is_gpt=False,

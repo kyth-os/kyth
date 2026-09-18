@@ -89,12 +89,16 @@ run-live-iso-native source_tag="latest" legacy="0":
     #!/usr/bin/bash
     set -eoux pipefail
 
+    # USER is unset under `set -u` in minimal environments (systemd units
+    # without pam_env, sudo -u without login shell); fall back to id.
+    vm_user="${USER:-$(id -un)}"
+
     image_file="output/live-iso/kyth-live-{{ source_tag }}.iso"
     if [[ ! -f "${image_file}" ]]; then
         just build-live-iso {{ source_tag }}
     fi
 
-    disk_dir="/var/tmp/kyth-vm-disks-${USER}"
+    disk_dir="/var/tmp/kyth-vm-disks-${vm_user}"
     mkdir -p "${disk_dir}"
     disk_img="${disk_dir}/kyth-live-test.qcow2"
     ovmf_vars="${disk_dir}/ovmf_vars.fd"
@@ -137,7 +141,7 @@ run-live-iso-native source_tag="latest" legacy="0":
     done
     [[ ${#_ovmf_args[@]} -eq 0 ]] && echo "==> BIOS boot (install edk2-ovmf for UEFI)"
 
-    share_dir="/var/tmp/kyth-vm-share-${USER}"
+    share_dir="/var/tmp/kyth-vm-share-${vm_user}"
     mkdir -p "${share_dir}"
     serial_log="${share_dir}/qemu-serial.log"
     qemu_log="${share_dir}/qemu-debug.log"
@@ -202,7 +206,7 @@ run-live-iso-native source_tag="latest" legacy="0":
         &
     QEMU_PID=$!
     sleep 2
-    rv_cache="/var/tmp/kyth-remote-viewer-${USER}"
+    rv_cache="/var/tmp/kyth-remote-viewer-${vm_user}"
     mkdir -p "${rv_cache}"
     env XDG_CACHE_HOME="${rv_cache}" TMPDIR="/var/tmp" remote-viewer "spice://localhost:${_spice_port}" &
     wait "${QEMU_PID}"

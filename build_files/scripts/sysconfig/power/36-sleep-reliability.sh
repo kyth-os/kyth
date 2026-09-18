@@ -25,3 +25,19 @@ AllowSuspendThenHibernate=no
 SuspendState=mem standby freeze
 HibernateDelaySec=0
 SLEEPEOF
+
+# Hibernate opt-in path (kept, never default): machines with a verified swap
+# partition/file and a working resume= karg can opt back in by copying the
+# example over the managed drop-in. The managed file above is re-applied on
+# every image update, so opt-in state must live in the higher-priority
+# 99-kyth-hibernate-opt-in.conf, which this fragment never touches.
+write_config /usr/share/kyth/sleep-hibernate-opt-in.conf.example <<'HIBOPTINEOF'
+# Kyth hibernate opt-in — copy to /etc/systemd/sleep.conf.d/99-kyth-hibernate-opt-in.conf
+# Requires: a swap partition/file sized for the RAM image AND resume=<device>
+# on the kernel command line. Verify with: systemctl hibernate (from a VT).
+[Sleep]
+AllowHibernation=yes
+AllowHybridSleep=yes
+AllowSuspendThenHibernate=yes
+HibernateDelaySec=30min
+HIBOPTINEOF

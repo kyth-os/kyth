@@ -96,10 +96,12 @@ python3 build_files/scripts/check-committed-secrets.py
 echo "==> Runtime migration inventory and frontend boundaries"
 python3 build_files/scripts/check-runtime-migration-inventory.py
 
-# --fast skips the heavy 600s unittest discover on a live desktop.
-# Live-desktop auto-skip: full suite is CI-gated (validation.yml). Force
-# locally with --full or KYTH_FORCE_FULL_VALIDATION=1. `pre-push` defaults
-# to --fast so a plain `git push` never runs the suite on Plasma.
+# --fast skips the heavy 600s unittest discover; it is strictly opt-in via
+# the --fast flag. There is deliberately no live-desktop autodetection:
+# implicit behavior that depends on which session happens to run the suite
+# made local and CI runs diverge. The full suite is CI-gated
+# (validation.yml); force the heavy path locally with --full or
+# KYTH_FORCE_FULL_VALIDATION=1. `pre-push` passes --fast/--full explicitly.
 validate_fast=0
 validate_force_full=0
 for _arg in "$@"; do
@@ -108,14 +110,8 @@ for _arg in "$@"; do
         --full) validate_force_full=1 ;;
     esac
 done
-if [[ ${validate_force_full} -eq 0 && -z "${KYTH_FORCE_FULL_VALIDATION:-}" && -z "${CI:-}" && -z "${GITHUB_ACTIONS:-}" ]]; then
-    if [[ -n "${WAYLAND_DISPLAY:-}" || -n "${DISPLAY:-}" || "${XDG_CURRENT_DESKTOP:-}" == *KDE* || "${XDG_SESSION_TYPE:-}" == "wayland" ]]; then
-        if [[ ${validate_fast} -eq 0 ]]; then
-            echo "[validate] Live desktop detected — defaulting to --fast (skipping heavy unittest discover)."
-            echo "[validate] Full suite is CI-gated; force locally with: KYTH_FORCE_FULL_VALIDATION=1 ./build_files/scripts/validate.sh --full"
-            validate_fast=1
-        fi
-    fi
+if [[ -n "${KYTH_FORCE_FULL_VALIDATION:-}" ]]; then
+    validate_force_full=1
 fi
 
 echo "==> Python unit tests"
@@ -136,7 +132,7 @@ export XDG_DATA_HOME="${test_home}/data"
 export XDG_STATE_HOME="${test_home}/state"
 mkdir -p "${HOME}" "${XDG_CACHE_HOME}" "${XDG_CONFIG_HOME}" "${XDG_DATA_HOME}" "${XDG_STATE_HOME}"
 if [[ ${validate_fast} -eq 1 ]]; then
-	echo "==> Python unit tests SKIPPED (--fast / live-desktop guard) — CI validation.yml gates the full suite"
+	echo "==> Python unit tests SKIPPED (--fast) — CI validation.yml gates the full suite"
 else
 	# Guard with timeout so CI doesn't hang on slow network/hardware probes; --foreground
 	# lets the suite read from TTY and avoids timeout's process-group SIGTERM

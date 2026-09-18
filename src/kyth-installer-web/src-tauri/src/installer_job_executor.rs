@@ -142,6 +142,7 @@ impl NativeInstallRequest {
                     skip_finalize: flag("skip_finalize", false),
                     root_subvolume: flag("root_subvolume", filesystem_install),
                     wipe: flag("wipe", false),
+                    encryption: text("encryption", "none"),
                 },
                 configuration: crate::installer_configuration::ConfigurationInput {
                     target_root: target_root.clone(),
@@ -318,6 +319,7 @@ impl NativePhaseExecutor {
                 skip_finalize: false,
                 root_subvolume: false,
                 wipe: false,
+                encryption: String::new(),
             },
             account: None,
             manual_mounts: None,
@@ -812,11 +814,56 @@ impl NativePhaseExecutor {
         let _ = self.write_transaction("failed", phase, "failed", message);
     }
 
+    fn verify_install_source(&self, phase: Phase) -> Result<(), NativePhaseError> {
+        // Re-verify the embedded image digest against the release digest AND
+        // the build-time cosign signature bundle immediately before bootc
+        // writes anything. `source_status_for` fails closed on any mismatch.
+        // Key off the claimed source, not the reported kind: a missing or
+        // tampered layout reports "invalid", which must also refuse bootc.
+        let claims_embedded = self.source_imgref.trim().starts_with("oci:");
+        if !claims_embedded {
+            return Ok(());
+        }
+        let status =
+            crate::installer_readonly::source_status_for(&self.source_imgref, &self.target_imgref);
+        if !status
+            .get("verified")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            let detail = status
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("embedded image verification failed");
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: format!("refusing bootc install: {detail}"),
+            });
+        }
+        Ok(())
+    }
+
+    fn check_storage_preflight(&self, phase: Phase) -> Result<(), NativePhaseError> {
+        // Live ESP-preservation / Windows / BitLocker preflight immediately
+        // before mutation or bootc: locked BitLocker fails closed in every
+        // mode, and non-wipe modes require an existing ESP to preserve.
+        let snapshot = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+        let preflight = crate::installer_storage::storage_preflight_from_snapshot(
+            &snapshot,
+            &self.storage_plan.disk,
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        crate::installer_storage::validate_storage_preflight(&preflight, &self.storage_plan.mode)
+            .map_err(|message| NativePhaseError::Execution { phase, message })
+    }
+
     fn execute_image(
         &self,
         phase: Phase,
         cancellation: &CancellationToken,
     ) -> Result<(), NativePhaseError> {
+        self.verify_install_source(phase)?;
+        self.check_storage_preflight(phase)?;
         if self.storage_plan.mode == "wipe" {
             crate::installer_guard::validate_target_disk(&self.storage_plan.disk)
                 .map_err(|message| NativePhaseError::Execution { phase, message })?;
@@ -1388,6 +1435,7 @@ impl NativePhaseExecutor {
         if self.storage_plan.mode != "wipe" {
             crate::installer_guard::validate_target_disk(&self.storage_plan.disk)
                 .map_err(|message| NativePhaseError::Execution { phase, message })?;
+            self.check_storage_preflight(phase)?;
         }
         let target = match self.storage_plan.mode.as_str() {
             "wipe" => {
@@ -1565,6 +1613,7 @@ mod tests {
                     skip_finalize: false,
                     root_subvolume: false,
                     wipe: true,
+                    encryption: "none".into(),
                 },
                 configuration: ConfigurationInput {
                     target_root: "/mnt/target".into(),
@@ -1596,6 +1645,34 @@ mod tests {
     }
 
     #[test]
+    fn frontend_encryption_choice_reaches_bootc_request() {
+        let request = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+            "encryption": "tpm2",
+        }))
+        .expect("frontend request should decode");
+        assert_eq!(request.execution.bootc.encryption, "tpm2");
+
+        let default = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+        }))
+        .expect("frontend request should decode");
+        assert_eq!(default.execution.bootc.encryption, "none");
+    }
+
+    #[test]
+    fn unsupported_encryption_fails_before_any_worker_starts() {
+        let mut bad = request(false);
+        bad.execution.bootc.encryption = "luks".into();
+        let error = NativePhaseExecutor::from_request(bad)
+            .expect_err("unsupported encryption must fail closed");
+        assert!(
+            error.contains("encryption unsupported"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
     fn frontend_cachyos_kernel_alias_is_normalized_for_native_secure_boot() {
         let request = NativeInstallRequest::from_http(serde_json::json!({
             "kernel": " CachyOS ",
@@ -1603,6 +1680,32 @@ mod tests {
         .expect("frontend request should decode");
 
         assert_eq!(request.execution.secure_boot.kernel, "cachy");
+    }
+
+    #[test]
+    fn image_phase_refuses_unverifiable_embedded_source_before_bootc() {
+        let mut missing = request(false);
+        missing.execution.bootc.source_imgref = "oci:/nonexistent/kyth/image:latest".into();
+        let executor =
+            NativePhaseExecutor::from_request(missing).expect("request shape should validate");
+        let error = executor
+            .verify_install_source(Phase::Image)
+            .expect_err("missing embedded image must refuse bootc");
+        assert!(
+            error.to_string().contains("refusing bootc install"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn image_phase_passes_through_non_embedded_sources() {
+        let mut network = request(false);
+        network.execution.bootc.source_imgref = "docker://ghcr.io/kyth-os/kyth:testing".into();
+        let executor =
+            NativePhaseExecutor::from_request(network).expect("request shape should validate");
+        executor
+            .verify_install_source(Phase::Image)
+            .expect("network source defers to fetch-time checks");
     }
 
     #[test]

@@ -14,9 +14,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use kyth_shared::system::process::{run_bounded, run_bounded_command};
 use kyth_shared::system::sched_daemon::{
-    current_scheduler, gamescope_active, load_sched_config, poll_step, proc_gaming_active,
-    session_uids, set_scheduler_with_retry, write_status, GamingCache, SchedEffect, SchedState,
-    SCX_SET_ATTEMPTS, SCX_SET_RETRY_DELAY,
+    current_scheduler, filter_uids_with_deadline, gamescope_active, load_sched_config, poll_step,
+    proc_gaming_active, session_uids, set_scheduler_with_retry, write_status, GamingCache,
+    SchedEffect, SchedState, SCX_SET_ATTEMPTS, SCX_SET_RETRY_DELAY,
 };
 
 static RUNNING: AtomicBool = AtomicBool::new(true);
@@ -165,11 +165,14 @@ fn gaming_detected(cache: &mut GamingCache, now: f64) -> bool {
         .copied()
         .filter(|id| gamescope_active(*id))
         .collect();
-    let gamemode: Vec<u32> = uids
-        .iter()
-        .copied()
-        .filter(|id| query_gamemode(*id))
-        .collect();
+    // Per-UID gamemode queries can each block for seconds on a dead user
+    // bus; bound the whole serial chain with a global deadline so one
+    // wedged session never stalls the poll iteration.
+    let gamemode = filter_uids_with_deadline(
+        &uids,
+        Instant::now() + Duration::from_secs(8),
+        &query_gamemode,
+    );
     let proc_active = proc_gaming_active();
     cache
         .check(

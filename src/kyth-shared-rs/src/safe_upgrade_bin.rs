@@ -23,18 +23,10 @@ fn now() -> i64 {
         .as_secs() as i64
 }
 
-fn rollout_ring() -> String {
-    std::fs::read_to_string(DEFAULT_CONFIG)
-        .ok()
-        .and_then(|text| text.parse::<toml::Value>().ok())
-        .and_then(|value| value.get("auto_update").cloned().or(Some(value)))
-        .and_then(|value| {
-            value
-                .get("rollout_ring")
-                .and_then(toml::Value::as_str)
-                .map(str::to_owned)
-        })
-        .unwrap_or_else(|| "follow-image".into())
+fn rollout_ring(last_known: &str) -> Result<String, String> {
+    // Strict: an explicitly configured unknown ring is a hard error and the
+    // stored state keeps the last known ring (staging never runs).
+    kyth_shared::system::safe_upgrade_policy::load_rollout_ring(DEFAULT_CONFIG, last_known)
 }
 
 fn free_bytes(path: &str) -> Option<u64> {
@@ -224,16 +216,23 @@ fn upgrade() -> Result<String, String> {
         .ok_or_else(|| "Could not determine the booted image status".to_string())?;
     let reference = kyth_shared::system::bootc_query::image_reference_from_status(&status)
         .ok_or_else(|| "Could not determine the booted image reference".to_string())?;
-    let ring = rollout_ring();
-    if let Some(reason) = kyth_shared::system::boot_health::rollout_policy_reason(&reference, &ring)
-    {
-        return Err(format!("Update blocked by rollout policy: {reason}"));
-    }
     // Do not make staging depend on a second registry client. GHCR metadata
     // probes can time out while bootc itself can still reach the image; bootc
     // is the authoritative fetcher for the mutating update path.
     let state = kyth_shared::system::boot_health::read_default_state();
+    // Strict ring validation keeps the last known ring on unknown values:
+    // resolve against the stored state before staging anything.
+    let ring = rollout_ring(&state.rollout_ring)?;
+    if let Some(reason) = kyth_shared::system::boot_health::rollout_policy_reason(&reference, &ring)
+    {
+        return Err(format!("Update blocked by rollout policy: {reason}"));
+    }
     let booted = kyth_shared::system::bootc_query::image_digest_from_status(&status, "booted");
+    // Record the booted release (version and digest) before staging so the
+    // post-upgrade gate can refuse a staged image older than what is
+    // running, unless an explicit downgrade opt-in is present.
+    let booted_version =
+        kyth_shared::system::bootc_query::image_version_from_status(&status, "booted");
     let staged = kyth_shared::system::bootc_query::image_digest_from_status(&status, "staged");
     if let Some(reason) = staged
         .as_deref()
@@ -280,6 +279,25 @@ fn upgrade() -> Result<String, String> {
             detail
         });
     };
+    // Refuse a staged image older than the recorded booted release unless an
+    // explicit downgrade opt-in is present.
+    let allow_downgrade = std::fs::read_to_string(DEFAULT_CONFIG)
+        .map(|raw| kyth_shared::system::safe_upgrade_policy::allow_downgrade_from_toml(&raw))
+        .unwrap_or_else(|_| {
+            kyth_shared::system::safe_upgrade_policy::allow_downgrade_from_toml("")
+        });
+    kyth_shared::system::safe_upgrade_policy::validate_not_downgrade(
+        booted_version.as_deref(),
+        booted.as_deref(),
+        after
+            .as_ref()
+            .and_then(|data| {
+                kyth_shared::system::bootc_query::image_version_from_status(data, "staged")
+            })
+            .as_deref(),
+        staged_after.as_deref(),
+        allow_downgrade,
+    )?;
     let coordinator = kyth_shared::system::update_coordinator::UpdateCoordinator::new(
         kyth_shared::system::boot_health::DEFAULT_STATE_PATH,
     );

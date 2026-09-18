@@ -21,6 +21,7 @@ pub mod cloud_idempotent;
 pub mod commands;
 pub mod config_loader;
 pub mod containers;
+pub mod default_flatpaks;
 pub mod desktop_polish;
 pub mod diagnostic_report;
 pub mod diagnostics_scrub;

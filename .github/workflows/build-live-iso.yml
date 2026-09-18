@@ -141,6 +141,39 @@ jobs:
           ref: ${{ steps.effective.outputs.sha || (startsWith(steps.effective.outputs.tag, 'testing') && 'testing' || 'main') }}
           persist-credentials: false
 
+      - name: Verify locked dependencies
+        # Fail fast before the multi-GB payload build: the builder stage
+        # runs `npm ci` and `cargo build --locked`, which refuse out-of-sync
+        # lockfiles — but only after pulling the toolchain. Assert the
+        # lockfiles exist, are tracked, and name the manifests they pin.
+        run: |
+          set -euo pipefail
+          for lock in \
+            src/kyth-installer-web/package-lock.json \
+            src/kyth-installer-web/src-tauri/Cargo.lock \
+            src/kyth-shared-rs/Cargo.lock; do
+            test -s "${lock}" || { echo "::error::missing lockfile ${lock}"; exit 1; }
+            git ls-files --error-unmatch "${lock}" >/dev/null || {
+              echo "::error::lockfile ${lock} is not tracked in git"; exit 1
+            }
+            echo "OK ${lock} ($(wc -c <"${lock}") bytes)"
+          done
+          python3 -c "import json; assert json.load(open('src/kyth-installer-web/package-lock.json'))['lockfileVersion']"
+          grep -q '^version = ' src/kyth-shared-rs/Cargo.lock
+          grep -q '^version = ' src/kyth-installer-web/src-tauri/Cargo.lock
+
+      - name: Compute installer build hash
+        id: installer_hash
+        run: |
+          set -euo pipefail
+          hash="$(build_files/scripts/installer-build-hash.sh)"
+          [[ "${hash}" =~ ^[0-9a-f]{64}$ ]] || {
+            echo "::error::installer-build-hash.sh produced invalid output" >&2
+            exit 1
+          }
+          echo "hash=${hash}" >>"${GITHUB_OUTPUT}"
+          echo "Installer build hash: ${hash}"
+
       - name: Prepare immutable release identity
         id: release
         env:
@@ -234,6 +267,7 @@ jobs:
         env:
           SOURCE_TAG: ${{ steps.effective.outputs.tag }}
           SOURCE_IMAGE_PINNED: ${{ steps.source_image.outputs.pinned }}
+          INSTALLER_BUILD_HASH: ${{ steps.installer_hash.outputs.hash }}
         run: |
           # No registry cache — podman/buildah cache syntax is incompatible
           # with buildx type=registry (and bare tagged refs are rejected by
@@ -245,6 +279,7 @@ jobs:
             --security-opt label=disable \
             --build-arg "BASE_IMAGE=${SOURCE_IMAGE_PINNED}" \
             --build-arg "SOURCE_TAG=${SOURCE_TAG}" \
+            --build-arg "INSTALLER_BUILD_HASH=${INSTALLER_BUILD_HASH}" \
             --tag localhost/payload:latest \
             -f installer/Containerfile \
             .
@@ -287,6 +322,34 @@ jobs:
           RUNNER_TEMP: ${{ runner.temp }}
           SOURCE_TAG: ${{ steps.effective.outputs.tag }}
           STEPS_RELEASE_OUTPUTS_ISO_BASENAME: ${{ steps.release.outputs.iso_basename }}
+
+      - name: Gate ISO size (8.5 GiB max)
+        env:
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
+          STEPS_RELEASE_OUTPUTS_ISO_BASENAME: ${{ steps.release.outputs.iso_basename }}
+        run: |
+          set -euo pipefail
+          ISO="output/live-iso/${STEPS_RELEASE_OUTPUTS_ISO_BASENAME}"
+          size_bytes="$(stat -c%s "${ISO}")"
+          # 8.5 GiB hard ceiling: larger ISOs no longer fit the release
+          # hosting budget and signal payload bloat.
+          limit_bytes=$((8 * 1024 * 1024 * 1024 + 512 * 1024 * 1024))
+          size_mib="$((size_bytes / 1024 / 1024))"
+          limit_mib="$((limit_bytes / 1024 / 1024))"
+          delta_mib="$((size_mib - limit_mib))"
+          {
+            echo "### ISO size gate"
+            echo ""
+            echo "| ISO | Size | Limit | Delta to limit |"
+            echo "| --- | --- | --- | --- |"
+            printf '| `%s` | %s MiB | %s MiB | %+d MiB |\n' \
+              "${STEPS_RELEASE_OUTPUTS_ISO_BASENAME}" "${size_mib}" "${limit_mib}" "${delta_mib}"
+          } >>"${GITHUB_STEP_SUMMARY}"
+          echo "ISO size: ${size_mib} MiB (limit ${limit_mib} MiB, delta ${delta_mib} MiB)"
+          if (( size_bytes > limit_bytes )); then
+            echo "::error::ISO ${STEPS_RELEASE_OUTPUTS_ISO_BASENAME} is ${size_mib} MiB, over the 8.5 GiB (${limit_mib} MiB) ceiling by ${delta_mib} MiB." >&2
+            exit 1
+          fi
 
       - name: Generate ISO checksums
         run: |

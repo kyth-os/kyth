@@ -28,13 +28,28 @@ class InstallerImageSourceCoverageTests(unittest.TestCase):
             "digest": digest,
             "annotations": {"org.opencontainers.image.ref.name": tag},
         }]}))
+        bundle = root.parent / "bundle.json"
+        bundle.write_text(json.dumps({
+            "schema_version": 1,
+            "digest": digest,
+            "release_digest": digest,
+            "source_image": "ghcr.io/kyth-os/kyth:testing",
+            "identity": "test-identity",
+            "issuer": "https://token.actions.githubusercontent.com",
+            "signatures": ["c2lnbmF0dXJlLW9uZQ=="],
+        }))
+        bundle_digest = "sha256:" + hashlib.sha256(bundle.read_bytes()).hexdigest()
         metadata = root.parent / "source.json"
         metadata.write_text(json.dumps({
             "schema_version": 1,
             "digest": digest,
+            "release_digest": digest,
             "target_image": target if target is not None else imagesrc.TARGET_IMAGE,
+            "source_image": "ghcr.io/kyth-os/kyth:testing",
+            "signature": "verified",
+            "signature_digest": bundle_digest,
         }))
-        return digest, metadata
+        return digest, metadata, bundle
 
     def test_oci_reference_parses_tag_and_defaults_latest(self):
         self.assertEqual(imagesrc._oci_layout_ref("oci:/images/kyth:stable"), (Path("/images/kyth"), "stable"))
@@ -57,32 +72,32 @@ class InstallerImageSourceCoverageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "image"
             root.mkdir()
-            digest, metadata = self._oci_fixture(root)
+            digest, metadata, bundle = self._oci_fixture(root)
             (root / "oci-layout").write_text(json.dumps({"imageLayoutVersion": "0.9.0"}))
             with self.assertRaisesRegex(RuntimeError, "layout version"):
-                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata)
+                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata, bundle_path=bundle)
 
             self._oci_fixture(root)
             (root / "index.json").write_text(json.dumps({"manifests": []}))
             with self.assertRaisesRegex(RuntimeError, "no valid manifest digest"):
-                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata)
+                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata, bundle_path=bundle)
 
-            digest, metadata = self._oci_fixture(root, target="different/image")
+            digest, metadata, bundle = self._oci_fixture(root, target="different/image")
             with self.assertRaisesRegex(RuntimeError, "update target"):
-                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata)
+                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata, bundle_path=bundle)
 
     def test_oci_verification_rejects_missing_and_modified_manifest_blob(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "image"
             root.mkdir()
-            digest, metadata = self._oci_fixture(root)
+            digest, metadata, bundle = self._oci_fixture(root)
             blob = root / "blobs" / "sha256" / digest.split(":", 1)[1]
             blob.unlink()
             with self.assertRaisesRegex(RuntimeError, "blob is missing"):
-                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata)
+                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata, bundle_path=bundle)
             blob.write_bytes(b"tampered")
             with self.assertRaisesRegex(RuntimeError, "integrity check"):
-                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata)
+                imagesrc._verify_oci_source(f"oci:{root}", expected_digest=digest, metadata_path=metadata, bundle_path=bundle)
 
     def test_network_preflight_reports_route_dns_and_connection_failures(self):
         route = SimpleNamespace(returncode=1, stdout="")

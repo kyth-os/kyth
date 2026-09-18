@@ -19,6 +19,9 @@ env/
 # Logs
 *.log
 
+# Local scratch (bib debug logs, ISO workdirs) — never tracked
+tmp/
+
 # Environment files
 .env
 .env.local

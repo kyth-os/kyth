@@ -80,6 +80,6 @@ class TestTunableRegistry(unittest.TestCase):
             # ensure we can call status (may be balanced vs custom)
             try:
                 st = tunable_status("ananicy")
-                self.assertIsInstance(st, str)
-            except Exception:
-                pass  # some other tunables may not have status in test env
+            except Exception as exc:
+                self.skipTest(f"tunable status unavailable in test env: {exc}")
+            self.assertIsInstance(st, str)

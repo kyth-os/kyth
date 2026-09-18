@@ -604,6 +604,97 @@ pub(crate) fn has_bios_boot_partition(input: &str) -> Result<bool, String> {
         .any(|partition| partition.parttype.eq_ignore_ascii_case(BIOS_BOOT_GUID)))
 }
 
+/// Microsoft basic-data GUID: the Windows-indicator partition type.
+const WINDOWS_DATA_GUID: &str = "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7";
+
+/// ESP-preservation / Windows-indicator / BitLocker state for one target
+/// disk, derived from the same lsblk snapshot the Python compatibility path
+/// (`list_partitions`) reads. One detection source, two consumers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct StoragePreflight {
+    pub disk: String,
+    pub esp_present: bool,
+    pub esp_name: String,
+    pub windows_present: bool,
+    pub bitlocker_locked: bool,
+    pub checked_partitions: usize,
+}
+
+fn on_selected_disk(name: &str, disk: &str) -> bool {
+    name.strip_prefix(disk).is_some_and(|suffix| {
+        !suffix.is_empty()
+            && suffix
+                .strip_prefix('p')
+                .unwrap_or(suffix)
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
+    })
+}
+
+pub(crate) fn storage_preflight_from_snapshot(
+    input: &str,
+    disk: &str,
+) -> Result<StoragePreflight, String> {
+    let disk = normalize_device_path(disk)
+        .ok_or_else(|| "storage preflight has an invalid disk".to_string())?;
+    let mut preflight = StoragePreflight {
+        disk: disk.clone(),
+        esp_present: false,
+        esp_name: String::new(),
+        windows_present: false,
+        bitlocker_locked: false,
+        checked_partitions: 0,
+    };
+    for part in parse_partitions(input)? {
+        if !on_selected_disk(&part.name, &disk) {
+            continue;
+        }
+        preflight.checked_partitions += 1;
+        if part.efi && !preflight.esp_present {
+            preflight.esp_present = true;
+            preflight.esp_name = part.name.clone();
+        }
+        // `parttype`/`fstype` are already lowercased by parse_partitions.
+        if matches!(part.fstype.as_str(), "ntfs" | "ntfs3")
+            || part.parttype == WINDOWS_DATA_GUID
+            || part.label.to_ascii_lowercase().contains("windows")
+        {
+            preflight.windows_present = true;
+        }
+        // An explicit BitLocker type, or an NTFS volume with active
+        // mappings: the locked-BitLocker shape the Python
+        // `_encryption_check` compat path warns on.
+        if part.fstype == "bitlocker"
+            || (matches!(part.fstype.as_str(), "ntfs" | "ntfs3") && part.in_use)
+        {
+            preflight.bitlocker_locked = true;
+        }
+    }
+    Ok(preflight)
+}
+
+/// Fail closed on locked BitLocker in every mode; require an existing ESP
+/// to preserve for every mode where bootc does not own the whole-disk
+/// layout (`wipe` recreates the ESP via `bootc to-disk`).
+pub(crate) fn validate_storage_preflight(
+    preflight: &StoragePreflight,
+    install_mode: &str,
+) -> Result<(), String> {
+    if preflight.bitlocker_locked {
+        return Err(
+            "This disk has a locked BitLocker volume. Suspend or disable BitLocker in Windows (manage-bde -off) and wait for decryption before installing."
+                .to_string(),
+        );
+    }
+    if install_mode != "wipe" && !preflight.esp_present {
+        return Err(
+            "No EFI System Partition was found on the target disk. The installer preserves the existing ESP instead of formatting it; select a disk with an ESP or erase the disk."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -818,5 +909,86 @@ mod tests {
             BIOS_BOOT_GUID
         );
         assert!(has_bios_boot_partition(&snapshot).unwrap());
+    }
+
+    fn preflight_snapshot(children: &str) -> String {
+        format!(
+            r#"{{"blockdevices":[{{"name":"/dev/sda","type":"disk","pttype":"gpt","children":[{children}]}}]}}"#
+        )
+    }
+
+    #[test]
+    fn preflight_detects_esp_windows_and_bitlocker_indicators() {
+        let snapshot = preflight_snapshot(
+            r#"{"name":"/dev/sda1","type":"part","fstype":"vfat","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b","label":"ESP"},
+                {"name":"/dev/sda2","type":"part","fstype":"ntfs","parttype":"ebd0a0a2-b9e5-4433-87c0-68b6b72699c7","label":"Windows"},
+                {"name":"/dev/sda3","type":"part","fstype":"BitLocker","label":""},
+                {"name":"/dev/sda4","type":"part","fstype":"btrfs","label":"KythOS"}"#,
+        );
+        let preflight =
+            storage_preflight_from_snapshot(&snapshot, "/dev/sda").expect("snapshot parses");
+        assert_eq!(preflight.checked_partitions, 4);
+        assert!(preflight.esp_present);
+        assert_eq!(preflight.esp_name, "/dev/sda1");
+        assert!(preflight.windows_present);
+        assert!(preflight.bitlocker_locked);
+        // Another disk's partitions never leak into this disk's preflight.
+        let other =
+            storage_preflight_from_snapshot(&snapshot, "/dev/sdb").expect("snapshot parses");
+        assert_eq!(other.checked_partitions, 0);
+        assert!(!other.esp_present);
+        assert!(!other.windows_present);
+        assert!(!other.bitlocker_locked);
+    }
+
+    #[test]
+    fn preflight_flags_ntfs_with_active_mappings_as_locked() {
+        let snapshot = preflight_snapshot(
+            r#"{"name":"/dev/sda1","type":"part","fstype":"ntfs","label":"Data","children":[{"name":"/dev/mapper/locked","type":"crypt"}]}"#,
+        );
+        let preflight = storage_preflight_from_snapshot(&snapshot, "sda").expect("snapshot parses");
+        assert!(preflight.windows_present);
+        assert!(preflight.bitlocker_locked);
+        assert!(!preflight.esp_present);
+    }
+
+    #[test]
+    fn preflight_validation_fails_closed_on_bitlocker_and_missing_esp() {
+        let locked = StoragePreflight {
+            disk: "/dev/sda".to_string(),
+            esp_present: true,
+            esp_name: "/dev/sda1".to_string(),
+            windows_present: true,
+            bitlocker_locked: true,
+            checked_partitions: 2,
+        };
+        for mode in ["wipe", "alongside", "resize_ntfs", "free_space", "manual"] {
+            let error = validate_storage_preflight(&locked, mode)
+                .expect_err("locked BitLocker must fail closed");
+            assert!(error.contains("BitLocker"), "{error}");
+        }
+        let no_esp = StoragePreflight {
+            bitlocker_locked: false,
+            esp_present: false,
+            esp_name: String::new(),
+            ..locked.clone()
+        };
+        // Wipe recreates the ESP via bootc to-disk; every other mode must
+        // preserve an existing one.
+        assert!(validate_storage_preflight(&no_esp, "wipe").is_ok());
+        for mode in ["alongside", "resize_ntfs", "free_space", "manual"] {
+            let error = validate_storage_preflight(&no_esp, mode)
+                .expect_err("missing ESP must fail closed");
+            assert!(error.contains("EFI System Partition"), "{error}");
+        }
+        let clean = StoragePreflight {
+            esp_present: true,
+            ..no_esp.clone()
+        };
+        assert!(validate_storage_preflight(&clean, "alongside").is_ok());
+        assert!(
+            storage_preflight_from_snapshot("not-json", "/dev/sda").is_err()
+                && storage_preflight_from_snapshot("{}", "../../etc").is_err()
+        );
     }
 }

@@ -229,6 +229,7 @@ mod tests {
             skip_finalize: false,
             root_subvolume: false,
             wipe: true,
+            encryption: "none".into(),
         })
         .expect("bootc wipe plan");
         assert!(bootc.destructive);

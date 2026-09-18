@@ -444,8 +444,9 @@ class InstallerPlanTests(unittest.TestCase):
         self.plan = plan
 
     def test_validate_alongside_requires_partition_on_selected_disk(self):
+        esp = {"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "list_partitions", return_value=[]), \
+             patch.object(self.plan, "list_partitions", return_value=[esp]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/sda"):
             with self.assertRaisesRegex(RuntimeError, "does not belong"):
                 self.plan._validate_install_target({
@@ -463,7 +464,7 @@ class InstallerPlanTests(unittest.TestCase):
             "size_bytes": 128 * 1024**3,
         }
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}, partition]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=False), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
@@ -483,7 +484,7 @@ class InstallerPlanTests(unittest.TestCase):
             "size_bytes": 128 * 1024**3,
         }
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}, partition]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan, "_has_bios_boot_partition", return_value=False):
@@ -500,7 +501,7 @@ class InstallerPlanTests(unittest.TestCase):
             "current": False, "size_bytes": 128 * 1024**3,
         }
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "list_partitions", return_value=[target]), \
+             patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}, target]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=False), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
@@ -558,7 +559,7 @@ class InstallerPlanTests(unittest.TestCase):
             "size_bytes": 256 * 1024**3,
         }
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}, partition]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=False), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
@@ -579,7 +580,7 @@ class InstallerPlanTests(unittest.TestCase):
             "size_bytes": 256 * 1024**3,
         }
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}, partition]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=False), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
@@ -602,7 +603,7 @@ class InstallerPlanTests(unittest.TestCase):
             "size_bytes": 256 * 1024**3,
         }
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "list_partitions", return_value=[partition]), \
+             patch.object(self.plan, "list_partitions", return_value=[{"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}, partition]), \
              patch.object(self.plan, "_parent_disk", return_value="/dev/nvme0n1"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=False), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"):
@@ -810,8 +811,9 @@ class InstallerPlanTests(unittest.TestCase):
     def test_validate_free_space_reserves_room_for_new_bios_partition(self):
         start = 40 * 1024**3
         end = start + 32 * 1024**3
+        esp = {"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "list_partitions", return_value=[]), \
+             patch.object(self.plan, "list_partitions", return_value=[esp]), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True):
             with self.assertRaisesRegex(RuntimeError, "33 GiB"):
                 self.plan._validate_free_space_target({

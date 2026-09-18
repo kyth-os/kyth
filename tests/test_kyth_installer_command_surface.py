@@ -221,82 +221,66 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         # this test doesn't write real state to /run/kyth-installer.
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
-        with mock.patch.object(
-            phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
-        ), mock.patch.object(
-            install,
-            "_prepare_install_plan",
-            return_value=InstallPlan(mode="wipe", disk="/dev/sda"),
-        ), mock.patch.object(
-            install,
-            "_validate_install_target",
-            return_value=("/dev/sda", None),
-        ), mock.patch.object(
-            install,
-            "_install_images",
-            return_value=("src", "tgt"),
-        ), mock.patch.object(
-            install,
-            "_network_preflight",
-            return_value=None,
-        ), mock.patch.object(
-            install,
-            "_validate_storage_intent",
-            return_value=None,
-        ), mock.patch.object(
-            install,
-            "run_command",
-        ) as run_command, mock.patch.object(
-            install,
-            "_run_cmd",
-        ), mock.patch.object(
-            install,
-            "get_root_partition",
-            return_value="/dev/sda3",
-        ), mock.patch.object(
-            install,
-            "find_deploy_etc",
-            return_value=Path("/mnt/deploy/etc"),
-        ), mock.patch.object(
-            phases_finalize,
-            "find_deploy_etc",
-            return_value=Path("/mnt/deploy/etc"),
-        ), mock.patch.object(
-            install,
-            "validate_installed_target",
-            return_value=[],
-        ), mock.patch.object(
-            phases_finalize,
-            "validate_installed_target",
-            return_value=[],
-        ), mock.patch.object(
-            install,
-            "ensure_system_accounts",
-        ), mock.patch.object(
-            phases_finalize,
-            "ensure_system_accounts",
-        ), mock.patch.object(
-            install,
-            "_try_stage_mok_enrollment",
-            return_value={},
-        ), mock.patch.object(
-            phases_run,
-            "_try_stage_mok_enrollment",
-            return_value={},
-        ), mock.patch.object(
-            install,
-            "unmount_target_disk",
-        ), mock.patch.multiple(
-            phases_storage,
-            unmount_target_disk=mock.DEFAULT,
-            PartitionTableGuard=mock.Mock(return_value=contextlib.nullcontext()),
-            _start_power_watch=mock.Mock(return_value=mock.Mock()),
-            _stop_power_watch=mock.DEFAULT,
-            _disk_image_hold=mock.Mock(return_value=contextlib.nullcontext()),
-        ), mock.patch.object(
-            install,
-            "require_root",
-        ):
+        # One flat `with a, b, ...:` would exceed CPython's static block
+        # nesting limit here, so mocks are entered via an ExitStack.
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_prepare_install_plan",
+                return_value=InstallPlan(mode="wipe", disk="/dev/sda"),
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_validate_install_target", return_value=("/dev/sda", None),
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_install_images", return_value=("src", "tgt"),
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_network_preflight", return_value=None,
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_validate_storage_intent", return_value=None,
+            ))
+            run_command = stack.enter_context(mock.patch.object(install, "run_command"))
+            stack.enter_context(mock.patch.object(install, "_run_cmd"))
+            stack.enter_context(mock.patch.object(
+                install, "get_root_partition", return_value="/dev/sda3",
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "find_deploy_etc", return_value=Path("/mnt/deploy/etc"),
+            ))
+            stack.enter_context(mock.patch.object(
+                phases_finalize, "find_deploy_etc", return_value=Path("/mnt/deploy/etc"),
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "validate_installed_target", return_value=[],
+            ))
+            stack.enter_context(mock.patch.object(
+                phases_finalize, "validate_installed_target", return_value=[],
+            ))
+            stack.enter_context(mock.patch.object(install, "ensure_system_accounts"))
+            stack.enter_context(mock.patch.object(phases_finalize, "ensure_system_accounts"))
+            stack.enter_context(mock.patch.object(
+                install, "_try_stage_mok_enrollment", return_value={},
+            ))
+            stack.enter_context(mock.patch.object(
+                phases_run, "_try_stage_mok_enrollment", return_value={},
+            ))
+            stack.enter_context(mock.patch.object(install, "unmount_target_disk"))
+            stack.enter_context(mock.patch.multiple(
+                phases_storage,
+                unmount_target_disk=mock.DEFAULT,
+                PartitionTableGuard=mock.Mock(return_value=contextlib.nullcontext()),
+                _start_power_watch=mock.Mock(return_value=mock.Mock()),
+                _stop_power_watch=mock.DEFAULT,
+                _disk_image_hold=mock.Mock(return_value=contextlib.nullcontext()),
+            ))
+            stack.enter_context(mock.patch.object(install, "require_root"))
+            # Fail-closed user creation would run the real shadow path here;
+            # this surface test mocks every side effect, so stub it too.
+            stack.enter_context(mock.patch.object(phases_finalize, "_create_installer_user"))
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
             install._run_install_worker(lambda _msg: None, lambda _pct: None, "", context)

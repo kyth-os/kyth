@@ -1,35 +1,140 @@
 #!/usr/bin/env python3
-import os, re, subprocess, time
+"""kyth-set-resolution — first-login preferred-mode apply with retry sentinel.
 
-# kscreen-doctor is only useful once the session has a screen. Retry briefly
-# instead of sleeping a fixed 3s (which used to stall System Hub launch).
-result = None
-for _ in range(8):
-    result = subprocess.run(['kscreen-doctor', '-o'], capture_output=True, text=True)
-    if result.returncode == 0 and result.stdout.strip():
-        break
-    time.sleep(0.25)
+Runs kscreen-doctor once per user to set every connected output to its
+preferred mode (not just the first mode listed). The autostart entry and the
+retry sentinel are removed only on success; on failure the attempt counter in
+~/.cache/kyth/set-resolution.attempts bounds retries across logins so a
+headless / broken-KWin session cannot spin forever.
+"""
+import os
+import re
+import subprocess
+import time
 
-if result is not None and result.returncode == 0:
-    current_output = None
-    for line in result.stdout.splitlines():
-        line = line.strip()
-        m = re.match(r'^Output:\s+\d+\s+(\S+)', line)
-        if m:
-            current_output = m.group(1)
+MAX_ATTEMPTS = 5
+SENTINEL = os.path.join(
+    os.environ.get("XDG_CACHE_HOME", os.path.expanduser("~/.cache")),
+    "kyth",
+    "set-resolution.attempts",
+)
+AUTOSTART = os.path.expanduser("~/.config/autostart/kyth-set-resolution.desktop")
+
+OUTPUT_RE = re.compile(r"^Output:\s+\d+\s+(\S+)")
+# kscreen-doctor -o marks the preferred/current mode, e.g. "3:1920x1080@60*".
+MODE_RE = re.compile(r"(\d+):(\d+)x(\d+)@([\d.]+)(\*)?")
+
+
+def _read_attempts() -> int:
+    try:
+        with open(SENTINEL, encoding="utf-8") as handle:
+            return int(handle.read().strip() or "0")
+    except (OSError, ValueError):
+        return 0
+
+
+def _note_attempt(n: int) -> None:
+    try:
+        os.makedirs(os.path.dirname(SENTINEL), exist_ok=True)
+        with open(SENTINEL, "w", encoding="utf-8") as handle:
+            handle.write(str(n))
+    except OSError:
+        pass
+
+
+def _clear_retry_state() -> None:
+    for path in (AUTOSTART, SENTINEL):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+def _preferred_mode(modes_blob: str) -> str | None:
+    """Pick the preferred ('*') mode id, else the largest WxH@Hz mode id."""
+    modes = MODE_RE.findall(modes_blob)
+    if not modes:
+        return None
+    for mode_id, _w, _h, _hz, star in modes:
+        if star:
+            return mode_id
+    best: tuple[int, int, float, str] | None = None
+    for mode_id, w, h, hz, _star in modes:
+        try:
+            key = (int(w) * int(h), int(h), float(hz), mode_id)
+        except ValueError:
             continue
-        if current_output and re.match(r'^Modes:', line):
-            modes = re.findall(r'\d+:(\d+x\d+@[\d.]+)', line)
-            if modes:
-                subprocess.run([
-                    'kscreen-doctor',
-                    f'output.{current_output}.enable',
-                    f'output.{current_output}.mode.{modes[0]}',
-                ], check=False)
-            current_output = None
+        if best is None or key > best:
+            best = key
+    return best[3] if best else modes[0][0]
 
-autostart = os.path.expanduser('~/.config/autostart/kyth-set-resolution.desktop')
-try:
-    os.unlink(autostart)
-except OSError:
-    pass
+
+def _parse_outputs(text: str) -> dict[str, str]:
+    """Map output name -> preferred mode id from `kscreen-doctor -o` text."""
+    found: dict[str, str] = {}
+    current: str | None = None
+    modes_blob: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        match = OUTPUT_RE.match(stripped)
+        if match:
+            if current is not None:
+                mode = _preferred_mode(" ".join(modes_blob))
+                if mode is not None:
+                    found[current] = mode
+            current = match.group(1)
+            modes_blob = []
+            continue
+        if current is not None and stripped.startswith("Modes:"):
+            modes_blob.append(stripped)
+    if current is not None:
+        mode = _preferred_mode(" ".join(modes_blob))
+        if mode is not None:
+            found[current] = mode
+    return found
+
+
+def main() -> int:
+    attempts = _read_attempts()
+    if attempts >= MAX_ATTEMPTS:
+        # Give up quietly; leave the desktop alone rather than wedging logins.
+        _clear_retry_state()
+        return 0
+
+    result = None
+    for _ in range(8):
+        result = subprocess.run(["kscreen-doctor", "-o"], capture_output=True, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            break
+        time.sleep(0.25)
+
+    if result is None or result.returncode != 0 or not result.stdout.strip():
+        _note_attempt(attempts + 1)
+        return 0
+
+    outputs = _parse_outputs(result.stdout)
+    if not outputs:
+        _note_attempt(attempts + 1)
+        return 0
+
+    ok = True
+    for name, mode_id in outputs.items():
+        applied = subprocess.run(
+            [
+                "kscreen-doctor",
+                f"output.{name}.enable",
+                f"output.{name}.mode.{mode_id}",
+            ],
+            check=False,
+        )
+        ok = ok and applied.returncode == 0
+
+    if ok:
+        _clear_retry_state()
+    else:
+        _note_attempt(attempts + 1)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

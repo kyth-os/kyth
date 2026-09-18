@@ -33,6 +33,30 @@ pub struct BatteryHealth {
     pub cycles: String,
 }
 
+/// System-wide config the Hub syncs the user's `battery.toml` to; the
+/// daemon prefers this when present so the per-user file is not required
+/// at boot. Falls back to the per-user path otherwise.
+pub const SYSTEM_CONFIG_PATH: &str = "/etc/kyth/battery.toml";
+/// Cap for the JSONL health ledger; `append_ledger` trims past this.
+pub const LEDGER_MAX_LINES: usize = 500;
+
+pub fn system_battery_config_path() -> PathBuf {
+    PathBuf::from(SYSTEM_CONFIG_PATH)
+}
+
+/// Daemon view of the config: explicit system path first, per-user file
+/// as fallback.
+pub fn load_battery_with_fallback(
+    system: impl AsRef<Path>,
+    user: impl AsRef<Path>,
+) -> BatteryConfig {
+    if system.as_ref().is_file() {
+        load_battery(system)
+    } else {
+        load_battery(user)
+    }
+}
+
 pub fn battery_config_path(path: Option<impl AsRef<Path>>) -> PathBuf {
     if let Some(path) = path {
         return path.as_ref().to_path_buf();
@@ -171,7 +195,74 @@ pub fn append_ledger(
         file,
         "{}",
         serde_json::to_string(&entry).unwrap_or_default()
-    )
+    )?;
+    // Bound the ledger: health snapshots append every 30 s forever, so
+    // trim past the cap instead of growing without limit.
+    let _ = cap_ledger(path, LEDGER_MAX_LINES);
+    Ok(())
+}
+
+/// Trim a JSONL ledger to its newest `max_lines` lines. Missing files are
+/// a no-op error the caller may ignore.
+pub fn cap_ledger(path: &Path, max_lines: usize) -> std::io::Result<()> {
+    let raw = fs::read_to_string(path)?;
+    let lines: Vec<&str> = raw.lines().collect();
+    if lines.len() <= max_lines {
+        return Ok(());
+    }
+    fs::write(path, lines[lines.len() - max_lines..].join("\n") + "\n")
+}
+
+/// Batteries exposing at least one charge-control file under `root`;
+/// desktops without a controllable battery yield an empty list.
+pub fn controllable_batteries_in(root: impl AsRef<Path>) -> Vec<String> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .filter(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            name.starts_with("BAT")
+                && [
+                    "charge_control_start_threshold",
+                    "charge_control_end_threshold",
+                ]
+                .iter()
+                .any(|file| entry.path().join(file).is_file())
+        })
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect()
+}
+
+/// Write the charge-start and charge-stop thresholds to every battery,
+/// but only where the control file is present. Returns how many
+/// batteries were controlled.
+pub fn apply_thresholds_in(root: impl AsRef<Path>, start: i64, stop: i64) -> usize {
+    let Ok(entries) = fs::read_dir(root) else {
+        return 0;
+    };
+    let mut controlled = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with("BAT") {
+            continue;
+        }
+        let mut touched = false;
+        for (file, value) in [
+            ("charge_control_start_threshold", start),
+            ("charge_control_end_threshold", stop),
+        ] {
+            let target = entry.path().join(file);
+            if target.is_file() && fs::write(&target, value.to_string()).is_ok() {
+                touched = true;
+            }
+        }
+        if touched {
+            controlled += 1;
+        }
+    }
+    controlled
 }
 
 /// Write the charge-stop threshold to every battery's control file.
@@ -219,6 +310,80 @@ mod tests {
             load_battery(directory.path().join("missing.toml")),
             BatteryConfig::default()
         );
+    }
+
+    #[test]
+    fn system_config_wins_over_user_config() {
+        let directory = tempdir().unwrap();
+        let system = directory.path().join("system.toml");
+        let user = directory.path().join("user.toml");
+        fs::write(&system, "charge_start = 45\ncharge_stop = 85\n").unwrap();
+        fs::write(&user, "charge_start = 20\ncharge_stop = 60\n").unwrap();
+        assert_eq!(
+            load_battery_with_fallback(&system, &user),
+            BatteryConfig {
+                charge_start: 45,
+                charge_stop: 85,
+                health_check: true
+            }
+        );
+        assert_eq!(
+            load_battery_with_fallback(directory.path().join("absent.toml"), &user),
+            BatteryConfig {
+                charge_start: 20,
+                charge_stop: 60,
+                health_check: true
+            }
+        );
+    }
+
+    #[test]
+    fn thresholds_apply_only_where_control_files_exist() {
+        let directory = tempdir().unwrap();
+        let full = directory.path().join("BAT0");
+        let partial = directory.path().join("BAT1");
+        let bare = directory.path().join("BAT2");
+        for dir in [&full, &partial, &bare] {
+            fs::create_dir(dir).unwrap();
+        }
+        fs::write(full.join("charge_control_start_threshold"), "0").unwrap();
+        fs::write(full.join("charge_control_end_threshold"), "0").unwrap();
+        fs::write(partial.join("charge_control_end_threshold"), "0").unwrap();
+        assert_eq!(controllable_batteries_in(directory.path()).len(), 2);
+        assert_eq!(apply_thresholds_in(directory.path(), 45, 85), 2);
+        assert_eq!(
+            fs::read_to_string(full.join("charge_control_start_threshold")).unwrap(),
+            "45"
+        );
+        assert_eq!(
+            fs::read_to_string(full.join("charge_control_end_threshold")).unwrap(),
+            "85"
+        );
+        assert_eq!(
+            fs::read_to_string(partial.join("charge_control_end_threshold")).unwrap(),
+            "85"
+        );
+        assert!(!partial.join("charge_control_start_threshold").exists());
+        assert!(!bare.join("charge_control_end_threshold").exists());
+    }
+
+    #[test]
+    fn empty_power_supply_tree_has_no_controllable_battery() {
+        let directory = tempdir().unwrap();
+        assert!(controllable_batteries_in(directory.path()).is_empty());
+        assert_eq!(apply_thresholds_in(directory.path(), 45, 85), 0);
+        assert!(controllable_batteries_in(directory.path().join("missing")).is_empty());
+    }
+
+    #[test]
+    fn ledger_is_capped_to_the_newest_lines() {
+        let directory = tempdir().unwrap();
+        let ledger = directory.path().join("battery.jsonl");
+        fs::write(&ledger, "a\nb\nc\nd\ne\n").unwrap();
+        cap_ledger(&ledger, 3).unwrap();
+        assert_eq!(fs::read_to_string(&ledger).unwrap(), "c\nd\ne\n");
+        cap_ledger(&ledger, 3).unwrap();
+        assert_eq!(fs::read_to_string(&ledger).unwrap(), "c\nd\ne\n");
     }
 
     #[test]
