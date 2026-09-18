@@ -25,9 +25,12 @@ profile and leaving it disconnected is not treated as a fault.
 
 ## Resource behavior
 
-The user timer performs a bounded check every 15 minutes, while a systemd path
-unit reacts when the shared user probe cache changes. Both start a oneshot
-process; nothing polls continuously. The service runs at low CPU and I/O
+The user timer performs a bounded check every 15 minutes
+(`kyth-guardian.timer`: `OnStartupSec=2min`, `OnUnitActiveSec=15min`); that
+timer is the only trigger. The former `kyth-guardian.path` unit (firing on
+probe-cache changes) was removed because it caused a check storm, so Guardian
+runs timer-only. Each run starts a oneshot process; nothing polls
+continuously. The service runs at low CPU and I/O
 priority with memory and CPU limits. `ProtectSystem=strict` is paired with
 `StateDirectory=kyth` so occurrence counters and history actually survive a
 timer run — without that, background auto-fix can never reach two consecutive
@@ -79,6 +82,11 @@ home paths, and filenames. Prompts are not retained and nothing is uploaded.
 History contains only sanitized evidence, recipe identifiers, model metadata,
 confidence, actions, and verification results; it rotates after 100 records or
 30 days.
+
+State reads take a shared lock so they never observe a half-written file. A
+corrupt `guardian.json` is never silently reset: the payload is preserved at
+`guardian.json.corrupt` and the corruption is logged, then an empty state is
+returned.
 
 System Hub exposes controls on **System → Guardian** (self-healing dashboard). The Repair page links there. The equivalent CLI is:
 

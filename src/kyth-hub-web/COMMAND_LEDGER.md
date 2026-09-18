@@ -32,7 +32,7 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
 | `fetchBootcSnapshot` | `probe_backend` | `section: "bootc-branch"` | `ProbeBridgeResponse<string>` | read | covered |
 | `fetchUpdateStatus` | `update_status` | none | `UpdateStatusLive` | read | covered |
 | `fetchPendingUpdatesSummary` | `pending_updates_summary` | none | `Record<string, string>` | read | covered |
-| `checkForUpdates` | `collect_availability` | `{ branch: null, useCached: false }` | `AvailabilityStatusLive` | check | covered |
+| `checkForUpdates` | `collect_availability` | `{ branch: null, useCached: false }`, raced against a Hub-side 95s timeout | `AvailabilityStatusLive` | check | covered |
 | `invokeBootcUpgrade` | `bootc_upgrade` | none | `string` | mutate | covered |
 | `invokeBootcRollback` | `bootc_rollback` | none | `string` | mutate | covered |
 | `invokeApplyStaged` | `apply_staged` | none | `string` | mutate | covered |
@@ -129,6 +129,14 @@ jobs (privileged actions) and library-call jobs (Bottles launch) cannot be
 killed mid-flight, so cancelling marks them and their late finish is
 dropped. VPN runtimes are capped at 16 tracked entries with terminal-state
 reaping; focus sessions reap exited children on insert.
+
+The frontend tracks at most one in-flight job per domain and rejects a
+second launch into an occupied slot with an already-running error.
+Tracked ids persist to `localStorage` (`kyth-hub:inflight-jobs`) and
+reattach on module init with a 2h TTL, an id-shape allowlist, and a
+one-shot per-domain status probe; tracking stays cross-tab single-flight
+over `storage` events. Each domain shares one poller (500ms for the first
+30s, then 2s backoff) with lost-contact after 5 consecutive empty probes.
 
 The Gaming tab's overlay/sched-ext/profile-builder commands
 (`gaming_perf_status`, `scx_status`, `scx_set_scheduler`,

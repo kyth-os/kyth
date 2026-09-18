@@ -28,7 +28,7 @@ requirements from enterprise storage/provisioning features.
 | Capability | KythOS | Consumer baseline | Enterprise baseline | Gate |
 |---|---|---|---|---|
 | Whole-disk install | bootc/Btrfs, final target rescan | Yes | Yes | Met |
-| Guided Windows coexistence | NTFS check/info/dry-run, BitLocker refusal, geometry verification, GPT backup/restore | Yes | Yes | Exceeds consumer safety baseline |
+| Guided Windows coexistence | NTFS check/info/dry-run, BitLocker refusal, ESP-preservation/BitLocker preflight, geometry verification, GPT backup/restore | Yes | Yes | Exceeds consumer safety baseline |
 | Use unallocated space | Exact live-region rescan before commit | Yes | Yes | Met |
 | Replace one partition | Final ownership, mount, mapping, size and ESP checks | Yes | Yes | Met |
 | Expert partitioner | Transaction journal, overlap simulation, one-root rule, EFI flagging, swap and per-filesystem fstab options | Yes | Yes | Met for physical partitions |
@@ -38,11 +38,22 @@ requirements from enterprise storage/provisioning features.
 | Unattended install | Headless CLI plus mode-0600 JSON answer files; all guided storage fields supported | Limited | Kickstart/AutoYaST | Met for fixed KythOS images, not general package provisioning |
 | Failure diagnostics | Resumable live event stream, copyable log, durable redacted transaction report, machine-readable failure summary, mount cleanup | Varies | Remote logging/rescue | Met locally |
 | Offline install | Exact pinned Fedora OCI image bundled in the ISO; manifest blob and release digest verified before storage mutation; optional CachyOS image requires network | Common | Common | Met for the default image |
-| Install completion assurance | Power preflight plus installed deployment, hostname, account and fstab validation before success | Varies | Varies | Met for implemented checks; real boot remains a release gate |
-| Full-disk encryption | Not exposed | LUKS/ZFS available | LUKS/LVM policies | **Open P0** |
+| Install completion assurance | Power preflight plus installed deployment, hostname, account and fstab validation before success; user creation is fail-closed (no login account fails the install instead of shipping an inaccessible system) | Varies | Varies | Met for implemented checks; real boot remains a release gate |
+| Full-disk encryption | Explicit `none`/`tpm2` option on `to-disk` installs (`--block-setup tpm2-luks` vs `direct`); unknown modes and encryption on `to-filesystem` fail closed instead of silently installing plaintext | LUKS/ZFS available | LUKS/LVM policies | **Partial; passphrase/LVM policies remain open** |
 | LVM/MD RAID/multipath/iSCSI | Existing mappings are detected and protected, but creation is not supported | Optional | Supported | Open enterprise scope |
 | OEM/custom package selection | Fixed image with first-boot System Hub | Varies | Supported | Image-based alternative, not direct parity |
 | In-installer rescue environment | Live desktop and System Hub repair tools, no dedicated installer rescue mode | Varies | Supported | Open P1 |
+
+## Storage preflight
+
+Before any guided target checks, the installer runs a shared
+ESP-preservation / BitLocker preflight over the probed snapshot (same
+detection source in the Python `plan_validate` path and the native Rust
+`installer_storage` path): a locked BitLocker volume fails closed in every
+mode — suspend or disable BitLocker in Windows and wait for decryption before
+installing — and every mode except `wipe` requires an existing ESP to
+preserve (`wipe` recreates the ESP via `bootc to-disk`). The exact ESP the
+install will mount is revalidated before commit.
 
 ## Release gates
 

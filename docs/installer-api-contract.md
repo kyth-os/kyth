@@ -27,6 +27,17 @@ bridge. In the live image, the root launcher writes the per-run session token
 to `/run/kyth-installer/session-token` with mode `0600`, starts the
 `kyth-installerd.service`, and removes the token after the shell exits.
 
+Backend tokens reach the unprivileged GUI child through a `0600` tokens file
+(`child-tokens.json` holding `bootstrap_token` and `session_token`), never in
+argv or a launcher URL. The native shell receives `--tokens-file <path>`; the
+Chromium fallback receives a `file://` launcher page carrying only the
+one-time bootstrap token. The writer refuses symlinks (`O_NOFOLLOW`), caps
+the payload at 4096 bytes, requires both tokens non-empty, and chowns the
+file to the desktop user when known. The shell reader fails closed — empty
+credentials, which the transport visibly rejects — on a symlink, a
+group/other-readable mode, an oversize path or file, malformed JSON, or
+invalid token shapes.
+
 The legacy HTTP root request must include the one-use `bootstrap_token` query
 parameter. A successful request sets:
 
@@ -76,7 +87,7 @@ All request bodies are JSON. Successful responses generally return HTTP 200. Val
 
 | Route | Required/recognized body | Success shape and behavior |
 |---|---|---|
-| `/api/start` | Installation state plus confirmation flags: `disk`, `hostname`, `timezone`, `username`, `password`, `locale`, `keymap`, `kernel`, `install_mode`, optional `target_partition`, `resize_partition`, `resize_gib`, `free_region_start`, `free_region_end`, `confirm_backup`, `confirm_erase`, `confirm_current` | `{started: true}` after validation and worker launch. A running install is 409. |
+| `/api/start` | Installation state plus confirmation flags: `disk`, `hostname`, `timezone`, `username`, `password`, `locale`, `keymap`, `kernel`, `install_mode`, optional `target_partition`, `resize_partition`, `resize_gib`, `free_region_start`, `free_region_end`, `encryption` (`none` default, `tpm2` for `to-disk` only; anything else fails closed), `confirm_backup`, `confirm_erase`, `confirm_current` | `{started: true}` after validation and worker launch. A running install is 409. |
 | `/api/cancel` | `{}` | `{ok: true, message}` when cancellation is accepted. No active cancellable install is 409. Cancellation is cooperative. |
 | `/api/reboot` | `{}` | `{ok: true}` after the privileged reboot command is accepted; command failure is `{ok:false,error}` with 500. |
 | `/api/disk/new-table` | `disk`, optional `table_type` (`gpt` or `msdos`) | `{ok:true,pending}`; creates a staged `new_table` operation. |

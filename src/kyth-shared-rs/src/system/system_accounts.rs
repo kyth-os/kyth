@@ -125,7 +125,7 @@ pub fn fix(sys: &Path, usr_lib: &Path) {
     let _ = std::fs::set_permissions(etc.join("group"), std::fs::Permissions::from_mode(0o644));
     let shadow = etc.join("shadow");
     if shadow.exists() {
-        if std::fs::set_permissions(&shadow, std::fs::Permissions::from_mode(0)).is_err() {
+        if std::fs::set_permissions(&shadow, std::fs::Permissions::from_mode(0o000)).is_err() {
             let _ = std::fs::set_permissions(&shadow, std::fs::Permissions::from_mode(0o600));
         }
     }

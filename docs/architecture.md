@@ -54,6 +54,37 @@ Python helpers that remain outside the Hub action path are listed in
 `docs/kyth-hub-migration-finalization-plan.md`; the native Rust service
 authorities are built from `src/kyth-shared-rs/`.
 
+### Conditional Device and First-Boot Defaults
+
+These image defaults apply only when their conditions hold; explicit user or
+operator configuration always wins:
+
+- **Default Flatpaks** (`kyth-default-flatpaks.service`, via `kyth-runtime
+  default-flatpaks`): system-wide (`--system --or-update -y flathub`)
+  first-boot install with its own 1800s timeout inside the unit's 3600s
+  bound. The completion stamp is versioned
+  (`/var/lib/kyth/default-flatpaks-v13-done`, bumped with the app list
+  because the old stamp survives OS upgrades in `/var`) and is written only
+  on full success — a flaky first-online pull exits cleanly with the stamp
+  unset so the next boot retries. An absent Flathub remote skips the unit
+  instead of failing it.
+- **Bluetooth** (`kyth-bluetooth-enable.service` + BlueZ `AutoEnable=true`
+  for newly-seen controllers): the boot service powers adapters on only when
+  no explicit user block exists. An `rfkill` soft-block skips the unit via
+  `ExecCondition`, and a BlueZ-persisted `Powered=false` on every known
+  adapter stays off; stale rfkill persistence is dropped only past those
+  checks, and a wifi soft-block is preserved while bluetooth is unblocked.
+  There is deliberately no udev unblock rule — unblocking on every adapter
+  event would undo an explicit user block.
+- **Wi-Fi power save**: NetworkManager defaults to powersave on
+  (`wifi.powersave = 3`, battery-friendly); the
+  `99-kyth-wifi-powersave` dispatcher turns the radio's `power_save` off on
+  AC power or while a game runs (`/run/kyth/gaming-hint`), back on
+  otherwise. `/etc/kyth/wifi-powersave.conf` with
+  `KYTH_WIFI_POWERSAVE=off|on` overrides unconditionally. The wireless
+  regulatory domain is derived from the system timezone
+  (`kyth-wifi-regdom`).
+
 ### CI/CD and Release Workflows
 
 `.github/workflows/` validates source changes, builds images, builds live ISOs,

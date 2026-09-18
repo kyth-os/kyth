@@ -844,8 +844,10 @@ class InstallerPlanTests(unittest.TestCase):
                 })
 
     def test_validate_free_space_accepts_exact_region_from_current_scan(self):
+        esp = {"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
              patch.object(self.plan, "find_efi_partition", return_value="/dev/nvme0n1p1"), \
+             patch.object(self.plan, "list_partitions", return_value=[esp]), \
              patch.object(self.plan, "list_free_space", return_value=[
                  {"start_bytes": 40 * 1024**3, "end_bytes": 80 * 1024**3},
              ]):

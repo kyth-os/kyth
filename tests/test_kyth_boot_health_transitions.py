@@ -26,7 +26,9 @@ from kyth_shared.boot_health import (  # noqa: E402
     clear_quarantine,
     mark_healthy,
     note_rollback_attempted,
+    quarantine_boot_message,
     record_failure,
+    rollback_retry_due,
 )
 
 DIGEST_A = "sha256:aaa"
@@ -118,6 +120,81 @@ class PerDigestCountingTests(unittest.TestCase):
         cleared = clear_quarantine(state, DIGEST_A, now=10)
         self.assertNotIn(DIGEST_A, cleared.quarantined)
         self.assertNotIn(DIGEST_A, cleared.failures_by_digest)
+
+
+class RollbackRetryDueTests(unittest.TestCase):
+    """Mirror of Rust rollback_retries_after_a_failed_attempt_but_not_after_success."""
+
+    def test_retry_after_failed_attempt_but_not_after_success(self) -> None:
+        state = BootHealthState(current_digest=DIGEST_A)
+        state = failed(state, DIGEST_A, "boot-1", 1)
+        state = failed(state, DIGEST_A, "boot-2", 2)
+        before = state
+        # Third red boot quarantines: first rollback attempt is due.
+        state = failed(state, DIGEST_A, "boot-3", 3)
+        self.assertIn(DIGEST_A, state.quarantined)
+        self.assertTrue(rollback_retry_due(before, state, DIGEST_A))
+        # A failed attempt records its error: the next red boot retries.
+        state = note_rollback_attempted(state, DIGEST_A, error="exit 1", now=4)
+        before = state
+        state = failed(state, DIGEST_A, "boot-4", 5)
+        self.assertTrue(rollback_retry_due(before, state, DIGEST_A))
+        # Duplicate reports from the same boot must not spam rollbacks.
+        duplicate = failed(state, DIGEST_A, "boot-4", 6)
+        self.assertFalse(rollback_retry_due(state, duplicate, DIGEST_A))
+        # A successful attempt is once-ever: later red boots stay quiet.
+        state = note_rollback_attempted(state, DIGEST_A, now=7)
+        before = state
+        state = failed(state, DIGEST_A, "boot-5", 8)
+        self.assertFalse(rollback_retry_due(before, state, DIGEST_A))
+        # Unrelated digests never trigger.
+        self.assertFalse(rollback_retry_due(before, state, DIGEST_B))
+
+    def test_unquarantined_digest_is_never_due(self) -> None:
+        state = BootHealthState(current_digest=DIGEST_A)
+        state = failed(state, DIGEST_A, "boot-1", 1)
+        self.assertFalse(rollback_retry_due(BootHealthState(), state, DIGEST_A))
+
+
+class BootMessageTests(unittest.TestCase):
+    """Mirror of Rust boot_message_surfaces_quarantine_and_rollback_state."""
+
+    def test_surfaces_quarantine_and_rollback_state(self) -> None:
+        self.assertIsNone(quarantine_boot_message(BootHealthState()))
+        state = BootHealthState(current_digest=DIGEST_A)
+        for index, boot in enumerate(("boot-1", "boot-2", "boot-3")):
+            state = failed(state, DIGEST_A, boot, index)
+        message = quarantine_boot_message(state)
+        self.assertIsNotNone(message)
+        assert message is not None
+        self.assertIn("quarantined after 3 failed boots", message)
+        self.assertNotIn("rollback", message)
+        state = note_rollback_attempted(state, DIGEST_A, error="exit 1", now=10)
+        message = quarantine_boot_message(state)
+        self.assertIsNotNone(message)
+        assert message is not None
+        self.assertIn("automatic rollback failed: exit 1", message)
+        state = note_rollback_attempted(state, DIGEST_A, now=11)
+        message = quarantine_boot_message(state)
+        self.assertIsNotNone(message)
+        assert message is not None
+        self.assertIn("rolled back", message)
+
+    def test_names_newest_quarantine(self) -> None:
+        state = BootHealthState(current_digest=DIGEST_A)
+        for index in range(3):
+            state = record_failure(
+                state, DIGEST_A, f"a-{index}", "alpha failed", now=index
+            )
+        for index in range(3):
+            state = record_failure(
+                state, DIGEST_B, f"b-{index}", "beta failed", now=10 + index
+            )
+        message = quarantine_boot_message(state)
+        self.assertIsNotNone(message)
+        assert message is not None
+        self.assertIn("beta failed", message)
+        self.assertNotIn("alpha failed", message)
 
 
 class StateCodecTests(unittest.TestCase):

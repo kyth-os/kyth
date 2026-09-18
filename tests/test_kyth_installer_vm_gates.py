@@ -210,7 +210,7 @@ class VmGateHarnessTests(unittest.TestCase):
         from kyth_installer.plan_validate import _validate_install_target
         from kyth_installer.storage_snapshot import StorageSnapshot  # pylint: disable=unused-import,reimported
         ctx = InstallerContext()
-        snap = StorageSnapshot(disks=({"name": "/dev/sda"},), partitions=(), free_regions=(), efi_partition="/dev/sda1", is_gpt=True)
+        snap = StorageSnapshot(disks=({"name": "/dev/sda"},), partitions=({"name": "/dev/sda1", "fstype": "vfat", "efi": True},), free_regions=(), efi_partition="/dev/sda1", is_gpt=True)
         # No journal at all — manual requires a committed journal
         with self.assertRaises(RuntimeError) as cm:
             _validate_install_target({"disk": "/dev/sda", "install_mode": "manual"}, context=ctx, snapshot=snap)

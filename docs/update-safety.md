@@ -58,7 +58,12 @@ There is no lower-level bootloader fallback under this: if `bootc rollback`
 itself fails (for example because the same problem that made the deployment
 unhealthy also impairs `bootc`), the machine stays quarantined on the broken
 digest but records `last_rollback_error`/`last_rollback_at` in
-`boot-health.json`. Check `kyth-boot-health status --json`'s
+`boot-health.json`. A failed rollback is retried automatically: the next red
+boot that counts a new failure for the same digest re-attempts `bootc
+rollback` (`rollback_retry_due` in `system::boot_health`, wired through
+`maybe_rollback` in `boot_health_bin`). A recorded attempt with no error
+means the rollback took effect, so a successful rollback is once-ever and
+later red boots stay quiet. Check `kyth-boot-health status --json`'s
 `rollback_attempted_for` + `last_rollback_error` fields when diagnosing a
 stuck deployment. A failed rollback can be retried manually after fixing the
 underlying condition:
@@ -67,6 +72,12 @@ underlying condition:
 sudo kyth-boot-health retry-rollback --digest sha256:…  # retries bootc rollback now
 sudo kyth-boot-health clear-quarantine --digest sha256:… # or allow the digest to be staged again
 ```
+
+`kyth-boot-health boot-message` prints a one-line quarantine summary for a
+boot menu entry or plymouth message. It names the newest quarantine and its
+failure count, and appends whether the automatic rollback already ran or
+still needs a retry (including the rollback error when the last attempt
+failed). It prints nothing when nothing is quarantined.
 
 The required checks deliberately cover immutable deployment invariants: KythOS
 identity, bootc deployment metadata, the desktop and networking components, and
@@ -86,6 +97,22 @@ failure would survive an OS rollback and could otherwise create a reboot loop.
 Explicit ring policy fails closed if the machine is accidentally switched to a
 different image family. Ring selection does not bypass signature, digest, or
 qualification checks.
+
+Ring validation is strict (`validate_rollout_ring` /
+`rollout_ring_from_toml` / `load_rollout_ring` in
+`system::safe_upgrade_policy`): a missing key, a malformed file, or an
+unreadable file keeps the last known ring (fail-safe default `follow-image`
+when there is none), but an explicitly configured unknown ring — including a
+non-string TOML value — is an error and staging never runs, so updates cannot
+silently follow an unintended channel while the bad value is kept.
+
+Staged downgrades are refused by default (`validate_not_downgrade`): a staged
+image older than the booted one fails unless downgrades are explicitly
+allowed with `auto_update.allow_downgrade = true` in
+`/etc/kyth/auto-update.toml` or a truthy `KYTH_ALLOW_DOWNGRADE` environment
+value (`1`/`true`/`yes`). Re-staging the identical digest is always accepted
+(same image, not a downgrade), and missing versions cannot be ordered so they
+pass — the digest and quarantine gates above remain authoritative.
 
 ## Inspect and Recover
 

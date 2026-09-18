@@ -67,6 +67,12 @@ class BootHealthState:
     last_rollback_error: str = ""
     last_rollback_at: int = 0
 
+    def newest_quarantine(self) -> QuarantineRecord | None:
+        """Newest quarantine by last_failed_at, mirroring Rust newest_quarantine."""
+        if not self.quarantined:
+            return None
+        return max(self.quarantined.values(), key=lambda record: record.last_failed_at)
+
     def invariants(self) -> list[str]:
         """S7: return list of violated invariants, [] if ok."""
         errs: list[str] = []
@@ -181,6 +187,53 @@ def quarantine_reason(state: BootHealthState, digest: str) -> str | None:
         f"digest {digest} is quarantined after {record.failures} unhealthy boots: "
         f"{record.reason}"
     )
+
+
+def rollback_retry_due(
+    before: BootHealthState, updated: BootHealthState, digest: str
+) -> bool:
+    """Mirror of Rust ``rollback_retry_due``: decide whether ``bootc rollback``
+    should be attempted for ``digest`` now.
+
+    Fires for a newly quarantined digest (a recorded attempt with no error
+    means the rollback already took effect, so it is not repeated), and
+    retries on subsequent red boots when the last attempt failed
+    (``last_rollback_error`` set) and this boot counted a new failure — the
+    per-boot dedupe in :func:`record_failure` keeps repeat reports from one
+    boot from spamming rollbacks.
+    """
+    if digest not in updated.quarantined:
+        return False
+    if updated.rollback_attempted_for == digest and not updated.last_rollback_error:
+        return False
+    if digest not in before.quarantined:
+        return True
+    if not updated.last_rollback_error:
+        return False
+    before_count = before.failures_by_digest.get(digest, 0)
+    updated_count = updated.failures_by_digest.get(digest, 0)
+    return updated_count > before_count
+
+
+def quarantine_boot_message(state: BootHealthState) -> str | None:
+    """One-line quarantine summary for a boot menu entry or plymouth message.
+
+    Mirrors Rust ``quarantine_boot_message``: ``None`` when nothing is
+    quarantined, otherwise names the newest quarantine and whether the
+    automatic rollback already ran or still needs a retry.
+    """
+    record = state.newest_quarantine()
+    if record is None:
+        return None
+    message = (
+        f"KythOS update quarantined after {record.failures} failed boots: "
+        f"{record.reason}"
+    )
+    if state.last_rollback_error:
+        message += f" — automatic rollback failed: {state.last_rollback_error}"
+    elif state.rollback_attempted_for == record.digest:
+        message += " — rolled back, rebooting into the previous deployment"
+    return message
 
 
 def is_retryable_bootc_error(exc: BaseException | None = None, reason: str | None = None) -> bool:
@@ -525,17 +578,18 @@ def trigger_rollback_if_newly_quarantined(
     boots with no self-recovery). Implement the fallback in software instead
     of depending on bootloader-level counting this image doesn't have.
 
-    Fires at most once per digest (recorded via rollback_attempted_for
-    regardless of outcome) so a rollback target that's itself unhealthy can
-    bounce back to the digest that triggered this exactly once, never loop.
+    Follows :func:`rollback_retry_due` (mirroring Rust ``maybe_rollback``):
+    fires for a newly quarantined digest, and retries on subsequent red
+    boots while the last attempt failed and a new failure was counted. A
+    successful attempt stays once-ever via rollback_attempted_for, so a
+    rollback target that's itself unhealthy can bounce back to the digest
+    that triggered this exactly once, never loop.
     *coordinator* is a kyth_shared.update_coordinator.UpdateCoordinator,
     untyped here to avoid importing it at module scope (it imports this
     module too).
     """
-    if digest not in updated.quarantined or digest in before.quarantined:
-        return  # not newly quarantined this call — already handled or n/a
-    if updated.rollback_attempted_for == digest:
-        return
+    if not rollback_retry_due(before, updated, digest):
+        return  # not due: unquarantined, already rolled back, or same-boot duplicate
     try:
         returncode, detail = run()
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
