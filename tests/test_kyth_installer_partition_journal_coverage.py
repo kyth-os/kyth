@@ -16,6 +16,18 @@ from kyth_installer.context import InstallerContext  # noqa: E402
 
 
 class InstallerPartitionJournalCoverageTests(unittest.TestCase):
+    def setUp(self):
+        # Same hardware isolation as the durability suite: commits run
+        # against fakes, so the probe layer must report an empty disk.
+        # Tests that stage their own partitions override these locally.
+        for target in (
+            "kyth_installer.partition_ops_journal.list_partitions",
+            "kyth_installer.disk.list_partitions",
+        ):
+            patcher = mock.patch(target, return_value=[])
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def _journal(self, *, dry_run=True):
         service = mock.MagicMock(dry_run=dry_run)
         service.backup_table.side_effect = lambda _disk, path: Path(path).write_bytes(b"table")

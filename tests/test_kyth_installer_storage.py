@@ -1883,8 +1883,11 @@ class InstallerDiskServiceTests(unittest.TestCase):
     def test_journal_with_dry_run_disk_service_executes_safely(self):
         from kyth_installer.services.disk_service import DiskService
         svc = DiskService(dry_run=True)
-        # Mock normal device path and disk block size
-        with patch("kyth_installer.partition_ops._normal_device_path", return_value="/dev/sda"):
+        # Mock normal device path and disk block size; present an empty disk
+        # so commit-time validation never reads real host partitions.
+        with patch("kyth_installer.partition_ops._normal_device_path", return_value="/dev/sda"), \
+             patch("kyth_installer.partition_ops_journal.list_partitions", return_value=[]), \
+             patch("kyth_installer.disk.list_partitions", return_value=[]):
             journal = partition_ops.Journal("/dev/sda", disk_service=svc)
             journal.add_op("new_table", {"table_type": "gpt"})
             journal.add_op("create", {

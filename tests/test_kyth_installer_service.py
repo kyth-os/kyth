@@ -23,6 +23,17 @@ class TestInstallerService(unittest.TestCase):
     def setUp(self):
         self.context = InstallerContext()
         self.service = InstallerService(self.context)
+        # Hardware isolation: journal commit-time validation reads the probe
+        # layer. These tests stage ops on a fake /dev/sda, so report an
+        # empty disk — otherwise results depend on whether the host happens
+        # to have a real mounted /dev/sda (CI runners do).
+        for target in (
+            "kyth_installer.partition_ops_journal.list_partitions",
+            "kyth_installer.disk.list_partitions",
+        ):
+            patcher = patch(target, return_value=[])
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     @patch("kyth_installer.disk.list_disks")
     def test_new_table(self, mock_list_disks):
@@ -111,6 +122,17 @@ class InstallerServiceCrudTests(unittest.TestCase):
     def setUp(self):
         self.context = InstallerContext()
         self.service = InstallerService(self.context)
+        # Hardware isolation: journal commit-time validation reads the probe
+        # layer. These tests stage ops on a fake /dev/sda, so report an
+        # empty disk — otherwise results depend on whether the host happens
+        # to have a real mounted /dev/sda (CI runners do).
+        for target in (
+            "kyth_installer.partition_ops_journal.list_partitions",
+            "kyth_installer.disk.list_partitions",
+        ):
+            patcher = patch(target, return_value=[])
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _new_table(self, mock_list_disks):
         mock_list_disks.return_value = [{"name": "/dev/sda"}]

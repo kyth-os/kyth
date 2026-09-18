@@ -79,6 +79,19 @@ def build_journal(fail_on: str = "") -> tuple[Journal, FakeDiskService]:
 
 @mock.patch.dict("os.environ", {"KYTH_INSTALL_ALLOW_NO_DISK_LOCK": "1"}, clear=False)
 class PartitionStepBracketingTests(unittest.TestCase):
+    def setUp(self):
+        # Commit-time validation reads the probe layer. These tests commit
+        # against a FakeDiskService, so present an empty disk: otherwise the
+        # suite passes on machines without /dev/sda and fails on machines
+        # with a real mounted one (e.g. CI runners).
+        for target in (
+            "kyth_installer.partition_ops_journal.list_partitions",
+            "kyth_installer.disk.list_partitions",
+        ):
+            patcher = mock.patch(target, return_value=[])
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
     def test_each_destructive_op_is_bracketed(self):
         journal, _service = build_journal()
         journal.add_op("create", {
