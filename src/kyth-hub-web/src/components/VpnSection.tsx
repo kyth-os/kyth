@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { disconnectVpnConnection, fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnConnectionStatus, fetchVpnProtectionStatus, fetchVpnSavedProfile, getInFlightJob, openVpnApp, setVpnProtection, startVpnConnection, untrackVpnJob, type NetworkSummary, type VpnProtectionStatus, type VpnSavedProfile } from "../services/liveData";
+import { cancelVpnConnection, disconnectVpnConnection, fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnConnectionStatus, fetchVpnProtectionStatus, fetchVpnSavedProfile, getInFlightJob, openVpnApp, setVpnProtection, startVpnConnection, untrackVpnJob, type NetworkSummary, type VpnProtectionStatus, type VpnSavedProfile } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -153,6 +153,7 @@ export function VpnSection({ section }: { section: HubSection }) {
             return "VPN connection started. Complete SAML sign-in if the secure window appears.";
           })} />
           {job && <ActionButton label="Disconnect" disabled={busy !== null} onClick={() => run("disconnect", "Disconnecting VPN…", async () => { try { const detail = await disconnectVpnConnection(job); setJobStatus(detail); setSummary((value) => value ? { ...value, vpnConnected: false, vpnName: "" } : value); return detail; } finally { setJob(null); } })} />}
+          {job && !summary?.vpnConnected && <ActionButton label={busy === "cancel" ? "Cancelling…" : "Cancel"} disabled={busy !== null} onClick={() => run("cancel", "Cancelling VPN…", async () => { const detail = await cancelVpnConnection(); setJobStatus(detail); setJob(null); return detail; })} />}
         </div>
         <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
           VPN profiles, openconnect, and SAML sign-in are handled by native Rust commands. Credentials and authentication tokens are never shown in status text.

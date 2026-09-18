@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { invalidateAllSharedReads } from "../services/liveData";
 
 /** Parent-facing offline state: Hub reads are local-first, but installs,
  * updates, and catalog search need the network. Without this banner an
@@ -10,7 +11,7 @@ export function OfflineBanner() {
   );
 
   useEffect(() => {
-    const goOnline = () => setOnline(true);
+    const goOnline = () => { invalidateAllSharedReads(); setOnline(true); };
     const goOffline = () => setOnline(false);
     window.addEventListener("online", goOnline);
     window.addEventListener("offline", goOffline);

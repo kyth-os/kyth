@@ -102,6 +102,11 @@ class RuntimeRecipeBehaviorTest(unittest.TestCase):
         environment["PATH"] = f"{fake_bin}:{environment.get('PATH', '')}"
         environment["KYTH_RUNTIME_TEST_LOG"] = str(log)
         environment["KYTH_RUNTIME_FAKE_EXIT"] = str(fake_exit)
+        # Deterministic graphical-session absence: reclaim-windows refuses
+        # without one, and inheriting the developer's Wayland/X session
+        # would both flip the expectation and launch real desktop apps.
+        environment.pop("WAYLAND_DISPLAY", None)
+        environment.pop("DISPLAY", None)
         return environment, log
 
     def _run(

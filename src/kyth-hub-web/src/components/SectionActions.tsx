@@ -9,6 +9,7 @@ import {
   cancelPrivilegedAction,
   cancelSecurityJob,
   cancelUpdateJob,
+  cancelVpnConnection,
   confirmUserAction,
   getInFlightJob,
   runHubRecipeAction,
@@ -96,6 +97,7 @@ export const CANCEL_FOR_DOMAIN: Record<JobDomain, () => Promise<string>> = {
   install: cancelInstall,
   security: cancelSecurityJob,
   gaming: cancelGamingJob,
+  vpn: cancelVpnConnection,
 };
 
 export function cancelForDomain(domain: JobDomain): () => Promise<string> {
