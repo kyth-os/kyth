@@ -32,8 +32,14 @@ export function HubPage({
 }) {
   const [searchParams, setSearchParams] = useSearchParams();
   const requested = searchParams.get("section");
+  // An explicit but unknown ?section= (stale bookmark, renamed section)
+  // counts as a request so it falls back to the first section with a
+  // notice instead of a blank content area. With no request at all, the
+  // defaultToFirstSection opt-in still decides between the first section
+  // and nothing.
   const active = sections.find((s) => s.key === requested)
-    ?? (defaultToFirstSection ? sections[0] : null);
+    ?? (requested !== null || defaultToFirstSection ? sections[0] : null);
+  const unknownSection = requested !== null && active?.key !== requested;
   const Content = active ? sectionContent[active.key] : null;
 
   // replace, not push: tabbing within a destination shouldn't stack up
@@ -43,6 +49,11 @@ export function HubPage({
   return (
     <div className="page-content" style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {showTabs && <HubTabs sections={sections} activeKey={active?.key ?? null} onSelect={onSelect} />}
+      {unknownSection && (
+        <p className="card-copy" role="status" style={{ opacity: 0.72 }}>
+          Unknown section “{requested}” — showing {active ? `“${active.key}”` : "nothing"} instead.
+        </p>
+      )}
       {Content && active ? <Content section={active} /> : null}
     </div>
   );

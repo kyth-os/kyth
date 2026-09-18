@@ -32,26 +32,32 @@ const ROUTE_FOR_PAGE = buildRouteTable();
 const WELCOME_ALIASES = new Set(["home", "hub", "kyth hub", "system hub", "pulse", "kyth pulse"]);
 
 export function routeForPage(page: string): string {
+  return resolvePage(page).route;
+}
+
+function resolvePage(page: string): { route: string; known: boolean } {
   const text = page.trim();
-  if (!text) return "/";
-  if (text in ROUTE_FOR_PAGE) return ROUTE_FOR_PAGE[text];
+  if (!text) return { route: "/", known: false };
+  if (text in ROUTE_FOR_PAGE) return { route: ROUTE_FOR_PAGE[text], known: true };
 
   const lowered = text.toLowerCase();
-  if (WELCOME_ALIASES.has(lowered)) return "/";
+  if (WELCOME_ALIASES.has(lowered)) return { route: "/", known: true };
   // resolve_page_key() also matches rail entries case-insensitively by
   // title, so "guardian" reaches the same tab "Guardian" does.
   for (const [key, route] of Object.entries(ROUTE_FOR_PAGE)) {
-    if (key.toLowerCase() === lowered) return route;
+    if (key.toLowerCase() === lowered) return { route, known: true };
   }
-  return "/";
+  return { route: "/", known: false };
 }
 
 function navigateToPage(page: string, source: "initial" | "single-instance"): void {
   // HashRouter, not history-API routing (see main.tsx) — this is the
   // entire deep-link contract with the shell: one string, one convention.
-  const route = routeForPage(page);
+  // Unknown pages still land on Home, but are recorded as rejected so a
+  // typo'd launcher entry can't masquerade as a working deep link.
+  const { route, known } = resolvePage(page);
   window.location.hash = route;
-  void recordHubAcceptance("deep-link", JSON.stringify({ page: page.trim(), route, source }));
+  void recordHubAcceptance(known ? "deep-link" : "deep-link-rejected", JSON.stringify({ page: page.trim(), route, source }));
 }
 
 /** Call once from main.tsx before the first render settles. Handles both

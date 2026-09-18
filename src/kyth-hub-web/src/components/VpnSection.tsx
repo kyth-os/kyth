@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { cancelVpnConnection, disconnectVpnConnection, fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnConnectionStatus, fetchVpnProtectionStatus, fetchVpnSavedProfile, getInFlightJob, openVpnApp, setVpnProtection, startVpnConnection, untrackVpnJob, type NetworkSummary, type VpnProtectionStatus, type VpnSavedProfile } from "../services/liveData";
+import { cancelVpnConnection, disconnectVpnConnection, fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnConnectionStatus, fetchVpnProtectionStatus, fetchVpnSavedProfile, getInFlightJob, onOnlineRefetch, openVpnApp, setVpnProtection, startVpnConnection, untrackVpnJob, type NetworkSummary, type VpnProtectionStatus, type VpnSavedProfile } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -25,24 +25,26 @@ export function VpnSection({ section }: { section: HubSection }) {
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [protection, setProtection] = useState<VpnProtectionStatus | null>(null);
   const { status, busy, run } = useSectionAction("hub-action");
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([fetchNetworkSummary(), fetchVpnSavedProfile(), fetchVpnProtectionStatus()]).then(([s, savedProfile, vpnProtection]) => {
-      if (!cancelled) {
-        setSummary(s);
-        setProfile(savedProfile);
-        setProtection(vpnProtection);
-        if (savedProfile) {
-          setGateway(savedProfile.gateway);
-          setProtocol(savedProfile.protocol);
-          setOsEmulation(savedProfile.os);
-        }
-        setLoaded(true);
+  // Mount fetch as a named refresh so a reconnect can re-run it: the
+  // summary/profile rendered from a stale offline read would otherwise
+  // sit unchanged until manual navigation.
+  const refreshAll = useRef(() => {});
+  refreshAll.current = () => {
+    void Promise.all([fetchNetworkSummary(), fetchVpnSavedProfile(), fetchVpnProtectionStatus()]).then(([s, savedProfile, vpnProtection]) => {
+      setSummary(s);
+      setProfile(savedProfile);
+      setProtection(vpnProtection);
+      if (savedProfile) {
+        setGateway(savedProfile.gateway);
+        setProtocol(savedProfile.protocol);
+        setOsEmulation(savedProfile.os);
       }
+      setLoaded(true);
     });
-    return () => {
-      cancelled = true;
-    };
+  };
+  useEffect(() => {
+    refreshAll.current();
+    return onOnlineRefetch(() => refreshAll.current());
   }, []);
   useEffect(() => {
     if (!job) return;
@@ -142,6 +144,7 @@ export function VpnSection({ section }: { section: HubSection }) {
           <input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="Username (optional)" style={fieldStyle} />
           <input value={password} onChange={(event) => setPassword(event.target.value)} type="password" placeholder="Password (optional)" style={fieldStyle} />
           <ActionButton label={busy === "connect" ? "Starting…" : "Connect"} disabled={busy !== null || !gateway.trim()} onClick={() => run("connect", "Starting native VPN connection…", async () => {
+            try {
             const active = getInFlightJob("vpn");
             if (active && active !== job) {
               setJob(active);
@@ -149,10 +152,13 @@ export function VpnSection({ section }: { section: HubSection }) {
             }
             const nextJob = await startVpnConnection({ gateway: gateway.trim(), protocol, osEmulation, username: username.trim(), password });
             setJob(nextJob);
-            setPassword("");
             return "VPN connection started. Complete SAML sign-in if the secure window appears.";
-          })} />
-          {job && <ActionButton label="Disconnect" disabled={busy !== null} onClick={() => run("disconnect", "Disconnecting VPN…", async () => { try { const detail = await disconnectVpnConnection(job); setJobStatus(detail); setSummary((value) => value ? { ...value, vpnConnected: false, vpnName: "" } : value); return detail; } finally { setJob(null); } })} />}
+          } finally {
+            // Never retain the plaintext password: clear it whether the
+            // connect path succeeded or threw.
+            setPassword("");
+          }})} />
+          {job && <ActionButton label="Disconnect" disabled={busy !== null} onClick={() => run("disconnect", "Disconnecting VPN…", async () => { const detail = await disconnectVpnConnection(job); setJobStatus(detail); setSummary((value) => value ? { ...value, vpnConnected: false, vpnName: "" } : value); setJob(null); return detail; })} />}
           {job && !summary?.vpnConnected && <ActionButton label={busy === "cancel" ? "Cancelling…" : "Cancel"} disabled={busy !== null} onClick={() => run("cancel", "Cancelling VPN…", async () => { const detail = await cancelVpnConnection(); setJobStatus(detail); setJob(null); return detail; })} />}
         </div>
         <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>

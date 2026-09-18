@@ -22,6 +22,10 @@ const rust = await readFile(resolve(root, "src-tauri/src/main.rs"), "utf8");
 const updatesRust = await readFile(resolve(root, "src-tauri/src/commands/updates.rs"), "utf8");
 const privilegeRust = await readFile(resolve(root, "src-tauri/src/commands/privilege.rs"), "utf8");
 const parity = await readFile(resolve(root, "PARITY.md"), "utf8");
+const appShell = await readFile(resolve(root, "src/App.tsx"), "utf8");
+const hubPage = await readFile(resolve(root, "src/pages/HubPage.tsx"), "utf8");
+const deepLink = await readFile(resolve(root, "src/deepLink.ts"), "utf8");
+const mainEntry = await readFile(resolve(root, "src/main.tsx"), "utf8");
 
 async function sourceFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true, recursive: true });
@@ -416,5 +420,21 @@ test("exe handler dialog caps polls and stays cancellable while running", () => 
   assert.match(exeDialog, /polls >= 240/, "exe handler polls must cap at 240");
   assert.match(exeDialog, /still running after several minutes/, "cap must surface a terminal error");
   assert.doesNotMatch(exeDialog, /setInspection\(null\)\} disabled/, "Cancel must stay enabled while a job runs");
-  assert.match(exeDialog, /Bottles.*timeout|timeout.*Bottles/i, "Cancel must note the backend Bottles timeout followup");
+  assert.match(exeDialog, /cancelExeHandlerBottles\(job\.job\)/, "Cancel must reach the backend Bottles job, not just close the dialog");
+});
+
+test("stale UI states recover without manual navigation", () => {
+  assert.match(service, /emitOnlineRefetch\(\)/, "reconnect must emit a refetch signal, not just invalidate caches");
+  assert.match(vpn, /onOnlineRefetch\(/, "mount-only VPN reads must re-run on reconnect");
+  assert.match(service, /\} catch \{\n    return null;\n  \}\n\}/, "probe invoke failures must not be cached as null");
+  assert.match(hubPage, /Unknown section/, "unknown ?section= must render a notice, not a blank page");
+  assert.match(actions, /getInFlightJob\(trackedDomain\) !== undefined/, "resumed note must read the tracked slot live");
+});
+
+test("routing and init failures stay visible", () => {
+  assert.match(appShell, /RouteErrorBoundary/, "lazy routes need an error boundary with retry");
+  assert.match(deepLink, /deep-link-rejected/, "unknown deep links must not log as success");
+  assert.match(mainEntry, /\.catch\(/, "deep-link init failure must not die silently");
+  assert.match(vpn, /} finally \{\n.*setPassword\(""\)/s, "VPN password must clear even when connect throws");
+  assert.doesNotMatch(vpn, /finally \{ setJob\(null\); \}/, "failed Disconnect must keep the job handle for retry");
 });

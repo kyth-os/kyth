@@ -10,7 +10,12 @@ import "./styles/theme.css";
 // to on a deep link (matching how a QWebEngineView/kiosk-Chromium load
 // works — see kyth-installer's own launch pattern) — no rewrite rules to
 // configure on the Python side.
-void installDeepLinkHandling();
+// A rejected deep-link init must not die silently: without the listener,
+// --page launches and single-instance activations do nothing for the whole
+// session with no visible cause.
+void installDeepLinkHandling().catch((reason) => {
+  console.error("Deep-link handling failed to initialize:", reason);
+});
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

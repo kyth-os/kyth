@@ -46,6 +46,30 @@ export function invalidateAllSharedReads(): void {
   sharedReads.clear();
 }
 
+type OnlineRefetchListener = () => void;
+const onlineRefetchListeners = new Set<OnlineRefetchListener>();
+
+/** Sections with mount-only fetches subscribe so a reconnect re-runs them:
+ * invalidation alone can't refresh state that was already rendered from a
+ * stale (empty/error) read. Returns an unsubscribe function. */
+export function onOnlineRefetch(listener: OnlineRefetchListener): () => void {
+  onlineRefetchListeners.add(listener);
+  return () => {
+    onlineRefetchListeners.delete(listener);
+  };
+}
+
+/** Emitted by OfflineBanner after invalidating: every subscriber refetches. */
+export function emitOnlineRefetch(): void {
+  for (const listener of [...onlineRefetchListeners]) {
+    try {
+      listener();
+    } catch {
+      /* one section's refetch must not break the others */
+    }
+  }
+}
+
 // Real backend data, read through the Tauri shell's bridge commands (see
 // src-tauri/src/main.rs, which calls straight into the kyth-shared Rust
 // crate — src/kyth-shared-rs — no subprocess). Every read here returns
@@ -523,14 +547,17 @@ interface ProbeBridgeResponse<T = unknown> {
  * reshape; this is just the shared plumbing. */
 async function fetchProbeSection<T>(key: string): Promise<T | null> {
   if (!inTauriShell()) return null;
-  return sharedRead(`probe:${key}`, 10_000, async () => {
-    try {
+  // Invoke errors propagate out of the loader so sharedRead caches nothing:
+  // a transient failure must not sit cached as null for the full TTL while
+  // every section on that probe renders "No reading yet".
+  try {
+    return await sharedRead(`probe:${key}`, 10_000, async () => {
       const raw = await invoke<ProbeBridgeResponse<T>>("probe_backend", { section: key });
       return raw.data ?? null;
-    } catch {
-      return null;
-    }
-  });
+    });
+  } catch {
+    return null;
+  }
 }
 
 export async function fetchUpdateChannel(): Promise<string | null> {
@@ -1872,4 +1899,12 @@ export async function startExeHandlerFlatpakInstall(appId: string): Promise<ExeH
 export async function startExeHandlerBottles(path: string, allowUnsupported: boolean): Promise<ExeHandlerJob> {
   if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");
   return await invoke<ExeHandlerJob>("exe_handler_start_bottles", { path, allowUnsupported });
+}
+
+/** Cancel a running Bottles provisioning job. The backend job lives in the
+ * shared app-installs store (launch_in_bottles is a library call, so cancel
+ * marks it and its late finish becomes a no-op) — reachable through the
+ * install_cancel command. */
+export async function cancelExeHandlerBottles(job: string): Promise<string> {
+  return cancelBackendJob("install_cancel", job);
 }

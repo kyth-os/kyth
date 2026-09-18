@@ -28,15 +28,22 @@ export function useSectionAction(trackedDomain?: JobDomain) {
   const [busy, setBusy] = useState<string | null>(null);
   // Component state is lost on reload, but a tracked backend job keeps
   // running (reattached from persisted in-flight ids) — surface that
-  // instead of a blank slate.
-  const [resumedNote, setResumedNote] = useState<string | null>(() =>
-    trackedDomain !== undefined && getInFlightJob(trackedDomain) !== undefined
+  // instead of a blank slate. Read live every render, not once at mount:
+  // a job that settled elsewhere must clear the notice, and one started
+  // elsewhere after mount must raise it (otherwise the next launch
+  // errors "already running" with no explanation).
+  const [resumedDismissed, setResumedDismissed] = useState(false);
+  const resumedNote =
+    !resumedDismissed &&
+    busy === null &&
+    status === null &&
+    trackedDomain !== undefined &&
+    getInFlightJob(trackedDomain) !== undefined
       ? "A previous action is still running; its progress resumes here."
-      : null,
-  );
+      : null;
 
   async function run(id: string, pendingLabel: string, action: () => Promise<string>) {
-    setResumedNote(null);
+    setResumedDismissed(true);
     setBusy(id);
     setStatus(pendingLabel);
     try {

@@ -1,6 +1,7 @@
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
 import {
+  cancelExeHandlerBottles,
   fetchInstallStatus,
   inspectExeHandler,
   isExeHandlerFlatpakInstalled,
@@ -24,6 +25,7 @@ export function ExeHandlerDialog() {
   const [autoBottles, setAutoBottles] = useState(false);
   const [flatpakInstalled, setFlatpakInstalled] = useState(false);
   const [job, setJob] = useState<ExeHandlerJob | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const startedAutomatically = useRef(false);
 
   useEffect(() => {
@@ -44,6 +46,26 @@ export function ExeHandlerDialog() {
     })();
     return () => unlisten?.();
   }, []);
+
+  // Cancel reaches the real backend job (app-installs store): the dialog
+  // stays open showing the outcome instead of orphaning a headless
+  // provisioning run. With no running job the button just closes.
+  const closeOrCancel = async () => {
+    if (job && job.state === "running" && !cancelling) {
+      setCancelling(true);
+      try {
+        const detail = await cancelExeHandlerBottles(job.job);
+        const next = await fetchInstallStatus(job.job).catch(() => null);
+        setJob(next ? { job: next.id, state: next.state, detail: next.detail } : { ...job, state: "cancelled", detail });
+      } catch (reason) {
+        setError(String(reason));
+      } finally {
+        setCancelling(false);
+      }
+      return;
+    }
+    setInspection(null);
+  };
 
   const startBottles = async (allowUnsupported = false) => {
     if (!inspection) return;
@@ -108,12 +130,9 @@ export function ExeHandlerDialog() {
               else void startExeHandlerFlatpakInstall(inspection.flatpak_id!).then(setJob).catch((reason) => setError(String(reason)));
             }}>{flatpakInstalled ? "Launch Linux Version" : "Install Linux Version"}</button>}
             <button onClick={() => void openExeHandlerFlathub(inspection.search_term).catch((reason) => setError(String(reason)))}>Search Flathub</button>
-            {/* Cancel stays enabled while a job runs: closing the dialog
-              leaves the backend job to finish on its own. Followup: the
-              backend has no Bottles job cancel/timeout yet, so there is
-              nothing to invoke here — add an exe-handler cancel command
-              (with a Bottles-side timeout) and wire it up. */}
-            <button onClick={() => setInspection(null)}>Cancel</button>
+            {/* Cancel reaches the backend job while one runs (the dialog stays
+              open showing the outcome); otherwise it just closes. */}
+            <button onClick={() => void closeOrCancel()} disabled={cancelling}>{job?.state === "running" ? (cancelling ? "Cancelling…" : "Cancel") : "Close"}</button>
           </div>
         </>}
         {error && !inspection && <><p role="alert" style={{ color: "#f48771" }}>{error}</p><button onClick={() => setError(null)}>Close</button></>}

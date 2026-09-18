@@ -1,4 +1,4 @@
-import { lazy, Suspense } from "react";
+import { lazy, Suspense, Component, type ReactNode } from "react";
 import { Route, Routes, useLocation } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
@@ -12,6 +12,28 @@ const ThisPc = lazy(() => import("./pages/ThisPc").then(({ ThisPc: page }) => ({
 const MoveIn = lazy(() => import("./pages/MoveIn").then(({ MoveIn: page }) => ({ default: page })));
 const Vpn = lazy(() => import("./pages/Vpn").then(({ Vpn: page }) => ({ default: page })));
 const Updates = lazy(() => import("./pages/Updates").then(({ Updates: page }) => ({ default: page })));
+
+/** Catches lazy-chunk load failures (partial update, stale cache) that
+ * Suspense alone leaves on "Loading Hub page…" forever. Keyed by pathname
+ * so navigating resets it; the retry reloads the whole shell for a clean
+ * chunk state. */
+class RouteErrorBoundary extends Component<{ children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+  static getDerivedStateFromError(): { failed: boolean } {
+    return { failed: true };
+  }
+  render(): ReactNode {
+    if (this.state.failed) {
+      return (
+        <div className="glass dashboard-card card-copy" role="alert">
+          <p>This page failed to load. An update may have left cached files behind.</p>
+          <button className="primary" onClick={() => window.location.reload()}>Reload Hub</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
 
 const crumbFor: Record<string, string> = {
   "/": "Home",
@@ -35,7 +57,10 @@ export function App() {
         <main className="scroll-area main-content" style={{ flex: 1, padding: "0 24px 24px", overflowY: "auto" }}>
           <Topbar crumb={crumb} />
           <OfflineBanner />
-          <Suspense fallback={<div className="glass dashboard-card card-copy">Loading Hub page…</div>}>
+          {/* A failed chunk import (partial update, stale cache) must offer
+            a retry instead of hanging on the Suspense fallback forever. */}
+          <RouteErrorBoundary key={location.pathname}>
+            <Suspense fallback={<div className="glass dashboard-card card-copy">Loading Hub page…</div>}>
             <Routes>
               <Route path="/" element={<Dashboard />} />
               <Route path="/play" element={<Play />} />
@@ -46,6 +71,7 @@ export function App() {
               <Route path="/updates" element={<Updates />} />
             </Routes>
           </Suspense>
+          </RouteErrorBoundary>
         </main>
       </div>
       <ExeHandlerDialog />
