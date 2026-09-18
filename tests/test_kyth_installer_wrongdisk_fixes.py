@@ -403,5 +403,171 @@ class WipePreflightAtPreviewTests(unittest.TestCase):
         list_parts.assert_called()
 
 
+class CoverageGapTests(unittest.TestCase):
+    """Cover the new fallback/exception branches so the coverage floor holds."""
+
+    def test_fallback_exception_continues_to_next_fallback(self):
+        with mock.patch.object(disk, "_findmnt_source", return_value=""), \
+             mock.patch.object(
+                 _probe, "_running_system_disk_from_mountinfo",
+                 side_effect=OSError("unreadable"),
+             ), \
+             mock.patch.object(
+                 _probe, "_running_system_disk_from_cmdline",
+                 return_value="/dev/sda1",
+             ):
+            self.assertEqual(_probe._running_system_disk(), "/dev/sda1")
+
+    def test_mountinfo_unreadable_resolves_to_nothing(self):
+        real_open = open
+
+        def fake_open(path, *args, **kwargs):
+            if str(path) == "/proc/self/mountinfo":
+                raise OSError("denied")
+            return real_open(path, *args, **kwargs)
+
+        with mock.patch("builtins.open", fake_open):
+            self.assertEqual(_probe._running_system_disk_from_mountinfo(), "")
+
+    def test_mountinfo_without_separator_line_is_skipped(self):
+        text = (
+            "this line has no separator at all\n"
+            "25 1 8:1 / / rw,relatime - ext4 /dev/sda1 rw\n"
+        )
+        with mock.patch("builtins.open", mock.mock_open(read_data=text)):
+            self.assertEqual(
+                _probe._running_system_disk_from_mountinfo(), "/dev/sda1"
+            )
+
+    def test_mountinfo_without_root_mount_resolves_to_nothing(self):
+        text = "25 1 8:1 / /boot rw,relatime - ext4 /dev/sda1 rw\n"
+        with mock.patch("builtins.open", mock.mock_open(read_data=text)):
+            self.assertEqual(_probe._running_system_disk_from_mountinfo(), "")
+
+    def test_cmdline_unreadable_resolves_to_nothing(self):
+        with mock.patch.object(
+            Path, "read_text", side_effect=OSError("denied")
+        ):
+            self.assertEqual(_probe._running_system_disk_from_cmdline(), "")
+
+    def test_mountinfo_short_line_is_skipped(self):
+        text = "- x\n25 1 8:1 / / rw,relatime - ext4 /dev/sda1 rw\n"
+        with mock.patch("builtins.open", mock.mock_open(read_data=text)):
+            self.assertEqual(
+                _probe._running_system_disk_from_mountinfo(), "/dev/sda1"
+            )
+
+    def test_cmdline_empty_root_value_is_skipped(self):
+        self.assertEqual(
+            _probe._running_system_disk_from_cmdline("root= ro quiet"), ""
+        )
+
+    def test_cmdline_skips_non_root_tokens(self):
+        self.assertEqual(
+            _probe._running_system_disk_from_cmdline(
+                "BOOT_IMAGE=/vmlinuz ro root=/dev/sdb1 quiet"
+            ),
+            "/dev/sdb1",
+        )
+
+    def test_cmdline_unresolvable_uuid_resolves_to_nothing(self):
+        out = SimpleNamespace(stdout="")
+        with mock.patch.object(disk, "run_command", return_value=out):
+            self.assertEqual(
+                _probe._running_system_disk_from_cmdline("root=UUID=missing ro"),
+                "",
+            )
+
+    def test_blkid_probe_failure_resolves_to_nothing(self):
+        with mock.patch.object(disk, "run_command", side_effect=OSError("no blkid")):
+            self.assertEqual(_probe._blkid_device("UUID=abc"), "")
+
+    def test_blkid_without_device_lines_resolves_to_nothing(self):
+        out = SimpleNamespace(stdout="not a device line\n")
+        with mock.patch.object(disk, "run_command", return_value=out):
+            self.assertEqual(_probe._blkid_device("UUID=abc"), "")
+
+    def test_snapshot_esp_read_only_rejected(self):
+        parts = {
+            "/dev/sda1": {"name": "/dev/sda1", "efi": True, "read_only": True}
+        }
+        deps = _deps(parent_disk=lambda _p: "/dev/sda")
+        with self.assertRaisesRegex(RuntimeError, "read-only"):
+            plan_validate._validate_efi_target(
+                {}, "/dev/sda2", "/dev/sda1",
+                dependencies=deps, install_disk="/dev/sda",
+                snapshot_parts=parts,
+            )
+
+    def test_stale_discovered_esp_rejected_without_snapshot(self):
+        # Discovered (not requested) ESP, no snapshot: live re-scan finds it
+        # invalid -> the `if not requested` raise, not the requested one.
+        deps = _deps(
+            parent_disk=lambda _p: "/dev/sda",
+            list_partitions=lambda _d: [
+                {"name": "/dev/sda1", "efi": False}
+            ],
+        )
+        with self.assertRaisesRegex(RuntimeError, "no longer a valid EFI"):
+            plan_validate._validate_efi_target(
+                {}, "/dev/sda2", "/dev/sda1",
+                dependencies=deps, install_disk="/dev/sda",
+            )
+
+    def test_requested_esp_read_only_rejected(self):
+        deps = _deps(
+            parent_disk=lambda _p: "/dev/sdb",
+            list_partitions=lambda _d: [
+                {"name": "/dev/sdb1", "efi": True, "read_only": True}
+            ],
+        )
+        with self.assertRaisesRegex(RuntimeError, "read-only"):
+            plan_validate._validate_efi_target(
+                {"efi_partition": "/dev/sdb1"}, "/dev/sdb2", None,
+                dependencies=deps, install_disk="/dev/sdb",
+            )
+
+    def test_requested_esp_rejected_when_not_an_esp(self):
+        deps = _deps(
+            parent_disk=lambda _p: "/dev/sdb",
+            list_partitions=lambda _d: [
+                {"name": "/dev/sdb1", "efi": False}
+            ],
+        )
+        with self.assertRaisesRegex(RuntimeError, "no longer a valid EFI"):
+            plan_validate._validate_efi_target(
+                {"efi_partition": "/dev/sdb1"}, "/dev/sdb2", None,
+                dependencies=deps, install_disk="/dev/sdb",
+            )
+
+    def test_bitlocker_partition_refuses_resize(self):
+        # Exercise the per-partition check itself (line 357+): neutralize the
+        # snapshot preflight, which would otherwise reject the locked volume
+        # first — both layers must refuse independently.
+        snapshot = StorageSnapshot(
+            disks=({"name": "/dev/sda"},),
+            partitions=(
+                {"name": "/dev/sda1", "efi": True, "fstype": "vfat",
+                 "size_bytes": 512 * 1024**2},
+                {"name": "/dev/sda2", "fstype": "bitlocker",
+                 "size_bytes": 200 * 1024**3},
+            ),
+            free_regions=(), efi_partition="/dev/sda1", is_gpt=False,
+        )
+        deps = plan_validate.GuidedValidationDependencies(
+            probe_storage=lambda *_a, **_k: None,
+            parent_disk=lambda _p: "/dev/sda",
+            partition_size=lambda _p: 200 * 1024**3,
+        )
+        with mock.patch.object(
+            plan_validate, "_check_storage_preflight", return_value=None
+        ), self.assertRaisesRegex(RuntimeError, "BitLocker"):
+            plan_validate.validate_resize_ntfs_target(
+                {"disk": "/dev/sda", "resize_partition": "/dev/sda2",
+                 "resize_gib": 40},
+                snapshot=snapshot, dependencies=deps,
+            )
+
+
 if __name__ == "__main__":
     unittest.main()
