@@ -836,8 +836,10 @@ class InstallerPlanTests(unittest.TestCase):
                 })
 
     def test_validate_free_space_requires_efi_partition(self):
+        esp = {"name": "/dev/nvme0n1p1", "fstype": "vfat", "efi": True}
         with patch.object(self.plan, "list_disks", return_value=[{"name": "/dev/nvme0n1"}]), \
-             patch.object(self.plan, "find_efi_partition", return_value=""):
+             patch.object(self.plan, "find_efi_partition", return_value=""), \
+             patch.object(self.plan, "list_partitions", return_value=[esp]):
             with self.assertRaisesRegex(RuntimeError, "EFI system partition"):
                 self.plan._validate_free_space_target({
                     "disk": "/dev/nvme0n1",
