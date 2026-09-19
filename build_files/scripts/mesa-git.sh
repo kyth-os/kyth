@@ -75,5 +75,18 @@ else
 	echo "mesa-dri-drivers version after mesa-git upgrade: ${mesa_ver}"
 fi
 
+# Bisect anchor: the upstream snapshots move hourly and cannot be EVR-pinned
+# (old builds are dropped), so stamp exactly what shipped. A GPU-stack
+# regression reports against this EVR + build date instead of "mesa-git".
+if [[ "${ENABLE_MESA_GIT:-0}" == "1" ]]; then
+	mkdir -p /usr/share/kyth
+	{
+		echo "mesa_dri_drivers_evr=$(rpm -q --queryformat '%{EPOCH}:%{VERSION}-%{RELEASE}.%{ARCH}' mesa-dri-drivers 2>/dev/null || echo unknown)"
+		echo "mesa_vulkan_drivers_evr=$(rpm -q --queryformat '%{EPOCH}:%{VERSION}-%{RELEASE}.%{ARCH}' mesa-vulkan-drivers 2>/dev/null || echo unknown)"
+		echo "mesa_source=xxmitsu/mesa-git"
+		echo "mesa_layer_date=${BUILD_DATE:-unknown}"
+	} > /usr/share/kyth/mesa-git.evr
+fi
+
 # Layer 3 already upgrades the complete RPM set before this script runs. Keep
 # downloaded metadata and RPMs in Docker's /var/cache mount for later rebuilds.

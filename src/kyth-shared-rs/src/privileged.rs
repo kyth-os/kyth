@@ -246,17 +246,18 @@ fn validate_request(request: &Value, uid: u32, gid: u32) -> Result<ExecSpec, Str
 }
 
 fn display_detail(stdout: &[u8], stderr: &[u8], status: std::process::ExitStatus) -> String {
-    let output = if stdout.iter().any(|byte| !byte.is_ascii_whitespace()) {
+    // stderr wins on failure: helpers print progress chatter on stdout and
+    // the real error on stderr, so preferring stdout masks the actionable
+    // message. On success either stream may carry the result.
+    let output = if !status.success() && stderr.iter().any(|byte| !byte.is_ascii_whitespace()) {
+        stderr
+    } else if stdout.iter().any(|byte| !byte.is_ascii_whitespace()) {
         stdout
     } else {
         stderr
     };
-    let detail = String::from_utf8_lossy(output)
-        .trim()
-        .chars()
-        .take(400)
-        .collect::<String>();
-    if !detail.is_empty() {
+    let detail = sanitize(String::from_utf8_lossy(output).trim());
+    if !detail.trim().is_empty() {
         detail
     } else if let Some(code) = status.code() {
         format!("operation exited with {code}")
@@ -266,12 +267,17 @@ fn display_detail(stdout: &[u8], stderr: &[u8], status: std::process::ExitStatus
 }
 
 fn run_operation(spec: ExecSpec) -> Result<String, String> {
+    use std::os::unix::process::CommandExt;
     let mut command = Command::new(&spec.argv[0]);
     command
         .args(&spec.argv[1..])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Own process group so the timeout kill below reaches forked
+    // grandchildren (fwupdmgr helpers, ujust chains) instead of leaving
+    // root orphans a retry would race.
+    command.process_group(0);
     let mut child = command
         .spawn()
         .map_err(|error| format!("could not start privileged operation: {error}"))?;
@@ -314,7 +320,7 @@ fn run_operation(spec: ExecSpec) -> Result<String, String> {
         {
             Some(status) => break status,
             None if Instant::now() >= deadline => {
-                let _ = child.kill();
+                crate::system::process::kill_process_group(&mut child);
                 let _ = child.wait();
                 return Err("privileged operation timed out after 900 seconds".to_string());
             }
@@ -552,9 +558,38 @@ pub fn serve() -> Result<(), String> {
 mod tests {
     use serde_json::json;
 
+    use super::display_detail;
     use super::{
         parse_wheel_gid, redact_request_detail, run_operation, validate_request, ExecSpec,
     };
+
+    fn exit_status(success: bool) -> std::process::ExitStatus {
+        std::process::Command::new(if success { "true" } else { "false" })
+            .status()
+            .expect("exit probe")
+    }
+
+    #[test]
+    fn failure_detail_prefers_stderr_over_stdout_chatter() {
+        let detail = display_detail(
+            b"step 1/10\nstep 2/10\n",
+            b"cryptsetup failed: no key available\n",
+            exit_status(false),
+        );
+        assert!(detail.contains("cryptsetup failed"), "{detail}");
+    }
+
+    #[test]
+    fn success_detail_still_uses_stdout_and_collapses_lines() {
+        let detail = display_detail(b"line one\nline two\n", b"", exit_status(true));
+        assert_eq!(detail, "line one line two");
+    }
+
+    #[test]
+    fn empty_output_reports_exit_code() {
+        let detail = display_detail(b"", b"  \n", exit_status(false));
+        assert!(detail.contains("exited"), "{detail}");
+    }
 
     #[test]
     fn wheel_gid_reads_third_field_not_password_placeholder() {

@@ -32,7 +32,9 @@ def mounted_target(mountpoint: str, *, run_command) -> bool:
     try:
         result = run_command(["findmnt", "-n", mountpoint], capture_output=True, timeout=3)
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-        return True
+        # Fail closed: an unverifiable candidate is not a target. Treating
+        # probe errors as mounted writes "saved" logs into the live env.
+        return False
     return result.returncode == 0
 
 
@@ -44,19 +46,29 @@ def persist_artifacts(log, context, sources, *, run_command, as_root) -> None:
                 continue
             destination = Path(mountpoint) / "var/log/kyth-installer"
             try:
-                run_command(as_root(["mkdir", "-p", str(destination)]), check=False)
+                mkdir = run_command(as_root(["mkdir", "-p", str(destination)]), check=False)
+                if mkdir.returncode != 0:
+                    log(f"Warning: could not create {destination} on the target disk.")
+                    continue
+                failed = False
                 for source in sources:
                     if source.is_file() and not source.is_symlink():
-                        run_command(
+                        copied = run_command(
                             as_root(["cp", "-a", str(source), str(destination / source.name)]),
                             check=False,
                         )
+                        if copied.returncode != 0:
+                            log(f"Warning: could not persist {source.name} to the target disk.")
+                            failed = True
+                if failed:
+                    continue
                 log(f"Installer artifacts persisted to {destination} on the target disk.")
                 return
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
                 log(f"Warning: could not persist artifacts to {mountpoint}: {exc}")
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             continue
+    log("Warning: installer artifacts were NOT saved to the target disk.")
 
 
 def persist_failure_message(log, context, message: str, *, persist, run_command, as_root) -> None:
@@ -69,12 +81,13 @@ def persist_failure_message(log, context, message: str, *, persist, run_command,
             destination = Path(mountpoint) / "var/log/kyth-installer"
             try:
                 failure = destination / "install-failure.txt"
-                run_command(
+                written = run_command(
                     as_root(["/usr/bin/tee", str(failure)]),
                     input=f"{message}\n\nSee also: {destination}/failure.json\n",
                     text=True, stdout=subprocess.DEVNULL, check=False,
                 )
-                return
+                if written.returncode == 0:
+                    return
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                 pass
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path

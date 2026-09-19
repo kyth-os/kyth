@@ -71,6 +71,20 @@ fn parse_stage_marker(line: &str) -> Option<StageProgressSnapshot> {
     })
 }
 
+/// Merge a streamed marker into the current snapshot. Pure so the
+/// monotonic clamp is unit-testable: a retried marker must never drag the
+/// bar backwards.
+fn merge_stage_snapshot(
+    current: &StageProgressSnapshot,
+    next: StageProgressSnapshot,
+) -> StageProgressSnapshot {
+    if next.pct >= current.pct {
+        next
+    } else {
+        current.clone()
+    }
+}
+
 #[tauri::command]
 pub(crate) fn stage_progress() -> StageProgressSnapshot {
     stage_progress_cell()
@@ -162,11 +176,8 @@ fn start_stage_job(
                             }
                             if let Some(snapshot) = parse_stage_marker(line.trim()) {
                                 if let Ok(mut cell) = stage_progress_cell().lock() {
-                                    // Monotonic: a retried marker must not
-                                    // drag the bar backwards.
-                                    if snapshot.pct >= cell.pct {
-                                        *cell = snapshot;
-                                    }
+                                    let merged = merge_stage_snapshot(&cell, snapshot);
+                                    *cell = merged;
                                 }
                             } else {
                                 collected_out.extend_from_slice(line.as_bytes());
@@ -1011,5 +1022,27 @@ mod tests {
             .expect("marker parses");
         assert_eq!(snapshot.pct, 99);
         assert_eq!(snapshot.detail, "Installing the staged image…");
+    }
+
+    #[test]
+    fn stage_merge_never_moves_the_bar_backwards() {
+        let current = super::StageProgressSnapshot {
+            pct: 60,
+            phase: "download".into(),
+            detail: "Downloading layer 20 of 39".into(),
+            active: true,
+        };
+        let stale = super::StageProgressSnapshot {
+            pct: 40,
+            phase: "download".into(),
+            detail: "Downloading layer 12 of 39".into(),
+            active: true,
+        };
+        assert_eq!(super::merge_stage_snapshot(&current, stale).pct, 60);
+        let advanced = super::StageProgressSnapshot {
+            pct: 61,
+            ..current.clone()
+        };
+        assert_eq!(super::merge_stage_snapshot(&current, advanced).pct, 61);
     }
 }

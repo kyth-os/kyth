@@ -396,6 +396,15 @@ class BuildAssemblyContracts(unittest.TestCase):
                 self.assertIn(f"${{{argument}}}", dockerfile)
                 self.assertIn(consumer, dockerfile)
 
+    def test_mesa_git_layer_stamps_a_bisect_anchor(self):
+        """Upstream mesa-git snapshots move hourly and cannot be EVR-pinned,
+        so the layer must stamp exactly what shipped for regression triage.
+        """
+        script = (BUILD_FILES / "scripts/mesa-git.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/share/kyth/mesa-git.evr", script)
+        self.assertIn("mesa_dri_drivers_evr=", script)
+        self.assertIn("mesa_layer_date=", script)
+
     def test_branch_to_image_channel_mapping_is_explicit(self):
         build = (ROOT / ".github/workflows/build.yml").read_text()
         iso = (ROOT / ".github/workflows/build-live-iso.yml").read_text()

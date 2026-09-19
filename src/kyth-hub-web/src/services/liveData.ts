@@ -1345,22 +1345,40 @@ export interface AvailabilityStatusLive { state: string; detail: string; flatpak
 /** Run the user-requested availability check without hiding an invoke error.
  * The explicit button press needs to tell the page why it could not run so
  * the user gets a useful next step instead of a misleading shell message. */
+let availabilityCheckInFlight: Promise<AvailabilityStatusLive> | null = null;
 export async function checkForUpdates(): Promise<AvailabilityStatusLive> {
   if (!inTauriShell()) throw new Error("Update checking is available from the installed Kyth Hub.");
-  // The backend check fans out to the update registry and can hang on a
-  // dead mirror past the Hub-side 90s deadline (issue #164): race the
-  // invoke against a 95s timer so the button always settles with a
-  // friendly, actionable error instead of spinning forever.
-  const timeout = new Promise<never>((_, reject) => {
-    globalThis.setTimeout(() => reject(new Error("The update check timed out; your current system has not changed. Check your connection and try again.")), 95_000);
-  });
-  return await Promise.race([
-    invoke<AvailabilityStatusLive>("collect_availability", {
-      branch: null,
-      useCached: false,
-    }),
-    timeout,
-  ]);
+  // Single-flight: the backend probe cannot be cancelled mid-invoke, so a
+  // second press while one check runs joins it instead of stacking another
+  // registry fan-out against a dead mirror.
+  if (availabilityCheckInFlight) return availabilityCheckInFlight;
+  const task = (async (): Promise<AvailabilityStatusLive> => {
+    // The backend check fans out to the update registry and can hang on a
+    // dead mirror past the Hub-side 90s deadline (issue #164): race the
+    // invoke against a 95s timer so the button always settles with a
+    // friendly, actionable error instead of spinning forever.
+    let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+    const timeout = new Promise<never>((_, reject) => {
+      timer = globalThis.setTimeout(() => reject(new Error("The update check timed out; your current system has not changed. Check your connection and try again.")), 95_000);
+    });
+    try {
+      return await Promise.race([
+        invoke<AvailabilityStatusLive>("collect_availability", {
+          branch: null,
+          useCached: false,
+        }),
+        timeout,
+      ]);
+    } finally {
+      if (timer !== undefined) globalThis.clearTimeout(timer);
+    }
+  })();
+  availabilityCheckInFlight = task;
+  try {
+    return await task;
+  } finally {
+    if (availabilityCheckInFlight === task) availabilityCheckInFlight = null;
+  }
 }
 
 // Drives — live `lsblk -J` blockdevices (Move In's "Rescan drives"). The

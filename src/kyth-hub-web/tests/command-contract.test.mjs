@@ -446,3 +446,16 @@ test("routing and init failures stay visible", () => {
   assert.match(vpn, /} finally \{\n.*setPassword\(""\)/s, "VPN password must clear even when connect throws");
   assert.doesNotMatch(vpn, /finally \{ setJob\(null\); \}/, "failed Disconnect must keep the job handle for retry");
 });
+
+test("stage progress survives reload and checks do not stack", () => {
+  // Determinate bar must follow the backend-tracked job, not just the
+  // local run: after a reload mid-stage the bar recovers instead of
+  // dropping to indeterminate.
+  assert.match(updatesOverview, /updateTracked && !\(readings\.status\?\.staged \|\| stagedLatch\)/, "stage polling must cover the reattached backend job");
+  assert.match(updatesOverview, /stagedLatch/, "successful stage must latch the Restart-to-apply UI past probe lag");
+  assert.match(updatesOverview, /progressPct/, "stage guidance must render the determinate bar");
+  // The availability probe cannot be cancelled mid-invoke: single-flight
+  // joins a second press, and the orphan timer is cleared on settle.
+  assert.match(service, /availabilityCheckInFlight/, "concurrent checks must join instead of stacking registry fan-outs");
+  assert.match(service, /clearTimeout\(timer\)/, "the check timeout must be cleared on settle");
+});

@@ -105,8 +105,11 @@ pub fn switch(channel: &str) -> Result<String, String> {
         "testing-cachy" => "ghcr.io/kyth-os/kyth:testing-cachy",
         _ => return Err("unsupported bootc channel".to_string()),
     };
-    crate::system::boot_finalize::prepare_boot()?;
+    // Lock first: prepare_boot remounts /boot rw, so a busy lock must
+    // report "another upgrade" BEFORE mutating mounts — never leave /boot
+    // writable for a switch that will not run.
     with_bootc_lock(|| {
+        crate::system::boot_finalize::prepare_boot()?;
         let output = run(
             "/usr/bin/bootc",
             &["switch", reference],
@@ -128,6 +131,21 @@ pub fn switch(channel: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn switch_takes_lock_before_remounting_boot() {
+        // Order pin: prepare_boot remounts /boot rw, so the busy-lock
+        // verdict must come first — never leave /boot writable for a
+        // switch that will not run.
+        let source = include_str!("bootc_guard.rs");
+        let switch_body = source.split("pub fn switch(").nth(1).expect("switch fn");
+        let lock_at = switch_body.find("with_bootc_lock").expect("lock call");
+        let prep_at = switch_body.find("prepare_boot()").expect("prep call");
+        assert!(
+            lock_at < prep_at,
+            "with_bootc_lock must precede prepare_boot in switch()"
+        );
+    }
 
     #[test]
     fn lock_serializes_and_reports_busy() {

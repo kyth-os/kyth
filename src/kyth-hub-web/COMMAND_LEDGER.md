@@ -37,6 +37,7 @@ entry still has a frontend wrapper and is registered in the Tauri handler.
 | `invokeBootcRollback` | `bootc_rollback` | none | `string` | mutate | covered |
 | `invokeApplyStaged` | `apply_staged` | none | `string` | mutate | covered |
 | update job polling | `update_job_status` | `{ job }` | `InstallStatus` | read | covered |
+| `fetchStageProgress` | `stage_progress` | none, polled 1Hz while a stage runs (incl. reattached jobs) | `StageProgress` (`pct` 0–99 monotonic, `phase` download/install, `detail`, `active`) | read | covered |
 | `cancelUpdateJob` | `update_job_cancel` | `{ job }` | `InstallStatus` | mutate | covered |
 | `fetchUpdateHealth` | `update_health` | none | `UpdateHealthLive` | read | covered |
 

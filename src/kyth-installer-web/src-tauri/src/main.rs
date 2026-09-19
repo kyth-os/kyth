@@ -269,6 +269,9 @@ fn send_socket_request(
     let mut stream = UnixStream::connect(socket_path(value)?)
         .map_err(|err| format!("could not connect to installer service: {err}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(610))).ok();
+    // A dead backend that never reads must fail fast on write instead of
+    // wedging install Send/Cancel behind the 610 s read bound.
+    stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let payload = body.unwrap_or("");
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: kyth-installer.local\r\nX-Kyth-Session-Token: {}\r\nAccept: application/json\r\nContent-Length: {}\r\n\r\n{payload}",
@@ -292,6 +295,9 @@ fn send_http_request(
     let mut stream = TcpStream::connect("127.0.0.1:7777")
         .map_err(|err| format!("could not connect to installer HTTP service: {err}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(610))).ok();
+    // Same write bound as the socket path: fail fast against a dead
+    // backend instead of blocking forever in write_all.
+    stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let payload = body.unwrap_or("");
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Kyth-Session-Token: {}\r\nAccept: application/json\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
@@ -326,6 +332,7 @@ fn start_socket_stream(
     let mut stream = UnixStream::connect(socket_path(&value)?)
         .map_err(|err| format!("could not connect to installer stream: {err}"))?;
     stream.set_read_timeout(Some(Duration::from_secs(1))).ok();
+    stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
     let request = format!(
         "GET /api/stream HTTP/1.1\r\nHost: kyth-installer.local\r\nX-Kyth-Session-Token: {}\r\nAccept: text/event-stream\r\n\r\n",
         value.session_token
@@ -454,6 +461,16 @@ fn main() {
 #[cfg(test)]
 mod transport_tests {
     use super::*;
+
+    #[test]
+    fn all_backend_writes_are_bounded() {
+        // Every backend write path (socket request, HTTP request, event
+        // stream) must bound writes: a dead backend that never reads must
+        // fail fast instead of wedging install Send/Cancel behind the
+        // long read timeout.
+        let source = include_str!("main.rs");
+        assert_eq!(source.matches("set_write_timeout").count(), 3);
+    }
 
     #[test]
     fn routes_are_strictly_allowlisted() {
