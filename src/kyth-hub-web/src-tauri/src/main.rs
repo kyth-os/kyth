@@ -1933,6 +1933,7 @@ fn main() {
             commands::updates::hub_action_status,
             commands::updates::hub_action_cancel,
             commands::updates::bootc_upgrade,
+            commands::updates::stage_progress,
             commands::updates::bootc_rollback,
             commands::updates::bootc_switch_branch,
             guardian_execute_recipe,

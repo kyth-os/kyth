@@ -105,7 +105,13 @@ class JustInvocationTests(unittest.TestCase):
             body = re.search(rf"fn {command}\([^)]*\)[^{{]*{{(.*?)\n}}", MAIN_RS, re.S)
             self.assertIsNotNone(body, command)
             code = re.sub(r"//.*", "", body.group(1))
-            self.assertIn("start_update_job", code, command)
+            # bootc_upgrade streams helper progress markers, so it launches
+            # through the streaming variant — same job bridge, same
+            # cancel/timeout contract.
+            if command == "bootc_upgrade":
+                self.assertIn("start_stage_job", code, command)
+            else:
+                self.assertIn("start_update_job", code, command)
             for claim in ("rolled back", "staged", "completed", "applied"):
                 self.assertNotIn(claim, code, f"{command} claims {claim!r} for a spawned window")
 

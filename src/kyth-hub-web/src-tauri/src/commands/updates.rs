@@ -17,6 +17,241 @@ fn update_jobs() -> &'static JobStore {
     UPDATE_JOBS.get_or_init(JobStore::default)
 }
 
+/// Latest live staging progress, streamed from `kyth-safe-upgrade` marker
+/// lines while the stage job runs. The Updates page polls `stage_progress`
+/// for a determinate bar; `active` is false when no stage is running.
+#[derive(Serialize, Clone)]
+pub(crate) struct StageProgressSnapshot {
+    pub(crate) pct: u8,
+    pub(crate) phase: String,
+    pub(crate) detail: String,
+    pub(crate) active: bool,
+}
+
+static STAGE_PROGRESS: OnceLock<std::sync::Mutex<StageProgressSnapshot>> = OnceLock::new();
+
+fn stage_progress_cell() -> &'static std::sync::Mutex<StageProgressSnapshot> {
+    STAGE_PROGRESS.get_or_init(|| {
+        std::sync::Mutex::new(StageProgressSnapshot {
+            pct: 0,
+            phase: "download".into(),
+            detail: "Starting the download…".into(),
+            active: false,
+        })
+    })
+}
+
+/// Parse a `KYTH_STAGE_PROGRESS pct=N phase=P detail=…` marker line.
+fn parse_stage_marker(line: &str) -> Option<StageProgressSnapshot> {
+    let rest = line.strip_prefix("KYTH_STAGE_PROGRESS ")?;
+    let pct = rest
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix("pct=")?.parse::<u8>().ok())?;
+    let phase = rest
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix("phase="))
+        .unwrap_or("download")
+        .to_string();
+    let detail = rest
+        .find("detail=")
+        .map(|idx| rest[idx + "detail=".len()..].trim().to_string())
+        .filter(|text| !text.is_empty())
+        .unwrap_or_else(|| {
+            if phase == "install" {
+                "Installing the staged image…".to_string()
+            } else {
+                "Downloading the update…".to_string()
+            }
+        });
+    Some(StageProgressSnapshot {
+        pct: pct.min(99),
+        phase,
+        detail,
+        active: true,
+    })
+}
+
+#[tauri::command]
+pub(crate) fn stage_progress() -> StageProgressSnapshot {
+    stage_progress_cell()
+        .lock()
+        .map(|snapshot| snapshot.clone())
+        .unwrap_or(StageProgressSnapshot {
+            pct: 0,
+            phase: "download".into(),
+            detail: "Starting the download…".into(),
+            active: false,
+        })
+}
+
+/// Stage variant of `start_update_job` that streams the helper's stdout so
+/// progress markers update the Updates page live. Cancel, timeout, and
+/// terminal detail behave exactly like the non-streaming path.
+fn start_stage_job(
+    job_slug: &str,
+    operation: &str,
+    argv: Vec<String>,
+    timeout: Duration,
+) -> Result<UpdateActionLaunch, String> {
+    kyth_shared::commands::normalize_command(&argv)
+        .map_err(|_| "update produced an invalid command".to_string())?;
+    let job = format!(
+        "update-{}-{}",
+        job_slug,
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    );
+    let cancel = update_jobs().start(&job, format!("{operation} is running…"));
+    if let Ok(mut snapshot) = stage_progress_cell().lock() {
+        *snapshot = StageProgressSnapshot {
+            pct: 0,
+            phase: "download".into(),
+            detail: "Starting the download…".into(),
+            active: true,
+        };
+    }
+    let job_for_thread = job.clone();
+    let operation_for_thread = operation.to_string();
+    std::thread::spawn(move || {
+        use std::io::BufRead;
+        use std::os::unix::process::CommandExt;
+        let mut command = Command::new(&argv[0]);
+        command.args(&argv[1..]);
+        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+        let desktop = kyth_shared::commands::environment_for(
+            kyth_shared::commands::EnvironmentPolicy::Desktop,
+            &inherited,
+        );
+        command.env_clear().envs(desktop);
+        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+            command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+        }
+        command.process_group(0);
+        command.stdin(std::process::Stdio::null());
+        command.stdout(std::process::Stdio::piped());
+        command.stderr(std::process::Stdio::piped());
+        let spawned = command.spawn();
+        let (state, detail) = match spawned {
+            Ok(mut child) => {
+                let mut collected_out = Vec::new();
+                let mut collected_err = Vec::new();
+                if let Some(stdout) = child.stdout.take() {
+                    let mut reader = std::io::BufReader::new(stdout);
+                    let mut line = String::new();
+                    loop {
+                        line.clear();
+                        match reader.read_line(&mut line) {
+                            Ok(0) => break,
+                            Ok(_) => {}
+                            Err(_) => break,
+                        }
+                        if let Some(snapshot) = parse_stage_marker(line.trim()) {
+                            if let Ok(mut cell) = stage_progress_cell().lock() {
+                                // Monotonic: a retried marker must not drag
+                                // the bar backwards.
+                                if snapshot.pct >= cell.pct {
+                                    *cell = snapshot;
+                                }
+                            }
+                        } else {
+                            collected_out.extend_from_slice(line.as_bytes());
+                        }
+                    }
+                }
+                // Mirror run_bounded_command_cancel: poll for exit, kill the
+                // whole process group on cancel or timeout.
+                let started = std::time::Instant::now();
+                let outcome = loop {
+                    match child.try_wait() {
+                        Ok(Some(status)) => break Ok(status),
+                        Ok(None) => {}
+                        Err(error) => break Err(error),
+                    }
+                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                        kyth_shared::system::process::kill_process_group(&mut child);
+                        break Err(std::io::Error::new(
+                            std::io::ErrorKind::Interrupted,
+                            "command was cancelled",
+                        ));
+                    }
+                    if started.elapsed() > timeout {
+                        kyth_shared::system::process::kill_process_group(&mut child);
+                        break Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "command timed out",
+                        ));
+                    }
+                    std::thread::sleep(Duration::from_millis(25));
+                };
+                if let Some(stderr) = child.stderr.take() {
+                    use std::io::Read;
+                    let mut reader = std::io::BufReader::new(stderr);
+                    let _ = reader.read_to_end(&mut collected_err);
+                }
+                match outcome {
+                    Ok(status) => {
+                        let mut detail = String::from_utf8_lossy(&collected_out).trim().to_string();
+                        let stderr = String::from_utf8_lossy(&collected_err).trim().to_string();
+                        if !stderr.is_empty() {
+                            if !detail.is_empty() {
+                                detail.push('\n');
+                            }
+                            detail.push_str(&stderr);
+                        }
+                        let detail: String = kyth_shared::system::process::redact_sensitive_text(
+                            kyth_shared::system::process::strip_ansi(&detail).as_str(),
+                        )
+                        .chars()
+                        .rev()
+                        .take(1200)
+                        .collect::<String>()
+                        .chars()
+                        .rev()
+                        .collect();
+                        let state = if status.success() {
+                            "complete"
+                        } else {
+                            "failed"
+                        };
+                        let detail = if detail.is_empty() {
+                            if status.success() {
+                                format!("{operation_for_thread} complete.")
+                            } else {
+                                format!(
+                                    "{operation_for_thread} failed (exit code {}).",
+                                    status.code().unwrap_or(-1)
+                                )
+                            }
+                        } else {
+                            detail
+                        };
+                        (state.to_string(), detail)
+                    }
+                    Err(error) => (
+                        "failed".to_string(),
+                        format!("{operation_for_thread} could not complete: {error}"),
+                    ),
+                }
+            }
+            Err(error) => (
+                "failed".to_string(),
+                format!("{operation_for_thread} could not start: {error}"),
+            ),
+        };
+        if let Ok(mut snapshot) = stage_progress_cell().lock() {
+            snapshot.active = false;
+        }
+        update_jobs().finish(&job_for_thread, &state, detail);
+    });
+    Ok(UpdateActionLaunch {
+        job,
+        state: "running".into(),
+        detail: format!("{operation} is running…"),
+    })
+}
+
 #[derive(Serialize)]
 pub(crate) struct JustRecipeResponse {
     pub(crate) name: String,
@@ -402,7 +637,7 @@ pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
     // mutating launch here instead of stacking two sudo prompts that
     // serialize anyway.
     kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
-    start_update_job(
+    start_stage_job(
         "stage",
         "Download and stage",
         vec!["sudo", "-A", "/usr/bin/kyth-safe-upgrade"]
@@ -737,5 +972,26 @@ mod tests {
     fn hub_action_rejects_unknown_recipe() {
         let result = serde_json::from_str::<HubAction>("\"run-arbitrary-command\"");
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn stage_marker_parses_pct_phase_and_detail() {
+        let snapshot = super::parse_stage_marker(
+            "KYTH_STAGE_PROGRESS pct=42 phase=download detail=Downloading layer 12 of 39",
+        )
+        .expect("marker parses");
+        assert_eq!(snapshot.pct, 42);
+        assert_eq!(snapshot.phase, "download");
+        assert_eq!(snapshot.detail, "Downloading layer 12 of 39");
+        assert!(snapshot.active);
+    }
+
+    #[test]
+    fn stage_marker_rejects_non_markers_and_caps_pct() {
+        assert!(super::parse_stage_marker("Downloading layer 12 of 39").is_none());
+        let snapshot = super::parse_stage_marker("KYTH_STAGE_PROGRESS pct=200 phase=install")
+            .expect("marker parses");
+        assert_eq!(snapshot.pct, 99);
+        assert_eq!(snapshot.detail, "Installing the staged image…");
     }
 }

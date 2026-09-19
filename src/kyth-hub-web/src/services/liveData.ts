@@ -1450,6 +1450,19 @@ export async function fetchUserName(): Promise<string | null> {
 }
 
 // Phase 2 mutating (Updates + Repair/Diagnostics)
+export interface StageProgress {
+  pct: number;
+  phase: string;
+  detail: string;
+  active: boolean;
+}
+
+export async function fetchStageProgress(): Promise<StageProgress | null> {
+  if (!inTauriShell()) return null;
+  try {
+    return await invoke<StageProgress>("stage_progress");
+  } catch { return null; }
+}
 export async function invokeBootcUpgrade(): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction("Download and stage the next system update? It will require a reboot to apply.")) return "Cancelled.";

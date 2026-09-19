@@ -3,6 +3,7 @@ import {
   cancelInstall,
   cancelUpdateJob,
   checkForUpdates,
+  fetchStageProgress,
   fetchUpdatesSnapshot,
   getInFlightJob,
   invalidateSharedReads,
@@ -10,6 +11,7 @@ import {
   invokeBootcRollback,
   invokeBootcUpgrade,
   updateFlatpaks,
+  type StageProgress,
   type UpdatesSnapshot,
 } from "../services/liveData";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
@@ -24,6 +26,7 @@ type UpdateGuidance = {
   message: string;
   next: string;
   progress?: boolean;
+  progressPct?: number;
 };
 
 const emptyReadings: UpdatesSnapshot = {
@@ -78,6 +81,29 @@ export function UpdatesOverview() {
   const [updateTracked, setUpdateTracked] = useState(() => getInFlightJob("update") !== undefined);
   const [cancelling, setCancelling] = useState(false);
   const [cancelNote, setCancelNote] = useState<string | null>(null);
+  // Latch a successful stage locally: the staged deployment exists the
+  // moment the job completes, even if the next status probe has not caught
+  // up yet. The latch clears as soon as the backend confirms staged (or a
+  // rollback/apply changes the state again).
+  const [stagedLatch, setStagedLatch] = useState(false);
+  const [stageProgress, setStageProgress] = useState<StageProgress | null>(null);
+
+  // While a stage runs, poll the live byte/layer progress for the
+  // determinate bar. Stops with the job; the last reading stays rendered
+  // until the page refreshes into the staged state.
+  useEffect(() => {
+    if (busy !== "stage") return;
+    let stopped = false;
+    const tick = async () => {
+      try {
+        const next = await fetchStageProgress();
+        if (!stopped && next && next.active) setStageProgress(next);
+      } catch { /* keep the last reading; the job poll owns errors */ }
+    };
+    void tick();
+    const timer = window.setInterval(tick, 1000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [busy]);
 
   function syncTrackedJobs(): void {
     setUpdateTracked(getInFlightJob("update") !== undefined);
@@ -146,6 +172,9 @@ export function UpdatesOverview() {
     const next = await fetchUpdatesSnapshot();
     setReadings(next);
     setLoaded(true);
+    // The backend caught up with the staged deployment: the local latch
+    // hands over to live data.
+    if (next.status?.staged) setStagedLatch(false);
     return "Update status refreshed.";
   }
 
@@ -197,6 +226,11 @@ export function UpdatesOverview() {
   async function stage(): Promise<string> {
     try {
       const detail = await invokeBootcUpgrade();
+      // The job completed: the deployment is staged even if the next
+      // probe has not caught up. Latch the staged UI now; refresh hands
+      // back to live data as soon as the backend confirms.
+      setStagedLatch(true);
+      setStageProgress(null);
       await refresh();
       return friendlyActionResult("stage", detail);
     } catch (error) {
@@ -217,6 +251,7 @@ export function UpdatesOverview() {
   async function apply(): Promise<string> {
     try {
       const detail = await invokeApplyStaged();
+      setStagedLatch(false);
       await refresh();
       return friendlyActionResult("apply", detail);
     } catch (error) {
@@ -227,6 +262,7 @@ export function UpdatesOverview() {
   async function rollback(): Promise<string> {
     try {
       const detail = await invokeBootcRollback();
+      setStagedLatch(false);
       await refresh();
       return friendlyActionResult("rollback", detail);
     } catch (error) {
@@ -236,8 +272,12 @@ export function UpdatesOverview() {
 
   const { snapshot, status: updateStatus, pending, health } = readings;
   const staged = updateStatus?.staged ?? false;
+  // Latched staged state wins until the backend confirms it: right after a
+  // successful stage the primary button must read "Restart to apply", not
+  // fall back to "Check for updates" on a lagging probe.
+  const stagedEffective = staged || stagedLatch;
   const pendingCount = numericPending(pending);
-  const systemUpdateAvailable = updateStatus?.check_state === "available" && !staged;
+  const systemUpdateAvailable = updateStatus?.check_state === "available" && !stagedEffective;
   // "blocked" (e.g. a quarantined update held back for safety) and "busy"
   // (a mutating operation in flight) are backend states, not read failures:
   // neither may render as up-to-date nor as a connection error.
@@ -247,7 +287,7 @@ export function UpdatesOverview() {
   const appUpdatesAvailable = pendingCount > 0;
   const hasReadings = snapshot !== null || updateStatus !== null || pending !== null || health !== null;
   const actionFailed = status?.startsWith("Failed:") ?? false;
-  const canStage = !staged && !isBlocked && (
+  const canStage = !stagedEffective && !isBlocked && (
     systemUpdateAvailable
     || checkFailed
     || (actionFailed && (lastAction === "check" || lastAction === "stage"))
@@ -291,13 +331,17 @@ export function UpdatesOverview() {
       };
     }
     if (busy === "stage") {
+      // Determinate while markers stream; indeterminate before the first
+      // one lands (sudo prompt, preflight) or on an older helper.
+      const live = stageProgress?.active === true && stageProgress.pct > 0 ? stageProgress : null;
       return {
         tone: "muted",
         icon: "↓",
-        title: "Downloading and preparing your update",
-        message: "KythOS is downloading the update and preparing it for your next restart. Your current system remains usable.",
-        next: "Keep the Hub open until staging finishes.",
+        title: live?.phase === "install" ? "Installing your update" : "Downloading and preparing your update",
+        message: live?.detail ?? "KythOS is downloading the update and preparing it for your next restart. Your current system remains usable.",
+        next: live ? `${live.pct}% complete. Keep the Hub open until staging finishes.` : "Keep the Hub open until staging finishes.",
         progress: true,
+        progressPct: live?.pct,
       };
     }
     if (busy === "apps") {
@@ -340,7 +384,7 @@ export function UpdatesOverview() {
         progress: true,
       };
     }
-    if (busy === null && updateTracked && !staged) {
+    if (busy === null && updateTracked && !stagedEffective) {
       return {
         tone: "muted",
         icon: "↓",
@@ -360,7 +404,7 @@ export function UpdatesOverview() {
         next: actionErrorNextStep(failure, lastAction),
       };
     }
-    if (staged) {
+    if (stagedEffective) {
       return {
         tone: "warn",
         icon: "✓",
@@ -432,7 +476,7 @@ export function UpdatesOverview() {
     };
   })();
 
-  const primaryAction = staged
+  const primaryAction = stagedEffective
     ? { id: "apply", label: busy === "apply" ? "Restarting…" : "Restart to apply", pending: "Applying the staged update…", action: apply }
     : isBlocked
       ? { id: "check", label: busy === "check" ? "Checking…" : "Check for updates", pending: "Checking for updates…", action: check }
@@ -477,14 +521,16 @@ export function UpdatesOverview() {
           <strong>{guidance.title}</strong>
           <p>{guidance.message}</p>
           <span>{guidance.next}</span>
-          {guidance.progress && <div className="updates-guidance-progress" aria-label="Update operation in progress"><i /></div>}
+          {guidance.progress && (guidance.progressPct !== undefined
+            ? <div className="updates-guidance-progress updates-guidance-progress-determinate" role="progressbar" aria-valuenow={guidance.progressPct} aria-valuemin={0} aria-valuemax={100} aria-label="Update download and staging progress"><i style={{ width: `${guidance.progressPct}%` }} /></div>
+            : <div className="updates-guidance-progress" aria-label="Update operation in progress"><i /></div>)}
         </div>
       </div>
 
       <div className="updates-actions-card updates-primary-actions">
         <div>
           <span className="updates-eyebrow">Next step</span>
-          <h2>{staged ? "Finish the staged update" : systemUpdateAvailable ? "Install the available update" : appUpdatesAvailable ? "Update your apps" : "Update KythOS"}</h2>
+          <h2>{stagedEffective ? "Finish the staged update" : systemUpdateAvailable ? "Install the available update" : appUpdatesAvailable ? "Update your apps" : "Update KythOS"}</h2>
           <p>{lastCheck}</p>
         </div>
         <div className="updates-actions">

@@ -111,6 +111,275 @@ fn drain_pipe(pipe: &mut Option<impl Read + Send + 'static>) -> Vec<u8> {
     buf
 }
 
+/// Drain bootc's stderr while translating progress fragments into
+/// `KYTH_STAGE_PROGRESS` marker lines on our stdout, where the Hub streams
+/// them into the Updates page. The full stderr is still returned for the
+/// terminal job detail on failure.
+fn drain_stderr_with_progress(pipe: &mut Option<impl Read + Send + 'static>) -> Vec<u8> {
+    use std::io::BufRead;
+    let mut collected = Vec::new();
+    let Some(pipe) = pipe.as_mut() else {
+        return collected;
+    };
+    let mut reader = std::io::BufReader::new(pipe);
+    let mut chunk = Vec::new();
+    let mut progress = StageProgress::default();
+    loop {
+        chunk.clear();
+        // One read delivers whatever the pipe currently holds — possibly
+        // several lines, possibly a partial indicatif re-render.
+        match reader.read_until(b'\n', &mut chunk) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        collected.extend_from_slice(&chunk);
+        let text = String::from_utf8_lossy(&chunk);
+        for fragment in text.split(['\n', '\r']) {
+            if let Some(marker) = classify_bootc_fragment(fragment, &mut progress) {
+                println!("{marker}");
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+            }
+        }
+    }
+    collected
+}
+
+/// Live staging progress parsed from `bootc upgrade` stderr.
+///
+/// Download reserves 0–85, deploy 85–99 (100 is only reported on clean
+/// exit, so a killed or failed stage can never display complete).
+#[derive(Debug, Default)]
+struct StageProgress {
+    blobs_needed: u64,
+    blobs_started: std::collections::HashSet<String>,
+    blobs_done: u64,
+    blob_totals: std::collections::HashMap<String, u64>,
+    blob_current: std::collections::HashMap<String, u64>,
+    fetch_finalized: bool,
+    deploy_steps: u64,
+    last_pct: u8,
+    last_detail: String,
+}
+
+impl StageProgress {
+    fn downloaded_bytes(&self) -> u64 {
+        self.blob_current
+            .iter()
+            .map(|(id, current)| (*current).min(*self.blob_totals.get(id).unwrap_or(&u64::MAX)))
+            .sum()
+    }
+
+    fn total_bytes(&self) -> u64 {
+        self.blob_totals.values().sum()
+    }
+
+    fn pct(&self) -> (u8, &'static str) {
+        if self.deploy_steps > 0 || self.fetch_finalized {
+            // Deploy is a short discrete tail: step the last stretch so the
+            // bar keeps moving while dracut and the bootloader run.
+            let step_pct = 85u8
+                .saturating_add((self.deploy_steps.min(7) * 2) as u8)
+                .min(99);
+            let phase = if self.deploy_steps > 0 {
+                "install"
+            } else {
+                "download"
+            };
+            return (step_pct.max(85), phase);
+        }
+        if self.blobs_needed > 0 {
+            let frac = (self.blobs_done as f64 + 0.5 * self.blobs_started.len() as f64)
+                / self.blobs_needed as f64;
+            return ((85.0 * frac.clamp(0.0, 1.0)) as u8, "download");
+        }
+        let (downloaded, total) = (self.downloaded_bytes(), self.total_bytes());
+        if total > 0 {
+            return ((85.0 * downloaded as f64 / total as f64) as u8, "download");
+        }
+        (0, "download")
+    }
+}
+
+fn parse_byte_size(value: f64, unit: &str) -> u64 {
+    let factor = match unit.to_ascii_lowercase().as_str() {
+        "kib" | "kb" => 1024.0,
+        "mib" | "mb" => 1024.0 * 1024.0,
+        "gib" | "gb" => 1024.0 * 1024.0 * 1024.0,
+        "tib" | "tb" => 1024.0 * 1024.0 * 1024.0 * 1024.0,
+        _ => 1.0,
+    };
+    (value * factor) as u64
+}
+
+const DEPLOY_KEYWORDS: &[&str] = &[
+    "merging layer",
+    "writing commit",
+    "deploying",
+    "staged deployment",
+    "dracut",
+    "bootloader",
+    "staged update",
+];
+
+/// Classify one stderr fragment (split on both `\n` and `\r`, ANSI
+/// stripped). Returns a marker line when progress visibly moved.
+fn classify_bootc_fragment(fragment: &str, state: &mut StageProgress) -> Option<String> {
+    let clean = kyth_shared::system::process::strip_ansi(fragment);
+    let line = clean.trim();
+    if line.is_empty() {
+        return None;
+    }
+    let lower = line.to_lowercase();
+
+    // Totals: "layers already present: 30; layers needed: 39 (4.4 GB)".
+    if let Some(idx) = lower.find("layers needed:") {
+        let rest = &lower[idx + "layers needed:".len()..];
+        if let Some(count) = rest.split_whitespace().next().and_then(|token| {
+            token
+                .trim_matches(|c: char| !c.is_ascii_digit())
+                .parse::<u64>()
+                .ok()
+        }) {
+            if count > 0 {
+                state.blobs_needed = count;
+            }
+        }
+    }
+
+    // Per-blob byte progress from indicatif bars:
+    // "a1b2c3d4e5f6 [===>...] 123MiB / 500MiB (10MiB/s)".
+    if let Some(prefix) = line
+        .split_whitespace()
+        .next()
+        .filter(|token| token.len() == 12 && token.chars().all(|c| c.is_ascii_hexdigit()))
+    {
+        if let Some(slash) = line.find('/') {
+            let left_trim = line[..slash].trim_end();
+            let left_unit: String = left_trim
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            let num_part = &left_trim[..left_trim.len().saturating_sub(left_unit.len())];
+            let left_num: String = num_part
+                .chars()
+                .rev()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            let right_token = line[slash + 1..].split_whitespace().next().unwrap_or("");
+            let right_num: String = right_token
+                .chars()
+                .take_while(|c| c.is_ascii_digit() || *c == '.')
+                .collect();
+            let right_unit: String = right_token
+                .chars()
+                .skip_while(|c| c.is_ascii_digit() || *c == '.')
+                .take_while(|c| c.is_ascii_alphabetic())
+                .collect();
+            if let (Ok(value), Ok(total)) = (left_num.parse::<f64>(), right_num.parse::<f64>()) {
+                if !left_unit.is_empty() && !right_unit.is_empty() && total > 0.0 {
+                    let id = prefix.to_string();
+                    state.blobs_started.insert(id.clone());
+                    state
+                        .blob_totals
+                        .insert(id.clone(), parse_byte_size(total, &right_unit).max(1));
+                    // Downloaded bytes never move backwards: indicatif
+                    // re-renders an earlier blob while a later one completes.
+                    let current = parse_byte_size(value, &left_unit);
+                    state
+                        .blob_current
+                        .entry(id)
+                        .and_modify(|known| *known = (*known).max(current))
+                        .or_insert(current);
+                }
+            }
+        }
+    }
+
+    // Blob start lines ("Copying blob sha256:…") count in-flight work when
+    // no byte bars are visible (piped skopeo-style output is start-only).
+    if lower.starts_with("copying blob") || lower.starts_with("copying config") {
+        let done =
+            lower.contains("done") || lower.contains("already exists") || lower.contains("skipped");
+        match line.split_whitespace().nth(2) {
+            Some(digest) if digest.len() >= 7 => {
+                let id: String = digest.chars().take(12).collect();
+                if done {
+                    state.blobs_done += 1;
+                    state.blobs_started.remove(&id);
+                    state.blob_current.remove(&id);
+                } else {
+                    state.blobs_started.insert(id);
+                }
+            }
+            _ => {
+                if done {
+                    state.blobs_done += 1;
+                } else {
+                    state
+                        .blobs_started
+                        .insert(format!("blob-{}", state.blobs_started.len()));
+                }
+            }
+        }
+    }
+
+    // Fetch tail: manifest stored, image fully pulled, deploy about to run.
+    if lower.contains("writing manifest")
+        || lower.contains("storing signatures")
+        || lower.contains("already have manifest")
+    {
+        state.fetch_finalized = true;
+    }
+
+    // Deploy phase: discrete steps after the pull.
+    if DEPLOY_KEYWORDS
+        .iter()
+        .any(|keyword| lower.contains(keyword))
+    {
+        state.deploy_steps += 1;
+    }
+
+    let (pct, phase) = state.pct();
+    // Monotonic: a re-rendered bar for an earlier blob must not move the
+    // bar backwards past a completed sibling.
+    if pct < state.last_pct && !(phase == "install" && state.last_pct < 85) {
+        return None;
+    }
+    let detail = if phase == "install" {
+        "Installing the staged image".to_string()
+    } else if state.blobs_needed > 0 {
+        let done = state.blobs_done.min(state.blobs_needed);
+        format!("Downloading layer {} of {}", done + 1, state.blobs_needed)
+    } else {
+        let (downloaded, total) = (state.downloaded_bytes(), state.total_bytes());
+        if total > 0 {
+            format!(
+                "Downloading {:.1} of {:.1} GB",
+                downloaded as f64 / 1024.0 / 1024.0 / 1024.0,
+                total as f64 / 1024.0 / 1024.0 / 1024.0
+            )
+        } else {
+            "Downloading the update".to_string()
+        }
+    };
+    if pct == state.last_pct && detail == state.last_detail {
+        return None;
+    }
+    state.last_pct = pct;
+    state.last_detail = detail.clone();
+    Some(format!(
+        "KYTH_STAGE_PROGRESS pct={pct} phase={phase} detail={detail}"
+    ))
+}
+
 /// Run `bootc upgrade` as its own process group so termination reaches
 /// forked grandchildren. On SIGTERM the group gets SIGTERM, up to 10s to
 /// exit gracefully, then SIGKILL; the caller reports failure and records
@@ -131,7 +400,7 @@ fn run_bootc_child() -> Result<std::process::Output, String> {
     let mut stdout = child.stdout.take();
     let mut stderr = child.stderr.take();
     let stdout_reader = std::thread::spawn(move || drain_pipe(&mut stdout));
-    let stderr_reader = std::thread::spawn(move || drain_pipe(&mut stderr));
+    let stderr_reader = std::thread::spawn(move || drain_stderr_with_progress(&mut stderr));
     let started = std::time::Instant::now();
     let mut term_at: Option<std::time::Instant> = None;
     loop {
@@ -354,5 +623,88 @@ mod tests {
     #[test]
     fn term_grace_is_ten_seconds() {
         assert_eq!(TERM_GRACE, Duration::from_secs(10));
+    }
+
+    fn feed(lines: &[&str]) -> (StageProgress, Vec<String>) {
+        let mut state = StageProgress::default();
+        let markers = lines
+            .iter()
+            .filter_map(|line| classify_bootc_fragment(line, &mut state))
+            .collect();
+        (state, markers)
+    }
+
+    #[test]
+    fn layers_needed_sets_totals_and_counts_starts() {
+        let (state, markers) = feed(&[
+            "layers already present: 30; layers needed: 39 (4.4 GB)",
+            "Copying blob sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "Copying blob sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        ]);
+        assert_eq!(state.blobs_needed, 39);
+        assert_eq!(state.blobs_started.len(), 2);
+        assert_eq!(state.pct().0, (85.0 * 1.0 / 39.0) as u8);
+        assert!(!markers.is_empty());
+    }
+
+    #[test]
+    fn indicatif_bar_tracks_bytes_and_never_regresses() {
+        let (state, _) = feed(&[
+            "a1b2c3d4e5f6 [======>---------------------] 250MiB / 500MiB (10MiB/s)",
+            "a1b2c3d4e5f6 [============>---------------] 400MiB / 500MiB (10MiB/s)",
+            "a1b2c3d4e5f6 [======>---------------------] 250MiB / 500MiB (10MiB/s)",
+        ]);
+        assert_eq!(state.downloaded_bytes(), 400 * 1024 * 1024);
+        assert_eq!(state.total_bytes(), 500 * 1024 * 1024);
+        assert_eq!(state.pct().0, (85.0 * 0.8) as u8);
+    }
+
+    #[test]
+    fn blob_done_lines_advance_past_starts() {
+        let (state, _) = feed(&[
+            "layers already present: 0; layers needed: 4 (1.0 GB)",
+            "Copying blob 797644653c72 skipped: already exists",
+            "Copying blob ef5675472650 done",
+        ]);
+        assert_eq!(state.blobs_done, 2);
+        assert_eq!(state.pct().0, (85.0 * 2.0 / 4.0) as u8);
+    }
+
+    #[test]
+    fn deploy_lines_move_to_install_phase_capped_at_99() {
+        let (state, markers) = feed(&[
+            "Writing manifest to image destination",
+            "Merging layer 1/39: overlay diff",
+            "Writing commit",
+            "dracut: building initramfs",
+        ]);
+        let (pct, phase) = state.pct();
+        assert_eq!(phase, "install");
+        assert!(pct >= 85 && pct <= 99, "pct={pct}");
+        assert!(markers.iter().any(|m| m.contains("phase=install")));
+    }
+
+    #[test]
+    fn noise_lines_emit_only_the_initial_activity_marker() {
+        let (state, markers) = feed(&[
+            "Getting image source signatures",
+            "Checking out base commit",
+            "",
+            "   ",
+        ]);
+        // The first fragment announces activity at 0%; repeats stay silent.
+        assert_eq!(markers.len(), 1);
+        assert!(markers[0].contains("pct=0"));
+        assert_eq!(state.pct().0, 0);
+    }
+
+    #[test]
+    fn marker_format_is_parseable() {
+        let (_, markers) = feed(&[
+            "Copying blob sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        ]);
+        let marker = markers.into_iter().next().expect("start line emits");
+        assert!(marker.starts_with("KYTH_STAGE_PROGRESS pct="));
+        assert!(marker.contains(" phase=download detail="));
     }
 }

@@ -53,6 +53,7 @@ const updateWrappers = [
   "invokeBootcUpgrade",
   "invokeBootcRollback",
   "invokeApplyStaged",
+  "fetchStageProgress",
 ];
 
 const rustCommands = [
@@ -99,9 +100,12 @@ test("Updates wrappers are present and used by the page", () => {
 });
 
 test("Updates actions use the native job bridge instead of just recipes", () => {
-  for (const command of ["bootc_upgrade", "bootc_rollback", "apply_staged"]) {
+  for (const command of ["bootc_rollback", "apply_staged"]) {
     assert.match(updatesRust, new RegExp(`fn ${command}\\b[\\s\\S]*?start_update_job`), command);
   }
+  // The stage path streams helper progress markers, so it launches through
+  // the streaming variant — same job bridge, same cancel/timeout contract.
+  assert.match(updatesRust, /fn bootc_upgrade\b[\s\S]*?start_stage_job/, "bootc_upgrade");
   assert.match(updatesOverview, /invokeApplyStaged/);
   assert.doesNotMatch(updatesOverview, /RecipeButton recipe="(?:apply-staged|update-health)"/);
 });
@@ -139,7 +143,7 @@ test("Updates page has one action owner and no duplicate legacy section", async 
   const page = await readFile(resolve(root, "src/pages/Updates.tsx"), "utf8");
   assert.doesNotMatch(page, /UpdatesSection|HubPage|Detailed update tools/);
   assert.doesNotMatch(updatesOverview, /update-watcher|Check now|Refresh status/);
-  assert.match(updatesOverview, /const canStage = !staged && !isBlocked && \(/);
+  assert.match(updatesOverview, /const canStage = !stagedEffective && !isBlocked && \(/);
   assert.match(updatesOverview, /lastAction === "check" \|\| lastAction === "stage"/);
   assert.doesNotMatch(updatesOverview, /disabled=\{busy !== null \|\| blocked\}/, "a failed check must not disable the safe staging retry");
 });
@@ -347,7 +351,7 @@ test("persisted slots carry timestamps and stale ones are dropped", () => {
 
 test("mutating Hub update launches serialize on the shared bootc lock", () => {
   for (const command of ["bootc_upgrade", "bootc_rollback", "bootc_switch_branch", "apply_staged"]) {
-    const fn = updatesRust.match(new RegExp(`fn ${command}\\b[\\s\\S]*?start_update_job`))?.[0] ?? "";
+    const fn = updatesRust.match(new RegExp(`fn ${command}\\b[\\s\\S]*?start_(update|stage)_job`))?.[0] ?? "";
     assert.notEqual(fn, "", `${command} not found`);
     assert.match(fn, /with_bootc_lock/, `${command} must admission-check the shared bootc lock before launching`);
   }
@@ -357,7 +361,7 @@ test("update job ids survive reload reattach (slug, never a label with spaces)",
   // The frontend only reattaches `<prefix>-<nanos>` ids across a reload; an
   // id built from a display label ("Download and stage") fails the pattern
   // and strands the job with no Cancel. Every launch site must pass a slug.
-  const slugs = [...updatesRust.matchAll(/start_update_job\(\s*"([^"]+)"/g)].map((match) => match[1]);
+  const slugs = [...updatesRust.matchAll(/start_(?:update|stage)_job\(\s*"([^"]+)"/g)].map((match) => match[1]);
   assert.ok(slugs.length >= 4, `expected update launch slugs, found ${slugs.length}`);
   for (const slug of slugs) {
     assert.match(slug, /^[a-z][a-z0-9-]*$/, `update job slug ${JSON.stringify(slug)} must match the reattach pattern`);
