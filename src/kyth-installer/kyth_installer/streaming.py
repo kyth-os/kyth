@@ -5,6 +5,7 @@ from __future__ import annotations
 import codecs
 import os
 import select
+import signal
 import subprocess  # nosec B404 # nosemgrep
 import threading
 import time
@@ -13,6 +14,24 @@ from collections.abc import Callable, Sequence
 
 from kyth_shared import NetStatsTracker, parse_size_bytes
 from .runner import spawn_command
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Kill the whole process group, then reap with a bound.
+
+    Installer children fork helpers (cryptsetup workers, mkfs, sgdisk
+    wrappers) that outlive a bare ``proc.kill()`` and keep writing the
+    target disk while a retry races them. A D-state child cannot be
+    reaped at all — never hang teardown on it.
+    """
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+    except Exception:  # noqa: BLE001 -- broad: best-effort teardown, pid may be gone or mocked
+        pass
+    try:
+        proc.wait(timeout=10)
+    except Exception:  # noqa: BLE001 -- broad: TimeoutExpired (D-state) or mock oddities
+        pass
 
 
 LogFn = Callable[[str], None]
@@ -62,10 +81,12 @@ class StreamingCommandRunner:
         proc = spawn_command(
             argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             stdin=subprocess.PIPE if stdin_data is not None else None, bufsize=0,
+            # Own process group so cancel/timeout kills reach forked
+            # grandchildren (see _kill_tree).
+            start_new_session=True,
         )
         if proc.stdout is None:
-            proc.kill()
-            proc.wait()
+            _kill_tree(proc)
             raise RuntimeError("Could not capture installer command output.")
 
         if stdin_data is not None and proc.stdin is not None:
@@ -164,8 +185,7 @@ class StreamingCommandRunner:
                         try:
                             proc.wait(timeout=5)
                         except Exception:  # noqa: BLE001 -- broad: proc.wait timeout can be TimeoutExpired or generic Exception in tests
-                            proc.kill()
-                            proc.wait()
+                            _kill_tree(proc)
                     from .execution import InstallCancelled
 
                     raise InstallCancelled(
@@ -198,11 +218,14 @@ class StreamingCommandRunner:
                     )
 
             consume_output(decoder.decode(b"", final=True), final=True)
-            proc.wait()
+            try:
+                proc.wait(timeout=30)
+            except subprocess.TimeoutExpired:
+                _kill_tree(proc)
+                raise RuntimeError("Installer command did not exit after its output ended.")
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             if proc.poll() is None:
-                proc.kill()
-            proc.wait()
+                _kill_tree(proc)
             raise
         finally:
             monitor_stop.set()

@@ -283,6 +283,16 @@ pub(crate) fn send_request(request: Value) -> Result<String, String> {
                 "could not configure privileged service timeout: {error}"
             ))
         })?;
+    // A wedged daemon that never reads must fail fast here instead of
+    // freezing the UI behind the 910 s read bound: requests are small
+    // JSON, so 30 s to accept them is generous.
+    stream
+        .set_write_timeout(Some(std::time::Duration::from_secs(30)))
+        .map_err(|error| {
+            tag_privileged(format!(
+                "could not configure privileged service timeout: {error}"
+            ))
+        })?;
     stream
         .write_all(format!("{request}\n").as_bytes())
         .map_err(|error| {

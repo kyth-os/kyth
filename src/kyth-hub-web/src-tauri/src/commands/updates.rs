@@ -135,31 +135,46 @@ fn start_stage_job(
         let spawned = command.spawn();
         let (state, detail) = match spawned {
             Ok(mut child) => {
-                let mut collected_out = Vec::new();
-                let mut collected_err = Vec::new();
-                if let Some(stdout) = child.stdout.take() {
-                    let mut reader = std::io::BufReader::new(stdout);
-                    let mut line = String::new();
-                    loop {
-                        line.clear();
-                        match reader.read_line(&mut line) {
-                            Ok(0) => break,
-                            Ok(_) => {}
-                            Err(_) => break,
-                        }
-                        if let Some(snapshot) = parse_stage_marker(line.trim()) {
-                            if let Ok(mut cell) = stage_progress_cell().lock() {
-                                // Monotonic: a retried marker must not drag
-                                // the bar backwards.
-                                if snapshot.pct >= cell.pct {
-                                    *cell = snapshot;
-                                }
+                // Both pipes drain on helper threads from the start: a
+                // chatty helper (>64 KiB on either pipe) must never wedge
+                // the child, and cancel/timeout must preempt mid-download
+                // instead of waiting for EOF.
+                let stderr_handle = child.stderr.take().map(|stderr| {
+                    std::thread::spawn(move || {
+                        use std::io::Read;
+                        let mut collected = Vec::new();
+                        let mut reader = std::io::BufReader::new(stderr);
+                        let _ = reader.read_to_end(&mut collected);
+                        collected
+                    })
+                });
+                let stdout_handle = child.stdout.take().map(|stdout| {
+                    std::thread::spawn(move || {
+                        let mut collected_out = Vec::new();
+                        let mut reader = std::io::BufReader::new(stdout);
+                        let mut line = String::new();
+                        loop {
+                            line.clear();
+                            match reader.read_line(&mut line) {
+                                Ok(0) => break,
+                                Ok(_) => {}
+                                Err(_) => break,
                             }
-                        } else {
-                            collected_out.extend_from_slice(line.as_bytes());
+                            if let Some(snapshot) = parse_stage_marker(line.trim()) {
+                                if let Ok(mut cell) = stage_progress_cell().lock() {
+                                    // Monotonic: a retried marker must not
+                                    // drag the bar backwards.
+                                    if snapshot.pct >= cell.pct {
+                                        *cell = snapshot;
+                                    }
+                                }
+                            } else {
+                                collected_out.extend_from_slice(line.as_bytes());
+                            }
                         }
-                    }
-                }
+                        collected_out
+                    })
+                });
                 // Mirror run_bounded_command_cancel: poll for exit, kill the
                 // whole process group on cancel or timeout.
                 let started = std::time::Instant::now();
@@ -185,11 +200,14 @@ fn start_stage_job(
                     }
                     std::thread::sleep(Duration::from_millis(25));
                 };
-                if let Some(stderr) = child.stderr.take() {
-                    use std::io::Read;
-                    let mut reader = std::io::BufReader::new(stderr);
-                    let _ = reader.read_to_end(&mut collected_err);
-                }
+                // Pipes close on exit/kill, so both readers terminate; join
+                // them for the terminal detail.
+                let collected_out = stdout_handle
+                    .and_then(|handle| handle.join().ok())
+                    .unwrap_or_default();
+                let collected_err = stderr_handle
+                    .and_then(|handle| handle.join().ok())
+                    .unwrap_or_default();
                 match outcome {
                     Ok(status) => {
                         let mut detail = String::from_utf8_lossy(&collected_out).trim().to_string();

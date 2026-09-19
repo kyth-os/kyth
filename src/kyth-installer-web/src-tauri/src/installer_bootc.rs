@@ -6,17 +6,17 @@
 
 use serde::{Deserialize, Serialize};
 
-fn default_true() -> bool {
-    true
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub(crate) struct BootcInstallInput {
     pub subcommand: String,
     pub source_imgref: String,
     pub target_imgref: String,
     pub target: String,
-    #[serde(default = "default_true")]
+    /// Reachability preflight runs unless explicitly skipped: an omitted
+    /// key must fail fast at validation, not mid-install on the target
+    /// disk. `bootc --skip-fetch-check` is an expert opt-out, not the
+    /// default.
+    #[serde(default)]
     pub skip_fetch_check: bool,
     #[serde(default)]
     pub skip_finalize: bool,
@@ -171,6 +171,22 @@ pub(crate) fn build_plan(input: BootcInstallInput) -> Result<BootcInstallPlan, S
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn omitted_fetch_check_runs_preflight_instead_of_skipping() {
+        // The riskiest default, pinned: an absent key must fail fast at
+        // validation, not mid-install. `true` stays an explicit opt-in.
+        let input: BootcInstallInput = serde_json::from_str(
+            r#"{"subcommand":"to-disk","source_imgref":"docker://ghcr.io/kyth-os/kyth:latest","target_imgref":"ghcr.io/kyth-os/kyth:latest","target":"/dev/sda"}"#,
+        )
+        .expect("minimal input deserializes");
+        assert!(!input.skip_fetch_check);
+        let plan = build_plan(input).expect("plan validates");
+        assert!(
+            !plan.argv.iter().any(|arg| arg == "--skip-fetch-check"),
+            "preflight must run when the key is omitted"
+        );
+    }
 
     fn input(subcommand: &str) -> BootcInstallInput {
         BootcInstallInput {

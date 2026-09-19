@@ -285,6 +285,20 @@ class BuildAssemblyContracts(unittest.TestCase):
         script = (BUILD_FILES / "scripts/kernel-repair.sh").read_text(encoding="utf-8")
         self.assertIn('find /usr/lib/kernel -name "vmlinuz-${KVER}"', script)
 
+    def test_builder_stage_bases_are_digest_pinned(self):
+        """Builder stages must not float on a moving tag: an upstream base
+        shift silently changes the installer/ISO toolchain and breaks
+        reproducibility. Bump the digest deliberately, never by drift.
+        """
+        for dockerfile in (ROOT / "Dockerfile", ROOT / "installer" / "Containerfile"):
+            for line in dockerfile.read_text(encoding="utf-8").splitlines():
+                if line.startswith("FROM registry.fedoraproject.org/"):
+                    self.assertRegex(
+                        line,
+                        r"@sha256:[0-9a-f]{64} AS ",
+                        f"{dockerfile.name} builder base must be digest-pinned: {line}",
+                    )
+
     def test_cherry_pick_run_steps_mount_every_sourced_lib(self):
         # RUN steps that bind individual files (not all of build_files) must
         # mount every lib/ helper the invoked script sources, or the build

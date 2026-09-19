@@ -14,7 +14,7 @@ ARG BASE_IMAGE=ghcr.io/kyth-os/kyth:latest
 # Keep Node/Rust/WebKit development dependencies out of the live image. The
 # resulting clients are unprivileged. The native installer daemon owns the
 # root-facing Unix socket and all destructive installer operations.
-FROM registry.fedoraproject.org/fedora:44 AS installer-web-builder
+FROM registry.fedoraproject.org/fedora:44@sha256:48628b48e6d033c1c5ed5adc7ce440b1d9906e349560ad9f57ef0b0beae78c84 AS installer-web-builder
 ARG INSTALLER_BUILD_HASH=unset
 RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
         cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \

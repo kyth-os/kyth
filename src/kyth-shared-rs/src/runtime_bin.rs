@@ -813,12 +813,7 @@ fn update_channel(args: &[String]) -> io::Result<ExitCode> {
         println!("Dry-run: would stage KythOS :{base}.");
         return Ok(ExitCode::SUCCESS);
     }
-    let flavor = fs::read_to_string("/usr/share/kyth/kernel-flavor").unwrap_or_default();
-    let suffix = if flavor.trim() == "cachy" {
-        "-cachy"
-    } else {
-        ""
-    };
+    let suffix = kernel_flavor_suffix();
     run(
         "sudo",
         &[
@@ -826,6 +821,26 @@ fn update_channel(args: &[String]) -> io::Result<ExitCode> {
             format!("switch-{base}{suffix}"),
         ],
     )
+}
+
+/// Resolve the `-cachy` image suffix without ever silently defaulting a
+/// cachy system onto the fedora ref: the flavor file wins, otherwise the
+/// booted kernel release decides (cachy kernels carry `cachy` in the
+/// release string), and only then do we fall back to fedora.
+fn kernel_flavor_suffix() -> String {
+    let flavor = fs::read_to_string("/usr/share/kyth/kernel-flavor").unwrap_or_default();
+    let booted = fs::read_to_string("/proc/sys/kernel/osrelease").unwrap_or_default();
+    flavor_suffix_for(&flavor, &booted).to_string()
+}
+
+fn flavor_suffix_for(flavor_file: &str, booted_release: &str) -> &'static str {
+    match flavor_file.trim() {
+        "cachy" => "-cachy",
+        "fedora" => "",
+        // Missing/garbled file: trust the booted kernel before defaulting.
+        _ if booted_release.to_lowercase().contains("cachy") => "-cachy",
+        _ => "",
+    }
 }
 
 fn rebase_image(args: &[String]) -> io::Result<ExitCode> {
@@ -1996,7 +2011,21 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use super::flavor_suffix_for;
     use super::parse_mem_sleep_modes;
+
+    #[test]
+    fn kernel_flavor_prefers_file_then_booted_kernel() {
+        assert_eq!(
+            flavor_suffix_for("cachy\n", "7.2.5-200.fc44.x86_64"),
+            "-cachy"
+        );
+        assert_eq!(flavor_suffix_for("fedora\n", "6.15.8-cachy1"), "");
+        // Missing/garbled file on a cachy kernel must not stage fedora.
+        assert_eq!(flavor_suffix_for("", "6.15.8-2-cachy"), "-cachy");
+        assert_eq!(flavor_suffix_for("garbage", "6.15.8-2-cachy"), "-cachy");
+        assert_eq!(flavor_suffix_for("", "7.2.5-200.fc44.x86_64"), "");
+    }
 
     #[test]
     fn parses_bracketed_current_mode() {

@@ -155,7 +155,7 @@ impl NativeInstallRequest {
                     } else {
                         text("disk", "")
                     },
-                    skip_fetch_check: flag("skip_fetch_check", true),
+                    skip_fetch_check: flag("skip_fetch_check", false),
                     skip_finalize: flag("skip_finalize", false),
                     root_subvolume: flag("root_subvolume", filesystem_install),
                     wipe: flag("wipe", false),
@@ -333,7 +333,7 @@ impl NativePhaseExecutor {
                 source_imgref: String::new(),
                 target_imgref: String::new(),
                 target: String::new(),
-                skip_fetch_check: true,
+                skip_fetch_check: false,
                 skip_finalize: false,
                 root_subvolume: false,
                 wipe: false,
@@ -1628,7 +1628,7 @@ mod tests {
                     source_imgref: "oci:/usr/share/kyth/image:latest".into(),
                     target_imgref: "ghcr.io/kyth-os/kyth:latest".into(),
                     target: "/dev/sda".into(),
-                    skip_fetch_check: true,
+                    skip_fetch_check: false,
                     skip_finalize: false,
                     root_subvolume: false,
                     wipe: true,

@@ -17,13 +17,21 @@ set -euo pipefail
 # is bound to the real /boot.
 _prepare_boot() {
 	if [[ -x /usr/libexec/kyth-finalize-staged ]]; then
-		/usr/libexec/kyth-finalize-staged prepare-boot >/dev/null 2>&1 || true
-		return
+		/usr/libexec/kyth-finalize-staged prepare-boot >/dev/null 2>&1 || return $?
+		return 0
 	fi
 	mount -o remount,bind,rw /boot 2>/dev/null || mount -o remount,rw /boot 2>/dev/null || true
 	if [[ -d /sysroot/boot ]] && ! findmnt -n /sysroot/boot >/dev/null 2>&1; then
 		mount --bind /boot /sysroot/boot 2>/dev/null || true
 	fi
+	# Prove /boot is actually writable: a silent failed remount would
+	# otherwise let `bootc switch` run against an unprepared /boot.
+	if ! touch /boot/.kyth-prep-write 2>/dev/null; then
+		echo "kyth-bootc-guard: /boot is not writable after prepare-boot; refusing to continue." >&2
+		return 1
+	fi
+	rm -f /boot/.kyth-prep-write
+	return 0
 }
 
 _bootc_status() {
@@ -31,7 +39,7 @@ _bootc_status() {
 	if [[ "${1:-}" == json ]]; then
 		extra+=(--json)
 	fi
-	_prepare_boot
+	_prepare_boot || true
 	if /usr/bin/bootc status "${extra[@]}"; then
 		return 0
 	fi
@@ -40,8 +48,12 @@ _bootc_status() {
 		echo "kyth-bootc-guard: bootc status failed (often opendir(boot) EPERM on the /boot bind). Try: sudo kyth-finalize-staged prepare-boot" >&2
 		return "${rc}"
 	fi
+	# Degraded human diagnostic only: this is rpm-ostree's schema, NOT
+	# bootc's. Exit with bootc's code so no script can mistake it for a
+	# successful bootc status.
 	echo "kyth-bootc-guard: bootc status could not open /boot; showing rpm-ostree status." >&2
 	/usr/bin/rpm-ostree status
+	return "${rc}"
 }
 
 case "$1" in
@@ -71,7 +83,10 @@ case "$1" in
         ;;
 esac
 
-_prepare_boot
+_prepare_boot || {
+	echo "kyth-bootc-guard: cannot prepare /boot for switch; aborting before touching deployments." >&2
+	exit 1
+}
 /usr/bin/bootc switch "${ref}"
 if [[ -x /usr/libexec/kyth-finalize-staged ]]; then
 	exec /usr/libexec/kyth-finalize-staged

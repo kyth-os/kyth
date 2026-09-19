@@ -1,3 +1,4 @@
+import subprocess
 import sys
 import threading
 import unittest
@@ -47,6 +48,59 @@ class StreamingAdditionalCoverageTests(unittest.TestCase):
             0, 100, lambda m: None, lambda p: seen.append(p),
         )
         self.assertTrue(seen)
+        # Parenthesized garbage must also fall back instead of raising.
+        seen.clear()
+        runner.run(
+            ["/usr/bin/echo", "layers needed: abc (not-a-size)"],
+            0, 100, lambda m: None, lambda p: seen.append(p),
+        )
+        self.assertTrue(seen)
+
+    def test_hung_child_after_eof_is_killed_and_reported(self):
+        """A child that stops exiting after its output ends is group-killed
+        with a clear error, never an unbounded hang."""
+        runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _e: None)
+        fake_proc = mock.Mock()
+        fake_proc.stdout = mock.Mock()
+        fake_proc.stdout.readline = mock.Mock(side_effect=[""])
+        fake_proc.stderr = None
+        fake_proc.stdin = None
+        fake_proc.poll = mock.Mock(return_value=1)
+        fake_proc.returncode = 1
+        fake_proc.wait = mock.Mock(
+            side_effect=subprocess.TimeoutExpired("argv", 30)
+        )
+        with mock.patch("kyth_installer.streaming.spawn_command", return_value=fake_proc), mock.patch(
+            "kyth_installer.streaming.select.select",
+            return_value=([fake_proc.stdout], [], []),
+        ), mock.patch("kyth_installer.streaming.os.read", return_value=b""):
+            with self.assertRaisesRegex(RuntimeError, "did not exit"):
+                runner.run(
+                    ["/usr/bin/echo", "hi"], 0, 100,
+                    lambda m: None, lambda p: None,
+                )
+
+    def test_kill_tree_kills_group_and_bounds_reap(self):
+        """Cancel/timeout must reach forked grandchildren, never hang."""
+        from kyth_installer.streaming import _kill_tree
+
+        proc = mock.Mock()
+        proc.pid = 12345
+        with mock.patch("os.killpg") as killpg, mock.patch("os.getpgid", return_value=12345):
+            _kill_tree(proc)
+            killpg.assert_called_once()
+        proc.wait.assert_called_once_with(timeout=10)
+
+    def test_kill_tree_survives_gone_pid_and_dstate_hang(self):
+        from kyth_installer.streaming import _kill_tree
+
+        proc = mock.Mock()
+        proc.pid = 99999
+        with mock.patch("os.killpg", side_effect=ProcessLookupError()):
+            _kill_tree(proc)  # must not raise
+        proc.wait.side_effect = subprocess.TimeoutExpired("p", 10)
+        with mock.patch("os.killpg"):
+            _kill_tree(proc)  # D-state: give up reaping, still no raise
 
     def test_stdout_is_none_raises(self):
         """Covers 67-69: spawn returns proc with stdout None."""

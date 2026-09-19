@@ -89,21 +89,29 @@ export function UpdatesOverview() {
   const [stageProgress, setStageProgress] = useState<StageProgress | null>(null);
 
   // While a stage runs, poll the live byte/layer progress for the
-  // determinate bar. Stops with the job; the last reading stays rendered
-  // until the page refreshes into the staged state.
+  // determinate bar. The backend-tracked job survives a frontend reload
+  // (reattached from storage), so poll for that too — otherwise the bar
+  // drops back to indeterminate after a reload mid-stage. Readings apply
+  // while active or still advancing; the bar never moves backwards.
+  const stagePollActive =
+    busy === "stage" || (updateTracked && !(readings.status?.staged || stagedLatch));
   useEffect(() => {
-    if (busy !== "stage") return;
+    if (!stagePollActive) return;
     let stopped = false;
     const tick = async () => {
       try {
         const next = await fetchStageProgress();
-        if (!stopped && next && next.active) setStageProgress(next);
+        if (stopped || !next) return;
+        setStageProgress((prev) => {
+          if (next.active || next.pct > (prev?.pct ?? 0)) return next;
+          return prev;
+        });
       } catch { /* keep the last reading; the job poll owns errors */ }
     };
     void tick();
     const timer = window.setInterval(tick, 1000);
     return () => { stopped = true; window.clearInterval(timer); };
-  }, [busy]);
+  }, [stagePollActive, busy, updateTracked, readings.status?.staged, stagedLatch]);
 
   function syncTrackedJobs(): void {
     setUpdateTracked(getInFlightJob("update") !== undefined);
@@ -392,6 +400,7 @@ export function UpdatesOverview() {
         message: "A previous update action is still running in the background. Its progress resumes here.",
         next: "You can wait for it to finish or choose “Cancel update” below to stop it.",
         progress: true,
+        progressPct: stageProgress?.active ? stageProgress.pct : undefined,
       };
     }
     if (actionFailed) {

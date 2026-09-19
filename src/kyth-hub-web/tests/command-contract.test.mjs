@@ -175,6 +175,10 @@ test("Privileged-helper outage is not reported as a network problem", () => {
   // "privileged service" substring branch covers old backends without tags.
   assert.match(privilegeRust, /PRIVILEGED_ERROR_TAG: &str = "\[privileged\]"/);
   assert.match(privilegeRust, /tag_privileged\(/);
+  // Both directions are bounded: a wedged daemon must fail fast on write
+  // instead of freezing the UI behind the long read bound.
+  assert.match(privilegeRust, /set_read_timeout/);
+  assert.match(privilegeRust, /set_write_timeout/);
   for (const [mapper, label] of [
     [updateMessages.slice(0, updateMessages.indexOf("export function friendlyActionError")), "friendlyAvailabilityDetail"],
     [updateMessages.slice(updateMessages.indexOf("export function friendlyActionError")), "friendlyActionError"],

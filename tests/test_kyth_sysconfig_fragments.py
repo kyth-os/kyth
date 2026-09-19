@@ -154,6 +154,16 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn("/usr/libexec/kyth-finalize-staged", guard)
         self.assertNotIn("exec /usr/bin/bootc switch", guard)
 
+    def test_bootc_guard_fails_closed_on_unprepared_boot(self):
+        """A silent failed /boot remount must abort `bootc switch` before it
+        touches deployments, and the rpm-ostree text fallback must keep
+        bootc's exit code so no consumer mistakes it for bootc status.
+        """
+        guard = (ROOT / "build_files" / "kyth-bootc-guard").read_text(encoding="utf-8")
+        self.assertIn(".kyth-prep-write", guard)
+        self.assertIn("aborting before touching deployments", guard)
+        self.assertIn('return "${rc}"', guard)
+
     def test_bootc_guard_prepares_boot_before_status(self):
         """bootc status opens sysroot-relative `boot` and returns EPERM on the
         Kyth read-only /boot bind until prepare-boot remounts it.
