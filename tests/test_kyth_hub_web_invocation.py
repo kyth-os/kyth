@@ -334,7 +334,7 @@ class BridgeFieldTests(unittest.TestCase):
         # KaliCard now runs the same export through the live kali_export
         # bridge command instead (see BridgeFieldTests / commands/security.rs),
         # so it's no longer a static recipe button to check for.
-        for recipe in ("hdr-per-game", "enable-bpftune", "disable-bpftune", "setup-kyth-dev-box", "ai-dev-status", "ai-dev-setup", "setup-waydroid", "remove-waydroid"):
+        for recipe in ("hdr-per-game", "enable-bpftune", "disable-bpftune", "setup-kyth-dev-box", "ai-dev-status", "ai-dev-setup", "setup-waydroid", "remove-waydroid-confirmed"):
             self.assertIn(f'recipe="{recipe}"', performance + app_store)
 
     def test_network_share_and_vpn_parity_bridges_are_registered(self):

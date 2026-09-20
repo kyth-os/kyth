@@ -113,7 +113,7 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
           />
           <RecipeButton recipe="fix-dualboot-clock" label="Fix dual-boot clock" busy={busy} run={run} />
           <RecipeButton recipe="setup-boot-windows-steam" label="Prepare Windows + Steam" busy={busy} run={run} />
-          <RecipeButton recipe="reclaim-windows" label="Reclaim Windows space" busy={busy} run={run} />
+          <ActionButton label="Reclaim Windows space" disabled={busy !== null} onClick={() => { window.location.hash = "/this-pc"; }} />
           <RecipeButton recipe="install-ludusavi" label="Install save migration" busy={busy} run={run} />
           <RecipeButton recipe="install-ms-fonts" label="Install Microsoft fonts" busy={busy} run={run} />
         </div>

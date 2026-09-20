@@ -739,10 +739,17 @@ enable-bpftune:
     echo "  Source: a third-party COPR (crono/bpftune-gaming), not an"
     echo "  official Fedora/EPEL package."
     echo
+    # Headless (Hub) callers get EOF here: without this guard the recipe
+    # "cancels" itself yet exits 0, and the Hub reports success for
+    # something that never happened.
+    if [[ ! -t 0 ]]; then
+        echo "  bpftune needs an interactive terminal (it layers a third-party COPR daemon)." >&2
+        exit 2
+    fi
     read -r -p "  Continue? [y/N] " reply
     if [[ ! "${reply}" =~ ^[Yy]$ ]]; then
         echo "  Cancelled — nothing changed."
-        exit 0
+        exit 1
     fi
     sudo dnf5 copr enable -y crono/bpftune-gaming
     sudo rpm-ostree install --idempotent bpftune

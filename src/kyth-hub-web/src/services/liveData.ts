@@ -1156,7 +1156,7 @@ async function waitHubJob(job: string, limit = 7200): Promise<string> {
 }
 export async function runCloudSync(remote: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Cloud sync is available from the installed Kyth Hub.");
-  if (!confirmUserAction(`Sync ${remote} to its saved local folder?`)) return "Cancelled.";
+  if (!confirmUserAction(`Copy ${remote} to its saved local folder? Files already here are kept; overwritten ones are backed up first.`)) return "Cancelled.";
   return await waitHubJob(await invoke<string>("cloud_sync_now", { remote }));
 }
 export async function openBackupApp(): Promise<string> {

@@ -230,23 +230,36 @@ def _shrink_btrfs(partition: str, new_size_bytes: int, log) -> None:
 
 def validate_shrink_request(partition: str, fstype: str) -> None:
     """Run last-moment power, encryption, and filesystem safety guards."""
+    from .assurance import _battery_check, _encryption_check
+
+    # Power probe is advisory: a broken probe (VMs, exotic ACPI) must not
+    # brick installs. Encryption is the opposite — unknown state blocks.
     try:
-        from .assurance import _battery_check, _encryption_check
-
         _battery_check()
-        from .disk import _parent_disk
-
-        try:
-            parent = _parent_disk(partition) or partition
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
-            parent = partition
-        enc = _encryption_check(disk=parent)
-        if enc is not None and enc.status == "warn":
-            raise RuntimeError(enc.detail)
-    except (OSError, ValueError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort guard
+    except (OSError, ValueError, AttributeError, KeyError) as exc:
         import logging as _lg
 
-        _lg.getLogger(__name__).debug("fsresize pre-shrink guard probe failed: %s", exc, exc_info=True)
+        _lg.getLogger(__name__).debug("fsresize battery probe failed: %s", exc, exc_info=True)
+    from .disk import _parent_disk
+
+    try:
+        parent = _parent_disk(partition) or partition
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
+        parent = partition
+    # Fail closed: if the encryption probe itself breaks (lsblk/blkid
+    # unavailable), the volume's BitLocker/LUKS state is UNKNOWN — and the
+    # explicit bitlocker gate below can only fire when detection worked.
+    # Shrinking a locked volume corrupts it, so an unverifiable probe is a
+    # blocker, not a debug log line.
+    try:
+        enc = _encryption_check(disk=parent)
+    except (OSError, ValueError, AttributeError, KeyError) as exc:
+        raise RuntimeError(
+            f"Could not verify the encryption state of {parent}; "
+            f"refusing to shrink blind ({exc})."
+        )
+    if enc is not None and enc.status == "warn":
+        raise RuntimeError(enc.detail)
     fstype = (fstype or "").lower()
     if fstype == "bitlocker":
         raise RuntimeError(

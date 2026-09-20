@@ -173,6 +173,9 @@ export function PerformanceSection({ section }: { section: HubSection }) {
             <RecipeButton recipe="enable-bpftune" label="Enable experimental bpftune" busy={busy} run={run} />
             <RecipeButton recipe="disable-bpftune" label="Remove bpftune" busy={busy} run={run} />
           </div>
+          <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>
+            bpftune is experimental and installs from a third-party COPR (crono/bpftune-gaming) — it can fight the gaming profile. Enable it from a terminal instead: <code>ujust enable-bpftune</code>
+          </p>
         </div>
         <ActionStatus status={status} />
       </div>

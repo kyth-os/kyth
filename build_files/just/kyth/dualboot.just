@@ -17,22 +17,27 @@ setup-boot-windows-steam:
         exit 1
     fi
 
-    # Install the helper script
+    # Install the helper script (runs as root via sudo; no inner sudo —
+    # the sudoers line below names this one fixed script, no args).
     tmpscript=$(mktemp)
-    printf '#!/bin/bash\nexec sudo efibootmgr -n %s && sudo systemctl reboot\n' \
+    printf '#!/bin/bash\nexec /usr/sbin/efibootmgr -n %s && /usr/bin/systemctl reboot\n' \
         "${windows_entry}" > "${tmpscript}"
     sudo install -Dm 0755 "${tmpscript}" /usr/local/bin/boot-windows
     rm -f "${tmpscript}"
 
-    # Add sudo rule for boot-windows (passwordless reboot + efibootmgr)
-    printf '%%wheel ALL=(root) NOPASSWD: /usr/sbin/efibootmgr -n %s, /usr/bin/systemctl reboot\n' \
-        "${windows_entry}" | sudo tee /etc/sudoers.d/kyth-boot-windows >/dev/null
+    # Add sudo rule for boot-windows ONLY. Never allowlist raw
+    # `systemctl reboot`: that lets any wheel process reboot the box at
+    # will — mid-game, mid-install, mid-update. The wrapper bakes the
+    # entry in, so the sudoers line names one fixed script, no args.
+    printf '%%wheel ALL=(root) NOPASSWD: /usr/local/bin/boot-windows\n' \
+        | sudo tee /etc/sudoers.d/kyth-boot-windows >/dev/null
     sudo chmod 0440 /etc/sudoers.d/kyth-boot-windows
 
     echo "boot-windows helper installed."
     echo
-    echo "Add it to Steam:"
-    echo "  Steam → Add a game → Add a Non-Steam Game → Browse → /usr/local/bin/boot-windows"
+    echo "Add it to Steam (it runs as root via passwordless sudo):"
+    echo "  Steam → Add a game → Add a Non-Steam Game → Browse → /usr/bin/sudo"
+    echo "  Then set its Launch Options target to: /usr/bin/sudo -n /usr/local/bin/boot-windows"
 
 # Show dual-boot status and reclaim help — the 30-day "try with Windows" win.
 # Keeps Windows boot entry while you evaluate; when ready, reclaim its space.
@@ -62,12 +67,17 @@ reclaim-windows:
     echo "  You must confirm with 'yes' to proceed. No data is touched until you confirm."
     sudo lsblk -o NAME,FSTYPE,LABEL,SIZE,MOUNTPOINT | grep -i ntfs || echo "  No NTFS partitions found."
     echo
+    if [[ ! -t 0 ]]; then
+        echo "  This step is interactive — open System Hub → This PC → Disks to reclaim instead." >&2
+        exit 2
+    fi
     read -p "  Type 'yes' to open System Hub → Disks to reclaim (or 'no' to cancel): " ans
     if [[ "$ans" == "yes" ]]; then
         echo "  Opening System Hub — use Disks to delete the Windows partition and grow KythOS."
         nohup /usr/bin/kyth-welcome-launch --page "This PC" >/dev/null 2>&1 &
     else
         echo "  Cancelled — your Windows install is untouched. Run 'just dualboot-status' anytime."
+        exit 1
     fi
 
 # Fix the clock skew between KythOS and a dual-booted Windows install.

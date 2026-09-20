@@ -669,12 +669,17 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
     }
     let folder = folder_canonical.to_string_lossy().into_owned();
     let job = commands::job::start_job("cloud-sync", &format!("Syncing {}…", configured.name))?;
+    // `copy`, never `sync`: sync deletes local-only files to mirror the
+    // remote, and a green "synced" after deleting saves is data loss.
+    // Overwritten files go to a backup dir (excluded from the transfer).
     let argv = vec![
         "rclone".to_string(),
-        "sync".to_string(),
+        "copy".to_string(),
         "--progress".to_string(),
         "--stats-one-line".to_string(),
         "--stats=2s".to_string(),
+        "--backup-dir".to_string(),
+        format!("{folder}/.kyth-cloud-backup"),
         "--".to_string(),
         format!("{}:", configured.name),
         folder.clone(),
@@ -703,6 +708,14 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
 
 #[tauri::command]
 fn open_backup_app() -> Result<String, String> {
+    // A detached `flatpak run` of a missing app fails where nobody reads
+    // it — same precheck as sec_host_tool_launch, so a fresh install gets
+    // an install pointer instead of a success toast and no window.
+    if !kyth_shared::system::software_catalog::is_flatpak_installed("org.gnome.World.PikaBackup") {
+        return Err(
+            "Pika Backup is not installed; install it from the App Store first.".to_string(),
+        );
+    }
     kyth_shared::system::process::spawn_detached(
         std::process::Command::new("flatpak").args(["run", "org.gnome.World.PikaBackup"]),
     )
@@ -896,6 +909,29 @@ fn focus_start(minutes: u32) -> Result<String, String> {
     if !(1..=240).contains(&minutes) {
         return Err("Focus session must be between 1 and 240 minutes".to_string());
     }
+    let mut sessions = focus_sessions()
+        .lock()
+        .map_err(|_| "focus session store is unavailable".to_string())?;
+    // Reap sessions whose `sleep` already exited without a focus_stop call:
+    // otherwise every unstopped session leaks a map entry (and an unwaited
+    // child) for the life of the Hub process.
+    sessions.retain(|_, existing| {
+        existing
+            .try_wait()
+            .map(|status| status.is_none())
+            .unwrap_or(false)
+    });
+    // Kill inhibitors orphaned by a previous Hub process (crash/restart
+    // reparents the `sleep` child, which then holds idle:sleep with no UI
+    // to cancel it). Live sessions in this process are spared.
+    let live_pids: Vec<u32> = sessions.values().map(|child| child.id()).collect();
+    drop(sessions);
+    let orphans = kyth_shared::system::process::reap_stale_focus_inhibits(&live_pids);
+    if orphans > 0 {
+        eprintln!(
+            "focus: reaped {orphans} orphaned sleep inhibitor(s) from a previous Hub process"
+        );
+    }
     let child = std::process::Command::new("systemd-inhibit")
         .args([
             "--what=idle:sleep",
@@ -916,15 +952,6 @@ fn focus_start(minutes: u32) -> Result<String, String> {
     let mut sessions = focus_sessions()
         .lock()
         .map_err(|_| "focus session store is unavailable".to_string())?;
-    // Reap sessions whose `sleep` already exited without a focus_stop call:
-    // otherwise every unstopped session leaks a map entry (and an unwaited
-    // child) for the life of the Hub process.
-    sessions.retain(|_, existing| {
-        existing
-            .try_wait()
-            .map(|status| status.is_none())
-            .unwrap_or(false)
-    });
     sessions.insert(id.clone(), child);
     Ok(id)
 }

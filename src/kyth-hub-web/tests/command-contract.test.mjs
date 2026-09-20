@@ -515,3 +515,13 @@ test("phase-4 backend honesty is enforced, not documented", async () => {
   assert.match(securityRust, /build_kali_create_command\([\s\S]*?parsed,?\s*\)\?/, "invalid box names must fail the command, not reach bash");
   assert.match(securityRust, /build_kali_remove_command\(DEFAULT_KALI_BOX\)\?/, "remove must fail closed too");
 });
+
+test("phase-5 stops silent data loss and fake success", async () => {
+  // Cloud copy never deletes, destructive recipes fail loudly without a
+  // TTY, app opens precheck, archives refuse symlinks, shrinks refuse
+  // unknown encryption, and focus reaps orphaned inhibitors.
+  assert.match(rust, /"copy"\.to_string\(\),[\s\S]*?--backup-dir/, "cloud sync must copy with a backup dir, never sync-delete");
+  assert.match(rust, /Pika Backup is not installed; install it from the App Store first/, "missing backup app must say so");
+  assert.match(rust, /reap_stale_focus_inhibits/, "focus must reap orphaned inhibitors");
+  assert.match(service, /Files already here are kept; overwritten ones are backed up first/, "cloud confirm must promise no deletion");
+});

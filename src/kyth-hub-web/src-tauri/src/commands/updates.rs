@@ -457,7 +457,9 @@ impl HubAction {
             Self::AiDevStatus => "ai-dev-status",
             Self::AiDevSetup => "ai-dev-setup",
             Self::SetupWaydroid => "setup-waydroid",
-            Self::RemoveWaydroid => "remove-waydroid",
+            // The Hub confirms first (RecipeButton confirm), so it runs the
+            // prompt-free variant; the interactive recipe stays for terminals.
+            Self::RemoveWaydroid => "remove-waydroid-confirmed",
             Self::InstallVscode => "install-vscode",
             Self::InstallBoxbuddy => "install-boxbuddy",
             Self::InstallJetbrainsToolbox => "install-jetbrains-toolbox",

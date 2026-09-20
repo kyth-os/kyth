@@ -99,6 +99,61 @@ fn kill_tree(child: &mut std::process::Child) {
     let _ = child.wait();
 }
 
+/// Kill stale focus-session inhibitors from a previous Hub process.
+///
+/// `focus_start` spawns `systemd-inhibit … sleep N`; when the Hub crashes
+/// or restarts, that child reparents and keeps holding the idle:sleep
+/// block with nothing tracking it — a laptop silently stops suspending
+/// for up to 4h. Only processes whose full command line carries BOTH the
+/// systemd-inhibit binary and our exact `--why` marker are touched, and
+/// `keep_pids` (the current process's live sessions) are spared, so a new
+/// session never murders a sibling's inhibit. Returns kills sent.
+pub fn reap_stale_focus_inhibits(keep_pids: &[u32]) -> usize {
+    reap_stale_focus_inhibits_at(std::path::Path::new("/proc"), keep_pids)
+}
+
+fn reap_stale_focus_inhibits_at(proc: &std::path::Path, keep_pids: &[u32]) -> usize {
+    let Ok(entries) = std::fs::read_dir(proc) else {
+        return 0;
+    };
+    let mut killed = 0;
+    for entry in entries.flatten() {
+        let pid: u32 = match entry.file_name().to_string_lossy().parse() {
+            Ok(pid) => pid,
+            Err(_) => continue,
+        };
+        if pid == std::process::id() || keep_pids.contains(&pid) {
+            continue;
+        }
+        let cmdline = std::fs::read(entry.path().join("cmdline")).unwrap_or_default();
+        let parts: Vec<&str> = cmdline
+            .split(|byte| *byte == b'\0')
+            .filter_map(|part| std::str::from_utf8(part).ok())
+            .filter(|part| !part.is_empty())
+            .collect();
+        let Some(first) = parts.first() else {
+            continue;
+        };
+        let is_inhibit = first.ends_with("/systemd-inhibit") || *first == "systemd-inhibit";
+        if !is_inhibit {
+            continue;
+        }
+        if !parts
+            .iter()
+            .any(|part| *part == "--why=KythOS Focus Session")
+        {
+            continue;
+        }
+        // TERM first so systemd-inhibit releases the lock cleanly; the
+        // orphaned `sleep` it leaves behind blocks nothing on its own.
+        unsafe {
+            libc::kill(pid as libc::pid_t, libc::SIGTERM);
+        }
+        killed += 1;
+    }
+    killed
+}
+
 /// Launch a GUI or otherwise long-lived child without blocking the caller
 /// and without leaking a zombie: a background thread reaps the exit status
 /// whenever the child exits. For bounded work with captured output, use the
@@ -457,6 +512,51 @@ fn human_bytes(n: u64) -> String {
 mod tests {
     use super::*;
     use std::time::Duration;
+    #[test]
+    fn stale_focus_reaper_kills_only_marked_inhibits() {
+        // Skip-paths use fake PIDs (never signalled — only entries
+        // matching BOTH the binary and the marker reach kill()). The one
+        // matching entry is a real `sleep` child this test owns, disguised
+        // via fake /proc, so the kill lands on nothing foreign.
+        let dir = tempfile::tempdir().unwrap();
+        let fake = |pid: &str, cmd: &[u8]| {
+            let entry = dir.path().join(pid);
+            std::fs::create_dir_all(&entry).unwrap();
+            std::fs::write(entry.join("cmdline"), cmd).unwrap();
+        };
+        fake(
+            "1001",
+            b"systemd-inhibit\0--what=idle:sleep\0--why=Something Else\0sleep\0",
+        );
+        fake("1002", b"sleep\0");
+        fake("self", b"systemd-inhibit\0--why=KythOS Focus Session\0");
+        let mut owned = std::process::Command::new("sleep")
+            .arg("300")
+            .spawn()
+            .expect("sleep must exist for the reaper test");
+        let pid = owned.id();
+        fake(
+            &pid.to_string(),
+            b"systemd-inhibit\0--what=idle:sleep\0--why=KythOS Focus Session\0sleep\0",
+        );
+        // A kept PID is spared even when marked.
+        assert_eq!(reap_stale_focus_inhibits_at(dir.path(), &[pid]), 0);
+        assert!(owned.try_wait().unwrap().is_none());
+        // Unkept and marked: TERM sent, child actually dies.
+        assert_eq!(reap_stale_focus_inhibits_at(dir.path(), &[]), 1);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            if owned.try_wait().unwrap().is_some() {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "TERMed child must exit"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(25));
+        }
+    }
+
     #[test]
     fn strip() {
         assert_eq!(strip_ansi("\x1b[31mred\x1b[0m"), "red");

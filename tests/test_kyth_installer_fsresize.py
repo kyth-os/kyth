@@ -251,5 +251,37 @@ class StreamTests(unittest.TestCase):
                 fsresize._stream(["false"], logs.append, timeout=5)
 
 
+class ValidateShrinkRequestTests(unittest.TestCase):
+    def test_broken_encryption_probe_blocks_the_shrink(self):
+        # A probe that cannot run leaves BitLocker/LUKS state unknown; the
+        # shrink must refuse, not proceed blind into a locked volume.
+        with patch("kyth_installer.assurance._battery_check", return_value=None), \
+             patch("kyth_installer.assurance._encryption_check", side_effect=OSError("no lsblk")), \
+             patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            with self.assertRaisesRegex(RuntimeError, "refusing to shrink blind"):
+                fsresize.validate_shrink_request("/dev/sda1", "ntfs")
+
+    def test_encryption_warn_blocks_the_shrink(self):
+        warn = MagicMock(status="warn", detail="LUKS locked")
+        with patch("kyth_installer.assurance._battery_check", return_value=None), \
+             patch("kyth_installer.assurance._encryption_check", return_value=warn), \
+             patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            with self.assertRaisesRegex(RuntimeError, "LUKS locked"):
+                fsresize.validate_shrink_request("/dev/sda1", "ntfs")
+
+    def test_clean_probe_passes_through(self):
+        with patch("kyth_installer.assurance._battery_check", return_value=None), \
+             patch("kyth_installer.assurance._encryption_check", return_value=None), \
+             patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            fsresize.validate_shrink_request("/dev/sda1", "ntfs")
+
+    def test_bitlocker_fstype_blocks_even_with_clean_probe(self):
+        with patch("kyth_installer.assurance._battery_check", return_value=None), \
+             patch("kyth_installer.assurance._encryption_check", return_value=None), \
+             patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            with self.assertRaisesRegex(RuntimeError, "BitLocker"):
+                fsresize.validate_shrink_request("/dev/sda1", "bitlocker")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -320,9 +320,11 @@ fn copy_dir_recursive(source: &Path, target: &Path, merge: bool) -> std::io::Res
     Ok(())
 }
 
-/// Copy one allowlisted relative path into `payload/files/`, preserving
-/// symlinks like `shutil.copytree(..., symlinks=True)`. Returns false when
-/// the source does not exist.
+/// Copy one allowlisted relative path into `payload/files/`,
+/// DEREFERENCING symlinks into plain files/dirs. A link planted (or
+/// merely present) in $HOME must never become a link inside the archive:
+/// safe_extract refuses any archive containing symlinks under files/, so
+/// the exporter writes link-free payloads our own restores accept.
 pub fn copy_into_payload(home: &Path, payload: &Path, rel: &str) -> bool {
     let source = home.join(rel);
     if std::fs::symlink_metadata(&source).is_err() {
@@ -335,15 +337,55 @@ pub fn copy_into_payload(home: &Path, payload: &Path, rel: &str) -> bool {
     {
         return false;
     }
-    let kind = std::fs::symlink_metadata(&source).map(|meta| meta.file_type());
-    let result = match kind {
-        Ok(kind) if kind.is_dir() && !kind.is_symlink() => {
-            copy_dir_recursive(&source, &target, false)
-        }
-        Ok(_) => copy_file_nofollow(&source, &target),
-        Err(_) => return false,
+    // symlink_metadata classifies the link itself; a symlinked dir must
+    // recurse through the target, never be recreated as a link.
+    let is_dir = source.is_dir();
+    let result = if is_dir {
+        copy_dir_deref_inner(&source, &target, 0)
+    } else {
+        copy_file_deref(&source, &target)
     };
     result.is_ok()
+}
+
+/// Recursive copy that follows symlinks (read_dir traverses dir links,
+/// fs::copy copies file content). Export-only: restores never need this
+/// because extracted payloads are symlink-free by construction. Depth is
+/// capped so a link loop (a -> b -> a) fails instead of recursing forever.
+fn copy_dir_deref_inner(source: &Path, target: &Path, depth: u32) -> std::io::Result<()> {
+    if depth > 32 {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "symlink depth exceeded",
+        ));
+    }
+    std::fs::create_dir_all(target)?;
+    for entry in std::fs::read_dir(source)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = target.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir_deref_inner(&from, &to, depth + 1)?;
+        } else {
+            copy_file_deref(&from, &to)?;
+        }
+    }
+    Ok(())
+}
+
+fn copy_file_deref(source: &Path, target: &Path) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(target).is_ok() {
+        std::fs::remove_file(target)?;
+    }
+    std::fs::copy(source, target)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        if let Ok(mode) = std::fs::metadata(source).map(|meta| meta.permissions().mode()) {
+            let _ = std::fs::set_permissions(target, std::fs::Permissions::from_mode(mode));
+        }
+    }
+    Ok(())
 }
 
 /// Relative paths of `kyth-*.desktop` launchers under
@@ -483,6 +525,32 @@ pub fn safe_extract(ctx: &SetupCtx, archive: &Path, dest: &Path) -> Result<PathB
     let payload = dest.join(ARCHIVE_PREFIX);
     if !payload.is_dir() {
         return Err("This is not a KythOS setup archive.".to_string());
+    }
+    // Symlink sweep: tar plants `files/.config/x -> /etc`-style links at
+    // extract time, and restore would faithfully recreate them in $HOME.
+    // Our own exporter never writes symlinks, so any is hostile — refuse
+    // the whole archive rather than restoring around it.
+    let mut links = Vec::new();
+    let mut stack = vec![payload.join("files")];
+    while let Some(directory) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&directory) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_symlink() {
+                links.push(path);
+            } else if path.is_dir() {
+                stack.push(path);
+            }
+        }
+    }
+    if !links.is_empty() {
+        return Err(format!(
+            "Unsafe archive: {} symlink(s) under files/ (first: {}). Only archives exported by KythOS itself are safe to restore.",
+            links.len(),
+            links[0].display()
+        ));
     }
     Ok(payload)
 }
@@ -808,6 +876,35 @@ mod tests {
             hostname: &|| "kyth-test".to_string(),
             flatpak_present,
         }
+    }
+
+    #[test]
+    fn exporter_dereferences_symlinks_and_survives_loops() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path();
+        // A symlinked file and dir inside an exported tree must land as
+        // plain content, never as links (safe_extract refuses archives
+        // containing symlinks under files/).
+        std::fs::create_dir_all(home.join(".config/app")).unwrap();
+        std::fs::write(home.join(".config/app/real.txt"), "data").unwrap();
+        std::os::unix::fs::symlink(
+            home.join(".config/app/real.txt"),
+            home.join(".config/app/link.txt"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(home.join(".config/app"), home.join(".config/applink")).unwrap();
+        // A link loop must fail, not recurse forever.
+        std::os::unix::fs::symlink(home.join(".config/loop"), home.join(".config/loop")).unwrap();
+        let payload = dir.path().join("payload");
+        assert!(copy_into_payload(home, &payload, ".config/app/link.txt"));
+        assert!(!payload.join("files/.config/app/link.txt").is_symlink());
+        assert_eq!(
+            std::fs::read_to_string(payload.join("files/.config/app/link.txt")).unwrap(),
+            "data"
+        );
+        assert!(copy_into_payload(home, &payload, ".config/applink"));
+        assert!(!payload.join("files/.config/applink").is_symlink());
+        assert!(!copy_into_payload(home, &payload, ".config/loop"));
     }
 
     #[test]
