@@ -196,7 +196,18 @@ pub(crate) fn fix_obs_pipewire() -> Result<String, String> {
 pub(crate) fn open_game_folder(key: String) -> Result<String, String> {
     let raw = gaming_tools::game_folder_path(&key).ok_or_else(|| "unknown folder".to_string())?;
     let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_string())?;
-    let expanded = raw.replacen('~', &home, 1);
+    // Expand a LEADING ~ only: replacen on the first '~' anywhere corrupts
+    // paths with a tilde mid-string into bogus locations.
+    let expanded = raw
+        .strip_prefix("~/")
+        .map(|rest| format!("{home}/{rest}"))
+        .unwrap_or_else(|| {
+            if raw == "~" {
+                home.clone()
+            } else {
+                raw.to_string()
+            }
+        });
     if !std::path::Path::new(&expanded).exists() {
         return Err(format!("Folder not found yet: {expanded}"));
     }

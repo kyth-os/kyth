@@ -31,7 +31,7 @@ pub(crate) fn new_job_id(prefix: &str) -> String {
 
 pub(crate) fn start_job(prefix: &str, pending: &str) -> Result<String, String> {
     let job = new_job_id(prefix);
-    jobs().start(&job, pending.to_string());
+    let (job, _) = jobs().start(&job, pending.to_string());
     Ok(job)
 }
 
@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn empty_argv_fails_the_job_without_spawning() {
         let job = new_job_id("test-empty");
-        jobs().start(&job, "pending".to_string());
+        let (job, _) = jobs().start(&job, "pending".to_string());
         spawn_argv_job(job.clone(), vec![], Duration::from_secs(5), |_| {
             panic!("empty argv must never reach the worker")
         });

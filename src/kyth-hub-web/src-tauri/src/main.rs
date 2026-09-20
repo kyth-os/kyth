@@ -152,7 +152,7 @@ fn guardian_check(investigate: bool) -> Result<GuardianActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    guardian_checks().start(&job, "Guardian check is running…".into());
+    let (job, _) = guardian_checks().start(&job, "Guardian check is running…".into());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let action = if investigate { "investigate" } else { "check" };
@@ -223,7 +223,7 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    guardian_checks().start(&job, format!("Running Guardian {action}…"));
+    let (job, _) = guardian_checks().start(&job, format!("Running Guardian {action}…"));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let result = commands::process::output("/usr/bin/kyth-guardian", args);
@@ -647,19 +647,33 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
     let home_canonical = fs::canonicalize(&home_path).unwrap_or(home_path.clone());
     let folder_path = PathBuf::from(&configured.folder);
     let folder_canonical = fs::canonicalize(&folder_path).unwrap_or_else(|_| {
+        // The leaf may not exist yet, but its PARENTS might be symlinks
+        // (`~/link-to-/data/new`): lexical cleaning alone never resolves
+        // those, so the starts_with check below passes while rclone writes
+        // outside HOME. Walk up to the nearest existing ancestor,
+        // canonicalize THAT, then re-append the remainder.
         let absolute = if folder_path.is_absolute() {
             folder_path.clone()
         } else {
             home_canonical.join(&folder_path)
         };
-        let mut clean = PathBuf::new();
-        for component in absolute.components() {
-            match component {
-                std::path::Component::CurDir => {}
-                std::path::Component::ParentDir => {
-                    clean.pop();
+        let mut existing = absolute.clone();
+        let mut rest: Vec<std::ffi::OsString> = Vec::new();
+        while !existing.exists() {
+            match existing.file_name() {
+                Some(name) => {
+                    rest.push(name.to_os_string());
+                    existing.pop();
                 }
-                other => clean.push(other.as_os_str()),
+                None => break,
+            }
+        }
+        let mut clean = fs::canonicalize(&existing).unwrap_or(existing);
+        for component in rest.into_iter().rev() {
+            if component == ".." {
+                clean.pop();
+            } else if component != "." {
+                clean.push(component);
             }
         }
         clean
@@ -671,7 +685,11 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
     let job = commands::job::start_job("cloud-sync", &format!("Syncing {}…", configured.name))?;
     // `copy`, never `sync`: sync deletes local-only files to mirror the
     // remote, and a green "synced" after deleting saves is data loss.
-    // Overwritten files go to a backup dir (excluded from the transfer).
+    // Overwritten files go to a backup dir. rclone skips the backup dir
+    // as a transfer target but still SCANS it — without this exclude,
+    // displaced files pile up inside the user's folder on every run, and
+    // would be resurrected as live files if the folder is ever synced back
+    // as a source.
     let argv = vec![
         "rclone".to_string(),
         "copy".to_string(),
@@ -680,6 +698,8 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
         "--stats=2s".to_string(),
         "--backup-dir".to_string(),
         format!("{folder}/.kyth-cloud-backup"),
+        "--exclude".to_string(),
+        "/.kyth-cloud-backup/**".to_string(),
         "--".to_string(),
         format!("{}:", configured.name),
         folder.clone(),
@@ -1215,7 +1235,7 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             .as_nanos()
     );
     let pending_detail = format!("Uninstalling {app_id}…");
-    let cancel = app_installs().start(&job, pending_detail.clone());
+    let (job, cancel) = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         // Resolve scope inside the worker: the full `flatpak list` scan
@@ -1321,7 +1341,7 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
             .as_nanos()
     );
     let pending_detail = "Updating your apps…".to_string();
-    let cancel = app_installs().start(&job, pending_detail.clone());
+    let (job, cancel) = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let mut user_command = std::process::Command::new("flatpak");
@@ -1385,7 +1405,7 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             .as_nanos()
     );
     let pending_detail = format!("Installing {app_id}…");
-    let cancel = app_installs().start(&job, pending_detail.clone());
+    let (job, cancel) = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         // Unbounded `.output()` hangs on a stalled mirror with no way to
@@ -1903,7 +1923,7 @@ fn exe_handler_start_bottles(
     let pending_detail = "Preparing an isolated Bottles environment…".to_string();
     // launch_in_bottles is a library call, not a child process: cancelling
     // marks the job and its late finish becomes a no-op.
-    app_installs().start(&job, pending_detail.clone());
+    let (job, _) = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let home = std::env::var_os("HOME")

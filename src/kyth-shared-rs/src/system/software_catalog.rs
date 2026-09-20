@@ -178,7 +178,10 @@ fn flathub_icon_url(app_id: &str) -> String {
     format!("https://dl.flathub.org/repo/appstream/x86_64/icons/128x128/{app_id}.png")
 }
 
-fn valid_flatpak_id(app_id: &str) -> bool {
+/// Reverse-DNS Flatpak application ids. Shared by the transfer restore path
+/// so archive manifests cannot smuggle flags (`--help` exits 0 and would
+/// otherwise count as "installed").
+pub fn valid_flatpak_id(app_id: &str) -> bool {
     !app_id.is_empty()
         && app_id.len() <= 200
         && app_id.contains('.')

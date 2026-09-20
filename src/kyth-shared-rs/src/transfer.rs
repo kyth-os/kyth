@@ -6,7 +6,7 @@
 
 use std::collections::VecDeque;
 use std::fs;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub fn parse_size_bytes(size: &str) -> u64 {
     let mut parts = size.split_whitespace();
@@ -78,6 +78,7 @@ pub fn human_bytes_pair(downloaded: u64, total: u64) -> (String, String) {
 /// supply a captured proc payload without mutating global state.
 pub fn rx_bytes_from_proc_net_dev(text: &str) -> Option<u64> {
     let mut total = 0_u64;
+    let mut usable = false;
     for line in text.lines() {
         let Some((interface, data)) = line.split_once(':') else {
             continue;
@@ -85,10 +86,15 @@ pub fn rx_bytes_from_proc_net_dev(text: &str) -> Option<u64> {
         if interface.trim() == "lo" {
             continue;
         }
-        let value = data.split_whitespace().next()?.parse::<u64>().ok()?;
+        // A transient malformed line must not zero the whole sample: skip
+        // it and total the interfaces that did parse.
+        let Ok(value) = data.split_whitespace().next().unwrap_or("").parse::<u64>() else {
+            continue;
+        };
         total = total.checked_add(value)?;
+        usable = true;
     }
-    Some(total)
+    usable.then_some(total)
 }
 
 /// Return total received bytes across non-loopback interfaces.
@@ -121,7 +127,11 @@ pub struct NetStatsTracker {
     rx_start: u64,
     rx_prev: u64,
     t_prev: Instant,
-    t_prev_seconds: f64,
+    /// Anchor mapping the f64-seconds test domain onto the monotonic
+    /// clock. Without it the two tick flavors mixed clocks: `new_at` set
+    /// the Instant while `t_prev_seconds` stayed 0.0, so a `tick_at`
+    /// computed `elapsed = time_now − 0` and reported garbage speed/ETA.
+    epoch: Option<(Instant, f64)>,
     samples: VecDeque<f64>,
 }
 
@@ -136,7 +146,20 @@ impl NetStatsTracker {
             rx_start,
             rx_prev: 0,
             t_prev: now,
-            t_prev_seconds: 0.0,
+            epoch: None,
+            samples: VecDeque::with_capacity(5),
+        }
+    }
+
+    /// Seconds-domain constructor for tests: anchors `time_now` to now so
+    /// `tick_at` measures against the same monotonic clock as `tick`.
+    pub fn new_at_seconds(total: u64, rx_start: u64, time_now: f64) -> Self {
+        Self {
+            total,
+            rx_start,
+            rx_prev: 0,
+            t_prev: Instant::now(),
+            epoch: Some((Instant::now(), time_now)),
             samples: VecDeque::with_capacity(5),
         }
     }
@@ -175,35 +198,23 @@ impl NetStatsTracker {
     }
 
     /// Test-friendly variant that accepts a monotonic timestamp in seconds.
+    /// Requires the seconds-domain constructor: without an anchor there is
+    /// no mapping from f64 time onto the monotonic clock, so mixing with
+    /// `new`/`new_at` would silently compute garbage. Falls back to a
+    /// zero-speed sample rather than a wild ETA when unanchored.
     pub fn tick_at(&mut self, rx_now: u64, time_now: f64) -> TransferProgress {
-        let downloaded = rx_now.saturating_sub(self.rx_start).min(self.total);
-        let elapsed = time_now - self.t_prev_seconds;
-        if elapsed > 0.0 && self.rx_prev > 0 {
-            let delta = rx_now.saturating_sub(self.rx_prev);
-            if delta > 0 {
-                if self.samples.len() == 5 {
-                    self.samples.pop_front();
-                }
-                self.samples.push_back(delta as f64 / elapsed);
-            }
-        }
-        self.rx_prev = rx_now;
-        self.t_prev_seconds = time_now;
-        let speed = if self.samples.is_empty() {
-            0
-        } else {
-            (self.samples.iter().sum::<f64>() / self.samples.len() as f64) as u64
+        let Some((base_instant, base_secs)) = self.epoch else {
+            // Unanchored: record the sample with no measurable elapsed.
+            self.rx_prev = rx_now;
+            return NetworkStats {
+                downloaded: rx_now.saturating_sub(self.rx_start).min(self.total),
+                total: self.total,
+                speed: 0,
+                eta_sec: 0,
+            };
         };
-        NetworkStats {
-            downloaded,
-            total: self.total,
-            speed,
-            eta_sec: if speed > 0 {
-                self.total.saturating_sub(downloaded) / speed
-            } else {
-                0
-            },
-        }
+        let now = base_instant + Duration::from_secs_f64((time_now - base_secs).max(0.0));
+        self.tick_with_now(rx_now, now)
     }
 }
 
@@ -236,7 +247,7 @@ mod tests {
 
     #[test]
     fn tracks_rolling_transfer_rate_without_polling() {
-        let mut tracker = NetStatsTracker::new(1_000, 100);
+        let mut tracker = NetStatsTracker::new_at_seconds(1_000, 100, 1.0);
         assert_eq!(tracker.tick_at(100, 1.0).speed, 0);
         let progress = tracker.tick_at(300, 3.0);
         assert_eq!(progress.downloaded, 200);
@@ -245,10 +256,31 @@ mod tests {
     }
 
     #[test]
+    fn unanchored_seconds_ticks_degrade_to_zero_speed_not_garbage() {
+        // Mixing Instant-domain constructors with tick_at used to compute
+        // elapsed = time_now - 0.0 and report wild speed/ETA. Now it
+        // records the sample with no measurable elapsed instead.
+        let mut tracker = NetStatsTracker::new(1_000, 100);
+        let stats = tracker.tick_at(300, 3.0);
+        assert_eq!(stats.downloaded, 200);
+        assert_eq!(stats.speed, 0);
+        assert_eq!(stats.eta_sec, 0);
+    }
+
+    #[test]
     fn parses_proc_receive_bytes_without_counting_loopback() {
         let proc = "Inter-| Receive |\n lo: 999 0 0\n eth0: 120 0 0\n wlan0: 80 0 0\n";
         assert_eq!(rx_bytes_from_proc_net_dev(proc), Some(200));
         assert_eq!(rx_bytes_from_proc_net_dev("eth0: not-a-counter"), None);
+    }
+
+    #[test]
+    fn malformed_proc_lines_are_skipped_not_fatal() {
+        // One transient garbage line used to discard the whole sample and
+        // zero throughput for the tick. Now the good interfaces still total.
+        let proc = "Inter-| Receive |\n lo: 999 0 0\n eth0: 120 0 0\n glitch line with no colon\n wlan0: 80 0 0\n bad0: not-a-counter\n";
+        assert_eq!(rx_bytes_from_proc_net_dev(proc), Some(200));
+        assert_eq!(rx_bytes_from_proc_net_dev(""), None);
     }
 
     #[test]

@@ -147,7 +147,7 @@ fn start_stage_job(
             .unwrap_or_default()
             .as_nanos()
     );
-    let cancel = update_jobs().start(&job, format!("{operation} is running…"));
+    let (job, cancel) = update_jobs().start(&job, format!("{operation} is running…"));
     if let Ok(mut snapshot) = stage_progress_cell().lock() {
         *snapshot = StageProgressSnapshot {
             pct: 0,
@@ -514,7 +514,7 @@ fn start_hub_action_job(action: HubAction) -> Result<HubActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    let cancel = hub_action_jobs().start(&job, format!("Running {recipe}…"));
+    let (job, cancel) = hub_action_jobs().start(&job, format!("Running {recipe}…"));
     let job_for_thread = job.clone();
     let recipe_for_thread = recipe.to_string();
     std::thread::spawn(move || {
@@ -592,7 +592,7 @@ fn start_update_job(
             .unwrap_or_default()
             .as_nanos()
     );
-    let cancel = update_jobs().start(&job, format!("{operation} is running…"));
+    let (job, cancel) = update_jobs().start(&job, format!("{operation} is running…"));
     let job_for_thread = job.clone();
     let operation_for_thread = operation.to_string();
     std::thread::spawn(move || {

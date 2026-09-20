@@ -66,6 +66,42 @@ fn scrub_active() -> bool {
     })
 }
 
+/// Post-maintenance verification for the Guardian recipe: every present
+/// btrfs mount must show a finished, error-free scrub. A skipped run
+/// ("already running", battery, gaming) or a scrub that errored fails
+/// instead of reporting verified on an unconditional `true`.
+pub fn maint_verified() -> bool {
+    let mut checked = false;
+    for mount in ["/", "/home", "/var"] {
+        if !Path::new(mount).exists() {
+            continue;
+        }
+        let Ok(output) = run(
+            "btrfs",
+            &["scrub", "status", mount],
+            Duration::from_secs(10),
+        ) else {
+            return false;
+        };
+        if !output.status.success() {
+            return false;
+        }
+        checked = true;
+        if !scrub_status_clean(&String::from_utf8_lossy(&output.stdout)) {
+            return false;
+        }
+    }
+    checked
+}
+
+/// Pure parse of `btrfs scrub status` output: finished AND error-free.
+/// "running" (someone else's scrub), "aborted", or any error summary
+/// fails — the maintenance this verifies did not complete cleanly.
+pub fn scrub_status_clean(output: &str) -> bool {
+    let lower = output.to_lowercase();
+    lower.contains("finished") && lower.contains("no errors") && !lower.contains("running")
+}
+
 pub fn run_maintenance() -> Result<String, String> {
     if !pressure_low() {
         return Ok("Storage maintenance skipped: CPU pressure is high.".into());
@@ -109,5 +145,24 @@ pub fn run_maintenance() -> Result<String, String> {
             "Storage maintenance completed with skipped operations: {}.",
             failures.join(", ")
         ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scrub_status_requires_finished_and_error_free() {
+        let clean = "scrub status for /:\n\tStatus: finished\n\tError summary: no errors found\n";
+        assert!(scrub_status_clean(clean));
+        assert!(!scrub_status_clean("Status: running\n"));
+        assert!(!scrub_status_clean(
+            "Status: finished\nError summary: 3 errors found\n"
+        ));
+        assert!(!scrub_status_clean(
+            "Status: aborted\nError summary: no errors found\n"
+        ));
+        assert!(!scrub_status_clean(""));
     }
 }

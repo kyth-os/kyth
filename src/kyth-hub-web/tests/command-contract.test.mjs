@@ -525,3 +525,16 @@ test("phase-5 stops silent data loss and fake success", async () => {
   assert.match(rust, /reap_stale_focus_inhibits/, "focus must reap orphaned inhibitors");
   assert.match(service, /Files already here are kept; overwritten ones are backed up first/, "cloud confirm must promise no deletion");
 });
+
+test("bug-hunt round 2 closes races and verifier gaps", async () => {
+  // VPN refuses duplicate connects on any live state, the cloud backup
+  // dir is excluded, flatpak restores validate ids, HOME containment
+  // resolves parent symlinks, restores never plant symlinks, job ids
+  // never clobber, net stats stay on one clock, proc skips bad lines,
+  // storage.maint verifies, and ~ expands only leading.
+  const vpnRust = await readFile(resolve(root, "src-tauri/src/commands/vpn.rs"), "utf8");
+  assert.match(vpnRust, /RETRYABLE_VPN_STATES/, "reconnect must be gated on an explicit retryable set");
+  assert.match(rust, /\/\.kyth-cloud-backup\/\*\*/, "backup dir must be excluded from the transfer");
+  assert.match(rust, /nearest existing ancestor/, "HOME check must resolve parent symlinks");
+  assert.match(rust, /reap_stale_focus_inhibits/, "focus must reap orphaned inhibitors");
+});

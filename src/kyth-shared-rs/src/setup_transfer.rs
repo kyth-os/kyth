@@ -276,14 +276,17 @@ pub fn cloud_remotes(ctx: &SetupCtx) -> Vec<Value> {
 }
 
 fn copy_file_nofollow(source: &Path, target: &Path) -> std::io::Result<()> {
-    let kind = std::fs::symlink_metadata(source)?.file_type();
-    if kind.is_symlink() {
-        let link = std::fs::read_link(source)?;
-        if std::fs::symlink_metadata(target).is_ok() {
-            std::fs::remove_file(target)?;
-        }
-        std::os::unix::fs::symlink(link, target)?;
-        return Ok(());
+    // Despite the historical name, this USED to recreate the link at the
+    // target — a symlink reaching a payload (TOCTOU past the extract sweep,
+    // or a direct restore_files caller) became an arbitrary link plant in
+    // $HOME that later restores write through. Refuse outright: exports
+    // are link-free since the exporter dereferences, so a link here is
+    // always hostile, never data.
+    if std::fs::symlink_metadata(source)?.file_type().is_symlink() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("refusing to restore symlink {}", source.display()),
+        ));
     }
     std::fs::copy(source, target)?;
     #[cfg(unix)]
@@ -743,7 +746,12 @@ pub fn restore_flatpaks(
     let mut failed = 0;
     for app in apps {
         let id = app.id.trim();
-        if id.is_empty() {
+        // Flatpak ids are reverse-DNS; anything else is either corrupt or a
+        // flag (`--system`, `--help`) that flatpak would parse as an option
+        // — `--help` even exits 0, which would count as "installed".
+        if !crate::system::software_catalog::valid_flatpak_id(id) {
+            on_line(&format!("Skipping invalid app id: {id}"));
+            failed += 1;
             continue;
         }
         let origin = app.origin.trim();
@@ -908,6 +916,20 @@ mod tests {
     }
 
     #[test]
+    fn restore_refuses_symlinks_instead_of_planting_them() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = dir.path().join("payload");
+        std::fs::create_dir_all(payload.join("files")).unwrap();
+        std::fs::write(payload.join("files/real.txt"), "data").unwrap();
+        std::os::unix::fs::symlink("real.txt", payload.join("files/link.txt")).unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let restored = restore_files(&payload, &home, &["link.txt".to_string()]);
+        assert_eq!(restored, 0, "a symlink must never be recreated in $HOME");
+        assert!(!home.join("link.txt").exists());
+    }
+
+    #[test]
     fn stamps_seconds_precision_iso_like_python() {
         let stamp = now_iso_seconds();
         assert!(!stamp.contains('.'));
@@ -1001,6 +1023,10 @@ mod tests {
                 id: "org.example.Other".into(),
                 origin: "flathub".into(),
             },
+            SetupFlatpak {
+                id: "--help".into(),
+                origin: "flathub".into(),
+            },
         ];
         let (ok, failed) = restore_flatpaks(
             &ctx,
@@ -1015,8 +1041,10 @@ mod tests {
             &|_| {},
             &apps,
         );
-        assert_eq!((ok, failed), (1, 1));
+        assert_eq!((ok, failed), (1, 3));
         assert!(seen.borrow()[0].contains("flathub org.example.App"));
+        // The flag-like id never reached argv: only one install ran.
+        assert_eq!(seen.borrow().len(), 2);
     }
 
     #[test]

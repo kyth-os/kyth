@@ -784,21 +784,36 @@ pub(crate) fn vpn_connect(
     username: String,
     password: String,
 ) -> Result<String, String> {
-    // A second connect to the same gateway while one is already up would
+    // A second connect to the same gateway while one is already live would
     // fork a duplicate openconnect fighting over the tunnel route. Reject
-    // it; the UI disconnects or reuses the live job instead.
-    let already_connected = jobs().lock().map(|store| {
+    // unless the previous job for this gateway is in an explicitly
+    // retryable state: "connecting" and "authentication_required" are live
+    // (two rapid connects both sail past a guard that only sees
+    // "connected"), and so is "connected" itself — which sits in
+    // VPN_TERMINAL_STATES only because the frontend stops polling it.
+    // The UI disconnects or reuses the live job instead.
+    const RETRYABLE_VPN_STATES: &[&str] = &[
+        "failed",
+        "disconnected",
+        "complete",
+        "failed_lockdown",
+        "failed_lockdown_open",
+        "complete_firewall_open",
+    ];
+    let already_live = jobs().lock().map(|store| {
         store.values().any(|runtime| {
             runtime.gateway == gateway
                 && runtime
                     .status
                     .lock()
                     .ok()
-                    .is_some_and(|guard| guard.0 == "connected")
+                    .is_some_and(|guard| !RETRYABLE_VPN_STATES.contains(&guard.0.as_str()))
         })
     });
-    if already_connected.unwrap_or(false) {
-        return Err(format!("Already connected to {gateway}; disconnect first."));
+    if already_live.unwrap_or(false) {
+        return Err(format!(
+            "Already connecting or connected to {gateway}; disconnect first."
+        ));
     }
     let command = kyth_shared::system::vpn_saml::build_initial_command(
         &gateway,
@@ -826,7 +841,7 @@ pub(crate) fn vpn_connect(
         username,
         interface: Mutex::new("portal".into()),
     });
-    {
+    let unique_job = {
         let mut store = jobs()
             .lock()
             .map_err(|_| "VPN job store is unavailable".to_string())?;
@@ -849,10 +864,20 @@ pub(crate) fn vpn_connect(
                 store.remove(&id);
             }
         }
-        store.insert(job.clone(), runtime.clone());
-    }
-    start_process(runtime, app, job.clone(), command);
-    Ok(job)
+        // Same-tick double connects share a nanos id: suffix until free so
+        // the second runtime never silently replaces the first (same
+        // generation discipline as JobStore::start).
+        let mut unique = job.clone();
+        let mut round = 1u32;
+        while store.contains_key(&unique) {
+            round += 1;
+            unique = format!("{job}#{round}");
+        }
+        store.insert(unique.clone(), runtime.clone());
+        unique
+    };
+    start_process(runtime, app, unique_job.clone(), command);
+    Ok(unique_job)
 }
 
 #[tauri::command]

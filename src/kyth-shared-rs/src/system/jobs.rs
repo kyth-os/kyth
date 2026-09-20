@@ -113,15 +113,29 @@ impl JobStore {
 
     /// Register a job as running and return its cancellation flag, which the
     /// worker thread must hand to the cancellable runner (or hold, for
-    /// socket-I/O workers that can only be marked cancelled).
-    pub fn start(&self, id: &str, detail: String) -> Arc<AtomicBool> {
+    /// socket-I/O workers that can only be marked cancelled). A start for
+    /// an id that is ALREADY running (same-tick double start, id reuse
+    /// after eviction) must not clobber it: the first worker would be
+    /// orphaned, cancels would signal the wrong generation, and finishes
+    /// would land on the wrong entry. Suffix until free instead.
+    pub fn start(&self, id: &str, detail: String) -> (String, Arc<AtomicBool>) {
         let cancel = Arc::new(AtomicBool::new(false));
         let mut inner = self.lock();
         Self::prune_locked(&mut inner, Instant::now());
         Self::evict_locked(&mut inner);
-        inner.order.push_back(id.to_string());
+        let mut unique = id.to_string();
+        let mut round = 1u32;
+        while inner
+            .entries
+            .get(&unique)
+            .is_some_and(|entry| entry.state == STATE_RUNNING)
+        {
+            round += 1;
+            unique = format!("{id}#{round}");
+        }
+        inner.order.push_back(unique.clone());
         inner.entries.insert(
-            id.to_string(),
+            unique.clone(),
             Entry {
                 state: STATE_RUNNING.into(),
                 detail,
@@ -129,7 +143,7 @@ impl JobStore {
                 finished_at: None,
             },
         );
-        cancel
+        (unique, cancel)
     }
 
     /// Fetch the cancellation flag for a running job, if it is still tracked.
@@ -259,7 +273,26 @@ mod tests {
     use super::*;
 
     fn store_with_running(store: &JobStore, id: &str) -> Arc<AtomicBool> {
-        store.start(id, format!("{id} running"))
+        store.start(id, format!("{id} running")).1
+    }
+
+    #[test]
+    fn start_suffixes_rather_than_clobbering_a_live_id() {
+        let store = JobStore::default();
+        let (first, _) = store.start("job-1", "first".to_string());
+        assert_eq!(first, "job-1");
+        let (second, second_cancel) = store.start("job-1", "second".to_string());
+        assert_ne!(second, "job-1", "a live id must never be clobbered");
+        // The first generation is untouched: its cancel flag still resolves
+        // and finishes land on their own entries.
+        assert!(store.cancel_flag("job-1").is_some());
+        assert!(store.cancel_flag(&second).is_some());
+        second_cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+        store.finish(&second, "cancelled", "done".to_string());
+        let (state, _) = store.status(&second).unwrap();
+        assert_eq!(state, "cancelled");
+        let (state, _) = store.status("job-1").unwrap();
+        assert_eq!(state, "running");
     }
 
     #[test]

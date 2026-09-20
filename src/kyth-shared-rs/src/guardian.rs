@@ -734,7 +734,7 @@ fn verify_recipe(recipe_id: &str) -> bool {
         "firmware.refresh" => run_ok(&["fwupdmgr", "get-updates"], Duration::from_secs(8)).is_ok(),
         "power.profile-fix" => run_ok(&["powerprofilesctl", "get"], Duration::from_secs(4)).is_ok(),
         "display.reconfigure" => run_ok(&["kscreen-doctor", "-o"], Duration::from_secs(5)).is_ok(),
-        "storage.maint" => true,
+        "storage.maint" => crate::system::storage_maintenance::maint_verified(),
         _ => run_ok(
             &[
                 "systemctl",
