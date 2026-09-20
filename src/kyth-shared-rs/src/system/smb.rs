@@ -37,6 +37,19 @@ pub fn smb_mount_command(share: &str) -> Vec<String> {
     vec!["gio".to_string(), "mount".to_string(), share.to_string()]
 }
 
+/// Display form of an SMB URI with userinfo stripped: `smb://user:pass@host/share`
+/// becomes `smb://host/share`. Status strings reach the UI and logs, so the
+/// raw URI (which may carry a password) must never be echoed.
+pub fn redact_smb_uri(share: &str) -> String {
+    let Some(rest) = share.strip_prefix("smb://") else {
+        return "smb://…".to_string();
+    };
+    let after_authority = rest.find('/').map(|index| &rest[index..]).unwrap_or("");
+    let authority = &rest[..rest.len() - after_authority.len()];
+    let host = authority.rsplit('@').next().unwrap_or(authority);
+    format!("smb://{host}{after_authority}")
+}
+
 fn run_with_timeout(cmd: &[String], timeout: Duration) -> Option<(i32, String, String)> {
     if cmd.is_empty() {
         return None;
@@ -76,6 +89,15 @@ pub fn smb_browse_dry_run(host: Option<&str>) -> (bool, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn redact_strips_userinfo_but_keeps_host_and_share() {
+        assert_eq!(
+            redact_smb_uri("smb://user:s3cret@nas/share"),
+            "smb://nas/share"
+        );
+        assert_eq!(redact_smb_uri("smb://nas/share"), "smb://nas/share");
+        assert_eq!(redact_smb_uri("smb://nas"), "smb://nas");
+    }
     #[test]
     fn discover_no_host() {
         assert_eq!(

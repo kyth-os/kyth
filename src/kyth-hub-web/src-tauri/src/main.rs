@@ -353,6 +353,10 @@ fn smb_mount(share: String) -> Result<String, String> {
         return Err("Enter a valid SMB share such as smb://server/share.".to_string());
     }
 
+    // Never echo the raw URI: `smb://user:password@host/share` carries
+    // credentials, and these strings reach the UI and the logs. Display
+    // host+share only.
+    let display = kyth_shared::system::smb::redact_smb_uri(share);
     let argv = kyth_shared::system::smb::smb_mount_command(share);
     // `gio mount` may need auth or fail outright; a detached spawn reports
     // success for a mount that never happened. Run it bounded and report
@@ -361,22 +365,22 @@ fn smb_mount(share: String) -> Result<String, String> {
         kyth_shared::system::process::run_bounded(&argv, std::time::Duration::from_secs(30))
             .map_err(|error| {
                 if error.kind() == std::io::ErrorKind::TimedOut {
-                    format!("Mounting {share} took too long and was stopped.")
+                    format!("Mounting {display} took too long and was stopped.")
                 } else {
                     format!("could not start the desktop share mount: {error}")
                 }
             })?;
     if output.status.success() {
-        Ok(format!("Mounted {share}."))
+        Ok(format!("Mounted {display}."))
     } else {
         let detail = commands::process::bounded_text(&output.stderr);
         if detail.is_empty() {
             Err(format!(
-                "Could not mount {share} (exit {}).",
+                "Could not mount {display} (exit {}).",
                 output.status.code().unwrap_or(-1)
             ))
         } else {
-            Err(format!("Could not mount {share}: {detail}"))
+            Err(format!("Could not mount {display}: {detail}"))
         }
     }
 }
@@ -450,19 +454,11 @@ fn save_smb_configured_shares(shares: &[SmbConfiguredShare]) -> Result<(), Strin
         .map_err(|error| format!("could not create SMB configuration directory: {error}"))?;
     let raw = serde_json::to_string_pretty(shares)
         .map_err(|error| format!("could not encode SMB configuration: {error}"))?;
-    let mut file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(true)
-        .mode(0o600)
-        .open(&path)
+    // Atomic write (temp + fsync + rename): truncating the live file first
+    // means a crash or power loss mid-save leaves an empty/corrupt JSON
+    // and every saved share is lost. Same pattern as guardian state.
+    kyth_shared::atomic_io::atomic_write_text(&path, &format!("{raw}\n"), Some(0o600))
         .map_err(|error| format!("could not save SMB configuration: {error}"))?;
-    file.write_all(raw.as_bytes())
-        .map_err(|error| format!("could not save SMB configuration: {error}"))?;
-    file.write_all(b"\n")
-        .map_err(|error| format!("could not save SMB configuration: {error}"))?;
-    file.sync_all()
-        .map_err(|error| format!("could not finish SMB configuration: {error}"))?;
     Ok(())
 }
 
@@ -791,10 +787,22 @@ fn create_m365_shortcuts() -> Result<String, String> {
                 continue;
             }
         }
+        // create_new is the atomic guard: a link swapped in between the
+        // metadata check above and this write would otherwise redirect
+        // attacker-controlled .desktop content into an arbitrary user file.
+        // create_new fails if anything already exists, so an existing real
+        // file is left untouched and never overwritten.
         let entry = format!("[Desktop Entry]\nType=Application\nName={name} (Microsoft 365)\nComment={comment}\nExec=/usr/bin/xdg-open {url}\nIcon=internet-web-browser\nCategories=Office;\n");
-        fs::write(&path, entry)
-            .map_err(|error| format!("could not write {name} shortcut: {error}"))?;
-        written += 1;
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut file) => {
+                use std::io::Write;
+                file.write_all(entry.as_bytes())
+                    .map_err(|error| format!("could not write {name} shortcut: {error}"))?;
+                written += 1;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(format!("could not write {name} shortcut: {error}")),
+        }
     }
     Ok(format!(
         "Added {written} Microsoft 365 shortcut(s) to the application menu."
@@ -874,7 +882,18 @@ fn allowed_pst_path(path: &str) -> Result<PathBuf, String> {
     if let Some(user) = std::env::var_os("USER") {
         allowed.push(PathBuf::from("/run/media").join(user));
     }
-    if allowed.iter().any(|root| canonical.starts_with(root)) {
+    // Canonicalize the roots too: comparing a canonical file against a
+    // non-canonical root rejects legit files when the folder itself is a
+    // symlink (e.g. ~/Documents -> /data/docs). Roots that cannot be
+    // canonicalized (missing dir) are skipped, matching pst_files.
+    let canonical_roots: Vec<PathBuf> = allowed
+        .iter()
+        .filter_map(|root| root.canonicalize().ok())
+        .collect();
+    if canonical_roots
+        .iter()
+        .any(|root| canonical.starts_with(root))
+    {
         Ok(canonical)
     } else {
         Err("Archive must be in a user-owned migration folder".to_string())
@@ -895,6 +914,10 @@ fn convert_pst(path: String) -> Result<String, String> {
     fs::create_dir_all(&destination)
         .map_err(|error| format!("could not create import folder: {error}"))?;
     let job = commands::job::start_job("pst", "Converting Outlook archive…")?;
+    // Re-verify containment at use time: the check above and this spawn are
+    // not atomic, and a link swapped in between would redirect the read.
+    // The path is already canonical, so this re-check is idempotent.
+    let source = allowed_pst_path(&source.to_string_lossy())?;
     let argv = vec![
         "readpst".to_string(),
         "-r".to_string(),

@@ -42,6 +42,8 @@ def save_work_cache(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     en = bool(cfg.get("enabled", False))
     size = str(cfg.get("size", "1G"))
+    if size not in ("1G", "2G", "4G"):
+        size = "1G"
     p.write_text(f"# Kyth work cache — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\n", encoding="utf-8")
     return p
 
@@ -60,6 +62,11 @@ def generate_work_cache(cfg: dict[str, Any] | None = None, tmpfiles: Path | None
                 pass
         return None
     size = str(cfg.get("size", "1G"))
+    # Normalize before shell interpolation: callers may pass a dict that
+    # never went through load_ (generic generate_tunable path), and size
+    # lands inside a root /bin/sh -c line.
+    if size not in ("1G", "2G", "4G"):
+        size = "1G"
     # Clamp to RAM/4 to avoid OOM on 8G boxes (item 9) — skip in test mode so
     # `test_generate_creates_service` is deterministic on small GitLab runners
     if os.environ.get("KYTH_TEST_MODE") != "1":
@@ -83,8 +90,8 @@ After=local-fs.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'mkdir -p /run/kyth-work-cache && mount -t tmpfs -o size={size},mode=0755 tmpfs /run/kyth-work-cache && mkdir -p /run/kyth-work-cache/vscode /run/kyth-work-cache/cargo && mount --bind /run/kyth-work-cache/vscode ~/.vscode-server 2>/dev/null || true; mount --bind /run/kyth-work-cache/cargo ~/.cargo/registry 2>/dev/null || true'
-ExecStop=/bin/sh -c 'umount ~/.vscode-server 2>/dev/null || true; umount ~/.cargo/registry 2>/dev/null || true; umount /run/kyth-work-cache 2>/dev/null || true'
+ExecStart=/bin/sh -c 'mkdir -p /run/kyth-work-cache && mount -t tmpfs -o size={size},mode=0755 tmpfs /run/kyth-work-cache && mkdir -p /run/kyth-work-cache/vscode /run/kyth-work-cache/cargo'
+ExecStop=/bin/sh -c 'umount /run/kyth-work-cache 2>/dev/null || true'
 [Install]
 WantedBy=multi-user.target
 """

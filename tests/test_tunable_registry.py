@@ -7,6 +7,8 @@ import unittest
 from pathlib import Path
 
 from kyth_shared.tunable import (
+    TunableSpec,
+    _import_module,
     get_spec,
     list_tunables,
     load_registry,
@@ -71,6 +73,48 @@ class TestTunableRegistry(unittest.TestCase):
             # balanced removes
             generate_tunable("swappiness", {"profile": "balanced"}, dest=dest)
             self.assertFalse(dest.exists())
+
+    def test_import_module_refuses_unknown_names(self):
+        # A hostile tunables.toml entry must never reach importlib: only
+        # builtin registry modules load.
+        for bad in ("os", "subprocess", "kyth_shared.os", "../evil", "", "work-cache"):
+            with self.subTest(module=bad):
+                with self.assertRaises(ImportError):
+                    _import_module(TunableSpec(name="evil", module=bad, kind="other", wrapper="kyth-evil"))
+        # A legit builtin still loads.
+        mod = _import_module(TunableSpec(name="work-cache", module="work_cache", kind="other", wrapper="kyth-work-cache"))
+        self.assertTrue(hasattr(mod, "generate_work_cache"))
+
+    def test_size_injection_never_reaches_shell_lines(self):
+        # generate_* must normalize sizes against the allowlist even when
+        # the dict never went through load_ (generic generate_tunable path).
+        from kyth_shared import distrobox_cache, shader_tmpfs, work_cache
+        with tempfile.TemporaryDirectory() as tmp:
+            tmpdir = Path(tmp)
+            svc = tmpdir / "svc.service"
+            tmpfiles = tmpdir / "t.conf"
+            res = distrobox_cache.generate_distrobox_cache(
+                {"enabled": True, "size": "1G; touch /tmp/pwned", "ccache_size": "10G; id"},
+                tmpfiles=tmpfiles, service=svc,
+            )
+            self.assertIsNotNone(res)
+            body = svc.read_text()
+            self.assertNotIn("touch", body)
+            self.assertNotIn("; id", body)
+            self.assertIn("size=4G", body)
+            self.assertIn("max-size=10G", body)
+            res = work_cache.generate_work_cache(
+                {"enabled": True, "size": "9G; touch /tmp/pwned"},
+                tmpfiles=tmpdir / "w.conf", service=tmpdir / "w.service",
+            )
+            self.assertNotIn("touch", (tmpdir / "w.service").read_text())
+            res = shader_tmpfs.generate_shader_tmpfs(
+                {"enabled": True, "size": "9G; touch /tmp/pwned"},
+                tmpfiles=tmpdir / "s.conf", service=tmpdir / "s.service",
+                env_dropin=tmpdir / "s.env",
+            )
+            self.assertNotIn("touch", (tmpdir / "s.service").read_text())
+            self.assertIn("MESA_SHADER_CACHE_PATH=/run/kyth-shader", (tmpdir / "s.env").read_text())
 
     def test_other_kind_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:

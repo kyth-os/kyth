@@ -40,17 +40,20 @@ def save_shader_tmpfs(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     en = bool(cfg.get("enabled", False))
     size = str(cfg.get("size", "2G"))
+    if size not in ("1G", "2G", "4G"):
+        size = "2G"
     p.write_text(f"# Kyth shader tmpfs — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\n", encoding="utf-8")
     return p
 
 
-def generate_shader_tmpfs(cfg: dict[str, Any] | None = None, tmpfiles: Path | None = None, service: Path | None = None) -> Path | None:
+def generate_shader_tmpfs(cfg: dict[str, Any] | None = None, tmpfiles: Path | None = None, service: Path | None = None, env_dropin: Path | None = None) -> Path | None:
     if cfg is None:
         cfg = load_shader_tmpfs()
     tmpfiles = tmpfiles or DEFAULT_TMPFS
     service = service or DEFAULT_MOUNT_UNIT
+    env_dropin = env_dropin or Path("/etc/environment.d/99-kyth-shader.conf")
     if not cfg.get("enabled"):
-        for d in (tmpfiles, service):
+        for d in (tmpfiles, service, env_dropin):
             try:
                 if d.exists():
                     d.unlink()
@@ -58,19 +61,24 @@ def generate_shader_tmpfs(cfg: dict[str, Any] | None = None, tmpfiles: Path | No
                 pass
         return None
     size = str(cfg.get("size", "2G"))
+    if size not in ("1G", "2G", "4G"):
+        size = "2G"
     try:
         tmpfiles.parent.mkdir(parents=True, exist_ok=True)
-        tmpfiles.write_text(f"# Kyth shader tmpfs — generated\nd /run/kyth-shader 0755 {os.getuid() if hasattr(os, 'getuid') else 1000} {os.getgid() if hasattr(os, 'getgid') else 1000} -\n", encoding="utf-8")
+        tmpfiles.write_text(f"# Kyth shader tmpfs — generated\nd /run/kyth-shader 1777 root root -\n", encoding="utf-8")
     except OSError:
         pass
+    # Mirror the native generator: the tmpfs is pointed at via the
+    # environment drop-in, never via bind mounts into ~ (a system unit
+    # runs as root, so ~ is /root — the old bind did nothing, or worse).
     content = f"""[Unit]
-Description=Kyth shader tmpfs — mesa cache on tmpfs
+Description=Kyth shader tmpfs — Mesa cache on tmpfs
 After=local-fs.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/bin/sh -c 'mkdir -p /run/kyth-shader && mount -t tmpfs -o size={size},mode=0755 tmpfs /run/kyth-shader && mkdir -p ~/.cache/mesa_shader_cache && mount --bind /run/kyth-shader ~/.cache/mesa_shader_cache 2>/dev/null || true'
-ExecStop=/bin/sh -c 'rsync -a /run/kyth-shader/ ~/.cache/mesa_shader_cache.persist/ 2>/dev/null || true; umount ~/.cache/mesa_shader_cache 2>/dev/null || true; umount /run/kyth-shader 2>/dev/null || true'
+ExecStart=/bin/sh -c 'mkdir -p /run/kyth-shader && mount -t tmpfs -o size={size},mode=1777 tmpfs /run/kyth-shader'
+ExecStop=/bin/sh -c 'umount /run/kyth-shader 2>/dev/null || true'
 [Install]
 WantedBy=multi-user.target
 """
@@ -81,6 +89,14 @@ WantedBy=multi-user.target
         tmp.replace(service)
     except OSError:
         return None
+    try:
+        env_dropin.parent.mkdir(parents=True, exist_ok=True)
+        env_dropin.write_text(
+            "# Kyth shader tmpfs — generated\nMESA_SHADER_CACHE_PATH=/run/kyth-shader\n",
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
     return service
 
 

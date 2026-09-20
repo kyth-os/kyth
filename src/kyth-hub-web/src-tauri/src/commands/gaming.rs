@@ -48,17 +48,56 @@ fn validated_gaming_tool(flatpak_id: &str) -> Result<&'static gaming_tools::Gami
     gaming_tools::find_gaming_tool(flatpak_id).ok_or_else(|| "unknown gaming tool".to_string())
 }
 
+/// Ensure the per-user Flathub remote exists before an install. Runs
+/// bounded and inline (not in the job): the install job's argv must stay a
+/// single flatpak invocation with no shell chaining.
+fn ensure_flathub_user_remote() -> Result<(), String> {
+    let argv = vec![
+        "flatpak".to_string(),
+        "remote-add".to_string(),
+        "--user".to_string(),
+        "--if-not-exists".to_string(),
+        "flathub".to_string(),
+        "https://dl.flathub.org/repo/flathub.flatpakrepo".to_string(),
+    ];
+    let output = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(60))
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::TimedOut {
+                "Flathub setup took too long and was stopped.".to_string()
+            } else {
+                format!("could not start flatpak: {error}")
+            }
+        })?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "flatpak remote-add failed (exit {})",
+            output.status.code().unwrap_or(-1)
+        ))
+    }
+}
+
 #[tauri::command]
 pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaunch, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
     let name = tool.name.to_string();
     let launch_detail = format!("Installing {name}…");
+    // Pure argv, no shell: the id comes from a fixed catalog today, but a
+    // single bad catalog entry or refactor must never become shell
+    // injection. Uninstall already uses this form.
+    // Note: remote-add runs inline first (bounded, best-effort); install is
+    // the job's argv.
+    if let Err(error) = ensure_flathub_user_remote() {
+        return Err(format!("Could not set up Flathub: {error}"));
+    }
     let argv = vec![
-        "bash".to_string(),
-        "-c".to_string(),
-        format!(
-            "flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak install --user -y flathub {flatpak_id}"
-        ),
+        "flatpak".to_string(),
+        "install".to_string(),
+        "--user".to_string(),
+        "-y".to_string(),
+        "flathub".to_string(),
+        flatpak_id,
     ];
     let job = start_job("gaming-install", &format!("Installing {name}…"))?;
     spawn_argv_job(

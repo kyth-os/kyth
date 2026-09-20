@@ -37,12 +37,29 @@ def load_distrobox_cache(path: Path | None = None) -> dict[str, Any]:
     return {"enabled": en, "size": size, "ccache_size": csz}
 
 
+_DISTROBOX_SIZES = ("2G", "4G", "8G")
+_DISTROBOX_CCACHE_SIZES = ("5G", "10G", "20G")
+
+
+def _norm_distrobox_size(value: Any, default: str = "4G") -> str:
+    size = str(value or default)
+    return size if size in _DISTROBOX_SIZES else default
+
+
+def _norm_ccache_size(value: Any, default: str = "10G") -> str:
+    size = str(value or default)
+    return size if size in _DISTROBOX_CCACHE_SIZES else default
+
+
 def save_distrobox_cache(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p = distrobox_cache_config_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     en = bool(cfg.get("enabled", False))
-    size = str(cfg.get("size", "4G"))
-    csz = str(cfg.get("ccache_size", "10G"))
+    # Normalize against the allowlist even on save: the TOML is re-read by
+    # load_*, but save_ also round-trips through callers that may feed the
+    # dict straight into generate_ — never persist a hostile string.
+    size = _norm_distrobox_size(cfg.get("size"))
+    csz = _norm_ccache_size(cfg.get("ccache_size"))
     p.write_text(f"# Kyth distrobox cache — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\nccache_size = \"{csz}\"\n", encoding="utf-8")
     return p
 
@@ -60,8 +77,11 @@ def generate_distrobox_cache(cfg: dict[str, Any] | None = None, tmpfiles: Path |
             except OSError:
                 pass
         return None
-    size = str(cfg.get("size", "4G"))
-    csz = str(cfg.get("ccache_size", "10G"))
+    # Normalize inside generate_ too: callers may pass a dict that never
+    # went through load_ (e.g. the generic generate_tunable path), and the
+    # sizes land inside a root /bin/sh -c line.
+    size = _norm_distrobox_size(cfg.get("size"))
+    csz = _norm_ccache_size(cfg.get("ccache_size"))
     try:
         tmpfiles.parent.mkdir(parents=True, exist_ok=True)
         tmpfiles.write_text(f"# Kyth distrobox cache — generated\nd /run/kyth-distrobox-cache 0755 1000 1000 -\n", encoding="utf-8")

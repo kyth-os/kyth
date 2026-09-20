@@ -694,9 +694,22 @@ fn setup_boot_windows_steam(args: &[String]) -> io::Result<ExitCode> {
         .ok_or_else(|| {
             io::Error::new(io::ErrorKind::NotFound, "no Windows EFI boot entry found")
         })?;
-    let temp = env::temp_dir().join(format!("kyth-boot-windows-{}", std::process::id()));
-    let sudoers_temp =
-        env::temp_dir().join(format!("kyth-boot-windows-sudoers-{}", std::process::id()));
+    // Unpredictable staging names: pid-only names in shared /tmp can be
+    // pre-planted as symlinks by another user.
+    let staging_nonce: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.subsec_nanos() as u64 ^ ((std::process::id() as u64) << 32))
+        .unwrap_or_else(|_| std::process::id() as u64);
+    let temp = env::temp_dir().join(format!(
+        "kyth-boot-windows-{:x}-{}",
+        staging_nonce,
+        std::process::id()
+    ));
+    let sudoers_temp = env::temp_dir().join(format!(
+        "kyth-boot-windows-sudoers-{:x}-{}",
+        staging_nonce,
+        std::process::id()
+    ));
     write_atomic(
         &temp,
         format!(
@@ -725,6 +738,38 @@ fn setup_boot_windows_steam(args: &[String]) -> io::Result<ExitCode> {
     if helper_result != ExitCode::SUCCESS {
         let _ = fs::remove_file(&sudoers_temp);
         return Ok(helper_result);
+    }
+    // Validate the fragment before it lands in /etc/sudoers.d: a torn or
+    // malformed fragment breaks ALL of sudo (lockout). visudo runs
+    // unprivileged here against the staging file; if visudo is missing we
+    // cannot validate, so refuse rather than risk sudo.
+    let visudo_check = run(
+        "visudo",
+        &[
+            "-c".into(),
+            "-q".into(),
+            "-f".into(),
+            sudoers_temp.display().to_string(),
+        ],
+    );
+    match visudo_check {
+        Ok(ExitCode::SUCCESS) => {}
+        Ok(_) => {
+            let _ = fs::remove_file(&sudoers_temp);
+            return Err(io::Error::other(
+                "refusing to install sudoers fragment: visudo validation failed",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            let _ = fs::remove_file(&sudoers_temp);
+            return Err(io::Error::other(
+                "refusing to install sudoers fragment: visudo is not installed",
+            ));
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&sudoers_temp);
+            return Err(error);
+        }
     }
     let sudoers_install = run(
         "sudo",
@@ -923,12 +968,30 @@ fn write_atomic(path: &Path, contents: &[u8]) -> io::Result<()> {
         .parent()
         .ok_or_else(|| io::Error::other("missing parent"))?;
     fs::create_dir_all(parent)?;
+    // Unpredictable temp name plus create_new + O_NOFOLLOW: the old
+    // pid-only name let another user pre-plant a symlink in shared /tmp,
+    // and plain fs::write would have followed it (arbitrary file write).
+    let nonce: u64 = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.subsec_nanos() as u64 ^ ((std::process::id() as u64) << 32))
+        .unwrap_or_else(|_| std::process::id() as u64);
     let tmp = parent.join(format!(
-        ".{}.tmp-{}",
+        ".{}.tmp-{:x}-{}",
         path.file_name().and_then(|n| n.to_str()).unwrap_or("kyth"),
+        nonce,
         std::process::id()
     ));
-    fs::write(&tmp, contents)?;
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut tmp_file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&tmp)?;
+        tmp_file.write_all(contents)?;
+        tmp_file.sync_all()?;
+    }
     fs::rename(tmp, path)
 }
 

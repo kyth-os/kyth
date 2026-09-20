@@ -289,8 +289,23 @@ purge:
     shopt -s nullglob
     build_dirs=( _build* )
     if [[ ${#build_dirs[@]} -gt 0 ]]; then
-        sudo rm -rf "${build_dirs[@]}"
-        printf '  removed: %s\n' "${build_dirs[@]}"
+        # Never sudo rm -rf a glob blind: a symlink matching _build*
+        # (planted, or unpacked from a tarball) would make ROOT rm -rf
+        # traverse outside the repo. Refuse links and non-directories.
+        safe_dirs=()
+        for dir in "${build_dirs[@]}"; do
+            if [[ -L "${dir}" ]]; then
+                echo "  REFUSING symlink: ${dir} (not a real directory)" >&2
+            elif [[ ! -d "${dir}" ]]; then
+                echo "  skipping non-directory: ${dir}"
+            else
+                safe_dirs+=("${dir}")
+            fi
+        done
+        if [[ ${#safe_dirs[@]} -gt 0 ]]; then
+            rm -rf "${safe_dirs[@]}"
+            printf '  removed: %s\n' "${safe_dirs[@]}"
+        fi
     else
         echo "  (none)"
     fi

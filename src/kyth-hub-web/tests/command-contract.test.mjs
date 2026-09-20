@@ -537,6 +537,20 @@ test("bug-hunt round 3: installer fail-closed and daemon bounds", async () => {
   assert.match(installerPlan, /checked_mul\(BYTES_PER_GIB\)/, "GiB math must be checked");
 });
 
+test("bug-hunt round 4: secrets stay out of strings, writes stay atomic", async () => {
+  // SMB status strings never carry userinfo, shares save atomically, M365
+  // shortcuts use create_new, gaming installs run pure argv with a bounded
+  // remote-add, and PST re-verifies containment at use time.
+  const smb = await readFile(resolve(root, "../kyth-shared-rs/src/system/smb.rs"), "utf8");
+  assert.match(smb, /redact_smb_uri/, "SMB display must strip userinfo");
+  const gaming = await readFile(resolve(root, "src-tauri/src/commands/gaming.rs"), "utf8");
+  assert.doesNotMatch(gaming, /bash/, "gaming install must not shell out");
+  assert.match(gaming, /ensure_flathub_user_remote/, "remote-add must precede install");
+  assert.match(rust, /atomic_write_text\(&path/, "SMB shares must save atomically");
+  assert.match(rust, /create_new\(true\)/, "M365 shortcuts must use create_new");
+  assert.match(rust, /allowed_pst_path\(&source\.to_string_lossy/, "PST must re-verify at use time");
+});
+
 test("bug-hunt round 2 closes races and verifier gaps", async () => {
   // VPN refuses duplicate connects on any live state, the cloud backup
   // dir is excluded, flatpak restores validate ids, HOME containment

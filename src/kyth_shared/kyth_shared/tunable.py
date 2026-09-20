@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -218,7 +219,16 @@ def list_tunables(config_dir: Path | None = None) -> list[TunableSpec]:
 
 
 def _import_module(spec: TunableSpec):
-    return importlib.import_module(f"kyth_shared.{spec.module}")
+    # The module name can arrive via tunables.toml (repo-relative,
+    # /ctx/config, or /usr/share/kyth/config). Never import it raw: a
+    # hostile or typo'd entry would execute arbitrary module-level code in
+    # a root helper context. Only modules in the builtin registry may load
+    # (derived from the registry itself, so it cannot drift).
+    module = spec.module or ""
+    allowed = {entry["module"] for entry in _BUILTIN_TUNABLES.values()}
+    if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", module) or module not in allowed:
+        raise ImportError(f"refusing to load unknown tunable module {module!r}")
+    return importlib.import_module(f"kyth_shared.{module}")
 
 
 def _find_callable(mod: Any, prefix: str = "", suffix: str = "") -> Any | None:
