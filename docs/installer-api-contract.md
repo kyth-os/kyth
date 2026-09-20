@@ -93,7 +93,7 @@ All request bodies are JSON. Successful responses generally return HTTP 200. Val
 | `/api/disk/new-table` | `disk`, optional `table_type` (`gpt` or `msdos`) | `{ok:true,pending}`; creates a staged `new_table` operation. |
 | `/api/disk/create` | `disk`, `start_bytes`, `size_bytes`, optional `fs_type`, `label`, `mountpoint` | `{ok, pending, errors?}`; stages a create operation and validates the journal. |
 | `/api/disk/delete` | `disk`, `partition` | `{ok:true,pending}`; refuses mounted/in-use partitions. |
-| `/api/disk/resize` | `disk`, `partition`, `new_size_bytes` | `{ok:true,pending}`; current service only permits shrinking. |
+| `/api/disk/resize` | `disk`, `partition`, `new_size_bytes`, optional attest object: `gpt_backup_path` (must be on external media — `/run/media/…`, `/mnt/…` — a backup on the disk being shrunk is rejected), `ntfs_verified_clean` (re-verified-clean attestation for NTFS shrinks), `on_ac_power` (explicit attestation; when absent the daemon stamps a live sysfs read at commit time and refuses battery shrinks) | `{ok:true,pending}`; current service only permits shrinking. |
 | `/api/disk/format` | `disk`, `partition`, optional `fs_type`, `label` | `{ok:true,pending}`; stages a format operation. |
 | `/api/disk/set-mountpoint` | `disk`, `partition`, `mountpoint` | `{ok:true,pending}`; mountpoint may be empty, `swap`, or an absolute path. |
 | `/api/disk/pending/remove` | `disk`, `index` | `{ok:true,pending}`; removes one uncommitted journal operation. |

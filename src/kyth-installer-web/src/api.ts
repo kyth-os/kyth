@@ -26,14 +26,37 @@ let connectionPromise: Promise<void> | null = null;
  * The HTTP bootstrap fetch below only runs on the dev-loopback transport; the
  * packaged Unix-socket transport authenticates via the session token instead.
  */
+/**
+ * fetch with a cleared-on-settle timeout (ES2020-safe: no
+ * AbortSignal.timeout). A hung daemon surfaces an error instead of hanging
+ * the installer forever. A caller-supplied signal wins over the timeout.
+ */
+async function fetchBounded(url: string, init: RequestInit | undefined, ms: number, label: string): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  try {
+    return await fetch(url, { ...init, signal: init?.signal ?? controller.signal });
+  } catch (error) {
+    if (init?.signal == null && error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`${label} did not respond; the installer backend may be stuck.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function ensureConnection(): Promise<void> {
   if (!inTauriShell() || connection) return;
   if (!connectionPromise) {
     connectionPromise = invoke<InstallerConnection>("installer_connection").then(async (value) => {
       if (value.transport === "http") {
-        const response = await fetch(`${value.base_url}/?bootstrap_token=${encodeURIComponent(value.bootstrap_token)}`, {
-          headers: { Accept: "application/json" },
-        });
+        const response = await fetchBounded(
+          `${value.base_url}/?bootstrap_token=${encodeURIComponent(value.bootstrap_token)}`,
+          { headers: { Accept: "application/json" } },
+          30_000,
+          "Installer backend bootstrap",
+        );
         if (!response.ok) throw new Error(`Installer backend bootstrap failed (${response.status})`);
       }
       connection = value;
@@ -68,11 +91,11 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     status = native.status;
     text = native.body;
   } else {
-    const response = await fetch(apiUrl(path), {
+    const response = await fetchBounded(apiUrl(path), {
       ...init,
       headers,
       credentials: inTauriShell() ? "omit" : "same-origin",
-    });
+    }, 60_000, `Installer request ${path}`);
     status = response.status;
     text = await response.text();
   }

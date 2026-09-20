@@ -10,6 +10,7 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Command, Stdio};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -70,11 +71,43 @@ fn normalize_mount_point(value: &str) -> String {
     }
 }
 
+static MOUNT_PATH_RE: OnceLock<Regex> = OnceLock::new();
+static SHARE_NAME_RE: OnceLock<Regex> = OnceLock::new();
+static SHARE_HOST_RE: OnceLock<Regex> = OnceLock::new();
+static FLATPAK_ID_RE: OnceLock<Regex> = OnceLock::new();
+static BLOCK_DEVICE_RE: OnceLock<Regex> = OnceLock::new();
+
+fn mount_path_re() -> &'static Regex {
+    MOUNT_PATH_RE.get_or_init(|| Regex::new(r"^[A-Za-z0-9._/ -]+$").expect("mount path regex"))
+}
+
+fn share_name_re() -> &'static Regex {
+    SHARE_NAME_RE.get_or_init(|| Regex::new(r"^[A-Za-z0-9_-]{1,64}$").expect("share name regex"))
+}
+
+fn share_host_re() -> &'static Regex {
+    SHARE_HOST_RE.get_or_init(|| Regex::new(r"^[A-Za-z0-9._:-]{1,253}$").expect("share host regex"))
+}
+
+fn flatpak_id_re() -> &'static Regex {
+    FLATPAK_ID_RE.get_or_init(|| {
+        Regex::new(r"^[A-Za-z0-9]+(?:[.-][A-Za-z0-9_]+)+$").expect("Flatpak id regex")
+    })
+}
+
+fn block_device_re() -> &'static Regex {
+    BLOCK_DEVICE_RE.get_or_init(|| {
+        Regex::new(
+            r"^/dev/(sd[a-z][0-9]*|nvme[0-9]+n[0-9]+p?[0-9]*|vd[a-z][0-9]*|mmcblk[0-9]+p?[0-9]*)$",
+        )
+        .expect("block device regex")
+    })
+}
+
 fn share_mount_point(payload: &Map<String, Value>) -> Result<String, String> {
     let value = share_text(payload, "mount_point", false, 4096)?;
     let mount_point = normalize_mount_point(value);
-    let safe = Regex::new(r"^[A-Za-z0-9._/ -]+$").expect("mount path regex");
-    if !safe.is_match(&mount_point)
+    if !mount_path_re().is_match(&mount_point)
         || mount_point.contains("//")
         || !["/mnt/", "/media/", "/run/media/", "/home/"]
             .iter()
@@ -103,10 +136,7 @@ fn network_share_stdin(
         return Err("network share payload is too large".to_string());
     }
     let name = share_text(payload, "name", false, 64)?;
-    if !Regex::new(r"^[A-Za-z0-9_-]{1,64}$")
-        .expect("share name regex")
-        .is_match(name)
-    {
+    if !share_name_re().is_match(name) {
         return Err("invalid share name".to_string());
     }
     let mount_point = share_mount_point(payload)?;
@@ -115,10 +145,7 @@ fn network_share_stdin(
     output.insert("mount_point".into(), Value::String(mount_point));
     if operation == "network_share_add" {
         let server = share_text(payload, "server", false, 253)?;
-        if !Regex::new(r"^[A-Za-z0-9._:-]{1,253}$")
-            .expect("share host regex")
-            .is_match(server)
-        {
+        if !share_host_re().is_match(server) {
             return Err("invalid share server".to_string());
         }
         let share_path = share_text(payload, "share_path", false, 4096)?.trim_start_matches('/');
@@ -161,17 +188,11 @@ fn network_share_stdin(
 }
 
 fn valid_flatpak_id(value: &str) -> bool {
-    Regex::new(r"^[A-Za-z0-9]+(?:[.-][A-Za-z0-9_]+)+$")
-        .expect("Flatpak id regex")
-        .is_match(value)
+    flatpak_id_re().is_match(value)
 }
 
 fn valid_block_device(value: &str) -> bool {
-    Regex::new(
-        r"^/dev/(sd[a-z][0-9]*|nvme[0-9]+n[0-9]+p?[0-9]*|vd[a-z][0-9]*|mmcblk[0-9]+p?[0-9]*)$",
-    )
-    .expect("block device regex")
-    .is_match(value)
+    block_device_re().is_match(value)
 }
 
 /// Validate a request into a fixed executable/argument shape.

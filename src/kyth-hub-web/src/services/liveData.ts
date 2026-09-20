@@ -70,6 +70,39 @@ export function emitOnlineRefetch(): void {
   }
 }
 
+/** Bounded invoke for snapshot reads: a wedged backend must surface an
+ * error instead of hanging the page forever. Callers keep their
+ * try/catch-null shape; the timeout only converts a hang into a throw.
+ * (Tauri invokes cannot be cancelled — the late response is dropped.) */
+async function invokeBounded<T>(
+  command: string,
+  args?: Record<string, unknown>,
+  ms = 30_000,
+): Promise<T> {
+  return withTimeout(invoke<T>(command, args), command, ms);
+}
+
+/** Race any promise against a cleared-on-settle timer. Backs invokeBounded
+ * and multi-invoke snapshots alike. */
+async function withTimeout<T>(
+  task: Promise<T>,
+  label: string,
+  ms = 30_000,
+): Promise<T> {
+  let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = globalThis.setTimeout(
+      () => reject(new Error(`${label} timed out; the backend did not respond.`)),
+      ms,
+    );
+  });
+  try {
+    return await Promise.race([task, timeout]);
+  } finally {
+    if (timer !== undefined) globalThis.clearTimeout(timer);
+  }
+}
+
 // Real backend data, read through the Tauri shell's bridge commands (see
 // src-tauri/src/main.rs, which calls straight into the kyth-shared Rust
 // crate — src/kyth-shared-rs — no subprocess). Every read here returns
@@ -134,7 +167,7 @@ function statusFor(item: GuardianBridgeHistoryItem): GuardianHistoryItem["status
 export async function fetchGuardianSnapshot(): Promise<GuardianSnapshot | null> {
   if (!inTauriShell()) return null;
   try {
-    const raw = await invoke<GuardianBridgeResponse>("guardian_snapshot");
+    const raw = await invokeBounded<GuardianBridgeResponse>("guardian_snapshot", undefined, 30_000);
     return {
       pendingCount: raw.pending_count,
       pending: raw.pending.map((item) => ({
@@ -697,10 +730,13 @@ export async function fetchBootcSnapshot(): Promise<BootcSnapshot | null> {
   if (!inTauriShell()) return null;
   return sharedRead("bootc-snapshot", 10_000, async () => {
     try {
-      const [statusRaw, channelRaw] = await Promise.all([
-        invoke<ProbeBridgeResponse>("probe_backend", { section: "bootc-status-data" }),
-        invoke<ProbeBridgeResponse<string>>("probe_backend", { section: "bootc-branch" }),
-      ]);
+      const [statusRaw, channelRaw] = await withTimeout(
+        Promise.all([
+          invoke<ProbeBridgeResponse>("probe_backend", { section: "bootc-status-data" }),
+          invoke<ProbeBridgeResponse<string>>("probe_backend", { section: "bootc-branch" }),
+        ]),
+        "bootc-snapshot",
+      );
       const data = statusRaw.data as unknown as BootcStatusJson | null;
       if (!data) return null;
       return {
@@ -818,17 +854,24 @@ interface HardwareSummaryRaw {
 }
 
 export async function fetchHardwareSnapshot(): Promise<HardwareSnapshot | null> {
-  const [gpuName, summary] = await Promise.all([
-    fetchGpuName(),
-    fetchProbeSection<HardwareSummaryRaw>("hardware-summary"),
-  ]);
-  if (gpuName == null && summary == null) return null;
-  return {
-    gpuName,
-    hasNvidia: summary?.has_nvidia ?? null,
-    isHybrid: summary?.is_hybrid ?? null,
-    capabilities: summary?.capabilities ?? [],
-  };
+  try {
+    const [gpuName, summary] = await withTimeout(
+      Promise.all([
+        fetchGpuName(),
+        fetchProbeSection<HardwareSummaryRaw>("hardware-summary"),
+      ]),
+      "hardware-snapshot",
+    );
+    if (gpuName == null && summary == null) return null;
+    return {
+      gpuName,
+      hasNvidia: summary?.has_nvidia ?? null,
+      isHybrid: summary?.is_hybrid ?? null,
+      capabilities: summary?.capabilities ?? [],
+    };
+  } catch {
+    return null;
+  }
 }
 
 // Mirrors main.rs's GuardianPendingResponse — the same

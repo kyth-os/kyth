@@ -19,6 +19,52 @@ pub const VALID_ROLLOUT_RINGS: [&str; 4] = ["follow-image", "canary", "testing",
 /// default; only an explicit opt-in bypasses the gate.
 pub const ALLOW_DOWNGRADE_ENV: &str = "KYTH_ALLOW_DOWNGRADE";
 
+/// Name of the environment variable that explicitly permits staging while
+/// on battery power. A 30-minute download plus finalize must not start on
+/// a draining battery by default — power loss mid-stage is the one failure
+/// atomic updates cannot roll back from.
+pub const ALLOW_BATTERY_ENV: &str = "KYTH_ALLOW_BATTERY_UPGRADE";
+
+/// True when the machine is on AC power (or has no battery at all).
+/// Desktops without a battery supply always pass; laptops require an
+/// adapter reporting online. sysfs only, no D-Bus dependency.
+pub fn on_ac_power_at(supply_dir: &Path) -> bool {
+    let entries = std::fs::read_dir(supply_dir).map(|dir| dir.flatten().collect::<Vec<_>>());
+    let entries = match entries {
+        Ok(entries) if !entries.is_empty() => entries,
+        // No power-supply class at all (VMs, containers): assume AC.
+        _ => return true,
+    };
+    let has_battery = entries.iter().any(|entry| {
+        entry.file_name().to_string_lossy().starts_with("BAT")
+            || std::fs::read_to_string(entry.path().join("type"))
+                .map(|kind| kind.trim().eq_ignore_ascii_case("battery"))
+                .unwrap_or(false)
+    });
+    if !has_battery {
+        return true;
+    }
+    entries.iter().any(|entry| {
+        std::fs::read_to_string(entry.path().join("online"))
+            .map(|state| state.trim() == "1")
+            .unwrap_or(false)
+    })
+}
+
+/// Refuse staging on battery unless explicitly overridden.
+pub fn battery_gate_reason() -> Option<String> {
+    if std::env::var(ALLOW_BATTERY_ENV).as_deref() == Ok("1") {
+        return None;
+    }
+    if on_ac_power_at(Path::new("/sys/class/power_supply")) {
+        return None;
+    }
+    Some(
+        "Update blocked: running on battery power. Connect AC power or retry with KYTH_ALLOW_BATTERY_UPGRADE=1 to stage anyway."
+            .to_string(),
+    )
+}
+
 /// Strictly validate one configured ring value.
 ///
 /// A missing value falls back to `last_known` (or the fail-safe default when
@@ -287,6 +333,34 @@ mod tests {
     use super::*;
     use std::fs;
     use tempfile::tempdir;
+
+    fn supply_fixture(entries: &[(&str, &str)]) -> tempfile::TempDir {
+        let dir = tempdir().expect("tempdir");
+        for (name, kind) in entries {
+            let supply = dir.path().join(name);
+            fs::create_dir(&supply).expect("supply dir");
+            fs::write(supply.join("type"), kind).expect("type file");
+        }
+        dir
+    }
+
+    #[test]
+    fn ac_gate_passes_desktops_and_plugged_laptops() {
+        // No power-supply class (VM/container): assume AC.
+        assert!(on_ac_power_at(Path::new("/nonexistent-kyth-test")));
+        // Desktop with only an AC adapter: AC.
+        let desktop = supply_fixture(&[("AC", "Mains")]);
+        fs::write(desktop.path().join("AC").join("online"), "1").expect("online");
+        assert!(on_ac_power_at(desktop.path()));
+        // Laptop on adapter: AC.
+        let laptop = supply_fixture(&[("AC", "Mains"), ("BAT0", "Battery")]);
+        fs::write(laptop.path().join("AC").join("online"), "1").expect("online");
+        assert!(on_ac_power_at(laptop.path()));
+        // Laptop unplugged: battery.
+        let unplugged = supply_fixture(&[("AC", "Mains"), ("BAT0", "Battery")]);
+        fs::write(unplugged.path().join("AC").join("online"), "0").expect("online");
+        assert!(!on_ac_power_at(unplugged.path()));
+    }
 
     #[test]
     fn parses_rollout_ring_and_strict_unknowns() {

@@ -210,11 +210,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def _bootstrap_authenticated(self, qs: dict[str, list[str]]) -> bool:
         cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
-        if cookies.get("bootstrap_auth") == SESSION_TOKEN:
+        if hmac.compare_digest(cookies.get("bootstrap_auth", ""), SESSION_TOKEN):
             return True
         if qs.get("bootstrap_token") and config._bootstrap_token is not None:
             with config._bootstrap_lock:
-                if config._bootstrap_token is not None and qs.get("bootstrap_token") == [config._bootstrap_token]:
+                presented = (qs.get("bootstrap_token") or [""])[0]
+                if config._bootstrap_token is not None and hmac.compare_digest(
+                    presented, config._bootstrap_token
+                ):
                     config._bootstrap_token = None
                     return True
         return False

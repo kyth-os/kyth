@@ -496,6 +496,9 @@ fn upgrade() -> Result<String, String> {
     {
         return Err(format!("Update blocked by rollout policy: {reason}"));
     }
+    if let Some(reason) = kyth_shared::system::safe_upgrade_policy::battery_gate_reason() {
+        return Err(reason);
+    }
     let booted = kyth_shared::system::bootc_query::image_digest_from_status(&status, "booted");
     // Record the booted release (version and digest) before staging so the
     // post-upgrade gate can refuse a staged image older than what is

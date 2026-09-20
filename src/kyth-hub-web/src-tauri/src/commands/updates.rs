@@ -17,6 +17,35 @@ fn update_jobs() -> &'static JobStore {
     UPDATE_JOBS.get_or_init(JobStore::default)
 }
 
+/// In-process slot for mutating update launches (stage/rollback/switch/
+/// apply). The flock admission probe below is check-then-act: two rapid
+/// invocations (double-click, two tabs) both pass it, then spawn two
+/// `sudo -A` jobs that stack prompts and race on finalize. The slot closes
+/// that window — the second launch fails fast with the same busy wording.
+/// Cross-process serialization still rests on the flock, which each helper
+/// holds for its whole run.
+static UPDATE_MUTATING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+struct MutatingSlot;
+
+impl Drop for MutatingSlot {
+    fn drop(&mut self) {
+        UPDATE_MUTATING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+fn take_mutating_slot() -> Result<MutatingSlot, String> {
+    UPDATE_MUTATING
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .map(|_| MutatingSlot)
+        .map_err(|_| "Another bootc upgrade is in progress; will retry on the next run".to_string())
+}
+
 /// Latest live staging progress, streamed from `kyth-safe-upgrade` marker
 /// lines while the stage job runs. The Updates page polls `stage_progress`
 /// for a determinate bar; `active` is false when no stage is running.
@@ -106,6 +135,7 @@ fn start_stage_job(
     operation: &str,
     argv: Vec<String>,
     timeout: Duration,
+    slot: MutatingSlot,
 ) -> Result<UpdateActionLaunch, String> {
     kyth_shared::commands::normalize_command(&argv)
         .map_err(|_| "update produced an invalid command".to_string())?;
@@ -129,6 +159,9 @@ fn start_stage_job(
     let job_for_thread = job.clone();
     let operation_for_thread = operation.to_string();
     std::thread::spawn(move || {
+        // Held to the end of the job: the second mutating launch fails at
+        // take_mutating_slot instead of racing this one.
+        let _slot = slot;
         use std::io::BufRead;
         use std::os::unix::process::CommandExt;
         let mut command = Command::new(&argv[0]);
@@ -542,6 +575,7 @@ fn start_update_job(
     operation: &str,
     argv: Vec<String>,
     timeout: Duration,
+    slot: MutatingSlot,
 ) -> Result<UpdateActionLaunch, String> {
     kyth_shared::commands::normalize_command(&argv)
         .map_err(|_| "update produced an invalid command".to_string())?;
@@ -560,6 +594,9 @@ fn start_update_job(
     let job_for_thread = job.clone();
     let operation_for_thread = operation.to_string();
     std::thread::spawn(move || {
+        // Held to the end of the job: the second mutating launch fails at
+        // take_mutating_slot instead of racing this one.
+        let _slot = slot;
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
         let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
@@ -665,6 +702,7 @@ pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
     // takes the shared bootc lock for the whole stage, so refuse a second
     // mutating launch here instead of stacking two sudo prompts that
     // serialize anyway.
+    let slot = take_mutating_slot()?;
     kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_stage_job(
         "stage",
@@ -674,6 +712,7 @@ pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
             .map(String::from)
             .collect(),
         timeout_for(JobTimeoutClass::LongTransfer),
+        slot,
     )
 }
 
@@ -682,6 +721,7 @@ pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
     // Admission check on the shared bootc lock: the privileged helper takes
     // it for the whole rollback, so refuse a second mutating launch here
     // instead of stacking two sudo prompts that serialize anyway.
+    let slot = take_mutating_slot()?;
     kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "rollback",
@@ -691,6 +731,7 @@ pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
             .map(String::from)
             .collect(),
         timeout_for(JobTimeoutClass::UpdateMutating),
+        slot,
     )
 }
 
@@ -713,12 +754,14 @@ pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, 
     argv.push(operation);
     // Same admission check as rollback: kyth-bootc-guard takes the shared
     // lock for the whole switch.
+    let slot = take_mutating_slot()?;
     kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "switch",
         "Switch channel",
         argv,
         timeout_for(JobTimeoutClass::UpdateMutating),
+        slot,
     )
 }
 
@@ -728,6 +771,7 @@ pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
         return Err("The staged-update finalizer is not installed on this system.".to_string());
     }
     // Finalize flips the boot target: serialize against upgrade/switch too.
+    let slot = take_mutating_slot()?;
     kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "apply",
@@ -737,6 +781,7 @@ pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
             .map(String::from)
             .collect(),
         timeout_for(JobTimeoutClass::UpdateMutating),
+        slot,
     )
 }
 
@@ -1044,5 +1089,22 @@ mod tests {
             ..current.clone()
         };
         assert_eq!(super::merge_stage_snapshot(&current, advanced).pct, 61);
+    }
+
+    #[test]
+    fn mutating_slot_rejects_a_second_launch_until_released() {
+        let slot = super::take_mutating_slot().expect("first launch takes the slot");
+        assert!(
+            super::take_mutating_slot().is_err(),
+            "double-click / second tab must fail fast, not spawn a second sudo job"
+        );
+        drop(slot);
+        // The is_ok temporary drops at the end of the assert, releasing
+        // the slot; belt-and-braces reset keeps later tests independent.
+        assert!(
+            super::take_mutating_slot().is_ok(),
+            "finished job releases the slot"
+        );
+        super::UPDATE_MUTATING.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 }

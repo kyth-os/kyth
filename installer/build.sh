@@ -17,6 +17,10 @@ else
 	dnf install -y ntfs-3g parted btrfs-progs gdisk
 	dnf clean all
 fi
+# Reproducibility anchor: these payload tools float on upstream (no EVR
+# pins — old Fedora builds are dropped, so pins would rot). Record exactly
+# what resolved so an NTFS-shrink behavior change bisects to a NEVRA.
+rpm -q --queryformat '%{NAME}-%{EPOCH}:%{VERSION}-%{RELEASE}.%{ARCH}\n' ntfs-3g parted btrfs-progs gdisk
 
 SOURCE_TAG=${SOURCE_TAG:?}
 BASE_IMAGE=${BASE_IMAGE:?}

@@ -68,6 +68,14 @@ permissions:
   actions: read
   contents: read
 
+# One acceptance VM at a time: schedule + dispatch runs each take ~150 min
+# on KVM runners and share artifact/download bandwidth. Queue rather than
+# interleave (cancel-in-progress stays false — a running 150-min VM is
+# never cheap to redo).
+concurrency:
+  group: rust-migration-acceptance
+  cancel-in-progress: false
+
 jobs:
   acceptance:
     name: Exact-image Rust migration acceptance

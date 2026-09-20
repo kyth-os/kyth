@@ -358,6 +358,7 @@ test("mutating Hub update launches serialize on the shared bootc lock", () => {
     const fn = updatesRust.match(new RegExp(`fn ${command}\\b[\\s\\S]*?start_(update|stage)_job`))?.[0] ?? "";
     assert.notEqual(fn, "", `${command} not found`);
     assert.match(fn, /with_bootc_lock/, `${command} must admission-check the shared bootc lock before launching`);
+    assert.match(fn, /take_mutating_slot/, `${command} must take the in-process mutating slot: the flock probe is check-then-act across two rapid launches`);
   }
 });
 

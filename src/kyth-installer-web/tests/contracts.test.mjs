@@ -37,3 +37,16 @@ test("Rust/Slint remains the production installer client", () => {
   assert.match(native, /stream_install_events/);
   assert.match(native, /confirm_current/);
 });
+
+test("resize attest guards survive UI refactors and daemon hangs surface", () => {
+  // The daemon refuses shrink commits without a GPT backup on external
+  // media and a re-verified-clean NTFS attestation; the Shrink button is
+  // the only supplier, so dropping either field silently re-arms data loss.
+  assert.match(api, /gpt_backup_path\?: string; ntfs_verified_clean\?: boolean/);
+  assert.match(app, /gpt_backup_path: gptBackup\.trim\(\)/);
+  assert.match(app, /ntfs_verified_clean: ntfsClean/);
+  // A hung daemon must fail requests, not hang the installer: bootstrap
+  // and every HTTP request run behind a cleared-on-settle timeout.
+  assert.match(api, /fetchBounded/);
+  assert.match(api, /clearTimeout\(timer\)/);
+});
