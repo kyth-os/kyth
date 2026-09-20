@@ -39,7 +39,7 @@ export function NvidiaSection({ section }: { section: HubSection }) {
       {detected && (
         <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
           <p className="card-copy" style={{ fontSize: 12, margin: "0 0 12px" }}>
-            The proprietary driver is layered onto the image, so installing it stages a new deployment and asks for a reboot. Wayland, PRIME offload, and NVENC capture come with it — no extra setup.
+            The proprietary driver is layered onto the image, so installing it stages a new deployment and asks for a reboot. Wayland, NVENC capture, suspend/resume, and laptop power management (nvidia-powerd) come with it — no extra setup. On hybrid laptops, per-game profiles offer a PRIME toggle to render on NVIDIA; RTX 20-series and newer can also use the open kernel modules via akmod-nvidia-open instead of akmod-nvidia.
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <RecipeButton recipe="nvidia-status" label="Driver status" busy={busy} run={run} />

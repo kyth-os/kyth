@@ -127,18 +127,36 @@ impl ProfileGoal {
 /// `_update_profile_builder`'s `launch_options` dict, ported byte-for-byte
 /// (including that "hdr" always forces `KYTH_HDR=1` regardless of the HDR
 /// toggle, and "troubleshoot" ignores both `fps` and `hdr` entirely).
-pub fn build_profile_launch_option(goal: ProfileGoal, fps: Option<&str>, hdr: bool) -> String {
+/// PRIME offload prefix for hybrid-GPU laptops: render on the NVIDIA
+/// dGPU, present via the iGPU. Empty when the game should use the default GPU.
+pub const PRIME_LAUNCH_PREFIX: &str =
+    "__NV_PRIME_RENDER_OFFLOAD=1 __GLX_VENDOR_LIBRARY_NAME=nvidia ";
+
+pub fn build_profile_launch_option(
+    goal: ProfileGoal,
+    fps: Option<&str>,
+    hdr: bool,
+    prime: bool,
+) -> String {
     let hdr_prefix = if hdr { "KYTH_HDR=1 " } else { "" };
+    let prime_prefix = if prime { PRIME_LAUNCH_PREFIX } else { "" };
     let fps_arg = fps
         .filter(|value| !value.is_empty())
         .map(|value| format!(" --fps {value}"))
         .unwrap_or_default();
-    match goal {
+    let rendered = match goal {
         ProfileGoal::Quality => format!("{hdr_prefix}kyth-gamescope quality{fps_arg} -- %command%"),
         ProfileGoal::Hdr => format!("KYTH_HDR=1 kyth-gamescope hdr{fps_arg} -- %command%"),
         ProfileGoal::Sharp => format!("{hdr_prefix}kyth-gamescope sharp --fsr{fps_arg} -- %command%"),
         ProfileGoal::Latency => format!("{hdr_prefix}game-performance --profile gaming -- kyth-gamescope latency{fps_arg} -- %command%"),
+        // Troubleshoot stays bare: logging flags only, no compositor, no
+        // offload — PRIME noise would only muddy a failure capture.
         ProfileGoal::Troubleshoot => "PROTON_LOG=1 PROTON_NO_NTSYNC=1 %command%".to_string(),
+    };
+    if prime && goal != ProfileGoal::Troubleshoot {
+        format!("{prime_prefix}{rendered}")
+    } else {
+        rendered
     }
 }
 
@@ -202,11 +220,11 @@ mod tests {
     #[test]
     fn quality_uses_hdr_prefix_only_when_toggled() {
         assert_eq!(
-            build_profile_launch_option(ProfileGoal::Quality, None, false),
+            build_profile_launch_option(ProfileGoal::Quality, None, false, false),
             "kyth-gamescope quality -- %command%"
         );
         assert_eq!(
-            build_profile_launch_option(ProfileGoal::Quality, None, true),
+            build_profile_launch_option(ProfileGoal::Quality, None, true, false),
             "KYTH_HDR=1 kyth-gamescope quality -- %command%"
         );
     }
@@ -214,11 +232,11 @@ mod tests {
     #[test]
     fn hdr_goal_always_forces_the_env_var_regardless_of_the_toggle() {
         assert_eq!(
-            build_profile_launch_option(ProfileGoal::Hdr, None, false),
+            build_profile_launch_option(ProfileGoal::Hdr, None, false, false),
             "KYTH_HDR=1 kyth-gamescope hdr -- %command%"
         );
         assert_eq!(
-            build_profile_launch_option(ProfileGoal::Hdr, None, true),
+            build_profile_launch_option(ProfileGoal::Hdr, None, true, false),
             "KYTH_HDR=1 kyth-gamescope hdr -- %command%"
         );
     }
@@ -226,15 +244,15 @@ mod tests {
     #[test]
     fn fps_cap_is_appended_only_when_set() {
         assert_eq!(
-            build_profile_launch_option(ProfileGoal::Sharp, Some("144"), false),
+            build_profile_launch_option(ProfileGoal::Sharp, Some("144"), false, false),
             "kyth-gamescope sharp --fsr --fps 144 -- %command%"
         );
         assert_eq!(
-            build_profile_launch_option(ProfileGoal::Sharp, Some(""), false),
+            build_profile_launch_option(ProfileGoal::Sharp, Some(""), false, false),
             "kyth-gamescope sharp --fsr -- %command%"
         );
         assert_eq!(
-            build_profile_launch_option(ProfileGoal::Sharp, None, false),
+            build_profile_launch_option(ProfileGoal::Sharp, None, false, false),
             "kyth-gamescope sharp --fsr -- %command%"
         );
     }
@@ -242,7 +260,7 @@ mod tests {
     #[test]
     fn latency_wraps_gamescope_in_game_performance() {
         assert_eq!(
-            build_profile_launch_option(ProfileGoal::Latency, Some("120"), true),
+            build_profile_launch_option(ProfileGoal::Latency, Some("120"), true, false),
             "KYTH_HDR=1 game-performance --profile gaming -- kyth-gamescope latency --fps 120 -- %command%",
         );
     }
@@ -250,7 +268,7 @@ mod tests {
     #[test]
     fn troubleshoot_ignores_fps_and_hdr() {
         assert_eq!(
-            build_profile_launch_option(ProfileGoal::Troubleshoot, Some("60"), true),
+            build_profile_launch_option(ProfileGoal::Troubleshoot, Some("60"), true, false),
             "PROTON_LOG=1 PROTON_NO_NTSYNC=1 %command%"
         );
     }

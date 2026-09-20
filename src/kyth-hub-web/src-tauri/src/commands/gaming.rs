@@ -239,12 +239,32 @@ pub(crate) fn scx_status() -> Option<ScxStatusResponse> {
     })
 }
 
-/// Only the two schedulers the Hub's buttons actually offer ("Use
-/// scx_rusty", "Stop scx") — a fixed set, not an arbitrary scheduler name
-/// from the webview.
+/// Schedulers installed on this machine (short names: rusty, lavd,
+/// bpfland). scx_loader resolves the `scx_` binary, so the list is whatever
+/// `kyth-scx list` reports, falling back to `scx_*` binaries on PATH.
+#[tauri::command]
+pub(crate) fn scx_available() -> Vec<String> {
+    use kyth_shared::system::sched_daemon::available_schedulers;
+    let run = |argv: &[String], _timeout_secs: u64| -> Option<(i32, String)> {
+        let (program, args) = argv.split_first()?;
+        let output = Command::new(program).args(args).output().ok()?;
+        Some((
+            output.status.code().unwrap_or(1),
+            String::from_utf8_lossy(&output.stdout).into_owned(),
+        ))
+    };
+    available_schedulers(&run, std::path::Path::new("/usr/bin"))
+        .into_iter()
+        .map(|name| name.strip_prefix("scx_").unwrap_or(&name).to_string())
+        .collect()
+}
+
+/// Only schedulers scx_loader can resolve — a fixed set, not an arbitrary
+/// scheduler name from the webview. lavd/bpfland fail visibly in the job
+/// log when their binaries are not installed.
 #[tauri::command]
 pub(crate) fn scx_set_scheduler(scheduler: String) -> Result<String, String> {
-    if !matches!(scheduler.as_str(), "rusty" | "stop") {
+    if !matches!(scheduler.as_str(), "rusty" | "lavd" | "bpfland" | "stop") {
         return Err("unknown scheduler".to_string());
     }
     let argv = gaming_perf::scx_scheduler_command(&scheduler);
@@ -273,13 +293,21 @@ pub(crate) fn scx_set_scheduler(scheduler: String) -> Result<String, String> {
 fn valid_appid(appid: &str) -> bool {
     // Steam app ids are short decimal ids. Restrict to digits, max 12, so a
     // crafted id can never smuggle shell metacharacters or option flags.
-    !appid.is_empty() && appid.len() <= 12 && appid.bytes().all(|byte| byte.is_ascii_digit())
+    // "builder-default" is the goal default the profile builder saves when
+    // no app id is entered — previously it failed every such save with
+    // "invalid Steam app id" and no path forward.
+    appid == "builder-default"
+        || (!appid.is_empty()
+            && appid.len() <= 12
+            && appid.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
 #[derive(Serialize)]
 pub(crate) struct GameProfileResponse {
     profile: String,
     hdr: bool,
+    fps: String,
+    prime: bool,
 }
 
 #[tauri::command]
@@ -294,7 +322,36 @@ pub(crate) fn per_game_profile(appid: String) -> Result<GameProfileResponse, Str
     Ok(GameProfileResponse {
         profile: profile.profile,
         hdr: profile.hdr,
+        fps: profile.fps,
+        prime: profile.prime,
     })
+}
+
+/// The exact Steam launch-options string for a saved profile, so the
+/// builder's saves stop being write-only: the user pastes this into
+/// Steam → Properties → Launch Options. Nothing is written to Steam's
+/// own config — same read-only honesty as the Steam Play check.
+#[tauri::command]
+pub(crate) fn per_game_launch_options(appid: String) -> Result<String, String> {
+    if !valid_appid(&appid) {
+        return Err("invalid Steam app id".to_string());
+    }
+    let saved = gaming_per_game::get_profile_for_appid(
+        &appid,
+        gaming_per_game::per_game_config_path(None::<&str>),
+    );
+    let goal = ProfileGoal::parse(&saved.profile).ok_or_else(|| "unknown profile".to_string())?;
+    let fps = if saved.fps.is_empty() {
+        None
+    } else {
+        Some(saved.fps.as_str())
+    };
+    Ok(gaming_perf::build_profile_launch_option(
+        goal,
+        fps,
+        saved.hdr,
+        saved.prime,
+    ))
 }
 
 #[tauri::command]
@@ -302,6 +359,8 @@ pub(crate) fn save_per_game_profile(
     appid: String,
     profile: String,
     hdr: bool,
+    fps: String,
+    prime: bool,
 ) -> Result<String, String> {
     if !valid_appid(&appid) {
         return Err("invalid Steam app id".to_string());
@@ -313,6 +372,8 @@ pub(crate) fn save_per_game_profile(
         &appid,
         &profile,
         hdr,
+        &fps,
+        prime,
         gaming_per_game::per_game_config_path(None::<&str>),
     )
     .map_err(|err| format!("Could not save profile: {err}"))?;

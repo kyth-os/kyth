@@ -35,6 +35,24 @@ game-performance-profile profile +args:
 # Usage: ujust gamescope -- %command%
 #        ujust gamescope -W 2560 -H 1440 -r 165 -- %command%
 
+# Full-screen Gamescope session: gamescope becomes the compositor (lowest
+# latency, HDR-capable) instead of a nested window. Stamps the session lock
+# so the scheduler daemon treats it as gaming.
+# Usage: ujust game-session -- %command%
+[group('KythOS')]
+game-session +args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec /usr/bin/kyth-runtime game-session -- {{ args }}
+
+# Render on the NVIDIA dGPU, present via the iGPU (hybrid laptops).
+# Usage: ujust prime-run -- %command%
+[group('KythOS')]
+prime-run +args:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    exec /usr/bin/kyth-runtime prime-run -- {{ args }}
+
 # Extra gamescope flags can be passed before the -- separator.
 [group('KythOS')]
 gamescope +args:

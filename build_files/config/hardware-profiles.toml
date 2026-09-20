@@ -156,6 +156,22 @@ module = "amdgpu"
 options = { ppfeaturemask = "0xffffffff", gttsize = "4096", noretry = "0" }
 
 [[quirks]]
+id = "intel-xe-media-firmware"
+reason = "Enable GuC submission and HuC media firmware on Intel Arc (xe driver)"
+expires_on = "2027-02-01"
+provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
+
+[[quirks.match.pci]]
+vendor = "8086"
+classes = ["0300", "0302", "0380"]
+drivers = ["xe"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "xe"
+options = { enable_guc = "3" }
+
+[[quirks]]
 id = "intel-i915-media-firmware"
 reason = "Enable GuC submission and HuC media firmware on systems still using i915"
 expires_on = "2027-02-01"

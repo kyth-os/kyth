@@ -1847,7 +1847,11 @@ export async function fetchScxStatus(): Promise<ScxStatus | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<ScxStatus>("scx_status"); } catch { return null; }
 }
-export async function setScxScheduler(scheduler: "rusty" | "stop"): Promise<string> {
+export async function fetchScxAvailable(): Promise<string[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string[]>("scx_available"); } catch { return null; }
+}
+export async function setScxScheduler(scheduler: "rusty" | "lavd" | "bpfland" | "stop"): Promise<string> {
   if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
   const job = await invoke<string>("scx_set_scheduler", { scheduler });
   trackJob("gaming", job);
@@ -1867,14 +1871,18 @@ export async function setScxScheduler(scheduler: "rusty" | "stop"): Promise<stri
   }
 }
 
-export interface GameProfile { profile: string; hdr: boolean }
+export interface GameProfile { profile: string; hdr: boolean; fps: string; prime: boolean }
 export async function fetchPerGameProfile(appid: string): Promise<GameProfile | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<GameProfile>("per_game_profile", { appid }); } catch { return null; }
 }
-export async function savePerGameProfile(appid: string, profile: string, hdr: boolean): Promise<string> {
+export async function savePerGameProfile(appid: string, profile: string, hdr: boolean, fps: string, prime: boolean): Promise<string> {
   if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
-  return await invoke<string>("save_per_game_profile", { appid, profile, hdr });
+  return await invoke<string>("save_per_game_profile", { appid, profile, hdr, fps, prime });
+}
+export async function fetchPerGameLaunchOptions(appid: string): Promise<string | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<string>("per_game_launch_options", { appid }); } catch { return null; }
 }
 export interface ProtonDbResult { app_id: string; tier: string; detail: string }
 export interface AntiCheatEntry { game: string; status: string; detail: string }

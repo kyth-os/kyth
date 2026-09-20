@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, fetchGamingPerfStatus, fetchScxStatus, fetchTelemetryRecent, setScxScheduler, type AuditCache, type GamingPerfStatus, type ScxStatus, type TelemetrySession } from "../services/liveData";
+import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, fetchGamingPerfStatus, fetchScxAvailable, fetchScxStatus, fetchTelemetryRecent, setScxScheduler, type AuditCache, type GamingPerfStatus, type ScxStatus, type TelemetrySession } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -15,16 +15,18 @@ export function PerformanceSection({ section }: { section: HubSection }) {
   const [pendingPreset, setPendingPreset] = useState<string | null>(null);
   const [gamingTools, setGamingTools] = useState<GamingPerfStatus | null>(null);
   const [scx, setScx] = useState<ScxStatus | null>(null);
+  const [scxAvailable, setScxAvailable] = useState<string[] | null>(null);
   const { status, busy, run } = useSectionAction("gaming");
   useEffect(() => {
     let c = false;
-    Promise.all([fetchAuditCache(), fetchAudioPresets(), fetchTelemetryRecent(8), fetchGamingPerfStatus(), fetchScxStatus()]).then(([a, p, recent, tools, scheduler]) => {
+    Promise.all([fetchAuditCache(), fetchAudioPresets(), fetchTelemetryRecent(8), fetchGamingPerfStatus(), fetchScxStatus(), fetchScxAvailable()]).then(([a, p, recent, tools, scheduler, available]) => {
       if (!c) {
         setAudit(a);
         setAudioPresets(p);
         setSessions(recent);
         setGamingTools(tools);
         setScx(scheduler);
+        setScxAvailable(available);
         setLoaded(true);
       }
     });
@@ -32,7 +34,7 @@ export function PerformanceSection({ section }: { section: HubSection }) {
       c = true;
     };
   }, []);
-  async function changeScheduler(scheduler: "rusty" | "stop"): Promise<string> {
+  async function changeScheduler(scheduler: "rusty" | "lavd" | "bpfland" | "stop"): Promise<string> {
     const result = await setScxScheduler(scheduler);
     setScx(await fetchScxStatus());
     return result;
@@ -100,8 +102,11 @@ export function PerformanceSection({ section }: { section: HubSection }) {
             </>}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            <ActionButton label={busy === "scheduler-rusty" ? "Starting…" : scx?.active ? "Low-latency scheduler on ✓" : "Use low-latency scheduler"} disabled={busy !== null} onClick={() => run("scheduler-rusty", "Starting scx_rusty…", () => changeScheduler("rusty"))} />
+            {(scxAvailable ?? ["rusty"]).map((name) => (
+              <ActionButton key={name} label={busy === `scheduler-${name}` ? "Starting…" : scx?.active && scx?.configured === `scx_${name}` ? `${name} on ✓` : `Use ${name}`} disabled={busy !== null} onClick={() => run(`scheduler-${name}`, `Starting scx_${name}…`, () => changeScheduler(name as "rusty" | "lavd" | "bpfland"))} />
+            ))}
             <ActionButton label={busy === "scheduler-stop" ? "Stopping…" : "Stop sched-ext"} disabled={busy !== null} onClick={() => run("scheduler-stop", "Stopping sched-ext…", () => changeScheduler("stop"))} />
+            {scxAvailable !== null && !scxAvailable.includes("lavd") && <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Only the installed schedulers are listed — lavd and bpfland appear here when their packages are installed.</p>}
             <RecipeButton recipe="system-audit" label="Gaming audit" busy={busy} run={run} />
             <RecipeButton recipe="gaming-stack-status" label="Stack status" busy={busy} run={run} />
             {gamingTools && (gamingTools.mangohud_installed

@@ -18,9 +18,11 @@ import {
   fetchGamingPerfStatus,
   fetchScxStatus,
   setScxScheduler,
+  fetchPerGameLaunchOptions,
   fetchPerGameProfile,
   savePerGameProfile,
   type AntiCheatEntry,
+  type GameProfile,
   type ProtonDbResult,
   type AuditCache,
   type SteamPlayStatus,
@@ -174,8 +176,11 @@ function ProfileBuilderCard({ busy, run }: { busy: string | null; run: SectionRu
   const [goal, setGoal] = useState("quality");
   const [fps, setFps] = useState("");
   const [hdr, setHdr] = useState(false);
+  const [prime, setPrime] = useState(false);
   const [appid, setAppid] = useState("");
-  const [saved, setSaved] = useState<{ profile: string; hdr: boolean } | null>(null);
+  const [saved, setSaved] = useState<GameProfile | null>(null);
+  const [launchOptions, setLaunchOptions] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
   // Same stale-guard as the App Store catalog search: only the latest
   // debounced profile read may write state.
   const profileRequest = useRef(0);
@@ -204,11 +209,15 @@ function ProfileBuilderCard({ busy, run }: { busy: string | null; run: SectionRu
           {PROFILE_FPS_CAPS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
         </select>
       </div>
-      <div className="play-profile-preview"><span>Selected profile</span><strong>{PROFILE_GOALS.find(([value]) => value === goal)?.[1] ?? goal}{fps ? ` · ${fps} FPS cap` : ""}{hdr ? " · HDR" : ""}</strong><small>Applied by Kyth when this profile is used.</small></div>
+      <div className="play-profile-preview"><span>Selected profile</span><strong>{PROFILE_GOALS.find(([value]) => value === goal)?.[1] ?? goal}{fps ? ` · ${fps} FPS cap` : ""}{hdr ? " · HDR" : ""}{prime ? " · NVIDIA" : ""}</strong><small>Paste the launch options below into Steam → Properties → Launch Options.</small></div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
         <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }}>
           <input type="checkbox" checked={hdr} onChange={(event) => setHdr(event.target.checked)} />
           HDR per game (KYTH_HDR=1)
+        </label>
+        <label style={{ fontSize: 12, display: "flex", gap: 6, alignItems: "center", cursor: "pointer" }} title="Render on the NVIDIA dGPU (hybrid laptops)">
+          <input type="checkbox" checked={prime} onChange={(event) => setPrime(event.target.checked)} />
+          Use NVIDIA dGPU (PRIME)
         </label>
         <input
           value={appid}
@@ -216,15 +225,31 @@ function ProfileBuilderCard({ busy, run }: { busy: string | null; run: SectionRu
           placeholder="Steam app id (optional)"
           style={{ padding: "7px 10px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 12, width: 180 }}
         />
-        {saved && <span className="card-copy" style={{ fontSize: 11 }}>Currently saved: {saved.profile}{saved.hdr ? " · HDR" : ""}</span>}
+        {saved && <span className="card-copy" style={{ fontSize: 11 }}>Currently saved: {saved.profile}{saved.hdr ? " · HDR" : ""}{saved.fps ? ` · ${saved.fps} FPS` : ""}{saved.prime ? " · NVIDIA" : ""}</span>}
         <button
           disabled={busy !== null}
-          onClick={() => run("save-per-game", "Saving per-game profile…", () => savePerGameProfile(appid.trim() || "builder-default", goal, hdr))}
+          onClick={() => run("save-per-game", "Saving per-game profile…", async () => {
+            const id = appid.trim() || "builder-default";
+            const result = await savePerGameProfile(id, goal, hdr, fps, prime);
+            setLaunchOptions(await fetchPerGameLaunchOptions(id));
+            setCopied(false);
+            return result;
+          })}
           style={gamingBtnStyle}
         >
           {busy === "save-per-game" ? "Saving…" : "Save per-game"}
         </button>
       </div>
+      {launchOptions && (
+        <div style={{ marginTop: 10, padding: "10px 12px", border: "1px solid var(--hairline)", borderRadius: 10 }}>
+          <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Steam launch options</p>
+          <code style={{ display: "block", fontSize: 12, marginTop: 6, overflowWrap: "anywhere" }}>{launchOptions}</code>
+          <div style={{ display: "flex", gap: 8, marginTop: 8, alignItems: "center" }}>
+            <button onClick={() => { void navigator.clipboard.writeText(launchOptions).then(() => setCopied(true)).catch(() => setCopied(false)); }} style={gamingBtnStyle}>{copied ? "Copied ✓" : "Copy"}</button>
+            <span className="card-copy" style={{ fontSize: 11 }}>Steam → right-click game → Properties → Launch Options → paste.</span>
+          </div>
+        </div>
+      )}
       <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>Saved per-game — launch env is KYTH_HDR + the goal's flags, no global layer.</p>
     </div>
   );

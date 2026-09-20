@@ -34,5 +34,6 @@
 | `bluetooth-usb-autosuspend` | 2027-08-01 | Prevent missed remote wake traffic from Bluetooth controllers and low-bandwidth peripherals | [policy rationale](hardware-policy.md#managed-quirks) |
 | `intel-i915-media-firmware` | 2027-02-01 | Enable GuC submission and HuC media firmware on systems still using i915 | [policy rationale](hardware-policy.md#managed-quirks) |
 | `intel-wifi-association-power` | 2027-05-01 | Keep Intel wireless active during WPA association while preserving Bluetooth coexistence | [policy rationale](hardware-policy.md#managed-quirks) |
+| `intel-xe-media-firmware` | 2027-02-01 | Enable GuC submission and HuC media firmware on Intel Arc (xe driver) | [policy rationale](hardware-policy.md#managed-quirks) |
 | `mediatek-pcie-wifi-aspm` | 2027-05-01 | Avoid intermittent wake and association failures on mt7921e and mt7925e adapters | [policy rationale](hardware-policy.md#managed-quirks) |
 | `nvidia-wayland-suspend` | 2027-05-01 | Enable DRM modesetting and preserve video memory across suspend on the proprietary driver | [policy rationale](hardware-policy.md#managed-quirks) |

@@ -308,6 +308,34 @@ fn configure_nvidia() -> Result<String, String> {
             Duration::from_secs(30),
         )?;
     }
+    // Dynamic Boost and clock management on supported laptops. Best-effort:
+    // the unit only ships with newer driver packages, and its absence must
+    // not fail an otherwise good NVIDIA setup.
+    // `list-unit-files <name>` exits 0 even when nothing matches (and
+    // `cat`'s exit code on a missing unit varies by systemd release), so
+    // match the unit name in the listing output instead of trusting status.
+    let powerd_listed = run(
+        &[
+            "systemctl".into(),
+            "list-unit-files".into(),
+            "nvidia-powerd.service".into(),
+        ],
+        Duration::from_secs(30),
+    )
+    .map(|output| String::from_utf8_lossy(&output.stdout).contains("nvidia-powerd.service"))
+    .unwrap_or(false);
+    if powerd_listed {
+        run_checked(
+            &[
+                "systemctl".into(),
+                "enable".into(),
+                "--now".into(),
+                "nvidia-powerd.service".into(),
+            ],
+            "enable nvidia-powerd",
+            Duration::from_secs(30),
+        )?;
+    }
     Ok("proprietary-ready".into())
 }
 

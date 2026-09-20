@@ -492,3 +492,17 @@ test("phase-2 onboarding is state-driven, not copy", async () => {
   assert.match(gaming, /Install Vesktop/, "Gaming must offer one-click voice chat");
   assert.match(controllersSection, /GamepadTester/, "Controllers must include a live input tester");
 });
+
+test("phase-3 graphics truth is wired, not implied", () => {
+  // Shader tmpfs must point Mesa at the mount with a sticky mode, prune
+  // must cap instead of deleting, gamescope presets must inject real flags,
+  // SCX must offer installed schedulers, per-game saves must render to a
+  // pasteable launch string, and PRIME/powerd/Xe must exist outside copy.
+  assert.match(rust, /scx_available/, "scx list command must be registered");
+  assert.match(rust, /per_game_launch_options/, "launch-options preview command must be registered");
+  assert.match(service, /fetchScxAvailable/, "scx list wrapper must exist");
+  assert.match(service, /fetchPerGameLaunchOptions/, "launch-options wrapper must exist");
+  assert.match(service, /savePerGameProfile\(appid: string, profile: string, hdr: boolean, fps: string, prime: boolean\)/, "per-game save must carry fps and prime");
+  assert.match(gaming, /Steam launch options/, "builder must show the pasteable launch string");
+  assert.match(gaming, /PRIME/, "builder must offer the dGPU toggle");
+});

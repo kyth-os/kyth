@@ -1595,6 +1595,11 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
         "kyth-shader-tmpfs.service",
         "/etc/systemd/system/kyth-shader-tmpfs.service",
     );
+    let env_dropin = generated_path(
+        "environment.d",
+        "99-kyth-shader-tmpfs.conf",
+        "/etc/environment.d/99-kyth-shader-tmpfs.conf",
+    );
     match action {
         "status" => {
             let config = shader_tmpfs::load(&config_path);
@@ -1612,9 +1617,9 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
             }
             let mut config = shader_tmpfs::load(&config_path);
             config.enabled = true;
-            if let Err(error) = shader_tmpfs::save(&config_path, &config)
-                .and_then(|_| shader_tmpfs::generate(&config, &tmpfiles, &service).map(|_| ()))
-            {
+            if let Err(error) = shader_tmpfs::save(&config_path, &config).and_then(|_| {
+                shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin).map(|_| ())
+            }) {
                 eprintln!("kyth-shader-tmpfs: {error}");
                 return ExitCode::from(1);
             }
@@ -1626,9 +1631,9 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
                 return code;
             }
             let config = shader_tmpfs::ShaderTmpfsConfig::default();
-            if let Err(error) = shader_tmpfs::save(&config_path, &config)
-                .and_then(|_| shader_tmpfs::generate(&config, &tmpfiles, &service).map(|_| ()))
-            {
+            if let Err(error) = shader_tmpfs::save(&config_path, &config).and_then(|_| {
+                shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin).map(|_| ())
+            }) {
                 eprintln!("kyth-shader-tmpfs: {error}");
                 return ExitCode::from(1);
             }
@@ -1640,7 +1645,7 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
                 return code;
             }
             let config = shader_tmpfs::load(&config_path);
-            if let Err(error) = shader_tmpfs::generate(&config, &tmpfiles, &service) {
+            if let Err(error) = shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin) {
                 eprintln!("kyth-shader-tmpfs: {error}");
                 return ExitCode::from(1);
             }

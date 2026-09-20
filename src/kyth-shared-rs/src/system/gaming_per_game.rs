@@ -1,6 +1,7 @@
 //! Port of `kyth_shared.gaming_per_game` — the per-game HDR/latency profile
 //! store the Gaming section's profile builder reads and writes. Persists to
-//! `~/.config/kyth/gaming-per-game.toml`, same as Python. Not ported:
+//! `~/.config/kyth/gaming-per-game.toml` (Rust is the sole writer; no Python
+//! twin exists for this file). Not ported:
 //! `gaming_launch_env_for_appid`'s dynamic fallback-import env resolution —
 //! that's for the actual game-launch path, not the builder UI this backs.
 
@@ -21,6 +22,10 @@ const KNOWN_PROFILES: [&str; 7] = [
 pub struct GameProfile {
     pub profile: String,
     pub hdr: bool,
+    /// FPS cap as decimal text ("" = none). Validated on load/save.
+    pub fps: String,
+    /// Render on the NVIDIA dGPU via PRIME offload (hybrid laptops).
+    pub prime: bool,
 }
 
 impl Default for GameProfile {
@@ -28,7 +33,26 @@ impl Default for GameProfile {
         Self {
             profile: "balanced".to_string(),
             hdr: false,
+            fps: String::new(),
+            prime: false,
         }
+    }
+}
+
+/// FPS caps are short decimals the `--fps` flag accepts. Anything else
+/// loads/saves as uncapped rather than erroring a whole profile.
+pub fn normalize_fps(value: &str) -> String {
+    let trimmed = value.trim();
+    if !trimmed.is_empty()
+        && trimmed.len() <= 4
+        && trimmed.bytes().all(|byte| byte.is_ascii_digit())
+        && trimmed
+            .parse::<u32>()
+            .is_ok_and(|fps| fps > 0 && fps <= 999)
+    {
+        trimmed.to_string()
+    } else {
+        String::new()
     }
 }
 
@@ -69,7 +93,24 @@ pub fn load_per_game_config(path: impl AsRef<Path>) -> BTreeMap<String, GameProf
                 .get("hdr")
                 .and_then(toml::Value::as_bool)
                 .unwrap_or(false);
-            Some((appid.clone(), GameProfile { profile, hdr }))
+            let fps = entry
+                .get("fps")
+                .and_then(toml::Value::as_str)
+                .map(normalize_fps)
+                .unwrap_or_default();
+            let prime = entry
+                .get("prime")
+                .and_then(toml::Value::as_bool)
+                .unwrap_or(false);
+            Some((
+                appid.clone(),
+                GameProfile {
+                    profile,
+                    hdr,
+                    fps,
+                    prime,
+                },
+            ))
         })
         .collect()
 }
@@ -87,6 +128,12 @@ pub fn save_per_game_config(
         lines.push(format!("[games.\"{appid}\"]"));
         lines.push(format!("profile = \"{}\"", entry.profile));
         lines.push(format!("hdr = {}", entry.hdr));
+        if !entry.fps.is_empty() {
+            lines.push(format!("fps = \"{}\"", entry.fps));
+        }
+        if entry.prime {
+            lines.push("prime = true".to_string());
+        }
         lines.push(String::new());
     }
     crate::atomic_io::atomic_write_bytes(path, lines.join("\n").as_bytes(), None)
@@ -100,6 +147,8 @@ pub fn set_profile_for_appid(
     appid: &str,
     profile: &str,
     hdr: bool,
+    fps: &str,
+    prime: bool,
     path: impl AsRef<Path>,
 ) -> std::io::Result<()> {
     let mut games = load_per_game_config(&path);
@@ -108,6 +157,8 @@ pub fn set_profile_for_appid(
         GameProfile {
             profile: profile.to_string(),
             hdr,
+            fps: normalize_fps(fps),
+            prime,
         },
     );
     save_per_game_config(&games, path)
@@ -129,13 +180,15 @@ mod tests {
     fn round_trips_a_saved_profile() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("gaming-per-game.toml");
-        set_profile_for_appid("730", "hdr", true, &path).unwrap();
+        set_profile_for_appid("730", "hdr", true, "144", true, &path).unwrap();
         let loaded = get_profile_for_appid("730", &path);
         assert_eq!(
             loaded,
             GameProfile {
                 profile: "hdr".to_string(),
-                hdr: true
+                hdr: true,
+                fps: "144".to_string(),
+                prime: true,
             }
         );
     }
@@ -156,24 +209,38 @@ mod tests {
     fn setting_one_appid_does_not_disturb_another() {
         let directory = tempdir().unwrap();
         let path = directory.path().join("gaming-per-game.toml");
-        set_profile_for_appid("1", "quality", false, &path).unwrap();
-        set_profile_for_appid("2", "latency", true, &path).unwrap();
+        set_profile_for_appid("1", "quality", false, "", false, &path).unwrap();
+        set_profile_for_appid("2", "latency", true, "60", false, &path).unwrap();
         let games = load_per_game_config(&path);
         assert_eq!(games.len(), 2);
         assert_eq!(
             games["1"],
             GameProfile {
                 profile: "quality".to_string(),
-                hdr: false
+                hdr: false,
+                fps: String::new(),
+                prime: false,
             }
         );
         assert_eq!(
             games["2"],
             GameProfile {
                 profile: "latency".to_string(),
-                hdr: true
+                hdr: true,
+                fps: "60".to_string(),
+                prime: false,
             }
         );
+    }
+
+    #[test]
+    fn fps_normalizes_to_caps_or_empty() {
+        assert_eq!(normalize_fps("144"), "144");
+        assert_eq!(normalize_fps(" 60 "), "60");
+        assert_eq!(normalize_fps(""), "");
+        assert_eq!(normalize_fps("144hz"), "");
+        assert_eq!(normalize_fps("10000"), "");
+        assert_eq!(normalize_fps("0"), "");
     }
 
     #[test]

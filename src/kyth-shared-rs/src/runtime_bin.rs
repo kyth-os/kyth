@@ -1405,22 +1405,133 @@ fn copy_tree(source: &Path, destination: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Preset flag sets injected before user args (user flags win on repeat).
+/// Previously the preset name was validated and then dropped, so
+/// `kyth-gamescope hdr` ran plain SDR gamescope and the Sharp/Latency
+/// profiles gaming_perf.rs emits died with "unknown gamescope preset".
+fn gamescope_preset_flags(
+    preset: &str,
+) -> Option<(
+    &'static [&'static str],
+    &'static [(&'static str, &'static str)],
+)> {
+    match preset {
+        quality @ ("quality" | "balanced") => {
+            let _ = quality;
+            Some((&["--fullscreen"], &[]))
+        }
+        // SDR default path: no HDR flags anywhere else, so SDR stays SDR.
+        "hdr" => Some((
+            &["--fullscreen", "--hdr-enabled"],
+            &[("ENABLE_HDR_WSI", "1")],
+        )),
+        "sharp" => Some((&["--fullscreen", "--fsr"], &[])),
+        "latency" | "performance" => Some((&["--fullscreen", "--immediate-flips"], &[])),
+        _ => None,
+    }
+}
+
+/// PRIME offload wrapper: `kyth-runtime prime-run -- <cmd> [args…]`.
+/// Renders on the NVIDIA dGPU, presents via the iGPU. The `--` separator is
+/// required so a game argv starting with `-` can never be mistaken for our
+/// flags; the command itself runs unmodified through the bounded runner.
+fn prime_run(args: &[String]) -> io::Result<ExitCode> {
+    let separator = args.iter().position(|arg| arg == "--");
+    let Some(index) = separator else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: kyth-runtime prime-run -- <command> [args…]",
+        ));
+    };
+    let command = &args[index + 1..];
+    if command.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: kyth-runtime prime-run -- <command> [args…]",
+        ));
+    }
+    for (key, value) in [
+        ("__NV_PRIME_RENDER_OFFLOAD", "1"),
+        ("__GLX_VENDOR_LIBRARY_NAME", "nvidia"),
+        ("__VK_LAYER_NV_optimus", "NVIDIA_only"),
+    ] {
+        // SAFETY: single-threaded exec wrapper; env applies to the child only.
+        unsafe { std::env::set_var(key, value) };
+    }
+    let (program, child_args) = command.split_first().expect("non-empty");
+    run(program, child_args)
+}
+
+/// Full-screen Gamescope session: `kyth-runtime game-session -- <cmd>`.
+/// Gamescope becomes the compositor (lowest latency, HDR-capable) instead of
+/// a nested window. Stamps the session lock gaming_activity.rs watches so
+/// the scheduler daemon and AI perf daemon treat the session as gaming.
+fn game_session(args: &[String]) -> io::Result<ExitCode> {
+    let separator = args.iter().position(|arg| arg == "--");
+    let Some(index) = separator else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: kyth-runtime game-session -- <command> [args…]",
+        ));
+    };
+    let command = &args[index + 1..];
+    if command.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "usage: kyth-runtime game-session -- <command> [args…]",
+        ));
+    }
+    let lock = session_lock_path();
+    if let Some(parent) = lock.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(&lock, b"kyth game session\n");
+    let mut scoped = vec![
+        "gamescope".to_string(),
+        "--fullscreen".to_string(),
+        "--".to_string(),
+    ];
+    scoped.extend(command.iter().cloned());
+    let (program, child_args) = scoped.split_first().expect("non-empty");
+    let result = run(program, child_args);
+    let _ = fs::remove_file(&lock);
+    result
+}
+
+fn session_lock_path() -> PathBuf {
+    let uid = unsafe { libc_uid() };
+    PathBuf::from(format!("/run/user/{uid}/gamescope-session.lock"))
+}
+
+/// libc-free getuid for the session lock path (nix/libc are not deps here).
+fn libc_uid() -> u32 {
+    unsafe extern "C" {
+        fn getuid() -> u32;
+    }
+    unsafe { getuid() }
+}
+
 fn gamescope(args: &[String]) -> io::Result<ExitCode> {
     require_args(args, 1, None);
     let preset = &args[0];
     validate_token(preset, "gamescope preset")
         .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error))?;
-    if !matches!(
-        preset.as_str(),
-        "quality" | "hdr" | "balanced" | "performance"
-    ) {
+    let Some((flags, env)) = gamescope_preset_flags(preset) else {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "unknown gamescope preset",
         ));
+    };
+    if preset == "hdr" {
+        eprintln!("kyth-gamescope: HDR needs an HDR-capable display and a Wayland session; on SDR screens colors may look washed out.");
     }
     let mut command = vec!["gamescope".to_string()];
+    command.extend(flags.iter().map(|flag| flag.to_string()));
     command.extend(args.iter().skip(1).cloned());
+    for (key, value) in env {
+        // SAFETY: single-threaded exec wrapper; env applies to the child only.
+        unsafe { std::env::set_var(key, value) };
+    }
     let (program, child_args) = command.split_first().expect("non-empty");
     run(program, child_args)
 }
@@ -1690,6 +1801,8 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
         "scx-loader-service" => run("/usr/bin/scx_loader", args),
         "windows-import" => windows_import(args),
         "gamescope" => gamescope(args),
+        "prime-run" => prime_run(args),
+        "game-session" => game_session(args),
         "isolate-game" => {
             require_args(args, 2, None);
             let mut command = vec![
@@ -1895,22 +2008,24 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         "shader-prune" => {
-            let cache = env::var_os("XDG_CACHE_HOME")
-                .map(PathBuf::from)
-                .unwrap_or_else(|| home().join(".cache"))
-                .join("mesa_shader_cache");
-            if cache.is_dir() {
-                let _ = fs::remove_dir_all(&cache);
+            // Size-capped, newest-wins prune across the native cache and
+            // every Flatpak app cache (Steam included) — never a wholesale
+            // delete, which only buys stutter on next launch.
+            let roots = kyth_shared::system::shader_tmpfs::cache_roots(&home());
+            let mut removed = 0u64;
+            for root in &roots {
+                removed += kyth_shared::system::shader_tmpfs::prune_root(root, 10 * 1024 * 1024 * 1024);
             }
+            println!("shader-prune: {} cache roots, {} bytes evicted", roots.len(), removed);
             Ok(ExitCode::SUCCESS)
         }
         "shader-preheat" => {
+            // GPL only. The cache *size* belongs to the configured setting
+            // (image default 10G / Hub shader size): writing 32G here used
+            // to silently override both via environment.d precedence.
             let dir = home().join(".config/environment.d");
             fs::create_dir_all(&dir)?;
-            write_atomic(
-                &dir.join("kyth-shader-cache.conf"),
-                b"MESA_SHADER_CACHE_MAX_SIZE=32G\nRADV_PERF=gpl\n",
-            )?;
+            write_atomic(&dir.join("kyth-shader-cache.conf"), b"RADV_PERF=gpl\n")?;
             Ok(ExitCode::SUCCESS)
         }
         "local-bin-migrate" => {
@@ -2011,6 +2126,66 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    #[test]
+    fn prime_run_and_game_session_reject_missing_separator() {
+        let no_sep = ["steam".to_string()];
+        assert!(prime_run(&no_sep).is_err());
+        assert!(game_session(&no_sep).is_err());
+        let empty_cmd = ["--".to_string()];
+        assert!(prime_run(&empty_cmd).is_err());
+        assert!(game_session(&empty_cmd).is_err());
+    }
+
+    #[test]
+    fn session_lock_path_matches_activity_watch() {
+        // gaming_activity.rs watches /run/user/{uid}/gamescope-session.lock;
+        // a divergent path here would leave the scheduler blind to sessions.
+        let expected = format!("/run/user/{}/gamescope-session.lock", super::libc_uid());
+        assert_eq!(session_lock_path(), PathBuf::from(expected));
+    }
+
+    #[test]
+    fn gamescope_presets_all_resolve_with_flags() {
+        // Every preset gaming_perf.rs emits must resolve — Sharp/Latency
+        // used to die with "unknown gamescope preset" at launch time.
+        for preset in [
+            "quality",
+            "balanced",
+            "hdr",
+            "sharp",
+            "latency",
+            "performance",
+        ] {
+            let (flags, _) = gamescope_preset_flags(preset)
+                .unwrap_or_else(|| panic!("preset {preset} must resolve"));
+            assert!(
+                flags.contains(&"--fullscreen"),
+                "{preset} must scope fullscreen"
+            );
+        }
+        assert!(gamescope_preset_flags("nope").is_none());
+    }
+
+    #[test]
+    fn gamescope_hdr_carries_hdr_flag_and_wsi() {
+        let (flags, env) = gamescope_preset_flags("hdr").unwrap();
+        assert!(
+            flags.contains(&"--hdr-enabled"),
+            "hdr preset without --hdr-enabled is plain SDR"
+        );
+        assert!(
+            env.contains(&("ENABLE_HDR_WSI", "1")),
+            "Proton HDR needs the WSI env"
+        );
+        let (sdr_flags, _) = gamescope_preset_flags("quality").unwrap();
+        assert!(
+            !sdr_flags.contains(&"--hdr-enabled"),
+            "SDR presets must not set HDR flags"
+        );
+    }
+
     use super::flavor_suffix_for;
     use super::parse_mem_sleep_modes;
 
