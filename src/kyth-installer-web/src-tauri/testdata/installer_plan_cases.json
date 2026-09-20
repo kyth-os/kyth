@@ -88,5 +88,20 @@
     "name": "reject-reversed-free-region",
     "input": {"disk": "sda", "install_mode": "free_space", "free_region_start": 10, "free_region_end": 5},
     "error_contains": "No free space region"
+  },
+  {
+    "name": "reject-empty-mode-instead-of-defaulting-to-wipe",
+    "input": {"disk": "sda", "install_mode": "   "},
+    "error_contains": "No install mode"
+  },
+  {
+    "name": "reject-dev-directory-as-disk",
+    "input": {"disk": "/dev", "install_mode": "wipe"},
+    "error_contains": "No target disk"
+  },
+  {
+    "name": "reject-empty-basename-device",
+    "input": {"disk": "/dev/", "install_mode": "wipe"},
+    "error_contains": "No target disk"
   }
 ]

@@ -18,6 +18,12 @@ use regex::Regex;
 use serde_json::{json, Map, Value};
 
 const SOCKET: &str = "/run/kyth/privileged.sock";
+/// Largest single request line the root daemon will read: without a cap
+/// one line can OOM it. Legitimate requests are small JSON objects.
+const MAX_REQUEST_LINE_BYTES: u64 = 128 * 1024;
+/// Cap on concurrent client threads: the accept loop spawns one thread
+/// per connection, so an uncapped wheel member could exhaust threads.
+const MAX_CLIENTS: usize = 32;
 const AUDIT_LOG: &str = "/var/log/kyth/privileged.log";
 const MAX_SHARE_PAYLOAD: usize = 64 * 1024;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
@@ -75,7 +81,6 @@ static MOUNT_PATH_RE: OnceLock<Regex> = OnceLock::new();
 static SHARE_NAME_RE: OnceLock<Regex> = OnceLock::new();
 static SHARE_HOST_RE: OnceLock<Regex> = OnceLock::new();
 static FLATPAK_ID_RE: OnceLock<Regex> = OnceLock::new();
-static BLOCK_DEVICE_RE: OnceLock<Regex> = OnceLock::new();
 
 fn mount_path_re() -> &'static Regex {
     MOUNT_PATH_RE.get_or_init(|| Regex::new(r"^[A-Za-z0-9._/ -]+$").expect("mount path regex"))
@@ -92,15 +97,6 @@ fn share_host_re() -> &'static Regex {
 fn flatpak_id_re() -> &'static Regex {
     FLATPAK_ID_RE.get_or_init(|| {
         Regex::new(r"^[A-Za-z0-9]+(?:[.-][A-Za-z0-9_]+)+$").expect("Flatpak id regex")
-    })
-}
-
-fn block_device_re() -> &'static Regex {
-    BLOCK_DEVICE_RE.get_or_init(|| {
-        Regex::new(
-            r"^/dev/(sd[a-z][0-9]*|nvme[0-9]+n[0-9]+p?[0-9]*|vd[a-z][0-9]*|mmcblk[0-9]+p?[0-9]*)$",
-        )
-        .expect("block device regex")
     })
 }
 
@@ -192,7 +188,7 @@ fn valid_flatpak_id(value: &str) -> bool {
 }
 
 fn valid_block_device(value: &str) -> bool {
-    block_device_re().is_match(value)
+    crate::system::software_catalog::valid_block_device_path(value)
 }
 
 /// Validate a request into a fixed executable/argument shape.
@@ -495,9 +491,17 @@ fn handle_client(stream: UnixStream) {
     let mut line = String::new();
     loop {
         line.clear();
-        match reader.read_line(&mut line) {
+        // A single unbounded line can OOM the root daemon: cap at 128 KiB
+        // and drop the connection past it. take() ends the read at the
+        // cap, and any bytes beyond a full line mean the peer is hostile.
+        let mut capped = (&mut reader).take(MAX_REQUEST_LINE_BYTES);
+        match capped.read_line(&mut line) {
             Ok(0) => break,
             Ok(_) => {
+                if line.len() as u64 >= MAX_REQUEST_LINE_BYTES && !line.ends_with('\n') {
+                    audit(uid, "oversize", false, "request line exceeded cap");
+                    break;
+                }
                 let request = serde_json::from_str::<Value>(&line);
                 let operation = request
                     .as_ref()
@@ -567,7 +571,20 @@ pub fn serve() -> Result<(), String> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                thread::spawn(|| handle_client(stream));
+                // Bound concurrent clients: without this, one peer opening
+                // connections in a loop exhausts daemon threads (root DoS).
+                static CLIENTS: std::sync::atomic::AtomicUsize =
+                    std::sync::atomic::AtomicUsize::new(0);
+                let active = CLIENTS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if active >= MAX_CLIENTS {
+                    CLIENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                    eprintln!("kyth-privileged: client cap reached, refusing connection");
+                    continue;
+                }
+                thread::spawn(|| {
+                    handle_client(stream);
+                    CLIENTS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+                });
             }
             Err(error) => eprintln!("kyth-privileged: incoming connection failed: {error}"),
         }

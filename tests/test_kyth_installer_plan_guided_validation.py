@@ -328,7 +328,7 @@ class GuidedPlanValidationTests(unittest.TestCase):
             get_journal=lambda c: SimpleNamespace(committed=True, root_partition=""),
         )
         with self.assertRaisesRegex(RuntimeError, "No target disk"):
-            _validate_install_target({}, dependencies=deps)
+            _validate_install_target({"install_mode": "wipe"}, dependencies=deps)
         # manual no root
         snap = StorageSnapshot(disks=({"name": "/dev/sda"},), partitions=(
             {"name": "/dev/sda1", "efi": True, "fstype": "vfat",

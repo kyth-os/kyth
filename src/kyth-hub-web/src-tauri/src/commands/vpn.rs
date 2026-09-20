@@ -28,12 +28,35 @@ fn saml_consumed() -> &'static Mutex<HashSet<String>> {
 }
 
 /// Claim the cookie for `job`. Returns false when a previous callback
-/// already consumed it — the caller must ignore the duplicate.
+/// already consumed it — the caller must ignore the duplicate. Fail
+/// closed on a poisoned lock (already-consumed): failing open would
+/// permanently disable the double-reconnect guard after any panic.
 fn claim_saml_cookie(job: &str) -> bool {
     saml_consumed()
         .lock()
         .map(|mut consumed| consumed.insert(job.to_string()))
-        .unwrap_or(true)
+        .unwrap_or(false)
+}
+
+/// Drop a consumed SAML claim (terminal state / disconnect), so the set
+/// cannot grow across the process lifetime alongside the capped runtimes.
+fn release_saml_cookie(job: &str) {
+    if let Ok(mut consumed) = saml_consumed().lock() {
+        consumed.remove(job);
+    }
+}
+
+/// Reap consumed claims whose runtimes are gone (crash paths that never
+/// reached disconnect): without this the set grows forever while the job
+/// store itself is capped and pruned.
+fn reap_saml_cookies() {
+    let live: std::collections::HashSet<String> = jobs()
+        .lock()
+        .map(|store| store.keys().cloned().collect())
+        .unwrap_or_default();
+    if let Ok(mut consumed) = saml_consumed().lock() {
+        consumed.retain(|job| live.contains(job));
+    }
 }
 
 /// Upper bound on tracked VPN runtimes. Connects are rare user actions, so
@@ -158,12 +181,10 @@ fn save_profile(
         .ok_or_else(|| "VPN config path is invalid".to_string())?;
     fs::create_dir_all(parent)
         .map_err(|error| format!("could not create VPN config directory: {error}"))?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
-            .map_err(|error| error.to_string())?;
-    }
+    // Never touch the parent dir's mode: it is ~/.config itself, and
+    // chmodding it to 0700 on every connect clobbers the user's real
+    // config-dir permissions. The FILE gets 0600 below; that is the
+    // only secret here.
     let content = format!("[vpn]\ngateway = {gateway}\nprotocol = {protocol}\nos = {os_emulation}\nusername = {username}\n");
     kyth_shared::atomic_io::atomic_write_text(&path, &content, Some(0o600))
         .map_err(|error| format!("could not save VPN profile: {error}"))
@@ -908,6 +929,8 @@ pub(crate) fn vpn_disconnect(job: String) -> Result<String, String> {
     runtime.stopped.store(true, Ordering::SeqCst);
     runtime.generation.fetch_add(1, Ordering::SeqCst);
     terminate_child(&runtime);
+    release_saml_cookie(&job);
+    reap_saml_cookies();
     status(&runtime, "complete", "VPN disconnected.");
     // Clean user disconnect lifts any fail-closed lockdown. A failed
     // restore gets its own terminal state rather than clobbering `complete`.

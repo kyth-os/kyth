@@ -526,6 +526,17 @@ test("phase-5 stops silent data loss and fake success", async () => {
   assert.match(service, /Files already here are kept; overwritten ones are backed up first/, "cloud confirm must promise no deletion");
 });
 
+test("bug-hunt round 3: installer fail-closed and daemon bounds", async () => {
+  // Empty mode never wipes, GiB math is checked, devices need real
+  // basenames, the root daemon caps lines and clients, stage output is
+  // capped, SAML fails closed and is reaped, both crates share one
+  // block-device gate, ~/.config keeps its mode, and bad profile lines
+  // are skipped instead of wiping the profile.
+  const installerPlan = await readFile(resolve(root, "../kyth-installer-web/src-tauri/src/installer_plan.rs"), "utf8");
+  assert.match(installerPlan, /No install mode was selected/, "empty mode must fail, never wipe");
+  assert.match(installerPlan, /checked_mul\(BYTES_PER_GIB\)/, "GiB math must be checked");
+});
+
 test("bug-hunt round 2 closes races and verifier gaps", async () => {
   // VPN refuses duplicate connects on any live state, the cloud backup
   // dir is excluded, flatpak restores validate ids, HOME containment

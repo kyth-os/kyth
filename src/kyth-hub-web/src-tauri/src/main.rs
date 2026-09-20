@@ -1588,7 +1588,12 @@ fn vpn_saved_profile() -> Option<VpnSavedProfile> {
         if !in_vpn_section || line.starts_with('#') || line.starts_with(';') {
             continue;
         }
-        let (key, value) = line.split_once('=')?;
+        // One hand-edited or legacy line without '=' must not erase the
+        // whole saved profile (and force re-entering gateway/creds): skip
+        // it, keep the keys that did parse.
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
         values.insert(key.trim().to_ascii_lowercase(), value.trim().to_string());
     }
     let gateway = values.remove("gateway")?;

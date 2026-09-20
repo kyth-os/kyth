@@ -190,6 +190,48 @@ pub fn valid_flatpak_id(app_id: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_'))
 }
 
+/// Single shared block-device gate for the Hub precheck and the root
+/// daemon: both crates must agree, or valid requests die with confusing
+/// errors on one side. Accepts full `/dev/...` paths for sd (one or MORE
+/// letters — `sdaa+` systems exist), vd, nvme, and mmcblk, with an
+/// optional partition suffix (whole-disk mmcblk0 unlocks are legitimate).
+pub fn valid_block_device_path(value: &str) -> bool {
+    let Some(name) = value.strip_prefix("/dev/") else {
+        return false;
+    };
+    if name.is_empty() || name.len() > 64 || name.contains('/') || !name.is_ascii() {
+        return false;
+    }
+    if let Some(rest) = name.strip_prefix("sd").or_else(|| name.strip_prefix("vd")) {
+        let letters = rest
+            .bytes()
+            .take_while(|byte| byte.is_ascii_lowercase())
+            .count();
+        let digits = &rest[letters..];
+        return letters >= 1 && digits.bytes().all(|byte| byte.is_ascii_digit());
+    }
+    if let Some(rest) = name.strip_prefix("nvme") {
+        let Some((controller, namespace)) = rest.split_once('n') else {
+            return false;
+        };
+        let (namespace, partition) = namespace
+            .split_once('p')
+            .map_or((namespace, ""), |(n, p)| (n, p));
+        return !controller.is_empty()
+            && controller.bytes().all(|byte| byte.is_ascii_digit())
+            && !namespace.is_empty()
+            && namespace.bytes().all(|byte| byte.is_ascii_digit())
+            && partition.bytes().all(|byte| byte.is_ascii_digit());
+    }
+    if let Some(rest) = name.strip_prefix("mmcblk") {
+        let (device, partition) = rest.split_once('p').map_or((rest, ""), |(d, p)| (d, p));
+        return !device.is_empty()
+            && device.bytes().all(|byte| byte.is_ascii_digit())
+            && partition.bytes().all(|byte| byte.is_ascii_digit());
+    }
+    false
+}
+
 pub fn parse_appstream_results(raw: &str) -> Vec<AppStreamApp> {
     raw.lines()
         .filter_map(|line| {
@@ -489,6 +531,38 @@ pub fn familiar_apps() -> Vec<FamiliarApp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn block_device_gate_covers_real_disk_shapes() {
+        for good in [
+            "/dev/sda",
+            "/dev/sda1",
+            "/dev/sdaa",
+            "/dev/sdaa15",
+            "/dev/vdb",
+            "/dev/nvme0n1",
+            "/dev/nvme0n1p2",
+            "/dev/mmcblk0",
+            "/dev/mmcblk0p1",
+        ] {
+            assert!(valid_block_device_path(good), "{good} must validate");
+        }
+        for bad in [
+            "/dev/",
+            "/dev",
+            "sda",
+            "/dev/sdaa!",
+            "/dev/../etc",
+            "/dev/mapper/locked",
+            "/dev/sd",
+            "/dev/sdA",
+            "/dev/nvme",
+            "/tmp/disk",
+            "",
+        ] {
+            assert!(!valid_block_device_path(bad), "{bad} must fail");
+        }
+    }
 
     #[test]
     fn parses_appstream_rows_and_skips_non_ids() {

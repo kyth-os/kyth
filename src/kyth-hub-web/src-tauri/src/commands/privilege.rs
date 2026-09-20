@@ -184,41 +184,11 @@ pub(crate) fn validate_flatpak_id(value: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Hub-side precheck delegates to the single shared gate also enforced
+/// by the root daemon, so both sides agree on sdaa+, whole-disk mmcblk,
+/// and every other shape.
 fn valid_block_device(value: &str) -> bool {
-    let Some(name) = value.strip_prefix("/dev/") else {
-        return false;
-    };
-    if name.is_empty() || name.len() > 64 || name.contains('/') || !name.is_ascii() {
-        return false;
-    }
-    if let Some(rest) = name.strip_prefix("sd").or_else(|| name.strip_prefix("vd")) {
-        return rest.len() >= 1
-            && rest.as_bytes()[0].is_ascii_lowercase()
-            && rest[1..].bytes().all(|byte| byte.is_ascii_digit());
-    }
-    if let Some(rest) = name.strip_prefix("nvme") {
-        let Some((controller, namespace)) = rest.split_once('n') else {
-            return false;
-        };
-        let (namespace, partition) = namespace
-            .split_once('p')
-            .map_or((namespace, ""), |(n, p)| (n, p));
-        return !controller.is_empty()
-            && controller.bytes().all(|byte| byte.is_ascii_digit())
-            && !namespace.is_empty()
-            && namespace.bytes().all(|byte| byte.is_ascii_digit())
-            && partition.bytes().all(|byte| byte.is_ascii_digit());
-    }
-    if let Some(rest) = name.strip_prefix("mmcblk") {
-        let Some((device, partition)) = rest.split_once('p') else {
-            return false;
-        };
-        return !device.is_empty()
-            && device.bytes().all(|byte| byte.is_ascii_digit())
-            && !partition.is_empty()
-            && partition.bytes().all(|byte| byte.is_ascii_digit());
-    }
-    false
+    kyth_shared::system::software_catalog::valid_block_device_path(value)
 }
 
 #[tauri::command]

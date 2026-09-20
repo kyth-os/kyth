@@ -43,12 +43,23 @@ pub(crate) fn normalize_device_path(raw: &str) -> Option<String> {
     if value.is_empty() {
         return None;
     }
+    // Bare names ("sda") get the prefix; absolute /dev paths pass
+    // through. Anything else with a slash ("/dev" itself, "foo/bar") is
+    // rejected instead of re-prefixed into "/dev/dev"-style nonsense that
+    // then feeds destructive disk targets.
     let value = if value.starts_with("/dev/") {
         value.to_string()
+    } else if value.contains('/') {
+        return None;
     } else {
         format!("/dev/{value}")
     };
-    if !value.starts_with("/dev/")
+    // "/dev/" (empty basename) and "/dev" (which becomes "/dev/dev")
+    // both passed; both feed destructive disk targets. Require a real
+    // single-level basename after the prefix.
+    let basename = value.strip_prefix("/dev/").unwrap_or("");
+    if basename.is_empty()
+        || basename.contains('/')
         || value.len() > 4096
         || value.contains("..")
         || !value.bytes().all(|byte| {
@@ -66,14 +77,12 @@ fn required_device(raw: &str, message: &str) -> Result<String, String> {
 
 /// Normalize a frontend request into the storage portion consumed by planning.
 pub fn build_plan(input: InstallerPlanInput) -> Result<InstallerPlan, String> {
-    let mode = {
-        let value = input.install_mode.trim().to_ascii_lowercase();
-        if value.is_empty() {
-            "wipe".to_string()
-        } else {
-            value
-        }
-    };
+    // Empty mode must NEVER default to "wipe": a malformed or
+    // default-constructed request would full-disk-wipe. Fail closed.
+    let mode = input.install_mode.trim().to_ascii_lowercase();
+    if mode.is_empty() {
+        return Err("No install mode was selected.".to_string());
+    }
     if !matches!(
         mode.as_str(),
         "wipe" | "resize_ntfs" | "alongside" | "free_space" | "manual"
@@ -107,7 +116,11 @@ pub fn build_plan(input: InstallerPlanInput) -> Result<InstallerPlan, String> {
                 partition,
                 "No NTFS partition was selected to shrink.",
             )?),
-            (input.resize_gib as u64) * BYTES_PER_GIB,
+            // Unchecked, a huge resize_gib wraps (release) or panics
+            // (debug) into a tiny shrink fed to NTFS resize. Fail closed.
+            (input.resize_gib as u64)
+                .checked_mul(BYTES_PER_GIB)
+                .ok_or_else(|| "Requested install size is too large to represent.".to_string())?,
         )
     } else {
         (None, 0)
@@ -222,6 +235,30 @@ mod tests {
                     ..input()
                 },
                 "at least",
+            ),
+            (
+                InstallerPlanInput {
+                    install_mode: "   ".to_string(),
+                    ..input()
+                },
+                "No install mode",
+            ),
+            (
+                InstallerPlanInput {
+                    install_mode: "resize_ntfs".to_string(),
+                    disk: "/dev/sda".to_string(),
+                    target_partition: "/dev/sda2".to_string(),
+                    resize_gib: i64::MAX,
+                    ..input()
+                },
+                "too large",
+            ),
+            (
+                InstallerPlanInput {
+                    disk: "/dev".to_string(),
+                    ..input()
+                },
+                "target disk",
             ),
             (
                 InstallerPlanInput {

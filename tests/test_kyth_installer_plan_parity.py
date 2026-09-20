@@ -109,8 +109,13 @@ class InstallerPlanParityTests(unittest.TestCase):
                 continue
             with self.subTest(case=case["name"]):
                 config = case["input"]
-                mode = config.get("install_mode", "wipe").strip().lower() or "wipe"
-                if mode == "resize_ntfs":
+                # Mirror the native boundary: no wipe default. Empty mode
+                # routes to the install-target validator, which raises
+                # "No install mode was selected."
+                mode = str(config.get("install_mode") or "").strip().lower()
+                if not mode:
+                    validator = lambda: _validate_install_target(config, object(), snapshot=snapshot, dependencies=validation)
+                elif mode == "resize_ntfs":
                     validator = lambda: validate_resize_ntfs_target(config, snapshot=snapshot, dependencies=guided)
                 elif mode == "free_space":
                     validator = lambda: validate_free_space_target(config, snapshot=snapshot, dependencies=guided)

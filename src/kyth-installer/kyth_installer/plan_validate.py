@@ -30,6 +30,29 @@ _logger = logging.getLogger(__name__)
 _EFI_FIRMWARE_PATH = "/sys/firmware/efi"
 
 
+def _selectable_device(value) -> str | None:
+    """User-selected disks/partitions must be single-level /dev names.
+
+    Mirrors the native plan boundary: "/dev" (which normalizes to
+    "/dev/dev") and multi-level paths are rejected before they can feed
+    destructive targets. Walks and discovery keep using
+    `_normal_device_path`, which must stay permissive for mapper paths.
+    """
+    path = _normal_device_path(value)
+    if path is None:
+        return None
+    # Mirror the native boundary on the RAW input as well: "/dev" itself
+    # normalizes to "/dev/dev", whose basename looks innocent. Anything
+    # with a slash that is not already an absolute /dev path is rejected.
+    raw = str(value).strip()
+    if not raw.startswith("/dev/") and "/" in raw:
+        return None
+    basename = path[len("/dev/"):]
+    if not basename or "/" in basename:
+        return None
+    return path
+
+
 def _is_uefi_boot(path_exists=os.path.exists) -> bool:
     """Return True when the live session booted via UEFI rather than legacy BIOS."""
     try:
@@ -248,8 +271,10 @@ def _validate_install_target(
 ) -> tuple[str, str | None]:
     dependencies = dependencies or default_validation_dependencies()
 
-    mode = str(config.get("install_mode") or "wipe").strip().lower()
-    disk = _normal_device_path(config.get("disk"))
+    mode = str(config.get("install_mode") or "").strip().lower()
+    if not mode:
+        raise RuntimeError("No install mode was selected.")
+    disk = _selectable_device(config.get("disk"))
     if not disk:
         raise RuntimeError("No target disk was selected.")
 
@@ -271,7 +296,7 @@ def _validate_install_target(
         return disk, None
 
     if mode == "alongside":
-        target = _normal_device_path(config.get("target_partition"))
+        target = _selectable_device(config.get("target_partition"))
         if not target:
             raise RuntimeError("No target partition was selected for alongside installation.")
         if dependencies.parent_disk(target) != disk:
@@ -327,8 +352,8 @@ def validate_resize_ntfs_target(
     uefi_boot: bool | None = None,
 ) -> tuple[str, str, int]:
     """Validate an NTFS shrink request without modifying its filesystem."""
-    disk = _normal_device_path(config.get("disk"))
-    partition = _normal_device_path(
+    disk = _selectable_device(config.get("disk"))
+    partition = _selectable_device(
         config.get("resize_partition") or config.get("target_partition")
     )
     shrink_gib = _safe_int(config.get("resize_gib") or config.get("shrink_gib") or 0)

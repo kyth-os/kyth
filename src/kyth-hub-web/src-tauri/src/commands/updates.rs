@@ -185,13 +185,21 @@ fn start_stage_job(
                 // Both pipes drain on helper threads from the start: a
                 // chatty helper (>64 KiB on either pipe) must never wedge
                 // the child, and cancel/timeout must preempt mid-download
-                // instead of waiting for EOF.
+                // instead of waiting for EOF. Captures are capped at 1 MiB
+                // each (overflow is truncated and marked): uncapped
+                // read_to_end/extend lets a chatty helper OOM the Hub.
+                const MAX_STAGE_CAPTURE_BYTES: usize = 1024 * 1024;
                 let stderr_handle = child.stderr.take().map(|stderr| {
                     std::thread::spawn(move || {
                         use std::io::Read;
                         let mut collected = Vec::new();
                         let mut reader = std::io::BufReader::new(stderr);
-                        let _ = reader.read_to_end(&mut collected);
+                        let mut limited = reader.take(MAX_STAGE_CAPTURE_BYTES as u64 + 1);
+                        let _ = limited.read_to_end(&mut collected);
+                        if collected.len() > MAX_STAGE_CAPTURE_BYTES {
+                            collected.truncate(MAX_STAGE_CAPTURE_BYTES);
+                            collected.extend_from_slice(b"\n...[truncated]");
+                        }
                         collected
                     })
                 });
@@ -200,6 +208,7 @@ fn start_stage_job(
                         let mut collected_out = Vec::new();
                         let mut reader = std::io::BufReader::new(stdout);
                         let mut line = String::new();
+                        let mut truncated = false;
                         loop {
                             line.clear();
                             match reader.read_line(&mut line) {
@@ -212,8 +221,13 @@ fn start_stage_job(
                                     let merged = merge_stage_snapshot(&cell, snapshot);
                                     *cell = merged;
                                 }
-                            } else {
-                                collected_out.extend_from_slice(line.as_bytes());
+                            } else if collected_out.len() < MAX_STAGE_CAPTURE_BYTES {
+                                let room = MAX_STAGE_CAPTURE_BYTES - collected_out.len();
+                                let bytes = line.as_bytes();
+                                collected_out.extend_from_slice(&bytes[..bytes.len().min(room)]);
+                            } else if !truncated {
+                                collected_out.extend_from_slice(b"\n...[truncated]");
+                                truncated = true;
                             }
                         }
                         collected_out
