@@ -94,16 +94,19 @@ export function PerformanceSection({ section }: { section: HubSection }) {
             <span className={`pill ${scx?.active ? "pill-ok" : "pill-dim"}`}>sched-ext: {scx ? scx.active ? "active" : "inactive" : "unknown"}</span>
             {scx && <span className="pill pill-dim">configured: {scx.configured}</span>}
             {gamingTools && <>
-              <span className={`pill ${gamingTools.mangohud_installed ? "pill-ok" : "pill-dim"}`}>MangoHud {gamingTools.mangohud_installed ? "ready" : "missing"}</span>
+              <span className={`pill ${gamingTools.mangohud_installed ? "pill-ok" : "pill-dim"}`}>FPS overlay {gamingTools.mangohud_installed ? "ready" : "missing"}</span>
               <span className={`pill ${gamingTools.gamescope_installed ? "pill-ok" : "pill-dim"}`}>Gamescope {gamingTools.gamescope_installed ? "ready" : "missing"}</span>
               <span className={`pill ${gamingTools.vkbasalt_installed ? "pill-ok" : "pill-dim"}`}>vkBasalt {gamingTools.vkbasalt_installed ? "ready" : "missing"}</span>
             </>}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            <ActionButton label={busy === "scheduler-rusty" ? "Starting…" : "Use scx_rusty"} disabled={busy !== null} onClick={() => run("scheduler-rusty", "Starting scx_rusty…", () => changeScheduler("rusty"))} />
+            <ActionButton label={busy === "scheduler-rusty" ? "Starting…" : scx?.active ? "Low-latency scheduler on ✓" : "Use low-latency scheduler"} disabled={busy !== null} onClick={() => run("scheduler-rusty", "Starting scx_rusty…", () => changeScheduler("rusty"))} />
             <ActionButton label={busy === "scheduler-stop" ? "Stopping…" : "Stop sched-ext"} disabled={busy !== null} onClick={() => run("scheduler-stop", "Stopping sched-ext…", () => changeScheduler("stop"))} />
             <RecipeButton recipe="system-audit" label="Gaming audit" busy={busy} run={run} />
             <RecipeButton recipe="gaming-stack-status" label="Stack status" busy={busy} run={run} />
+            {gamingTools && (gamingTools.mangohud_installed
+              ? <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Run any game with <code>MANGOHUD=1</code> for the FPS overlay — install GOverlay from Play &gt; Gaming to tune its layout without editing configs.</p>
+              : <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>MangoHud ships with KythOS; seeing “missing” here means this Hub is running on another system.</p>)}
           </div>
         </div>
 

@@ -64,20 +64,17 @@ fn main() -> std::process::ExitCode {
         );
         return std::process::ExitCode::from(2);
     }
-    let apps = [
-        "com.valvesoftware.Steam",
-        "net.lutris.Lutris",
-        "com.heroicgameslauncher.hgl",
-        "com.usebottles.bottles",
-        "com.github.mtkennerly.ludusavi",
-    ];
+    // Steam-only first boot (v14 defaults): Lutris/Heroic/Bottles/ludusavi
+    // are on-demand Hub installs. Expecting all five here reported a false
+    // "some default apps are missing" alarm on every clean install.
+    let apps = ["com.valvesoftware.Steam"];
     let missing = apps
         .iter()
         .filter(|app| !run("flatpak", &["info", app], 20).is_some_and(|(ok, _)| ok))
         .count();
     let updated = format!("{}", unix_now());
     if missing == 0 {
-        let message = "Steam, launchers, Bottles, and save backup tools are installed.";
+        let message = "Steam is installed. Extra launchers (Lutris, Heroic, Bottles) install on demand from Hub > Play.";
         let _ = kyth_shared::system::firstboot::write_app_status(
             &status_file,
             "ready",

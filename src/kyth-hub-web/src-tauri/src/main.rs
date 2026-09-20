@@ -1731,6 +1731,60 @@ fn exe_handler_launch_umu(path: String) -> Result<(), String> {
     kyth_shared::system::windows_installer::launch_in_umu(&path)
 }
 
+/// First-boot app status for the Play checklist: whether the background
+/// Steam install is still running, ready, or needs attention.
+#[derive(serde::Serialize)]
+struct FirstbootAppsStatus {
+    state: String,
+    message: String,
+    updated: String,
+}
+
+/// Steam Play default status for the Play checklist (read-only VDF scan).
+#[derive(serde::Serialize)]
+struct SteamPlayStatusFront {
+    steam_present: bool,
+    steam_running: bool,
+    mapping_present: bool,
+    detail: String,
+}
+
+#[tauri::command]
+fn steam_play_status() -> SteamPlayStatusFront {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let blank = || SteamPlayStatusFront {
+        steam_present: false,
+        steam_running: false,
+        mapping_present: false,
+        detail: "No home directory.".to_string(),
+    };
+    home.as_deref()
+        .map(|root| {
+            let status = kyth_shared::system::gaming_compat::steam_play_status(root);
+            SteamPlayStatusFront {
+                steam_present: status.steam_present,
+                steam_running: status.steam_running,
+                mapping_present: status.mapping_present,
+                detail: status.detail,
+            }
+        })
+        .unwrap_or_else(blank)
+}
+
+#[tauri::command]
+fn firstboot_apps_status() -> FirstbootAppsStatus {
+    let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+    let (state, message, updated) = home
+        .as_deref()
+        .map(kyth_shared::system::firstboot::read_app_status)
+        .unwrap_or_else(|| ("unknown".to_string(), String::new(), String::new()));
+    FirstbootAppsStatus {
+        state,
+        message,
+        updated,
+    }
+}
+
 #[tauri::command]
 fn exe_handler_set_auto_bottles(enabled: bool) -> Result<(), String> {
     let path = exe_handler_config_path();
@@ -1960,6 +2014,8 @@ fn main() {
             take_pending_page,
             take_pending_exe_handler,
             exe_handler_inspect,
+            firstboot_apps_status,
+            steam_play_status,
             exe_handler_trust,
             exe_handler_untrust,
             exe_handler_launch_umu,

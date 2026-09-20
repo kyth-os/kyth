@@ -4,12 +4,16 @@ import {
   fetchAuditCache,
   fetchCompatibilityGames,
   fetchControllersLive,
+  fetchFirstbootAppsStatus,
+  fetchSteamPlayStatus,
   fetchGamingLibrary,
   fetchGamingPerfStatus,
   fetchTelemetryRecent,
   type AuditCache,
   type CompatibilityGame,
   type ControllersLive,
+  type FirstbootAppsStatus,
+  type SteamPlayStatus,
   type GamingPerfStatus,
   type LauncherEntry,
   type TelemetrySession,
@@ -23,6 +27,8 @@ type PlayReadings = {
   compatibility: CompatibilityGame[] | null;
   performance: GamingPerfStatus | null;
   sessions: TelemetrySession[] | null;
+  firstboot: FirstbootAppsStatus | null;
+  steamPlay: SteamPlayStatus | null;
 };
 
 const emptyReadings: PlayReadings = {
@@ -32,18 +38,22 @@ const emptyReadings: PlayReadings = {
   compatibility: null,
   performance: null,
   sessions: null,
+  firstboot: null,
+  steamPlay: null,
 };
 
 async function readPlay(): Promise<PlayReadings> {
-  const [audit, launchers, controllers, compatibility, performance, sessions] = await Promise.all([
+  const [audit, launchers, controllers, compatibility, performance, sessions, firstboot, steamPlay] = await Promise.all([
     fetchAuditCache(),
     fetchGamingLibrary(),
     fetchControllersLive(),
     fetchCompatibilityGames(),
     fetchGamingPerfStatus(),
     fetchTelemetryRecent(15),
+    fetchFirstbootAppsStatus(),
+    fetchSteamPlayStatus(),
   ]);
-  return { audit, launchers, controllers, compatibility, performance, sessions };
+  return { audit, launchers, controllers, compatibility, performance, sessions, firstboot, steamPlay };
 }
 
 function tone(status: boolean | null): string {
@@ -126,6 +136,20 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
     window.setTimeout(() => document.querySelector(".tab-nav")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
   }
 
+  // First-run setup checklist: ordered, state-driven, no dead ends. Each
+  // step completes from live readings; the first incomplete step owns the
+  // primary button. Controller pairing is optional and never blocks play.
+  const steamInstalled = installedLaunchers?.some((launcher) => launcher.installed && /steam/i.test(`${launcher.id} ${launcher.label}`)) ?? null;
+  const gamingProfile = readings.audit?.master === "gaming";
+  type SetupStep = { key: string; label: string; hint: string; done: boolean | null; optional?: boolean; section: string; action: string };
+  const setupSteps: SetupStep[] = [
+    { key: "steam", label: "Install Steam", hint: readings.firstboot?.state === "setting_up" ? "Steam is installing in the background right now — give it a few minutes, then refresh." : "Your game library starts here — KythOS installs it as a Flatpak.", done: steamInstalled, section: "Gaming", action: "Install Steam" },
+    { key: "games", label: "Log into Steam and find your games", hint: readings.steamPlay && !readings.steamPlay.mapping_present ? `${readings.steamPlay.detail} Sign in first, then turn it on.` : "Sign in, then enable Steam Play for all titles so Windows games are playable.", done: gameCount === null || steamInstalled === false ? null : gameCount > 0, section: "Gaming", action: "Open game libraries" },
+    { key: "controller", label: "Pair a controller (optional)", hint: "Xbox, DualSense, and Switch pads work out of the box, wired or Bluetooth.", done: controllerCount === null ? null : controllerCount > 0, optional: true, section: "Controllers", action: "Pair a controller" },
+    { key: "perf", label: "Enable the gaming profile", hint: "Performance CPU scheduling, reduced latency, and overlay support.", done: readings.audit || readings.performance ? gamingProfile : null, section: "Performance", action: "Enable gaming profile" },
+  ];
+  const setupComplete = setupSteps.every((step) => step.done !== false);
+
   const launchersValue = installedLaunchers === null
     ? "Checking…"
     : installedLaunchers.length === 0
@@ -137,7 +161,7 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
   const controllerValue = controllerCount === null ? "Checking…" : controllerCount === 0 ? "No controller found" : `${controllerCount} connected`;
   const controllerDetail = driverCount === null
     ? "Checking USB devices and controller drivers."
-    : `${driverCount} controller driver${driverCount === 1 ? "" : "s"} loaded · test input in Controllers.`;
+    : `${driverCount} controller driver${driverCount === 1 ? "" : "s"} loaded · pair and rescan in Controllers.`;
   const performanceValue = readings.audit?.master ? String(readings.audit.master) : readings.performance ? "Ready to tune" : "Checking…";
   const performanceDetail = overlayCount === null
     ? "Gaming profile and overlay status are being checked."
@@ -178,10 +202,11 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
 
       <div className="play-actions-card">
         <div>
-          <span className="play-eyebrow">Start playing</span>
-          <h2>{readinessDetail}</h2>
-          <p>Jump straight into the task you want to finish.</p>
+          <span className="play-eyebrow">{setupComplete ? "Start playing" : "Get set up to play"}</span>
+          <h2>{setupComplete ? readinessDetail : "Four steps to your first game"}</h2>
+          <p>{setupComplete ? "Jump straight into the task you want to finish." : "Work top to bottom — each step lights up as it completes."}</p>
         </div>
+        {setupComplete ? (
         <div className="play-actions">
           <ActionButton label="Install a launcher" disabled={busy !== null} onClick={() => openSection("Gaming")} />
           <ActionButton label="Tune performance" disabled={busy !== null} onClick={() => openSection("Performance")} />
@@ -189,6 +214,20 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
           <ActionButton label="Check a game" disabled={busy !== null} onClick={() => openSection("Compatibility")} />
           <ActionButton label={busy === "play-refresh" ? "Refreshing…" : "Refresh status"} disabled={busy !== null} onClick={() => void run("play-refresh", "Refreshing Play status…", refresh)} />
         </div>
+        ) : (
+        <ol className="play-setup-list">
+          {setupSteps.map((step, index) => (
+            <li key={step.key} className={step.done ? "play-setup-done" : step.done === null ? "play-setup-pending" : index === setupSteps.findIndex((s) => s.done === false) ? "play-setup-next" : "play-setup-todo"}>
+              <span className="play-setup-marker" aria-hidden="true">{step.done ? "✓" : step.done === null ? "…" : `${index + 1}`}</span>
+              <div>
+                <strong>{step.label}</strong>
+                <p>{step.hint}</p>
+              </div>
+              {!step.done && <ActionButton label={step.action} disabled={busy !== null} onClick={() => openSection(step.section)} />}
+            </li>
+          ))}
+        </ol>
+        )}
       </div>
       <ActionStatus status={status} />
     </section>

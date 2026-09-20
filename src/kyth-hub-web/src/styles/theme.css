@@ -1418,6 +1418,15 @@ body {
 .play-actions-card p, .play-controls-heading p, .play-content-heading p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; }
 .play-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .play-actions .action-button { white-space: nowrap; }
+.play-setup-list { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; width: 100%; }
+.play-setup-list li { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-raised); }
+.play-setup-list strong { color: var(--text); font-size: 12px; }
+.play-setup-list p { margin: 2px 0 0; color: var(--text-muted); font-size: 11px; }
+.play-setup-marker { flex: none; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 99px; font-size: 11px; font-weight: 700; background: rgba(255, 255, 255, .08); color: var(--text-muted); }
+.play-setup-done .play-setup-marker { background: var(--status-ok); color: #06130b; }
+.play-setup-done { opacity: .75; }
+.play-setup-next { border-color: var(--status-ok); }
+.play-setup-list .action-button { margin-left: auto; white-space: nowrap; }
 .play-controls-heading, .play-content-heading { padding: 3px 3px 0; }
 .play-guidance-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
 .play-guidance-grid > div, .play-profile-preview { display: flex; flex-direction: column; gap: 4px; padding: 11px 12px; border: 1px solid var(--hairline); border-radius: 10px; background: var(--surface-raised); }

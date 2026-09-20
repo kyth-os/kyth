@@ -42,6 +42,28 @@ pub fn app_status_content(state: &str, message: &str, updated: &str) -> String {
     format!("state={state}\nmessage={message}\nupdated={updated}\n")
 }
 
+/// Read back first-boot status for Hub display. Missing file reads as
+/// `{"state": "unknown"}` so a fresh boot shows progress, not an error.
+pub fn read_app_status(home: impl AsRef<Path>) -> (String, String, String) {
+    let path = home
+        .as_ref()
+        .join(".local/share/kyth/first-run-apps.status");
+    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let mut state = "unknown".to_string();
+    let mut message = String::new();
+    let mut updated = String::new();
+    for line in text.lines() {
+        if let Some(value) = line.strip_prefix("state=") {
+            state = value.trim().to_string();
+        } else if let Some(value) = line.strip_prefix("message=") {
+            message = value.trim().to_string();
+        } else if let Some(value) = line.strip_prefix("updated=") {
+            updated = value.trim().to_string();
+        }
+    }
+    (state, message, updated)
+}
+
 /// Persist first-boot status through the shared crash-safe writer.
 pub fn write_app_status(
     path: impl AsRef<Path>,

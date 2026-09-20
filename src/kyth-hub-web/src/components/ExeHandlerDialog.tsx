@@ -29,6 +29,7 @@ export function ExeHandlerDialog() {
   const [trustDirect, setTrustDirect] = useState(false);
   const [flatpakInstalled, setFlatpakInstalled] = useState(false);
   const [job, setJob] = useState<ExeHandlerJob | null>(null);
+  const [pollEpoch, setPollEpoch] = useState(0);
   const [cancelling, setCancelling] = useState(false);
   const startedAutomatically = useRef(false);
 
@@ -114,14 +115,14 @@ export function ExeHandlerDialog() {
       polls += 1;
       if (polls >= 240) {
         window.clearInterval(timer);
-        setError("The installer is still running after several minutes. Close this dialog and check whether the app appeared; if not, try again.");
+        setError("The installer is still running after several minutes. It may finish in the background — keep waiting, or close and re-open the file to resume tracking.");
         return;
       }
       const next = await fetchInstallStatus(job.job);
       if (next) setJob({ job: next.id, state: next.state, detail: next.detail });
     }, 750);
     return () => window.clearInterval(timer);
-  }, [job]);
+  }, [job, pollEpoch]);
 
   if (!inspection && !error) return null;
   const unsupported = inspection?.compatibility?.level === "unsupported";
@@ -139,11 +140,11 @@ export function ExeHandlerDialog() {
             {inspection.sha256_prefix && <p style={{ opacity: .6, fontSize: ".82em" }}>SHA-256: {inspection.sha256_prefix}…</p>}
           </>}
           {job && <p role="status"><strong>{job.state === "failed" ? "Could not open installer:" : "Installer workflow:"}</strong> {job.detail}</p>}
-          {error && <p role="alert" style={{ color: "#f48771" }}>{error}</p>}
+          {error && <p role="alert" style={{ color: "#f48771" }}>{error} {job?.state === "running" && <button onClick={() => { setError(null); setPollEpoch((epoch) => epoch + 1); }}>Keep waiting</button>}</p>}
           {!inspection.is_rpm && (inspection.trusted_direct
             ? <p style={{ opacity: .72, fontSize: ".9em" }}>✓ Trusted — double-clicking this file runs it directly. <button onClick={() => { if (inspection.sha256_full) void untrustExeHandlerFile(inspection.sha256_full).then(() => setInspection({ ...inspection, trusted_direct: false })).catch((reason) => setError(String(reason))); }}>Forget this file</button></p>
-            : <label style={{ display: "block", margin: "16px 0 4px" }}><input type="checkbox" checked={trustDirect} onChange={(event) => setTrustDirect(event.target.checked)} /> Always run this exact file directly (skip this dialog next time)</label>)}
-          {!inspection.is_rpm && <label style={{ display: "block", margin: "16px 0" }}><input type="checkbox" checked={autoBottles} onChange={async (event) => { const enabled = event.target.checked; setAutoBottles(enabled); try { await setExeHandlerAutoBottles(enabled); } catch (reason) { setError(String(reason)); } }} /> Automatically prepare and run future compatible Windows installers</label>}
+            : <label style={{ display: "block", margin: "16px 0 4px" }}><input type="checkbox" checked={trustDirect} onChange={(event) => setTrustDirect(event.target.checked)} /> Always run this exact file directly (skip this dialog next time — any change to the file asks again)</label>)}
+          {!inspection.is_rpm && <label style={{ display: "block", margin: "16px 0" }}><input type="checkbox" checked={autoBottles} onChange={async (event) => { const enabled = event.target.checked; setAutoBottles(enabled); try { await setExeHandlerAutoBottles(enabled); } catch (reason) { setError(String(reason)); } }} /> Skip this dialog for future installers rated Likely — start Bottles straight away</label>}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {inspection.is_rpm && <button onClick={() => { window.location.hash = "/apps"; setInspection(null); }}>Open App Store</button>}
             {!inspection.is_rpm && <button onClick={() => void startBottles()} disabled={job?.state === "running"}>{unsupported ? "Try Anyway" : "Run Windows Installer"}</button>}

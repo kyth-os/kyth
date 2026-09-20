@@ -472,3 +472,23 @@ test("exe trust-once fast path is wired end to end", () => {
   assert.match(exeDialog, /trustExeHandlerFile\(inspection\.sha256_full/, "dialog must record the full content hash, never a prefix");
   assert.match(exeDialog, /launchExeHandlerUmu/, "dialog must offer the Proton path for game exes");
 });
+
+test("phase-2 onboarding is state-driven, not copy", async () => {
+  // Play checklist derives from live readings (first run shows steps,
+  // finished setup shows actions); the Home banner and Steam step read
+  // the background-install status; Steam Play defaults are verified
+  // read-only from config.vdf, never written.
+  assert.match(rust, /firstboot_apps_status/, "first-boot status command must be registered");
+  assert.match(rust, /steam_play_status/, "steam play status command must be registered");
+  assert.match(service, /fetchFirstbootAppsStatus/, "first-boot wrapper must exist");
+  assert.match(service, /fetchSteamPlayStatus/, "steam play wrapper must exist");
+  const playOverview = await readFile(resolve(root, "src/components/PlayOverview.tsx"), "utf8");
+  const controllersSection = await readFile(resolve(root, "src/components/ControllersSection.tsx"), "utf8");
+  const playPage = await readFile(resolve(root, "src/pages/Play.tsx"), "utf8");
+  assert.match(playOverview, /setupSteps/, "Play must render the ordered setup checklist");
+  assert.match(playOverview, /setupComplete/, "Play must collapse the checklist once setup finishes");
+  assert.match(playPage, /Nothing played yet/, "Play must explain an empty session history");
+  assert.match(gaming, /Steam Play defaults/, "Gaming must surface the Steam Play default state");
+  assert.match(gaming, /Install Vesktop/, "Gaming must offer one-click voice chat");
+  assert.match(controllersSection, /GamepadTester/, "Controllers must include a live input tester");
+});

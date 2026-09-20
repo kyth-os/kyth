@@ -1956,6 +1956,20 @@ export async function inspectExeHandler(path: string): Promise<ExeHandlerInspect
   if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");
   return await invoke<ExeHandlerInspection>("exe_handler_inspect", { path });
 }
+export interface FirstbootAppsStatus { state: string; message: string; updated: string; }
+export interface SteamPlayStatus { steam_present: boolean; steam_running: boolean; mapping_present: boolean; detail: string; }
+export async function fetchSteamPlayStatus(): Promise<SteamPlayStatus | null> {
+  if (!inTauriShell()) return null;
+  try {
+    return await invoke<SteamPlayStatus>("steam_play_status");
+  } catch { return null; }
+}
+export async function fetchFirstbootAppsStatus(): Promise<FirstbootAppsStatus | null> {
+  if (!inTauriShell()) return null;
+  try {
+    return await invoke<FirstbootAppsStatus>("firstboot_apps_status");
+  } catch { return null; }
+}
 export async function trustExeHandlerFile(sha256: string, name: string, runner: "bottles" | "umu"): Promise<void> {
   if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");
   await invoke("exe_handler_trust", { sha256, name, runner });

@@ -61,3 +61,93 @@ pub fn anti_cheat_table() -> Vec<AntiCheatEntry> {
         AntiCheatEntry { game: "Valve Anti-Cheat".into(), status: "varies".into(), detail: "Check the title's ProtonDB reports and current Steam compatibility notes.".into() },
     ]
 }
+
+/// Steam Play default status, read from Steam's own config.vdf. Read-only:
+/// editing VDF while Steam runs corrupts it, so the Hub instructs and
+/// verifies instead of writing.
+#[derive(Debug, Clone, Serialize)]
+pub struct SteamPlayStatus {
+    pub steam_present: bool,
+    pub steam_running: bool,
+    pub mapping_present: bool,
+    pub detail: String,
+}
+
+pub fn steam_config_vdf(home: &std::path::Path) -> std::path::PathBuf {
+    home.join(".var/app/com.valvesoftware.Steam/.local/share/Steam/config/config.vdf")
+}
+
+pub fn steam_running() -> bool {
+    crate::system::process::run_bounded(
+        &["pgrep".to_string(), "-x".to_string(), "steam".to_string()],
+        Duration::from_secs(5),
+    )
+    .map(|output| output.status.success())
+    .unwrap_or(false)
+}
+
+pub fn steam_play_status(home: &std::path::Path) -> SteamPlayStatus {
+    let vdf = steam_config_vdf(home);
+    let steam_present = vdf.exists();
+    if !steam_present {
+        return SteamPlayStatus {
+            steam_present: false,
+            steam_running: false,
+            mapping_present: false,
+            detail: "Steam is not installed yet.".to_string(),
+        };
+    }
+    let running = steam_running();
+    let text = std::fs::read_to_string(&vdf).unwrap_or_default();
+    // A global default mapping appears as a CompatToolMapping section with a
+    // "0" (all-titles) entry. Textual scan only — the Hub never writes VDF.
+    let mapping_present = text.contains("CompatToolMapping") && text.contains("\"0\"");
+    let detail = if mapping_present {
+        "Steam Play is enabled for all titles.".to_string()
+    } else if running {
+        "Quit Steam, then open Steam → Settings → Compatibility → “Enable Steam Play for all other titles”.".to_string()
+    } else {
+        "Open Steam → Settings → Compatibility → “Enable Steam Play for all other titles”."
+            .to_string()
+    };
+    SteamPlayStatus {
+        steam_present,
+        steam_running: running,
+        mapping_present,
+        detail,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn missing_steam_reports_not_present() {
+        let directory = tempdir().unwrap();
+        let status = steam_play_status(directory.path());
+        assert!(!status.steam_present && !status.mapping_present);
+    }
+
+    #[test]
+    fn global_mapping_detected_in_vdf() {
+        let directory = tempdir().unwrap();
+        let config = steam_config_vdf(directory.path());
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&config, "\"InstallConfigStore\"\n{\n\"Software\"\n{\n\"Valve\"\n{\n\"Steam\"\n{\n\"CompatToolMapping\"\n{\n\"0\"\n{\"name\"\"proton_experimental\"}}}}}}").unwrap();
+        let status = steam_play_status(directory.path());
+        assert!(status.steam_present && status.mapping_present);
+    }
+
+    #[test]
+    fn vdf_without_mapping_reports_absent() {
+        let directory = tempdir().unwrap();
+        let config = steam_config_vdf(directory.path());
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&config, "\"InstallConfigStore\"\n{\n\"Software\"\n{}}").unwrap();
+        let status = steam_play_status(directory.path());
+        assert!(status.steam_present && !status.mapping_present);
+    }
+}

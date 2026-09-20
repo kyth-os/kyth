@@ -9,6 +9,42 @@ import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 // probe section (cheap); the Rescan button runs the live lsusb+lsmod
 // detect, which is what you want right after plugging a pad in. The live
 // result wins once it exists.
+// Browser Gamepad API input tester: polls navigator.getGamepads() at 4Hz
+// while enabled and renders live axes/buttons. Client-side only — no
+// backend traffic, works even when the Hub shell is unreachable.
+function GamepadTester() {
+  const [testing, setTesting] = useState(false);
+  const [pads, setPads] = useState<Array<{ id: string; axes: number[]; buttons: boolean[] }>>([]);
+  useEffect(() => {
+    if (!testing) return;
+    const timer = window.setInterval(() => {
+      const found: Array<{ id: string; axes: number[]; buttons: boolean[] }> = [];
+      for (const pad of navigator.getGamepads()) {
+        if (pad && pad.connected) found.push({ id: pad.id, axes: [...pad.axes], buttons: pad.buttons.map((b) => b.pressed) });
+      }
+      setPads(found);
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [testing]);
+  if (!("getGamepads" in navigator)) return null;
+  return (
+    <div style={{ marginTop: 16 }}>
+      <ActionButton label={testing ? "Stop input test" : "Test controller inputs"} onClick={() => setTesting((on) => !on)} />
+      {testing && (
+        pads.length === 0
+          ? <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>No gamepad visible to the browser yet — press any button on the controller to wake it, then check the browser granted gamepad access.</p>
+          : pads.map((pad) => (
+            <div key={pad.id} style={{ marginTop: 8, padding: "8px 10px", border: "1px solid var(--hairline)", borderRadius: 8 }}>
+              <p style={{ margin: 0, fontSize: 12, fontWeight: 600 }}>{pad.id}</p>
+              <p className="card-copy" style={{ fontSize: 12, margin: "4px 0 0" }}>Axes: {pad.axes.map((a) => a.toFixed(2)).join(" · ")}</p>
+              <p className="card-copy" style={{ fontSize: 12, margin: "4px 0 0" }}>Pressed: {pad.buttons.map((down, i) => (down ? i : null)).filter((i) => i !== null).join(", ") || "none — press buttons to see them light up"}</p>
+            </div>
+          ))
+      )}
+    </div>
+  );
+}
+
 export function ControllersSection({ section }: { section: HubSection }) {
   const [info, setInfo] = useState<ControllerInfo | null>(null);
   const [live, setLive] = useState<ControllersLive | null>(null);
@@ -105,6 +141,7 @@ export function ControllersSection({ section }: { section: HubSection }) {
           }
         />
         <ActionStatus status={status} />
+        <GamepadTester />
       </div>
     </LiveSectionCard>
   );

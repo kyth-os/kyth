@@ -10,12 +10,14 @@ import {
   fetchGuardianSnapshot,
   dismissGuardianRecommendation,
   invokeGuardianExecute,
+  fetchFirstbootAppsStatus,
   fetchRecoveryStatus,
   fetchStorageFree,
   fetchUpdateChannel,
   fetchUserName,
   relativeTime,
   type BootRuntimeCheck,
+  type FirstbootAppsStatus,
   type GuardianSnapshot,
   type RecoveryStatus,
 } from "../services/liveData";
@@ -39,6 +41,7 @@ export function Dashboard() {
   const [userName, setUserName] = useState<string | null>(null);
   const [bootChecks, setBootChecks] = useState<BootRuntimeCheck[] | null>(null);
   const [recovery, setRecovery] = useState<RecoveryStatus | null>(null);
+  const [firstboot, setFirstboot] = useState<FirstbootAppsStatus | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [, setClock] = useState(() => Date.now());
 
@@ -54,9 +57,9 @@ export function Dashboard() {
         }
         return;
       }
-      const [nextGuardian, nextChannel, nextGpu, nextStorage, nextUser, nextBoot, nextRecovery] = await Promise.all([
+      const [nextGuardian, nextChannel, nextGpu, nextStorage, nextUser, nextBoot, nextRecovery, nextFirstboot] = await Promise.all([
         fetchGuardianSnapshot(), fetchUpdateChannel(), fetchGpuName(), fetchStorageFree(),
-        fetchUserName(), fetchBootRuntimeChecks(), fetchRecoveryStatus(),
+        fetchUserName(), fetchBootRuntimeChecks(), fetchRecoveryStatus(), fetchFirstbootAppsStatus(),
       ]);
       if (cancelled) return;
       setGuardian(nextGuardian);
@@ -66,6 +69,7 @@ export function Dashboard() {
       setUserName(nextUser);
       setBootChecks(nextBoot);
       setRecovery(nextRecovery);
+      setFirstboot(nextFirstboot);
       setLoaded(true);
       const hasInitialReadings = nextGuardian !== null || nextBoot !== null || nextRecovery !== null || nextChannel !== null || nextGpu !== null || nextStorage !== null;
       void recordHubAcceptance("dashboard", JSON.stringify({ state: hasInitialReadings ? "live" : "degraded", label: hasInitialReadings ? "System at a glance" : "Status unavailable" }));
@@ -131,6 +135,14 @@ export function Dashboard() {
     <div className="home-page">
       <section className="home-overview" aria-label="Home overview">
         <div className={`home-hero ${hasReadings ? "home-hero-live" : "home-hero-muted"}`}><div><span className="home-eyebrow">KythOS command center</span><h1>Welcome back{userName ? `, ${userName}` : ""}</h1><p>{dashboardDetail}</p></div><div className="home-ready-chip"><span />{guardianGood === false || healthGood === false ? "Needs attention" : dashboardLabel}</div></div>
+        {firstboot && firstboot.state !== "ready" && (
+          <div className="home-card home-card-warn" role="status" style={{ marginTop: 12 }}>
+            <div className="home-card-top"><span className="home-card-icon" aria-hidden="true">▶</span><span className="home-card-label">New to KythOS gaming?</span></div>
+            <strong className="home-card-value">{firstboot.state === "setting_up" ? "Steam is installing" : "Get set up to play"}</strong>
+            <span className="home-card-detail">{firstboot.state === "setting_up" ? "Your game launchers are installing in the background. Meanwhile, see the four steps to your first game." : "An ordered checklist takes you from install to your first game in minutes."}</span>
+            <div style={{ marginTop: 8 }}><ActionButton label="Open Play setup" onClick={() => navigate("/play")} /></div>
+          </div>
+        )}
         <div className="home-card-grid">
           <HomeCard icon="✓" label="Guardian" value={guardianLabel} detail={guardianDetail} good={guardianGood} pendingLabel="PENDING" />
           <HomeCard icon="⌁" label="Boot health" value={healthLabel} detail={healthDetail} good={healthGood} pendingLabel="PENDING" pendingNote={bootChecks ? "Boot checks were reported." : "Boot checks are still pending."} />

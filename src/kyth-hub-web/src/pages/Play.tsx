@@ -19,6 +19,11 @@ export function Play() {
     <div className="play-page">
       <PlayOverview onTelemetryLoaded={setSessions} />
       <div className="play-content-heading"><span className="play-eyebrow">Gaming activity</span><h2>Your recent play</h2><p>Performance and gaming sessions from your recent telemetry.</p></div>
+      {sessions !== null && sessions.length === 0 ? (
+        <div className="glass dashboard-card card-copy" style={{ padding: 20 }}>
+          <p style={{ marginTop: 0 }}>Nothing played yet — your sessions and FPS history will appear here after your first game.</p>
+        </div>
+      ) : null}
       {sessions && sessions.length > 0 ? (
         showCharts ? (
           <Suspense fallback={<div className="glass dashboard-card card-copy">Loading performance charts…</div>}>
