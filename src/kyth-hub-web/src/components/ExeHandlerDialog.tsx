@@ -6,6 +6,9 @@ import {
   inspectExeHandler,
   isExeHandlerFlatpakInstalled,
   launchExeHandlerFlatpak,
+  launchExeHandlerUmu,
+  trustExeHandlerFile,
+  untrustExeHandlerFile,
   openExeHandlerFlathub,
   setExeHandlerAutoBottles,
   startExeHandlerBottles,
@@ -23,6 +26,7 @@ export function ExeHandlerDialog() {
   const [inspection, setInspection] = useState<ExeHandlerInspection | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [autoBottles, setAutoBottles] = useState(false);
+  const [trustDirect, setTrustDirect] = useState(false);
   const [flatpakInstalled, setFlatpakInstalled] = useState(false);
   const [job, setJob] = useState<ExeHandlerJob | null>(null);
   const [cancelling, setCancelling] = useState(false);
@@ -31,7 +35,7 @@ export function ExeHandlerDialog() {
   useEffect(() => {
     if (!inTauriShell()) return;
     const open = async (path: string) => {
-      setError(null); setJob(null); setFlatpakInstalled(false); startedAutomatically.current = false;
+      setError(null); setJob(null); setFlatpakInstalled(false); setTrustDirect(false); startedAutomatically.current = false;
       try {
         const next = await inspectExeHandler(path);
         setInspection(next); setAutoBottles(next.auto_bottles);
@@ -76,6 +80,21 @@ export function ExeHandlerDialog() {
     try {
       setError(null);
       setJob(await startExeHandlerBottles(inspection.path, allowUnsupported));
+      if (trustDirect && inspection.sha256_full) {
+        await trustExeHandlerFile(inspection.sha256_full, inspection.basename, "bottles").catch((reason) => setError(String(reason)));
+      }
+    } catch (reason) { setError(String(reason)); }
+  };
+
+  const startUmu = async () => {
+    if (!inspection) return;
+    try {
+      setError(null);
+      await launchExeHandlerUmu(inspection.path);
+      if (trustDirect && inspection.sha256_full) {
+        await trustExeHandlerFile(inspection.sha256_full, inspection.basename, "umu").catch((reason) => setError(String(reason)));
+      }
+      setInspection(null);
     } catch (reason) { setError(String(reason)); }
   };
 
@@ -121,10 +140,14 @@ export function ExeHandlerDialog() {
           </>}
           {job && <p role="status"><strong>{job.state === "failed" ? "Could not open installer:" : "Installer workflow:"}</strong> {job.detail}</p>}
           {error && <p role="alert" style={{ color: "#f48771" }}>{error}</p>}
+          {!inspection.is_rpm && (inspection.trusted_direct
+            ? <p style={{ opacity: .72, fontSize: ".9em" }}>✓ Trusted — double-clicking this file runs it directly. <button onClick={() => { if (inspection.sha256_full) void untrustExeHandlerFile(inspection.sha256_full).then(() => setInspection({ ...inspection, trusted_direct: false })).catch((reason) => setError(String(reason))); }}>Forget this file</button></p>
+            : <label style={{ display: "block", margin: "16px 0 4px" }}><input type="checkbox" checked={trustDirect} onChange={(event) => setTrustDirect(event.target.checked)} /> Always run this exact file directly (skip this dialog next time)</label>)}
           {!inspection.is_rpm && <label style={{ display: "block", margin: "16px 0" }}><input type="checkbox" checked={autoBottles} onChange={async (event) => { const enabled = event.target.checked; setAutoBottles(enabled); try { await setExeHandlerAutoBottles(enabled); } catch (reason) { setError(String(reason)); } }} /> Automatically prepare and run future compatible Windows installers</label>}
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {inspection.is_rpm && <button onClick={() => { window.location.hash = "/apps"; setInspection(null); }}>Open App Store</button>}
             {!inspection.is_rpm && <button onClick={() => void startBottles()} disabled={job?.state === "running"}>{unsupported ? "Try Anyway" : "Run Windows Installer"}</button>}
+            {!inspection.is_rpm && !unsupported && <button onClick={() => void startUmu()} disabled={job?.state === "running"}>Run Game with Proton</button>}
             {inspection.flatpak_id && <button onClick={() => {
               if (flatpakInstalled) void launchExeHandlerFlatpak(inspection.flatpak_id!).then(() => setInspection(null)).catch((reason) => setError(String(reason)));
               else void startExeHandlerFlatpakInstall(inspection.flatpak_id!).then(setJob).catch((reason) => setError(String(reason)));

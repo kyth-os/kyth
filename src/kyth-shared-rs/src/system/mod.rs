@@ -44,6 +44,7 @@ pub mod drivers;
 pub mod drives;
 pub mod dynamic_lock;
 pub mod exe_compat;
+pub mod exe_trust;
 pub mod explorer_preset;
 pub mod extended_preferences;
 pub mod firmware;

@@ -1942,6 +1942,8 @@ export interface ExeHandlerInspection {
   search_term: string;
   compatibility: ExeHandlerCompatibility | null;
   sha256_prefix: string | null;
+  sha256_full: string | null;
+  trusted_direct: boolean;
   auto_bottles: boolean;
 }
 export interface ExeHandlerJob { job: string; state: "running" | "complete" | "failed" | "unknown" | "cancelled"; detail: string; }
@@ -1953,6 +1955,18 @@ export async function takePendingExeHandler(): Promise<string | null> {
 export async function inspectExeHandler(path: string): Promise<ExeHandlerInspection> {
   if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");
   return await invoke<ExeHandlerInspection>("exe_handler_inspect", { path });
+}
+export async function trustExeHandlerFile(sha256: string, name: string, runner: "bottles" | "umu"): Promise<void> {
+  if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");
+  await invoke("exe_handler_trust", { sha256, name, runner });
+}
+export async function untrustExeHandlerFile(sha256: string): Promise<void> {
+  if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");
+  await invoke("exe_handler_untrust", { sha256 });
+}
+export async function launchExeHandlerUmu(path: string): Promise<void> {
+  if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");
+  await invoke("exe_handler_launch_umu", { path });
 }
 export async function setExeHandlerAutoBottles(enabled: boolean): Promise<void> {
   if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");

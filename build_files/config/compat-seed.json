@@ -1,0 +1,70 @@
+{
+  "_comment": "Seed for /usr/share/kyth/compat.json, the offline verdict DB consulted by kyth-exe-compat and the Hub exe dialog. Keys are either full SHA-256 prefix hashes (12 hex chars, strongest) or normalised installer stems as produced by exe_compat::normalise_filename (lowercase, wrapper and arch tokens stripped: 'Setup My.Game v1.2 x64.exe' -> 'my-game'). Keep keys lowercase. Statuses: Works / Likely / Unknown / Blocked.",
+  "entries": {
+    "battle-net-setup": {
+      "status": "Likely",
+      "runner": "Bottles",
+      "reason": "Battle.net launcher installs via Bottles; use the Lutris one-click recipe for the smoothest path"
+    },
+    "epic-installer": {
+      "status": "Likely",
+      "runner": "Bottles",
+      "reason": "Epic Games Launcher installs via Bottles; the Lutris one-click recipe is smoother"
+    },
+    "epic-games-launcher": {
+      "status": "Likely",
+      "runner": "Bottles",
+      "reason": "Epic Games Launcher installs via Bottles; the Lutris one-click recipe is smoother"
+    },
+    "ea-app": {
+      "status": "Likely",
+      "runner": "Bottles",
+      "reason": "EA App installs via Bottles; the Lutris one-click recipe is smoother"
+    },
+    "ubisoft-connect": {
+      "status": "Likely",
+      "runner": "Bottles",
+      "reason": "Ubisoft Connect installs via Bottles; the Lutris one-click recipe is smoother"
+    },
+    "gog-galaxy": {
+      "status": "Likely",
+      "runner": "Bottles",
+      "reason": "GOG Galaxy installs via Bottles; Heroic Launcher (native) covers GOG games without it"
+    },
+    "steamsetup": {
+      "status": "Works",
+      "runner": "Native",
+      "reason": "Steam has a native Linux client: install Steam from the App Store instead of this Windows installer"
+    },
+    "discordsetup": {
+      "status": "Works",
+      "runner": "Native",
+      "reason": "Discord has a native Linux client: install it from the App Store instead of this Windows installer"
+    },
+    "vc-redist": {
+      "status": "Works",
+      "runner": "Bottles",
+      "reason": "Visual C++ redistributables install cleanly into a Bottles runtime"
+    },
+    "dxwebsetup": {
+      "status": "Works",
+      "runner": "Bottles",
+      "reason": "DirectX web setup runs inside a Bottles runtime"
+    },
+    "dotnet": {
+      "status": "Likely",
+      "runner": "Bottles",
+      "reason": ".NET runtimes usually install via Bottles; winetricks dotnet48 is the fallback"
+    },
+    "driver": {
+      "status": "Blocked",
+      "runner": "Native",
+      "reason": "Windows drivers cannot run on Linux: use the KythOS driver tooling (This PC) for hardware support"
+    },
+    "firmware": {
+      "status": "Blocked",
+      "runner": "Native",
+      "reason": "Windows firmware updaters cannot run on Linux: use fwupd (This PC) instead"
+    }
+  }
+}

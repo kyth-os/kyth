@@ -222,12 +222,26 @@ pub fn inspect_installer(
             source.read_exact(&mut header).map_err(|_| {
                 invalid("The file does not contain a valid MSI compound-document header.")
             })?;
-            if header == *b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" {
-                "win64".into()
-            } else {
+            if header != *b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1" {
                 return Err(invalid(
                     "The file does not contain a valid MSI compound-document header.",
                 ));
+            }
+            // The compound-document header carries no architecture: a
+            // 32-bit MSI forced into a win64 bottle fails opaquely. Trust
+            // an explicit 32-bit filename marker, default to win64.
+            let stem = resolved
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            if ["x86", "i386", "i686", "32bit", "32-bit", "win32"]
+                .iter()
+                .any(|marker| stem.contains(marker))
+            {
+                "win32".into()
+            } else {
+                "win64".into()
             }
         }
     };
@@ -343,6 +357,53 @@ pub fn flatpak_install_commands() -> [Vec<String>; 2] {
         .map(String::from)
         .collect(),
     ]
+}
+
+/// Standalone-game path: umu-run with Proton, no Bottles involved.
+/// Double-clicked game executables (not installers) launch here when the
+/// user trusts them or picks umu in the dialog. Fire-and-forget like a
+/// natively double-clicked game: detached stdio, no pipe to drain, and the
+/// caller does not wait.
+pub fn umu_available() -> bool {
+    Path::new("/usr/bin/umu-run").is_file()
+        || std::env::var_os("PATH")
+            .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("umu-run").is_file()))
+            .unwrap_or(false)
+}
+
+pub fn launch_in_umu(exe: &Path) -> Result<(), String> {
+    if !umu_available() {
+        return Err("umu-run is not installed".to_string());
+    }
+    Command::new("umu-run")
+        .arg(exe)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("umu-run could not start: {error}"))
+}
+
+/// bottles-cli argv with an extra sandbox-visible directory. The staged
+/// installer lives under the Bottles private cache on the host; without an
+/// explicit `--filesystem` grant the `-e` path may not resolve inside the
+/// sandbox despite pointing at Bottles-owned storage.
+pub fn bottles_cli_fs(extra_fs: &str, args: &[&str]) -> Vec<String> {
+    [
+        vec![
+            "flatpak",
+            "run",
+            &format!("--filesystem={extra_fs}"),
+            "--command=bottles-cli",
+            BOTTLES_ID,
+        ]
+        .into_iter()
+        .map(String::from)
+        .collect::<Vec<_>>(),
+        args.iter().map(|arg| (*arg).into()).collect(),
+    ]
+    .concat()
 }
 
 pub fn bottles_cli(args: &[&str]) -> Vec<String> {
@@ -590,18 +651,26 @@ pub fn launch_in_bottles(
         )?;
     }
     let staged = stage_installer(request, home)?;
-    let launch = bottles_cli(&[
-        "run",
-        "-b",
-        &bottle.name,
-        "-e",
-        staged.sandbox_path.to_str().ok_or_else(|| {
-            failure(
-                WorkflowFailureKind::Launch,
-                "The installer path is not valid UTF-8.",
-            )
-        })?,
-    ]);
+    let staged_dir = staged
+        .sandbox_path
+        .parent()
+        .and_then(|dir| dir.to_str())
+        .unwrap_or("");
+    let launch = bottles_cli_fs(
+        staged_dir,
+        &[
+            "run",
+            "-b",
+            &bottle.name,
+            "-e",
+            staged.sandbox_path.to_str().ok_or_else(|| {
+                failure(
+                    WorkflowFailureKind::Launch,
+                    "The installer path is not valid UTF-8.",
+                )
+            })?,
+        ],
+    );
     run(
         &launch,
         WorkflowFailureKind::Launch,
@@ -678,6 +747,54 @@ mod tests {
         let msi = directory.path().join("office.msi");
         fs::write(&msi, b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1payload").unwrap();
         assert_eq!(inspect_installer(&msi).unwrap().kind, InstallerKind::Msi);
+    }
+
+    #[test]
+    fn msi_arch_honors_32bit_filename_markers() {
+        let directory = tempdir().unwrap();
+        let header = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1payload";
+        let legacy = directory.path().join("driver-x86.msi");
+        fs::write(&legacy, header).unwrap();
+        assert_eq!(inspect_installer(&legacy).unwrap().architecture, "win32");
+        let modern = directory.path().join("office-x64.msi");
+        fs::write(&modern, header).unwrap();
+        assert_eq!(inspect_installer(&modern).unwrap().architecture, "win64");
+    }
+
+    #[test]
+    fn bottle_names_keep_launcher_tokens() {
+        // Epic/Battle.net-style names must not collapse to generic ones.
+        let request = InstallerRequest {
+            source: PathBuf::from("Epic Games Launcher Setup.exe"),
+            kind: InstallerKind::Exe,
+            architecture: "win64".into(),
+            identity: FileIdentity {
+                device: 0,
+                inode: 0,
+                size: 1,
+                modified_ns: 0,
+            },
+            sha256: "ab".repeat(32),
+        };
+        let plan = plan_bottle(&request);
+        assert!(
+            plan.name.contains("launcher"),
+            "bottle name lost the launcher token: {}",
+            plan.name
+        );
+    }
+
+    #[test]
+    fn sandbox_launch_grants_the_staged_dir() {
+        let argv = bottles_cli_fs(
+            "/home/test/.var/app/com.usebottles.bottles/cache/x",
+            &["run", "-b", "b", "-e", "/e.exe"],
+        );
+        assert_eq!(argv[0], "flatpak");
+        assert!(argv.contains(
+            &"--filesystem=/home/test/.var/app/com.usebottles.bottles/cache/x".to_string()
+        ));
+        assert!(argv.contains(&"--command=bottles-cli".to_string()));
     }
 
     #[test]

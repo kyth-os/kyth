@@ -11,6 +11,19 @@ install -m 0644 /ctx/kyth-exe-handler.desktop \
 	/usr/share/applications/kyth-exe-handler.desktop
 mkdir -p /usr/share/kyth
 install -m 0644 /ctx/exe-handler-apps.json /usr/share/kyth/exe-handler-apps.json
+# Offline verdict DB for kyth-exe-compat and the Hub exe dialog. Validate
+# shape here so a malformed seed fails the build, not a double-click.
+python3 - <<'EOF'
+import json
+entries = json.load(open('/ctx/config/compat-seed.json'))['entries']
+assert entries, 'empty compat seed'
+for key, value in entries.items():
+    assert isinstance(key, str) and key == key.lower(), f'key not lowercase: {key}'
+    assert isinstance(value, dict), f'entry not an object: {key}'
+    assert value.get('status') in {'Works', 'Likely', 'Unknown', 'Blocked'}, f'bad status: {key}'
+    assert value.get('runner'), f'missing runner: {key}'
+EOF
+install -m 0644 /ctx/config/compat-seed.json /usr/share/kyth/compat.json
 
 # Keep expert tools installed without crowding a new user's app launcher.
 # System Hub still exposes the relevant guided actions, and every binary remains

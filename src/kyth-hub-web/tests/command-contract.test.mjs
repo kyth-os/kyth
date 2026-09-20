@@ -460,3 +460,15 @@ test("stage progress survives reload and checks do not stack", () => {
   assert.match(service, /availabilityCheckInFlight/, "concurrent checks must join instead of stacking registry fan-outs");
   assert.match(service, /clearTimeout\(timer\)/, "the check timeout must be cleared on settle");
 });
+
+test("exe trust-once fast path is wired end to end", () => {
+  // Double-clicked files the user trusted must launch with no dialog:
+  // the native handler checks the content-hash store first, the dialog
+  // records consent with the full hash, and umu covers game exes.
+  assert.match(rust, /\bexe_handler_trust\b/, "trust command must be registered");
+  assert.match(rust, /\bexe_handler_launch_umu\b/, "umu launch command must be registered");
+  assert.match(service, /trustExeHandlerFile/, "trust wrapper must exist");
+  assert.match(service, /launchExeHandlerUmu/, "umu wrapper must exist");
+  assert.match(exeDialog, /trustExeHandlerFile\(inspection\.sha256_full/, "dialog must record the full content hash, never a prefix");
+  assert.match(exeDialog, /launchExeHandlerUmu/, "dialog must offer the Proton path for game exes");
+});

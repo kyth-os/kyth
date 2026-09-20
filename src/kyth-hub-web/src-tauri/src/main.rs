@@ -1611,7 +1611,16 @@ struct ExeHandlerInspection {
     search_term: String,
     compatibility: Option<kyth_shared::system::windows_installer::CompatibilityAssessment>,
     sha256_prefix: Option<String>,
+    sha256_full: Option<String>,
+    trusted_direct: bool,
     auto_bottles: bool,
+}
+
+fn home_trusted(sha256: &str) -> bool {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .and_then(|home| kyth_shared::system::exe_trust::trusted_runner(&home, sha256))
+        .is_some()
 }
 
 fn exe_handler_config_path() -> PathBuf {
@@ -1667,7 +1676,7 @@ fn exe_handler_inspect(path: String) -> Result<ExeHandlerInspection, String> {
             path: path.display().to_string(), basename: basename.clone(), is_rpm: true,
             app_name: Some("RPM Package".into()),
             suggestion: "This is an RPM package for traditional mutable Fedora/RHEL-style systems. On KythOS, install desktop apps from App Store or Flathub. Use Distrobox for command-line tools that need dnf. Only layer system RPMs when a KythOS guide explicitly tells you to, because base-system changes require a reboot and can complicate updates.".into(),
-            flatpak_id: None, search_term: basename.trim_end_matches(".rpm").replace(' ', "+"), compatibility: None, sha256_prefix: None, auto_bottles: false,
+            flatpak_id: None, search_term: basename.trim_end_matches(".rpm").replace(' ', "+"), compatibility: None, sha256_prefix: None, sha256_full: None, trusted_direct: false, auto_bottles: false,
         });
     }
     let request = kyth_shared::system::windows_installer::inspect_installer(&path)
@@ -1690,8 +1699,36 @@ fn exe_handler_inspect(path: String) -> Result<ExeHandlerInspection, String> {
         suggestion: suggestion.as_ref().map(|entry| entry.suggestion.clone()).unwrap_or_else(|| "This is a Windows application installer. KythOS runs Linux software natively. Search Flathub for a Linux equivalent, or run it inside Bottles (Wine).".into()),
         flatpak_id: suggestion.and_then(|entry| entry.flatpak_id), app_name, search_term,
         compatibility: Some(kyth_shared::system::windows_installer::assess_compatibility(&request)),
-        sha256_prefix: Some(request.sha256[..16].to_string()), auto_bottles: load_auto_bottles(),
+        sha256_prefix: Some(request.sha256[..16].to_string()), sha256_full: Some(request.sha256.clone()), trusted_direct: home_trusted(&request.sha256), auto_bottles: load_auto_bottles(),
     })
+}
+
+/// Record trust-once consent: this exact file content (full SHA-256)
+/// launches straight into `runner` on future double-clicks with no dialog.
+/// The hash gates everything — a modified file falls back to the dialog.
+#[tauri::command]
+fn exe_handler_trust(sha256: String, name: String, runner: String) -> Result<(), String> {
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .ok_or("could not determine the home directory")?;
+    kyth_shared::system::exe_trust::trust_file(&home, &sha256, &name, &runner)
+}
+
+/// Drop trust-once consent for one hash. Missing entries succeed silently.
+#[tauri::command]
+fn exe_handler_untrust(sha256: String) -> Result<(), String> {
+    let home = std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .ok_or("could not determine the home directory")?;
+    kyth_shared::system::exe_trust::untrust_file(&home, &sha256)
+}
+
+/// Launch a trusted-or-dialog-approved game executable via umu+Proton.
+/// Fire-and-forget: the game outlives the Hub like a natively launched app.
+#[tauri::command]
+fn exe_handler_launch_umu(path: String) -> Result<(), String> {
+    let path = regular_handler_path(&path)?;
+    kyth_shared::system::windows_installer::launch_in_umu(&path)
 }
 
 #[tauri::command]
@@ -1923,6 +1960,9 @@ fn main() {
             take_pending_page,
             take_pending_exe_handler,
             exe_handler_inspect,
+            exe_handler_trust,
+            exe_handler_untrust,
+            exe_handler_launch_umu,
             exe_handler_set_auto_bottles,
             exe_handler_open_flathub,
             exe_handler_flatpak_installed,

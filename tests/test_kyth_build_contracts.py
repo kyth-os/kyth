@@ -405,6 +405,36 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertIn("mesa_dri_drivers_evr=", script)
         self.assertIn("mesa_layer_date=", script)
 
+    def test_lutris_recipes_use_flatpak_form(self):
+        """Lutris ships as a Flatpak only: a bare `lutris` binary does not
+        exist, so every one-click launcher recipe must probe and launch via
+        `flatpak run net.lutris.Lutris`.
+        """
+        body = (ROOT / "build_files/just/kyth/gaming/games.just").read_text(encoding="utf-8")
+        self.assertNotIn("command -v lutris", body)
+        self.assertEqual(body.count("flatpak info net.lutris.Lutris"), 4)
+        self.assertEqual(body.count("flatpak run net.lutris.Lutris"), 4)
+
+    def test_compat_seed_is_shaped_for_the_offline_db(self):
+        """The seed ships as /usr/share/kyth/compat.json: keys must be
+        lowercase normalised stems (or 12-hex hash prefixes) with a valid
+        status and runner, or every verdict falls back to guesswork.
+        """
+        import json as jsonlib
+        import re as relib
+        seed = jsonlib.loads((ROOT / "build_files/config/compat-seed.json").read_text(encoding="utf-8"))
+        entries = seed["entries"]
+        self.assertTrue(entries)
+        statuses = {"Works", "Likely", "Unknown", "Blocked"}
+        for key, value in entries.items():
+            with self.subTest(key=key):
+                self.assertEqual(key, key.lower())
+                self.assertRegex(key, r"^(?:[0-9a-f]{12}|[a-z0-9][a-z0-9-]*)$")
+                self.assertIn(value["status"], statuses)
+                self.assertTrue(value["runner"])
+        script = (BUILD_FILES / "scripts/branding/25-installer-mime-interception.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/share/kyth/compat.json", script)
+
     def test_branch_to_image_channel_mapping_is_explicit(self):
         build = (ROOT / ".github/workflows/build.yml").read_text()
         iso = (ROOT / ".github/workflows/build-live-iso.yml").read_text()

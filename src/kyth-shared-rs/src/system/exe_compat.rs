@@ -15,18 +15,33 @@ pub struct CompatResult {
     pub reason: String,
 }
 
+static NAME_SEP_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+static NAME_WRAP_PRE_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+static NAME_WRAP_SUF_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+static NAME_TOKEN_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+static STEAM_GAME_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+static STEAM_APPLAUNCH_RE: std::sync::OnceLock<Regex> = std::sync::OnceLock::new();
+
 pub fn normalise_filename(filename: &str) -> String {
     let stem = Path::new(filename)
         .file_stem()
         .and_then(|value| value.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    let separators = Regex::new(r"[\s.]+").expect("static filename separator pattern");
-    let wrapper = Regex::new(r"^(setup|install|installer|update|updater|launcher)[-_]+")
-        .expect("static wrapper prefix pattern");
-    let wrapper_suffix = Regex::new(r"[-_]+(setup|install|installer|update|updater|launcher)$")
-        .expect("static wrapper suffix pattern");
-    let token = Regex::new(r"[-_]+(x64|x86|x86_64|amd64|win64|win32|windows|pc|arm64|online|offline|stable|v?\d[\d.]*)$").expect("static release token pattern");
+    let separators = NAME_SEP_RE
+        .get_or_init(|| Regex::new(r"[\s.]+").expect("static filename separator pattern"));
+    let wrapper = NAME_WRAP_PRE_RE.get_or_init(|| {
+        Regex::new(r"^(setup|install|installer|update|updater|launcher)[-_]+")
+            .expect("static wrapper prefix pattern")
+    });
+    let wrapper_suffix = NAME_WRAP_SUF_RE.get_or_init(|| {
+        Regex::new(r"[-_]+(setup|install|installer|update|updater|launcher)$")
+            .expect("static wrapper suffix pattern")
+    });
+    let token = NAME_TOKEN_RE.get_or_init(|| {
+        Regex::new(r"[-_]+(x64|x86|x86_64|amd64|win64|win32|windows|pc|arm64|online|offline|stable|v?\d[\d.]*)$")
+            .expect("static release token pattern")
+    });
     let mut stem = separators.replace_all(&stem, "-").into_owned();
     for _ in 0..4 {
         let old = stem.clone();
@@ -46,7 +61,9 @@ pub fn is_rpm_installer(filename: &str) -> bool {
 
 pub fn rewrite_steam_exec(exec_line: &str) -> Option<String> {
     let target = exec_line.split_once('=')?.1.trim();
-    let game_pattern = Regex::new(r"steam://rungameid/([0-9]+)").expect("static Steam URI pattern");
+    let game_pattern = STEAM_GAME_RE.get_or_init(|| {
+        Regex::new(r"steam://rungameid/([0-9]+)").expect("static Steam URI pattern")
+    });
     if let Some(capture) = game_pattern
         .captures(target)
         .and_then(|capture| capture.get(1))
@@ -56,7 +73,9 @@ pub fn rewrite_steam_exec(exec_line: &str) -> Option<String> {
             capture.as_str()
         ));
     }
-    let app_pattern = Regex::new(r"-applaunch\s+([0-9]+)").expect("static Steam applaunch pattern");
+    let app_pattern = STEAM_APPLAUNCH_RE.get_or_init(|| {
+        Regex::new(r"-applaunch\s+([0-9]+)").expect("static Steam applaunch pattern")
+    });
     app_pattern
         .captures(target)
         .and_then(|capture| capture.get(1))
@@ -127,10 +146,29 @@ pub fn load_compat(path: impl AsRef<Path>) -> Value {
 }
 
 fn bounded_hash(path: &Path) -> Option<String> {
-    let bytes = std::fs::read(path).ok()?;
+    // Stream only the first HASH_BYTES: multi-GB installers must never be
+    // read fully into memory for a prefix hash.
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
     let mut hasher = Sha256::new();
-    hasher.update(&bytes[..bytes.len().min(HASH_BYTES)]);
+    let mut limited = (&mut file).take(HASH_BYTES as u64);
+    let mut buf = [0u8; 8192];
+    loop {
+        match limited.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => hasher.update(&buf[..n]),
+            Err(_) => return None,
+        }
+    }
     Some(format!("{:x}", hasher.finalize())[..12].to_string())
+}
+
+/// Home directory for Bottles-availability gating of the default verdict.
+/// Falls back to "/" (system scope only) when HOME is unset.
+fn home_dir() -> std::path::PathBuf {
+    std::env::var_os("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("/"))
 }
 
 fn entry_result(entry: &Value) -> CompatResult {
@@ -166,6 +204,7 @@ pub fn check_exe(path: impl AsRef<Path>, compat: &Value) -> CompatResult {
         .as_deref()
         .and_then(|key| entries.and_then(|entries| entries.get(key)))
         .or_else(|| entries.and_then(|entries| entries.get(&filename)))
+        .or_else(|| entries.and_then(|entries| entries.get(&normalise_filename(&filename))))
     {
         return entry_result(entry);
     }
@@ -178,10 +217,30 @@ pub fn check_exe(path: impl AsRef<Path>, compat: &Value) -> CompatResult {
             };
         }
     }
+    // Honest default: only promise Bottles when a runner exists, and say
+    // whether the verdict is verified. Over-promising "Works via Bottles"
+    // on machines without Bottles strands first-time gamers.
+    if bottles_available(&home_dir()) {
+        return likely_bottles_verdict();
+    }
+    unknown_wine_verdict()
+}
+
+/// Default verdict split for testability: the availability probe stays at
+/// the call edge, the wording lives here.
+fn likely_bottles_verdict() -> CompatResult {
     CompatResult {
-        status: "Works".to_string(),
+        status: "Likely".to_string(),
         runner: "Bottles".to_string(),
-        reason: "Offline DB: best-effort Wine".to_string(),
+        reason: "Offline DB: unverified, best-effort Wine".to_string(),
+    }
+}
+
+fn unknown_wine_verdict() -> CompatResult {
+    CompatResult {
+        status: "Unknown".to_string(),
+        runner: "Wine".to_string(),
+        reason: "Offline DB: unverified and no Bottles runner installed".to_string(),
     }
 }
 
@@ -235,6 +294,42 @@ mod tests {
         std::fs::create_dir_all(&marker).unwrap();
         assert!(bottles_flatpak_installed(home.path()));
         assert!(bottles_available(home.path()));
+    }
+
+    #[test]
+    fn bounded_hash_streams_only_the_first_mib() {
+        use sha2::Digest;
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("big-installer.exe");
+        // 2 MiB file with distinct halves: the hash must cover the first
+        // MiB only, never the whole file in memory.
+        let first = vec![0x41u8; 1 << 20];
+        let mut content = first.clone();
+        content.extend(std::iter::repeat(0x42u8).take(1 << 20));
+        fs::write(&path, &content).unwrap();
+        let mut expected = sha2::Sha256::new();
+        expected.update(&first);
+        let expected = format!("{:x}", expected.finalize())[..12].to_string();
+        assert_eq!(super::bounded_hash(&path), Some(expected));
+    }
+
+    #[test]
+    fn normalised_filename_hits_db_entries() {
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("Setup My.Game v1.2 x64.exe");
+        fs::write(&path, "demo").unwrap();
+        let compat = serde_json::json!({"entries":{"my-game":{"status":"Gold","runner":"Proton","reason":"tested"}}});
+        assert_eq!(super::check_exe(&path, &compat).status, "Gold");
+    }
+
+    #[test]
+    fn default_verdicts_are_honest_about_verification() {
+        let likely = super::likely_bottles_verdict();
+        assert_eq!(likely.status, "Likely");
+        assert!(likely.reason.contains("unverified"));
+        let unknown = super::unknown_wine_verdict();
+        assert_eq!(unknown.status, "Unknown");
+        assert_eq!(unknown.runner, "Wine");
     }
 
     #[test]

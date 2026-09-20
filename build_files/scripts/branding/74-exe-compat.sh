@@ -6,16 +6,9 @@ if [[ ! -x /usr/bin/kyth-exe-compat ]]; then
 	echo "kyth-exe-compat: native Rust binary missing from image builder" >&2
 	exit 1
 fi
-# mimeapps.list xdg-open interceptor hash-gated: .exe → kyth-exe-compat
-if [[ -f /usr/share/applications/kyth-exe-compat.desktop ]]; then
-    : # already
-else
-    cat > /usr/share/applications/kyth-exe-compat.desktop <<'DESKEOF'
-[Desktop Entry]
-Type=Application
-Name=Kyth EXE Compat Check
-Exec=/usr/bin/kyth-exe-compat %f
-MimeType=application/x-ms-dos-executable;application/x-msdos-program;
-NoDisplay=true
-DESKEOF
-fi
+# No desktop entry: double-clicks belong to kyth-exe-handler.desktop (the
+# trust-once fast path + Hub dialog, registered in mimeapps.list by
+# 25-installer-mime-interception.sh). A second NoDisplay entry covering a
+# subset of the same MIME types only duplicates naming and hides its stdout
+# verdict from the user. kyth-exe-compat stays a CLI verdict tool.
+rm -f /usr/share/applications/kyth-exe-compat.desktop
