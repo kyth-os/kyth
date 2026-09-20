@@ -389,12 +389,72 @@ pub fn wine_sync_status(content: Option<&str>) -> &'static str {
         "unknown"
     }
 }
+/// FUTEX2_WAITV shipped in kernel 5.16. Parse the release properly: the old
+/// substring check also matched compiler strings in /proc/version and missed
+/// 5.16+ kernels entirely.
+pub fn kernel_release_has_futex2(release: &str) -> bool {
+    let version = release.strip_prefix("Linux version ").unwrap_or(release);
+    let mut parts = version.split(|byte: char| !byte.is_ascii_digit());
+    let major: u32 = parts.next().and_then(|part| part.parse().ok()).unwrap_or(0);
+    let minor: u32 = parts.next().and_then(|part| part.parse().ok()).unwrap_or(0);
+    major > 5 || (major == 5 && minor >= 16)
+}
+
 pub fn probe_wine_sync() -> (bool, bool) {
     let ntsync = Path::new("/dev/ntsync").exists() || Path::new("/sys/module/ntsync").exists();
     let futex2 = std::fs::read_to_string("/proc/version")
-        .map(|value| value.contains("6."))
+        .map(|value| kernel_release_has_futex2(&value))
         .unwrap_or(false);
     (ntsync, futex2)
+}
+
+/// Preemption model from a /proc/version line. Order matters: PREEMPT_RT
+/// contains PREEMPT, and PREEMPT_DYNAMIC contains PREEMPT.
+pub fn kernel_preempt_model(version: &str) -> &'static str {
+    if version.contains("PREEMPT_RT") {
+        "realtime"
+    } else if version.contains("PREEMPT_DYNAMIC") {
+        "dynamic"
+    } else if version.contains("PREEMPT") {
+        "full"
+    } else {
+        "voluntary"
+    }
+}
+
+pub fn probe_preempt_model() -> &'static str {
+    std::fs::read_to_string("/proc/version")
+        .map(|value| kernel_preempt_model(&value))
+        .unwrap_or("unknown")
+}
+
+/// VRR capability from DRM sysfs. Returns None when the kernel exposes no
+/// vrr_capable files (older kernels) so callers report unknown, not failure.
+/// A connected output reporting vrr_capable=1 means VRR is usable.
+pub fn vrr_capable(drm: &std::path::Path) -> Option<bool> {
+    let Ok(entries) = std::fs::read_dir(drm) else {
+        return None;
+    };
+    let mut saw_file = false;
+    let mut capable = false;
+    for entry in entries.flatten() {
+        let flag = entry.path().join("vrr_capable");
+        let Ok(text) = std::fs::read_to_string(&flag) else {
+            continue;
+        };
+        saw_file = true;
+        let connected = std::fs::read_to_string(entry.path().join("status"))
+            .map(|status| status.trim() == "connected")
+            .unwrap_or(false);
+        if connected && text.trim() == "1" {
+            capable = true;
+        }
+    }
+    if saw_file {
+        Some(capable)
+    } else {
+        None
+    }
 }
 pub fn generate_wine_env(
     config: &WineSyncConfig,
@@ -884,6 +944,42 @@ mod tests {
         assert!(path.exists());
         generate_pcie(&PcieConfig::default(), &path).unwrap();
         assert!(!path.exists());
+    }
+
+    #[test]
+    fn preempt_and_vrr_helpers_read_kernel_state() {
+        assert_eq!(
+            kernel_preempt_model("Linux version 6.12 #1 SMP PREEMPT_RT"),
+            "realtime"
+        );
+        assert_eq!(kernel_preempt_model("#1 SMP PREEMPT_DYNAMIC"), "dynamic");
+        assert_eq!(kernel_preempt_model("#1 SMP PREEMPT"), "full");
+        assert_eq!(kernel_preempt_model("#1 SMP"), "voluntary");
+        // tmpfs stand-in for /sys/class/drm.
+        let dir = tempdir().unwrap();
+        assert_eq!(vrr_capable(dir.path()), None);
+        let out = dir.path().join("card0-DP-1");
+        std::fs::create_dir_all(&out).unwrap();
+        std::fs::write(out.join("status"), "connected\n").unwrap();
+        std::fs::write(out.join("vrr_capable"), "1\n").unwrap();
+        assert_eq!(vrr_capable(dir.path()), Some(true));
+        std::fs::write(out.join("status"), "disconnected\n").unwrap();
+        assert_eq!(vrr_capable(dir.path()), Some(false));
+    }
+
+    #[test]
+    fn futex2_parses_kernel_release_not_substrings() {
+        assert!(kernel_release_has_futex2(
+            "Linux version 6.12.9-200.fc44.x86_64"
+        ));
+        assert!(kernel_release_has_futex2("Linux version 5.16.0"));
+        assert!(kernel_release_has_futex2("6.1"));
+        assert!(!kernel_release_has_futex2("Linux version 5.15.0"));
+        assert!(!kernel_release_has_futex2(
+            "Linux version 5.4.0-216-generic"
+        ));
+        assert!(!kernel_release_has_futex2(""));
+        assert!(!kernel_release_has_futex2("not a version"));
     }
 
     #[test]

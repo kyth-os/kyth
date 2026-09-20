@@ -79,7 +79,18 @@ fn health_check() -> ExitCode {
     if ntsync {
         report.passed("Wine Synchronization", "NTSYNC fast kernel driver loaded");
     } else {
-        report.passed("Wine Synchronization", "FUTEX2 / esync fallback active");
+        let (_, futex2) = kyth_shared::system::extended_preferences::probe_wine_sync();
+        if futex2 {
+            report.passed(
+                "Wine Synchronization",
+                "FUTEX2 fsync verified (kernel 5.16+)",
+            );
+        } else {
+            report.warned(
+                "Wine Synchronization",
+                "esync only — kernel predates FUTEX2 (5.16), expect slower sync",
+            );
+        }
     }
 
     let pipewire = (command_exists("pgrep") && succeeds(&["pgrep", "-x", "pipewire"], 5))

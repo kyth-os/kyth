@@ -25,11 +25,29 @@ pub const DEFAULT_KALI_IMAGE: &str = "docker.io/kalilinux/kali-rolling";
 
 /// Wraps a shell word in single quotes the way Python's `!r` does for the
 /// plain identifiers this module ever calls it on (no embedded quotes).
-/// `box_name`/`box_image` only ever come from this module's own constants,
-/// never from a caller — this exists for defense in depth, not because
-/// untrusted text reaches it.
 fn shell_single_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', r"'\''"))
+}
+
+/// Box names land inside `bash -c` scripts (quoted AND unquoted positions),
+/// so quoting alone is not a sufficient defense. Reject anything outside
+/// container-name shape before building: a future caller passing user text
+/// fails here instead of injecting through the script.
+pub fn validate_box_name(name: &str) -> Result<(), String> {
+    let valid = !name.is_empty()
+        && name.len() <= 64
+        && name
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric())
+        && name.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-' || byte == b'.'
+        });
+    if valid {
+        Ok(())
+    } else {
+        Err(format!("invalid container box name: {name}"))
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -142,7 +160,12 @@ const DESKTOP_FILE_REWRITE_SCRIPT: &str = "kyth-kali-desktop-fixup";
 /// user passwordless sudo, and (GUI tiers only) bulk-export .desktop
 /// launchers and fix them up for the host menu. Mirrors
 /// `build_kali_create_command` in `services/security.py` exactly.
-pub fn build_kali_create_command(box_name: &str, box_image: &str, tier: KaliTier) -> Vec<String> {
+pub fn build_kali_create_command(
+    box_name: &str,
+    box_image: &str,
+    tier: KaliTier,
+) -> Result<Vec<String>, String> {
+    validate_box_name(box_name)?;
     let meta = tier.meta_package();
     let has_gui = tier.has_gui();
     let box_q = shell_single_quote(box_name);
@@ -192,21 +215,22 @@ if [[ "${{rootful_exists}}" -eq 0 ]]; then
 fi
 distrobox enter --root {box_name} -- bash -c "export DEBIAN_FRONTEND=noninteractive; (printf '%s\n' 'popularity-contest popularity-contest/participate boolean false' 'encfs encfs/security-information boolean true' 'encfs encfs/security-information seen true' 'console-setup console-setup/charmap47 select UTF-8' 'samba-common samba-common/dhcp boolean false' 'macchanger macchanger/automatically_run boolean false' 'kismet-capture-common kismet-capture-common/install-users string' 'kismet-capture-common kismet-capture-common/install-setuid boolean true' 'wireshark-common wireshark-common/install-setuid boolean true' 'sslh sslh/inetd_or_standalone select standalone' | sudo debconf-set-selections) || true; sudo -E apt-get install -y -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold {meta}" && distrobox enter --root {box_name} -- bash -c "echo '${{USER}} ALL=(root) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/kali-user-nopasswd > /dev/null; sudo chmod 0440 /etc/sudoers.d/kali-user-nopasswd; mkdir -p /root/.config/gtk-3.0; printf '[Settings]\ngtk-icon-theme-name = hicolor\n' > /root/.config/gtk-3.0/settings.ini; if command -v nmap >/dev/null 2>&1; then printf '#!/bin/sh\nexec sudo /usr/bin/nmap \"\$@\"\n' | sudo tee /usr/local/bin/nmap > /dev/null; sudo chmod 755 /usr/local/bin/nmap; fi"{export_step}"#
     );
-    vec!["bash".to_string(), "-c".to_string(), script]
+    Ok(vec!["bash".to_string(), "-c".to_string(), script])
 }
 
 /// Bulk-export every .desktop file the container ships (exit 2 if none),
 /// grant passwordless sudo, then fix up the exported launchers for the host
 /// menu. Mirrors the GUI-tier export step in `build_kali_create_command` for
 /// a box that already exists.
-pub fn build_kali_export_command(box_name: &str) -> Vec<String> {
+pub fn build_kali_export_command(box_name: &str) -> Result<Vec<String>, String> {
+    validate_box_name(box_name)?;
     let script = format!(
         r#"distrobox enter --root {box_name} -- bash -c 'shopt -s nullglob; files=(/usr/share/applications/*.desktop); if [ ${{#files[@]}} -eq 0 ]; then exit 2; fi; n=0; for f in ${{files[@]}}; do app=$(basename $f .desktop); distrobox-export --app $app 2>&1 && n=$((n+1)) || echo skip: $app; done; echo EXPORTED:$n'
 _rc=$?; [ "$_rc" -eq 2 ] && exit 2
 distrobox enter --root {box_name} -- bash -c "echo '${{USER}} ALL=(root) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/kali-user-nopasswd > /dev/null; sudo chmod 0440 /etc/sudoers.d/kali-user-nopasswd"
 {DESKTOP_FILE_REWRITE_SCRIPT}"#
     );
-    vec!["bash".to_string(), "-c".to_string(), script]
+    Ok(vec!["bash".to_string(), "-c".to_string(), script])
 }
 
 /// Parses the `EXPORTED:<n>` marker line `build_kali_export_command` emits.
@@ -220,7 +244,8 @@ pub fn parse_kali_export_count(stdout: &str) -> Option<u32> {
 /// Stop and remove both a rootless and rootful box by this name, forcing
 /// backend container removal if distrobox still lists it afterward, then
 /// delete any exported launchers pointing at it.
-pub fn build_kali_remove_command(box_name: &str) -> Vec<String> {
+pub fn build_kali_remove_command(box_name: &str) -> Result<Vec<String>, String> {
+    validate_box_name(box_name)?;
     let box_q = shell_single_quote(box_name);
     let script = format!(
         r#"set -euo pipefail
@@ -267,7 +292,7 @@ kbuildsycoca6 --noincremental 2>/dev/null || true
 echo "Kali box is stopped and removed."
 "#
     );
-    vec!["bash".to_string(), "-c".to_string(), script]
+    Ok(vec!["bash".to_string(), "-c".to_string(), script])
 }
 
 /// Terminal candidates in preference order, mirroring the
@@ -399,9 +424,27 @@ mod tests {
     }
 
     #[test]
+    fn box_names_outside_container_shape_are_rejected() {
+        for bad in ["", "kali; rm -rf ~", "kali box", "$(id)", "../escape"] {
+            assert!(
+                validate_box_name(bad).is_err(),
+                "{bad} must not reach a shell script"
+            );
+        }
+        assert!(
+            validate_box_name(&"a".repeat(65)).is_err(),
+            "overlong names must fail"
+        );
+        assert!(validate_box_name("kali").is_ok());
+        assert!(validate_box_name("kali-2.x").is_ok());
+        assert!(build_kali_remove_command("kali; evil").is_err());
+    }
+
+    #[test]
     fn create_command_is_a_bash_script_naming_the_chosen_metapackage() {
         let argv =
-            build_kali_create_command(DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE, KaliTier::Headless);
+            build_kali_create_command(DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE, KaliTier::Headless)
+                .unwrap();
         assert_eq!(argv[0], "bash");
         assert_eq!(argv[1], "-c");
         assert!(argv[2].contains("kali-linux-headless"));
@@ -413,7 +456,8 @@ mod tests {
     #[test]
     fn gui_tier_create_command_exports_desktop_files() {
         let argv =
-            build_kali_create_command(DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE, KaliTier::Default);
+            build_kali_create_command(DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE, KaliTier::Default)
+                .unwrap();
         assert!(argv[2].contains("kali-linux-default"));
         assert!(argv[2].contains("distrobox-export"));
         assert!(argv[2].contains(DESKTOP_FILE_REWRITE_SCRIPT));
@@ -421,7 +465,7 @@ mod tests {
 
     #[test]
     fn export_command_targets_the_named_box_and_rewrites_launchers() {
-        let argv = build_kali_export_command("kali");
+        let argv = build_kali_export_command("kali").unwrap();
         assert!(argv[2].contains("distrobox enter --root kali"));
         assert!(argv[2].contains("EXPORTED:"));
         assert!(argv[2].contains(DESKTOP_FILE_REWRITE_SCRIPT));
@@ -436,7 +480,7 @@ mod tests {
 
     #[test]
     fn remove_command_stops_and_removes_both_rootless_and_rootful_boxes() {
-        let argv = build_kali_remove_command("kali");
+        let argv = build_kali_remove_command("kali").unwrap();
         assert!(argv[2].contains("distrobox stop \"${box}\""));
         assert!(argv[2].contains("distrobox rm --root"));
         assert!(argv[2].contains("kbuildsycoca6"));

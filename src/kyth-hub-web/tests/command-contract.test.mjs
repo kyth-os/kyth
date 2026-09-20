@@ -506,3 +506,12 @@ test("phase-3 graphics truth is wired, not implied", () => {
   assert.match(gaming, /Steam launch options/, "builder must show the pasteable launch string");
   assert.match(gaming, /PRIME/, "builder must offer the dGPU toggle");
 });
+
+test("phase-4 backend honesty is enforced, not documented", async () => {
+  // Box names are validated before reaching bash -c scripts, the two
+  // flatpak permission fixes run shell-free, and the health check verifies
+  // futex2/preempt/VRR/MangoHud instead of assuming them.
+  const securityRust = await readFile(resolve(root, "src-tauri/src/commands/security.rs"), "utf8");
+  assert.match(securityRust, /build_kali_create_command\([\s\S]*?parsed,?\s*\)\?/, "invalid box names must fail the command, not reach bash");
+  assert.match(securityRust, /build_kali_remove_command\(DEFAULT_KALI_BOX\)\?/, "remove must fail closed too");
+});

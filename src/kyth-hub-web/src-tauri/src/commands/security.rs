@@ -35,8 +35,11 @@ pub(crate) fn kali_status() -> bool {
 #[tauri::command]
 pub(crate) fn kali_create(tier: String) -> Result<SecurityActionLaunch, String> {
     let parsed = KaliTier::parse(&tier).ok_or_else(|| "unknown Kali tier".to_string())?;
-    let argv =
-        security_container::build_kali_create_command(DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE, parsed);
+    let argv = security_container::build_kali_create_command(
+        DEFAULT_KALI_BOX,
+        DEFAULT_KALI_IMAGE,
+        parsed,
+    )?;
     let job = start_job("kali-create", "Pulling Kali container image…")?;
     // kali-linux-everything can pull 15-20GB; give it real headroom.
     spawn_argv_job(
@@ -68,7 +71,7 @@ pub(crate) fn kali_create(tier: String) -> Result<SecurityActionLaunch, String> 
 
 #[tauri::command]
 pub(crate) fn kali_export() -> Result<SecurityActionLaunch, String> {
-    let argv = security_container::build_kali_export_command(DEFAULT_KALI_BOX);
+    let argv = security_container::build_kali_export_command(DEFAULT_KALI_BOX)?;
     let job = start_job("kali-export", "Scanning Kali container for GUI apps…")?;
     spawn_argv_job(
         job.clone(),
@@ -107,7 +110,7 @@ pub(crate) fn kali_export() -> Result<SecurityActionLaunch, String> {
 
 #[tauri::command]
 pub(crate) fn kali_remove() -> Result<SecurityActionLaunch, String> {
-    let argv = security_container::build_kali_remove_command(DEFAULT_KALI_BOX);
+    let argv = security_container::build_kali_remove_command(DEFAULT_KALI_BOX)?;
     let job = start_job("kali-remove", "Stopping and removing Kali box…")?;
     spawn_argv_job(
         job.clone(),

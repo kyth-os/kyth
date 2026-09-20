@@ -47,14 +47,19 @@ pub fn find_gaming_tool(flatpak_id: &str) -> Option<&'static GamingTool> {
 /// `services/gaming/tools.py::discord_screenshare_fix_command` — grants the
 /// Flatpak Discord client the Wayland/portal permissions screen share needs.
 pub fn discord_screenshare_fix_command() -> Vec<String> {
+    // Shell-free argv: nothing here expands, globs, or pipelines, so bash
+    // only added a word-splitting layer with nothing to split.
     [
-        "bash",
-        "-c",
-        "flatpak override --user com.discordapp.Discord \
-         --env=ELECTRON_OZONE_PLATFORM_HINT=auto \
-         --socket=wayland --socket=fallback-x11 --device=dri \
-         --talk-name=org.freedesktop.portal.Desktop \
-         --talk-name=org.kde.StatusNotifierWatcher",
+        "flatpak",
+        "override",
+        "--user",
+        "com.discordapp.Discord",
+        "--env=ELECTRON_OZONE_PLATFORM_HINT=auto",
+        "--socket=wayland",
+        "--socket=fallback-x11",
+        "--device=dri",
+        "--talk-name=org.freedesktop.portal.Desktop",
+        "--talk-name=org.kde.StatusNotifierWatcher",
     ]
     .into_iter()
     .map(String::from)
@@ -65,11 +70,14 @@ pub fn discord_screenshare_fix_command() -> Vec<String> {
 /// Flatpak OBS client the Wayland/PipeWire permissions capture needs.
 pub fn obs_pipewire_fix_command() -> Vec<String> {
     [
-        "bash",
-        "-c",
-        "flatpak override --user com.obsproject.Studio \
-         --socket=wayland --socket=pulseaudio --device=dri \
-         --talk-name=org.freedesktop.portal.Desktop",
+        "flatpak",
+        "override",
+        "--user",
+        "com.obsproject.Studio",
+        "--socket=wayland",
+        "--socket=pulseaudio",
+        "--device=dri",
+        "--talk-name=org.freedesktop.portal.Desktop",
     ]
     .into_iter()
     .map(String::from)
@@ -132,16 +140,17 @@ mod tests {
     #[test]
     fn discord_fix_grants_wayland_and_portal_permissions() {
         let argv = discord_screenshare_fix_command();
-        assert_eq!(argv[0], "bash");
-        assert!(argv[2].contains("com.discordapp.Discord"));
-        assert!(argv[2].contains("--socket=wayland"));
+        assert_eq!(argv[0], "flatpak");
+        assert!(argv.contains(&"com.discordapp.Discord".to_string()));
+        assert!(argv.contains(&"--socket=wayland".to_string()));
     }
 
     #[test]
     fn obs_fix_grants_pipewire_permissions() {
         let argv = obs_pipewire_fix_command();
-        assert!(argv[2].contains("com.obsproject.Studio"));
-        assert!(argv[2].contains("--socket=pulseaudio"));
+        assert_eq!(argv[0], "flatpak");
+        assert!(argv.contains(&"com.obsproject.Studio".to_string()));
+        assert!(argv.contains(&"--socket=pulseaudio".to_string()));
     }
 
     #[test]

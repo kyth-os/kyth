@@ -74,14 +74,22 @@ fn run_checks() -> Vec<Check> {
                 detail: "CFS/EEVDF fallback (scx not active)",
             }
         },
-        Check {
-            level: "PASS",
-            name: "Wine Synchronization",
-            detail: if ntsync_loaded {
-                "NTSYNC fast kernel driver loaded"
+        {
+            let (level, detail) = if ntsync_loaded {
+                ("PASS", "NTSYNC fast kernel driver loaded")
+            } else if kyth_shared::system::extended_preferences::probe_wine_sync().1 {
+                ("PASS", "FUTEX2 fsync verified (kernel 5.16+)")
             } else {
-                "FUTEX2 / esync fallback active"
-            },
+                (
+                    "WARN",
+                    "esync only — kernel predates FUTEX2 (5.16), expect slower sync",
+                )
+            };
+            Check {
+                level,
+                name: "Wine Synchronization",
+                detail,
+            }
         },
         if pipewire_running() {
             Check {
@@ -129,6 +137,51 @@ fn run_checks() -> Vec<Check> {
                 level: "WARN",
                 name: "Input & Gamepads",
                 detail: "/dev/input device node inaccessible",
+            }
+        },
+        {
+            let (level, detail) =
+                match kyth_shared::system::extended_preferences::probe_preempt_model() {
+                    "realtime" => ("PASS", "PREEMPT_RT realtime kernel"),
+                    "full" => ("PASS", "fully preemptible kernel"),
+                    "dynamic" => ("PASS", "dynamic preemption kernel"),
+                    "voluntary" => (
+                        "WARN",
+                        "voluntary preemption — gaming kernels use full or dynamic",
+                    ),
+                    _ => ("WARN", "preemption model unreadable"),
+                };
+            Check {
+                level,
+                name: "Kernel Preemption",
+                detail,
+            }
+        },
+        {
+            let (level, detail) = match kyth_shared::system::extended_preferences::vrr_capable(
+                std::path::Path::new("/sys/class/drm"),
+            ) {
+                Some(true) => ("PASS", "VRR-capable connected display"),
+                Some(false) => ("WARN", "no VRR-capable connected display"),
+                None => ("WARN", "VRR capability unreadable on this kernel"),
+            };
+            Check {
+                level,
+                name: "VRR Display",
+                detail,
+            }
+        },
+        if kyth_shared::system::gaming_perf::mangohud_installed() {
+            Check {
+                level: "PASS",
+                name: "FPS Overlay",
+                detail: "MangoHud installed (MANGOHUD=1)",
+            }
+        } else {
+            Check {
+                level: "WARN",
+                name: "FPS Overlay",
+                detail: "MangoHud missing — overlay unavailable",
             }
         },
     ]
