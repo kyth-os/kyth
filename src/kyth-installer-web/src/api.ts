@@ -51,15 +51,28 @@ async function ensureConnection(): Promise<void> {
   if (!connectionPromise) {
     connectionPromise = invoke<InstallerConnection>("installer_connection").then(async (value) => {
       if (value.transport === "http") {
+        // Bearer header, never the query string: a token in the URL lands
+        // in daemon access logs, proxy logs, history, and crash reports.
         const response = await fetchBounded(
-          `${value.base_url}/?bootstrap_token=${encodeURIComponent(value.bootstrap_token)}`,
-          { headers: { Accept: "application/json" } },
+          `${value.base_url}/`,
+          {
+            headers: {
+              Accept: "application/json",
+              Authorization: `Bearer ${value.bootstrap_token}`,
+            },
+          },
           30_000,
           "Installer backend bootstrap",
         );
         if (!response.ok) throw new Error(`Installer backend bootstrap failed (${response.status})`);
       }
       connection = value;
+    });
+    // A failed bootstrap must not brick the UI until reload: drop the
+    // rejected promise so the next action re-attempts bootstrap.
+    connectionPromise = connectionPromise.catch((error: unknown) => {
+      if (!connection) connectionPromise = null;
+      throw error;
     });
   }
   await connectionPromise;

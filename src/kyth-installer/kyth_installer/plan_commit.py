@@ -222,7 +222,17 @@ def shrink_ntfs_filesystem_guarded(
         marker = marker_root / f"ntfs-shrunk-{partition.replace('/', '_')}"
         marker.write_text(f"{new_size}\n")
     except (OSError, ValueError) as exc:
-        _logger.debug("ntfs marker write failed for %s: %s", partition, exc, exc_info=True)
+        # Fail closed: the shrink SUCCEEDED but its retry guard could not be
+        # recorded. Proceeding would let a retry double-shrink the volume
+        # with no marker and (if the probe also fails) no signal. Abort
+        # before any table commit instead.
+        raise RuntimeError(
+            f"NTFS filesystem shrink completed, but its progress marker could not be "
+            f"recorded ({exc}). Aborting before the partition table change: the "
+            f"filesystem is at its new smaller size while the partition still "
+            f"describes the old size. Reboot, let Windows extend the volume back, "
+            f"or reboot the live ISO before retrying."
+        ) from exc
 
 
 def _fail_if_ntfs_already_shrunk(partition: str, partition_size_bytes: int, log, *, ntfs_fs_size=None) -> None:
@@ -231,19 +241,28 @@ def _fail_if_ntfs_already_shrunk(partition: str, partition_size_bytes: int, log,
     A previous shrink whose table change was rolled back (or a retry after a
     reboot that wiped the tmpfs `/run` marker) leaves exactly this shape:
     filesystem < partition. Shrinking again on top would compound the loss,
-    so refuse with remediation instead. Best-effort: an unreadable size
-    (None) falls back to the in-session marker check below. No probe
-    dependency means no probe (unit-test hermeticity) — production wires
-    the real `ntfsresize --info` probe through `plan.py`.
+    so refuse with remediation instead. `ntfs_fs_size=None` means no probe
+    was wired (unit-test hermeticity) — that returns so the in-session
+    marker check below still applies. But a WIRED probe that errors or
+    returns garbage fails closed: `ntfsresize --info` fails on dirty,
+    hibernated, or damaged volumes, which are exactly the volumes that must
+    not be shrunk.
     """
     probe = ntfs_fs_size
     if probe is None:
         return
     try:
         fs_size = probe(partition)
-    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
-        return
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+        raise RuntimeError(
+            "Could not read the live NTFS filesystem size — the volume may be "
+            f"dirty, hibernated, or damaged ({exc}). Refusing to shrink an "
+            "unverifiable volume: run chkdsk from Windows (or clear hibernation "
+            "with a full shutdown) and retry."
+        ) from exc
     if not isinstance(fs_size, int) or fs_size <= 0:
+        # None strictly means "could not attempt" (helper missing) or
+        # unparsable output — fall back to the in-session marker check.
         return
     tolerance = 64 * 1024 * 1024
     if fs_size < partition_size_bytes - tolerance:

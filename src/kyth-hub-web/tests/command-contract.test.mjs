@@ -551,6 +551,23 @@ test("bug-hunt round 4: secrets stay out of strings, writes stay atomic", async 
   assert.match(rust, /allowed_pst_path\(&source\.to_string_lossy/, "PST must re-verify at use time");
 });
 
+test("bug-hunt round 6: fail closed everywhere", async () => {
+  // NTFS guards raise, deploy selection refuses ambiguity, bootstrap uses
+  // headers with retryable connections, exe config preserves keys, trust
+  // store locks and fsyncs, model gate compares outside the try.
+  const planCommit = await readFile(resolve(root, "../kyth-installer/kyth_installer/plan_commit.py"), "utf8");
+  assert.match(planCommit, /marker could not be/, "NTFS marker failure must abort");
+  assert.match(planCommit, /Could not read the live NTFS/, "NTFS probe failure must abort");
+  const apiTs = await readFile(resolve(root, "../kyth-installer-web/src/api.ts"), "utf8");
+  assert.match(apiTs, /Authorization/, "bootstrap must use a header, not the URL");
+  assert.doesNotMatch(apiTs, /bootstrap_token=\$/, "token must not be interpolated into the URL");
+  assert.match(apiTs, /connectionPromise = null/, "failed bootstrap must be retryable");
+  assert.match(rust, /atomic_write_text\(&path/, "exe config must write atomically");
+  const trust = await readFile(resolve(root, "../kyth-shared-rs/src/system/exe_trust.rs"), "utf8");
+  assert.match(trust, /store_lock/, "trust store must lock across load-modify-store");
+  assert.match(trust, /is corrupt; refusing/, "corrupt trust store must fail closed");
+});
+
 test("bug-hunt round 5: untrusted archives stay untrusted", async () => {
   // Restore never auto-enables services, flatpak/mime restores gate ids
   // with -- separators, stderr drains on a thread, exports never truncate.

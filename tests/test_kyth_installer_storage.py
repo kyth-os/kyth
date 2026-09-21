@@ -663,6 +663,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "_settle"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan, "run_command", side_effect=fake_run), \
+             patch.object(self.plan, "ntfs_filesystem_size_bytes", return_value=256 * 1024**3), \
              tempfile.TemporaryDirectory() as marker_dir:
             # marker_root MUST be a throwaway temp dir: the real default
             # (/run/kyth-installer) is a live system path, and a shrink
@@ -735,6 +736,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "_settle"), \
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan, "run_command", side_effect=fake_run), \
+             patch.object(self.plan, "ntfs_filesystem_size_bytes", return_value=256 * 1024**3), \
              tempfile.TemporaryDirectory() as marker_dir:
             with self.assertRaisesRegex(RuntimeError, "mkfs.btrfs exploded"):
                 self.plan._prepare_ntfs_resize_target(
@@ -1517,14 +1519,20 @@ class InstallerSystemTests(unittest.TestCase):
             zones = system.list_timezones()
         self.assertEqual(zones, ["UTC"])
 
-    def test_find_deploy_etc_returns_latest_sorted_candidate(self):
+    def test_find_deploy_etc_refuses_multiple_candidates(self):
+        # Guessing by sort order could configure a stale deployment (no
+        # login account on boot) — fail closed instead.
         import tempfile
         with tempfile.TemporaryDirectory() as tmpdir:
             base = Path(tmpdir) / "ostree/deploy/default/deploy"
             (base / "abc123.0" / "etc").mkdir(parents=True)
             (base / "def456.1" / "etc").mkdir(parents=True)
-            result = system.find_deploy_etc(tmpdir)
-            self.assertEqual(result, str(base / "def456.1" / "etc"))
+            with self.assertRaisesRegex(RuntimeError, 'Multiple ostree deployments'):
+                system.find_deploy_etc(tmpdir)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            base = Path(tmpdir) / "ostree/deploy/default/deploy"
+            (base / "abc123.0" / "etc").mkdir(parents=True)
+            self.assertEqual(system.find_deploy_etc(tmpdir), str(base / "abc123.0" / "etc"))
 
     def test_find_deploy_etc_returns_none_when_missing(self):
         import tempfile

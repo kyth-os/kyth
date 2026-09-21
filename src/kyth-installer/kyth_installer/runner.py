@@ -38,6 +38,7 @@ _ALLOWED_EXECUTABLES = frozenset({
     "kyth-installer-shell",
     "kyth-installerd",
     "ln",
+    "localectl",
     "lsblk",
     "mkdir",
     "mkfs.btrfs",

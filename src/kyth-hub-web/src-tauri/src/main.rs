@@ -1865,14 +1865,43 @@ fn exe_handler_set_auto_bottles(enabled: bool) -> Result<(), String> {
     let path = exe_handler_config_path();
     let directory = path.parent().ok_or("invalid Kyth configuration path")?;
     fs::create_dir_all(directory).map_err(|error| format!("Could not save preference: {error}"))?;
-    fs::write(
-        path,
-        format!(
-            "[exe-handler]\nauto_bottles={}\n",
-            if enabled { "true" } else { "false" }
-        ),
-    )
-    .map_err(|error| format!("Could not save preference: {error}"))
+    // Parse-modify-write, preserving every other key/section: a bare
+    // fs::write of the two known lines would discard anything else a user
+    // or a future version stores here. Atomic temp + fsync + rename so a
+    // crash mid-write never leaves a truncated file.
+    let desired = format!("auto_bottles={}", if enabled { "true" } else { "false" });
+    let mut lines: Vec<String> = match fs::read_to_string(&path) {
+        Ok(text) => text.lines().map(str::to_string).collect(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(format!("Could not save preference: {error}")),
+    };
+    let mut in_section = false;
+    let mut section_seen = false;
+    let mut key_written = false;
+    for line in &mut lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_section = trimmed == "[exe-handler]";
+            section_seen = section_seen || in_section;
+        } else if in_section
+            && trimmed
+                .split_once('=')
+                .is_some_and(|(key, _)| key.trim() == "auto_bottles")
+        {
+            *line = desired.clone();
+            key_written = true;
+        }
+    }
+    if !key_written {
+        if !section_seen {
+            lines.push("[exe-handler]".to_string());
+        }
+        lines.push(desired);
+    }
+    let mut rendered = lines.join("\n");
+    rendered.push('\n');
+    kyth_shared::atomic_io::atomic_write_text(&path, &rendered, Some(0o600))
+        .map_err(|error| format!("Could not save preference: {error}"))
 }
 
 #[tauri::command]

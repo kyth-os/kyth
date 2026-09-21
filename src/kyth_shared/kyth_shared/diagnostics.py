@@ -166,12 +166,16 @@ def create_github_issue_draft(
     from urllib.parse import urlencode
 
     if body_file:
-
-        if os.access(body_file, os.R_OK):
+        # No os.access pre-check: it is TOCTOU, follows symlinks, and the
+        # open below is the real readability proof. Cap the slurp so an
+        # unbounded file cannot balloon the draft/URL.
+        try:
             with open(body_file, "r", encoding="utf-8") as fh:
-                body = fh.read()
-        else:
-            raise FileNotFoundError(f"Body file is not readable: {body_file}")
+                body = fh.read(256 * 1024 + 1)
+        except OSError as exc:
+            raise FileNotFoundError(f"Body file is not readable: {body_file}") from exc
+        if len(body) > 256 * 1024:
+            body = body[:256 * 1024] + "\n\n[Body truncated at 256 KiB.]"
 
     if not body:
         body = "Describe what happened, what you expected, and what you were doing just before it happened."
@@ -180,11 +184,30 @@ def create_github_issue_draft(
     draft_dir = os.path.join(state_home, "kyth")
     os.makedirs(draft_dir, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
-    draft_path = os.path.join(draft_dir, f"github-issue-{timestamp}.md")
-
+    # Second-resolution stamps collide: two reports in the same second must
+    # not destroy the first draft. Reserve the name with O_EXCL (atomic
+    # even across concurrent reporters), bumping until it succeeds.
     from .atomic_io import atomic_write_text
 
+    timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    draft_path = ""
+    for counter in range(100):
+        candidate = os.path.join(
+            draft_dir,
+            f"github-issue-{timestamp}.md" if counter == 0 else f"github-issue-{timestamp}-{counter:02d}.md",
+        )
+        try:
+            reservation = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            continue
+        os.close(reservation)
+        draft_path = candidate
+        break
+    if not draft_path:
+        raise FileExistsError(
+            f"Too many issue drafts for timestamp {timestamp}; "
+            "remove older drafts and retry."
+        )
     atomic_write_text(draft_path, f"# {title}\n\n{body}\n", encoding="utf-8")
 
     max_body = 5500
@@ -203,10 +226,15 @@ def create_github_issue_draft(
 
     if open_browser:
         if shutil.which("xdg-open"):
+            # Detached + new session: the child must not linger as a zombie
+            # of this process when the reporter exits first.
             subprocess.Popen(
                 ["xdg-open", url],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                close_fds=True,
             )
 
     return draft_path, url

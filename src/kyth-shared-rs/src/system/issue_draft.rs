@@ -90,16 +90,11 @@ pub fn issue_url(repo_url: &str, title: &str, body: &str, label: &str) -> String
 }
 
 /// Resolves the issue body: a readable body file wins, then the inline
-/// body, then the placeholder. Mirrors the `os.access(R_OK)` gate —
-/// unreadable paths raise `Body file is not readable`, as upstream.
+/// body, then the placeholder. Readability is proven by reading: a metadata
+/// `readonly()` gate is inverted (mode-444 files ARE readable; mode-222
+/// write-only files are not), so just `read_to_string` and map the error.
 pub fn resolve_body(body: &str, body_file: Option<&str>) -> Result<String, String> {
     if let Some(path) = body_file {
-        let readable = std::fs::metadata(path)
-            .map(|metadata| !metadata.permissions().readonly())
-            .unwrap_or(false);
-        if !readable {
-            return Err(format!("Body file is not readable: {path}"));
-        }
         let text = std::fs::read_to_string(path)
             .map_err(|_| format!("Body file is not readable: {path}"))?;
         return Ok(text);
@@ -149,6 +144,20 @@ mod tests {
             resolve_body("", Some(file.to_str().unwrap())).unwrap(),
             "from file"
         );
+        // Read-only (mode 444) files ARE readable — the old metadata gate
+        // rejected them. Write-only files and missing files error.
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+        assert_eq!(
+            resolve_body("", Some(file.to_str().unwrap())).unwrap(),
+            "from file"
+        );
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o222)).unwrap();
+        // Root can read anything regardless of mode bits, so the
+        // write-only rejection only applies to non-root test runners.
+        if unsafe { libc::getuid() } != 0 {
+            assert!(resolve_body("", Some(file.to_str().unwrap())).is_err());
+        }
     }
 
     #[test]

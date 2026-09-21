@@ -279,6 +279,33 @@ class GuardianStorageTests(unittest.TestCase):
                 path = guardian.install_model(manifest)
                 self.assertEqual(path.read_bytes(), payload)
 
+    def test_content_length_mismatch_fails_before_first_read(self):
+        import hashlib as _hashlib
+        payload = b'tiny-test-model'
+        reads = []
+        class HeaderedBody(io.BytesIO):
+            headers = {'Content-Length': str(len(payload) + 10**9)}
+            def read(self, size=-1):
+                reads.append(size)
+                return super().read(size)
+        with tempfile.TemporaryDirectory() as temp:
+            root = pathlib.Path(temp)
+            manifest = root / 'manifest.json'
+            manifest.write_text(json.dumps({
+                'id': 'test', 'url': 'https://example.invalid/model.gguf',
+                'filename': 'model.gguf', 'size': len(payload),
+                'sha256': _hashlib.sha256(payload).hexdigest(), 'license': 'Apache-2.0',
+                'prompt_version': 1, 'compatibility_version': 1,
+            }))
+            with (
+                patch.dict(os.environ, {'XDG_DATA_HOME': str(root / 'data')}, clear=False),
+                patch.object(guardian.urllib.request, 'urlopen', return_value=HeaderedBody(payload)),
+            ):
+                with self.assertRaisesRegex(ValueError, 'Content-Length'):
+                    guardian.install_model(manifest)
+            # No body bytes were ever pulled off the wire.
+            self.assertEqual(reads, [])
+
     def test_bad_model_digest_never_replaces_destination(self):
         payload = b"wrong"
         with tempfile.TemporaryDirectory() as temp:

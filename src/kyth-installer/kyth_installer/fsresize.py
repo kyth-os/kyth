@@ -71,14 +71,16 @@ def _run_typed(payload, *, timeout, **kwargs):
 
 
 def ntfs_filesystem_size_bytes(partition: str, *, timeout: int = 120) -> int | None:
-    """Return the live NTFS filesystem size on `partition`, or None if unknown.
+    """Return the live NTFS filesystem size on `partition`.
 
     Parses `ntfsresize --info` ("Current volume size: N bytes") through the
-    validated disk helper. Best-effort: any failure returns None and callers
-    fall back to the in-session `/run` marker. Unlike that marker (tmpfs,
-    gone after a reboot), this probes live state, so an NTFS volume whose
-    filesystem was shrunk but whose table change was rolled back is still
-    detected after a reboot.
+    validated disk helper. Returns None only when the probe could not be
+    attempted at all (helper missing/broken) or its output is unparsable —
+    in both cases the caller falls back to the in-session `/run` marker.
+    But a nonzero exit means ntfsresize REFUSED to read the volume (dirty,
+    hibernated, damaged) and that raises: those are exactly the volumes
+    that must not be shrunk, and swallowing the signal would let a retry
+    double-shrink with no marker and no probe.
     """
     import re as _re
 
@@ -91,7 +93,11 @@ def ntfs_filesystem_size_bytes(partition: str, *, timeout: int = 120) -> int | N
     except (OSError, ValueError, RuntimeError):
         return None
     if proc.returncode != 0:
-        return None
+        raise RuntimeError(
+            f"ntfsresize --info refused to read {partition} (exit {proc.returncode}): "
+            f"the volume is likely dirty, hibernated, or damaged. "
+            f"Output: {(proc.stdout or '')[:500]}"
+        )
     match = _re.search(r"Current volume size:\s*(\d+)\s*bytes", proc.stdout or "")
     if not match:
         return None

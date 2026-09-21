@@ -121,7 +121,17 @@ def find_deploy_etc(root_mount: str) -> Optional[str]:
     candidates = glob.glob(f"{root_mount}/ostree/deploy/default/deploy/*/etc")
     if not candidates:
         return None
-    return sorted(candidates)[-1]
+    if len(candidates) > 1:
+        # Fail closed: with a staged update plus the current deployment
+        # checked out, lexicographically-last is not necessarily the pending
+        # deployment — writing hostname/fstab/accounts into the stale one
+        # ships a system with no login account. Refuse instead of guessing.
+        raise RuntimeError(
+            "Multiple ostree deployments found under "
+            f"{root_mount} ({len(candidates)}); refusing to guess which one to "
+            "configure. Resolve to a single pending deployment and retry."
+        )
+    return candidates[0]
 
 
 # The actual account-database repair algorithm lives in kyth_shared.accounts

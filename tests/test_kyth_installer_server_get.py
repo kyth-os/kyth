@@ -28,11 +28,13 @@ from kyth_installer import config, server  # noqa: E402
 from kyth_installer.context import InstallerContext  # noqa: E402
 
 
-def _make_handler(path: str, *, host: str | None = None, cookie: str = "") -> server.Handler:
+def _make_handler(path: str, *, host: str | None = None, cookie: str = "", authorization: str = "") -> server.Handler:
     handler = server.Handler.__new__(server.Handler)
     headers = {"Cookie": cookie}
     if host is not None:
         headers["Host"] = host
+    if authorization:
+        headers["Authorization"] = authorization
     handler.headers = headers
     handler.rfile = io.BytesIO(b"")
     handler.wfile = io.BytesIO()
@@ -469,6 +471,38 @@ class ServerConstructionTests(unittest.TestCase):
             srv = server._Server(("127.0.0.1", 0), server.Handler)
         self.assertIsInstance(srv.context, InstallerContext)
         parent_init.assert_called_once_with(("127.0.0.1", 0), server.Handler)
+
+
+
+class ServerBootstrapHeaderTests(unittest.TestCase):
+    """The bootstrap token travels in an Authorization header, never the URL."""
+
+    def setUp(self):
+        config._bootstrap_token = None
+
+    def tearDown(self):
+        config._bootstrap_token = None
+
+    def test_index_accepts_bearer_bootstrap_and_consumes_one_shot(self):
+        config._bootstrap_token = 'header-token'
+        handler = _make_handler('/', host=f'127.0.0.1:{config.PORT}', authorization='Bearer header-token')
+        handler.do_GET()
+        handler.send_error.assert_not_called()
+        handler.send_response.assert_called_once_with(200)
+        self.assertIsNone(config._bootstrap_token)
+
+    def test_index_rejects_wrong_bearer_bootstrap(self):
+        config._bootstrap_token = 'header-token'
+        handler = _make_handler('/', host=f'127.0.0.1:{config.PORT}', authorization='Bearer wrong')
+        handler.do_GET()
+        handler.send_error.assert_called_once_with(403, 'Forbidden')
+        self.assertEqual(config._bootstrap_token, 'header-token')
+
+    def test_index_rejects_bare_url_without_any_credential(self):
+        config._bootstrap_token = 'header-token'
+        handler = _make_handler('/', host=f'127.0.0.1:{config.PORT}')
+        handler.do_GET()
+        handler.send_error.assert_called_once_with(403, 'Forbidden')
 
 
 if __name__ == "__main__":

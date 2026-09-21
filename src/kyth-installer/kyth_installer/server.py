@@ -212,10 +212,18 @@ class Handler(BaseHTTPRequestHandler):
         cookies = _parse_cookie_header(self.headers.get("Cookie", ""))
         if hmac.compare_digest(cookies.get("bootstrap_auth", ""), SESSION_TOKEN):
             return True
-        if qs.get("bootstrap_token") and config._bootstrap_token is not None:
-            with config._bootstrap_lock:
+        if config._bootstrap_token is not None:
+            presented = ""
+            authorization = self.headers.get("Authorization", "")
+            if authorization.startswith("Bearer "):
+                presented = authorization[len("Bearer "):]
+            elif qs.get("bootstrap_token"):
+                # Legacy fallback: older bundled UIs put the token in the
+                # query string. The current UI sends it as a Bearer header
+                # so the secret never lands in logs/history/crash reports.
                 presented = (qs.get("bootstrap_token") or [""])[0]
-                if config._bootstrap_token is not None and hmac.compare_digest(
+            with config._bootstrap_lock:
+                if presented and config._bootstrap_token is not None and hmac.compare_digest(
                     presented, config._bootstrap_token
                 ):
                     config._bootstrap_token = None
