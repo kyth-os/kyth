@@ -150,6 +150,38 @@ class RollbackRetryDueTests(unittest.TestCase):
         # Unrelated digests never trigger.
         self.assertFalse(rollback_retry_due(before, state, DIGEST_B))
 
+    def test_retry_due_ignores_a_different_digests_overwritten_attempt(self) -> None:
+        """Mirror of Rust rollback_retry_due_ignores_a_different_digests_overwritten_attempt.
+
+        rollback_attempted_for/last_rollback_error are a single global slot,
+        not per-digest. Once digest A's rollback has succeeded, a later
+        rollback attempt for an unrelated digest B that then FAILS must not
+        make A look retry-eligible again just because it overwrote the
+        global slot with B's own error.
+        """
+        state = BootHealthState(current_digest=DIGEST_A)
+        state = failed(state, DIGEST_A, "boot-1", 1)
+        state = failed(state, DIGEST_A, "boot-2", 2)
+        state = failed(state, DIGEST_A, "boot-3", 3)
+        self.assertIn(DIGEST_A, state.quarantined)
+        # A's rollback succeeds: global slot now names A with no error.
+        state = note_rollback_attempted(state, DIGEST_A, now=4)
+
+        # B is later quarantined and its rollback fails, overwriting the
+        # global slot so it now names B with an error.
+        state = failed(state, DIGEST_B, "boot-4", 5)
+        state = failed(state, DIGEST_B, "boot-5", 6)
+        state = failed(state, DIGEST_B, "boot-6", 7)
+        self.assertIn(DIGEST_B, state.quarantined)
+        state = note_rollback_attempted(state, DIGEST_B, error="bootc rollback: no such deployment", now=8)
+
+        # A fails again. The global slot now names B, not A, so A's own
+        # rollback history is unknowable from these fields — the fix must
+        # not treat B's error as evidence that A needs a retry.
+        before = state
+        state = failed(state, DIGEST_A, "boot-7", 9)
+        self.assertFalse(rollback_retry_due(before, state, DIGEST_A))
+
     def test_unquarantined_digest_is_never_due(self) -> None:
         state = BootHealthState(current_digest=DIGEST_A)
         state = failed(state, DIGEST_A, "boot-1", 1)

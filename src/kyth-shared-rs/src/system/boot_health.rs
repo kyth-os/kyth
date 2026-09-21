@@ -347,7 +347,12 @@ pub fn mark_healthy(state: &BootHealthState, digest: &str, now: i64) -> BootHeal
 /// took effect, so it is not repeated), and retries on subsequent red boots
 /// when the last attempt failed (`last_rollback_error` set) and this boot
 /// counted a new failure — the per-boot dedupe in `record_failure` keeps
-/// repeat reports from one boot from spamming rollbacks.
+/// repeat reports from one boot from spamming rollbacks. The retry check
+/// only trusts `last_rollback_error` when `rollback_attempted_for` still
+/// names `digest` — those two fields are a single global slot, not
+/// per-digest, so once a *different* digest's attempt has overwritten them
+/// this returns `false` for `digest` rather than risk retrying a rollback
+/// that already succeeded for it.
 pub fn rollback_retry_due(
     before: &BootHealthState,
     updated: &BootHealthState,
@@ -356,11 +361,27 @@ pub fn rollback_retry_due(
     if !updated.quarantined.contains_key(digest) {
         return false;
     }
-    if updated.rollback_attempted_for == digest && updated.last_rollback_error.is_empty() {
+    let attempted_for_this_digest = updated.rollback_attempted_for == digest;
+    if attempted_for_this_digest && updated.last_rollback_error.is_empty() {
         return false;
     }
     if !before.quarantined.contains_key(digest) {
         return true;
+    }
+    // rollback_attempted_for/last_rollback_error/last_rollback_at are a
+    // single global slot, not per-digest — note_rollback_attempted()
+    // overwrites them for whichever digest was rolled back most recently.
+    // If a DIFFERENT digest's later attempt has since overwritten this
+    // slot, we can no longer tell whether THIS digest's own rollback
+    // already succeeded — trusting the stale error/empty value here would
+    // let an unrelated digest's failure resurrect a retry for a digest
+    // that was already successfully rolled back from (see
+    // rollback_retry_due_ignores_a_different_digests_overwritten_attempt). Erring
+    // toward not retrying is the safe direction: it can only cause a
+    // legitimate retry to wait for this digest's own next quarantine
+    // transition, never repeat a rollback that already worked.
+    if !attempted_for_this_digest {
+        return false;
     }
     if updated.last_rollback_error.is_empty() {
         return false;
@@ -623,6 +644,46 @@ mod tests {
         assert!(!rollback_retry_due(&before, &state, digest));
         // Unrelated digests never trigger.
         assert!(!rollback_retry_due(&before, &state, "sha256:other"));
+    }
+
+    #[test]
+    fn rollback_retry_due_ignores_a_different_digests_overwritten_attempt() {
+        let a = "sha256:aaa";
+        let b = "sha256:bbb";
+        let mut state = BootHealthState::default();
+        for (index, boot) in ["a-1", "a-2", "a-3"].into_iter().enumerate() {
+            state = record_failure(&state, a, boot, "failed", 3, index as i64);
+        }
+        assert!(state.quarantined.contains_key(a));
+        // A's rollback is attempted and SUCCEEDS.
+        state = note_rollback_attempted(&state, a, None, 10);
+        assert_eq!(state.rollback_attempted_for, a);
+        assert!(state.last_rollback_error.is_empty());
+
+        // Unrelated digest B later fails and quarantines too; its rollback
+        // is attempted and FAILS.
+        for (index, boot) in ["b-1", "b-2", "b-3"].into_iter().enumerate() {
+            state = record_failure(&state, b, boot, "failed", 3, 20 + index as i64);
+        }
+        state = note_rollback_attempted(&state, b, Some("bootc rollback: no such deployment"), 30);
+        assert_eq!(state.rollback_attempted_for, b);
+        assert_eq!(
+            state.last_rollback_error,
+            "bootc rollback: no such deployment"
+        );
+
+        // A is somehow re-selected/re-booted and fails again (still
+        // quarantined the whole time; its own successful rollback record was
+        // never cleared). The *global* rollback_attempted_for/
+        // last_rollback_error now being B's must not make rollback_retry_due
+        // blind to A's own prior SUCCESSFUL rollback.
+        let before = state.clone();
+        state = record_failure(&state, a, "a-4", "failed", 3, 40);
+        assert!(
+            !rollback_retry_due(&before, &state, a),
+            "A already had a SUCCESSFUL rollback recorded; B's later, unrelated \
+             failed attempt must not resurrect a retry for A"
+        );
     }
 
     #[test]

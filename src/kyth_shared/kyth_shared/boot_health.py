@@ -200,14 +200,22 @@ def rollback_retry_due(
     retries on subsequent red boots when the last attempt failed
     (``last_rollback_error`` set) and this boot counted a new failure — the
     per-boot dedupe in :func:`record_failure` keeps repeat reports from one
-    boot from spamming rollbacks.
+    boot from spamming rollbacks. The retry check only trusts
+    ``last_rollback_error`` when ``rollback_attempted_for`` still names
+    ``digest`` — those two fields are a single global slot, not per-digest,
+    so once a *different* digest's attempt has overwritten them this
+    returns ``False`` for ``digest`` rather than risk retrying a rollback
+    that already succeeded for it.
     """
     if digest not in updated.quarantined:
         return False
-    if updated.rollback_attempted_for == digest and not updated.last_rollback_error:
+    attempted_for_this_digest = updated.rollback_attempted_for == digest
+    if attempted_for_this_digest and not updated.last_rollback_error:
         return False
     if digest not in before.quarantined:
         return True
+    if not attempted_for_this_digest:
+        return False
     if not updated.last_rollback_error:
         return False
     before_count = before.failures_by_digest.get(digest, 0)
