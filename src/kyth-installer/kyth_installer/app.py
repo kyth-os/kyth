@@ -168,31 +168,39 @@ def _child_gui_command(
     tokens_file: str,
     launcher_file: str,
     socket_path: str | None,
+    sandboxed: bool = False,
 ) -> list[str]:
     """Build the GUI child command without embedding secrets.
 
     The native shell receives ``--tokens-file``; the Chromium fallback
     receives a ``file://`` launcher page. Tokens travel via 0600 files only.
+
+    ``sandboxed`` drops Chromium's ``--no-sandbox`` escape: the sandbox is
+    only unworkable when Chromium runs as root, and the normal path already
+    runs it as the desktop user via ``sudo -u``. A renderer compromise while
+    holding the installer session must not own the install flow.
     """
     if installer_shell:
         gui_cmd = [installer_shell, "--tokens-file", tokens_file]
         if socket_path is not None:
             gui_cmd.extend(["--socket-path", socket_path])
         return gui_cmd
-    return [
+    cmd = [
         chromium_bin,
         f"--app=file://{launcher_file}",
         "--disable-dev-shm-usage",
         "--disable-extensions",
         "--disable-translate",
         "--no-first-run",
-        "--no-sandbox",
-        "--disable-setuid-sandbox",
         "--test-type",
         "--password-store=basic",
         "--window-size=1280,800",
         "--window-position=0,0",
     ]
+    if not sandboxed:
+        # Root fallback only: the sandbox cannot run as uid 0.
+        cmd.extend(["--no-sandbox", "--disable-setuid-sandbox"])
+    return cmd
 
 
 def _build_child_gui_command(
@@ -201,6 +209,7 @@ def _build_child_gui_command(
     tokens_file: str,
     launcher_file: str,
     child_uid: int | None,
+    child_runs_as_user: bool = False,
 ) -> tuple[list[str], tuple[bool, bool]]:
     """Write the child's 0600 token material and build its secret-free argv.
 
@@ -249,6 +258,7 @@ def _build_child_gui_command(
         tokens_file=tokens_file,
         launcher_file=launcher_file,
         socket_path=None,
+        sandboxed=child_runs_as_user,
     ), (False, True)
 
 
@@ -462,6 +472,7 @@ def main() -> None:
             tokens_file=tokens_file,
             launcher_file=launcher_file,
             child_uid=child_uid,
+            child_runs_as_user=bool(sudo_user),
         )
         wrote_tokens, wrote_launcher = wrote
         if sudo_user:

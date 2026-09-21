@@ -447,7 +447,39 @@ fn tar(ctx: &SetupCtx, args: &[&str], timeout_secs: u64) -> Result<String, Strin
 pub fn export_setup(ctx: &SetupCtx, dest: &Path) -> Result<PathBuf, String> {
     std::fs::create_dir_all(dest)
         .map_err(|error| format!("Cannot use archive destination: {error}"))?;
-    let archive = dest.join(format!("{ARCHIVE_PREFIX}-{}.tar.gz", (ctx.stamp)()));
+    // Second-precision stamps collide: two exports in the same second must
+    // never silently truncate an existing archive. Reserve the name with
+    // create_new (atomic even across concurrent exports), bumping until
+    // the reservation succeeds. The reservation file is removed below and
+    // tar recreates the name — the window is single-process-owned and the
+    // destination dir is the user's own, so this is best-effort hardening,
+    // not a security boundary.
+    let stamp = (ctx.stamp)();
+    let mut archive: Option<PathBuf> = None;
+    for counter in 0..100 {
+        let candidate = if counter == 0 {
+            dest.join(format!("{ARCHIVE_PREFIX}-{stamp}.tar.gz"))
+        } else {
+            dest.join(format!("{ARCHIVE_PREFIX}-{stamp}-{counter:02}.tar.gz"))
+        };
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&candidate)
+        {
+            Ok(_) => {
+                let _ = std::fs::remove_file(&candidate);
+                archive = Some(candidate);
+                break;
+            }
+            Err(_) => continue,
+        }
+    }
+    let archive = archive.ok_or_else(|| {
+        format!(
+            "Too many existing archives for timestamp {stamp}; move or rename older exports and retry."
+        )
+    })?;
     let work = TempDir::create("kyth-setup-export")?;
     let payload = work.path.join(ARCHIVE_PREFIX);
     std::fs::create_dir_all(&payload)
@@ -621,11 +653,33 @@ pub fn restore_files(payload: &Path, home: &Path, paths: &[String]) -> usize {
 pub fn restore_defaults(ctx: &SetupCtx, defaults: &BTreeMap<String, String>) -> usize {
     let mut restored = 0;
     for (mime, desktop) in defaults {
-        if run_ok(ctx, &["xdg-mime", "default", desktop, mime], 10).is_some() {
+        // Archive-controlled values (same gate as the Python side):
+        // allowlist the mime, shape-check the desktop id, and pass `--`
+        // so `--help` (exit 0) can never count as restored.
+        if !DEFAULT_MIME_TYPES.contains(&mime.as_str()) || !valid_desktop_id(desktop) {
+            continue;
+        }
+        if run_ok(ctx, &["xdg-mime", "default", "--", desktop, mime], 10).is_some() {
             restored += 1;
         }
     }
     restored
+}
+
+/// `org.gnome.gedit.desktop`-shaped ids only; manifest content is untrusted.
+fn valid_desktop_id(desktop: &str) -> bool {
+    let Some(base) = desktop.strip_suffix(".desktop") else {
+        return false;
+    };
+    !base.is_empty()
+        && base.len() <= 128
+        && base
+            .bytes()
+            .next()
+            .is_some_and(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
+        && base
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
 }
 
 /// Re-enable the Dynamic Lock user unit when the restored config opts in.
@@ -652,6 +706,11 @@ pub fn restore_dynamic_lock(ctx: &SetupCtx) -> bool {
 /// Stream one fixed argv, printing each stdout line as it arrives and
 /// merging trailing stderr lines after exit. Returns the exit code, or `1`
 /// when the process cannot start or outlives its bound.
+///
+/// stderr is drained on a background thread from spawn: without it, a chatty
+/// child (`flatpak install` progress) fills the 64 KiB pipe and both sides
+/// block forever — the stdout `lines().next()` loop below never reaches the
+/// timeout poll, so this used to hang permanently instead of timing out.
 pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)) -> i32 {
     let Some((program, rest)) = args.split_first() else {
         return 1;
@@ -665,6 +724,23 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
         Ok(child) => child,
         Err(_) => return 1,
     };
+    // Drain stderr concurrently so a verbose child can never fill the pipe
+    // and deadlock the stdout loop below.
+    let stderr_lines = std::sync::mpsc::channel::<String>();
+    if let Some(stderr) = child.stderr.take() {
+        let sender = stderr_lines.0;
+        std::thread::Builder::new()
+            .name("kyth-transfer-stderr".to_string())
+            .spawn(move || {
+                for line in BufReader::new(stderr).lines().map_while(Result::ok) {
+                    let trimmed = line.trim().to_string();
+                    if !trimmed.is_empty() {
+                        let _ = sender.send(trimmed);
+                    }
+                }
+            })
+            .ok();
+    }
     let stdout = child.stdout.take().map(BufReader::new);
     let mut lines = stdout.map(BufReader::lines);
     let started = Instant::now();
@@ -687,20 +763,13 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
             }
         }
     };
-    if let Some(mut child) = child
-        .stderr
-        .take()
-        .map(BufReader::new)
-        .map(BufReader::lines)
-    {
-        for line in child.by_ref().flatten() {
-            let trimmed = line.trim().to_string();
-            if !trimmed.is_empty() {
-                on_line(&trimmed);
-            }
-        }
+    // Child has exited: stdout is at EOF, so emit whatever stderr the drain
+    // thread collected, then any stdout lines that arrived after the final
+    // poll. Iterating the receiver blocks until the drain thread finishes
+    // (it ends on stderr EOF now that the child is gone).
+    for line in stderr_lines.1 {
+        on_line(&line);
     }
-    // Drain any stdout lines that arrived after the final poll.
     if let Some(iterator) = lines.as_mut() {
         for line in iterator.flatten() {
             let trimmed = line.trim().to_string();
@@ -762,7 +831,7 @@ pub fn restore_flatpaks(
         };
         on_line(&format!("Restoring app: {id}"));
         let code = stream(
-            &argv(&["flatpak", "install", "-y", "--or-update", origin, id]),
+            &argv(&["flatpak", "install", "-y", "--or-update", "--", origin, id]),
             on_line,
         );
         if code == 0 {
@@ -785,18 +854,30 @@ pub struct RestoreReport {
 }
 
 /// Restore an archive into `home`, returning the report the launcher prints.
+///
+/// `enable_dynamic_lock` must come from an explicit user flag
+/// (`--enable-dynamic-lock`): the restored config is untrusted archive
+/// content, and auto-enabling on `enabled:true` alone would let any shared
+/// archive silently persist a user service. Without the flag the config is
+/// still restored, but the unit is left off with a re-enable hint.
 pub fn restore_setup(
     ctx: &SetupCtx,
     stream: &dyn Fn(&[String], &dyn Fn(&str)) -> i32,
     on_line: &dyn Fn(&str),
     archive: &Path,
+    enable_dynamic_lock: bool,
 ) -> Result<RestoreReport, String> {
     let work = TempDir::create("kyth-setup-restore")?;
     let payload = safe_extract(ctx, archive, &work.path)?;
     let manifest = load_manifest_from_payload(&payload)?;
     let paths = restore_files(&payload, ctx.home, &manifest.copied_paths);
     let defaults = restore_defaults(ctx, &manifest.default_apps);
-    let dynamic_lock = restore_dynamic_lock(ctx);
+    let dynamic_lock = if enable_dynamic_lock {
+        restore_dynamic_lock(ctx)
+    } else {
+        on_line("Dynamic Lock config restored but left off — re-enable it in Settings if wanted.");
+        false
+    };
     let remotes = manifest
         .cloud_remotes
         .iter()
@@ -822,6 +903,24 @@ pub fn restore_setup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn desktop_id_gate_rejects_flags_and_garbage() {
+        assert!(valid_desktop_id("org.gnome.gedit.desktop"));
+        assert!(valid_desktop_id("firefox.desktop"));
+        for bad in [
+            "--help",
+            "--help.desktop",
+            "",
+            ".desktop",
+            "no-suffix",
+            "has space.desktop",
+            "semi;colon.desktop",
+            "../escape.desktop",
+        ] {
+            assert!(!valid_desktop_id(bad), "{bad} must be rejected");
+        }
+    }
 
     fn manifest(paths: &[&str]) -> Value {
         serde_json::json!({
@@ -1170,7 +1269,8 @@ mod tests {
         let on_line = |_: &str| {};
         // Restore runs flatpak reinstalls through `stream`; the stub reports
         // success without touching the system.
-        let report = restore_setup(&ctx, &stream, &on_line, &archive).expect("restore works");
+        let report =
+            restore_setup(&ctx, &stream, &on_line, &archive, false).expect("restore works");
         assert!(report.paths >= 1);
         assert_eq!(
             std::fs::read_to_string(home.path().join(".config/kdeglobals")).unwrap(),

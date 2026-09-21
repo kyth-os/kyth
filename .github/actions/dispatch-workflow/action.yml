@@ -51,11 +51,14 @@ runs:
         gh workflow run "${WORKFLOW}" "${args[@]}" --repo "${GH_REPO}"
         for attempt in $(seq 1 12); do
           sleep 10
+          # NOTE: `gh run list --jq` takes only the expression — it has no
+          # jq-style `--arg`. Passing `--arg since ...` made gh swallow
+          # `--arg` as the expression and fail with `unknown command
+          # "since"`. Inline the timestamp into the expression instead.
           if gh run list --repo "${GH_REPO}" --workflow "${WORKFLOW}" \
             --event workflow_dispatch --branch "${REF}" --limit 5 \
             --json databaseId,createdAt \
-            --jq --arg since "${DISPATCHED_AT}" \
-              '[.[] | select(.createdAt >= $since)] | length > 0' \
+            --jq "[.[] | select(.createdAt >= \"${DISPATCHED_AT}\")] | length > 0" \
             | grep -q true; then
             echo "Verified ${WORKFLOW} dispatch on ${REF} (attempt ${attempt})"
             exit 0

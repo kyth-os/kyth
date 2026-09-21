@@ -107,6 +107,55 @@ class StorageRoutingTests(unittest.TestCase):
 
 
 class BtrfsPreparationTests(unittest.TestCase):
+    def test_partition_target_reprobes_before_format(self):
+        # The explicit alongside/manual path must re-validate on a FRESH
+        # probe immediately before formatting: a stale selection (replug,
+        # rename, a mount from another shell) must fail closed, never
+        # format the wrong volume.
+        from kyth_installer import plan as plan_module
+        context = InstallerContext()
+        snapshot = SimpleNamespace(
+            partitions_by_name={
+                "/dev/sda3": {"name": "/dev/sda3", "fstype": "ext4", "size_bytes": 64 * 1024**3},
+            }
+        )
+        real_resolver = storage.phase_dependency
+        fmt = mock.Mock()
+        validate = mock.Mock()
+        calls: dict[str, mock.Mock] = {}
+        def fake_dependency(name: str):
+            return calls.setdefault(name, mock.Mock(side_effect=lambda *a, **k: mock.Mock(returncode=0)))
+        with (
+            mock.patch.object(plan_module, "_parent_disk", return_value="/dev/sda"),
+            mock.patch.object(plan_module, "_probe_storage", return_value=snapshot),
+            mock.patch.object(plan_module, "_validate_partition_target", validate),
+            mock.patch.object(storage, "phase_dependency", side_effect=fake_dependency),
+            mock.patch.object(storage, "_create_btrfs_subvolumes", fmt),
+            mock.patch.object(storage, "_run_guarded_image_write"),
+            mock.patch.object(storage, "_mount_efi_for_alongside"),
+            mock.patch("kyth_installer.install._build_bootc_install_cmd", return_value=["true"], create=True),
+        ):
+            storage._prepare_partition_target_storage(
+                "/dev/sda3", "", "/mnt/x", "src", "tgt",
+                mock.Mock(), mock.Mock(), context,
+            )
+        validate.assert_called_once()
+        fmt.assert_called_once()
+
+    def test_partition_target_vanished_fails_before_format(self):
+        from kyth_installer import plan as plan_module
+        context = InstallerContext()
+        with (
+            mock.patch.object(plan_module, "_parent_disk", return_value=None),
+            mock.patch("kyth_installer.phases.storage._create_btrfs_subvolumes") as fmt,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "vanished during the final disk scan"):
+                storage._prepare_partition_target_storage(
+                    "/dev/sda3", "", "/mnt/x", "src", "tgt",
+                    mock.Mock(), mock.Mock(), context,
+                )
+        fmt.assert_not_called()
+
     def test_btrfs_layout_uses_typed_rust_operations_when_helper_is_installed(self):
         context = InstallerContext()
         with (

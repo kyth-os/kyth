@@ -89,6 +89,27 @@ class ChildGuiCommandTests(unittest.TestCase):
         self.assertFalse(any("bootstrap_token=" in part for part in cmd))
         self.assertFalse(any("session-token" in part for part in cmd))
 
+    def test_chromium_sandboxed_for_user_root_fallback_keeps_no_sandbox(self):
+        user_cmd = app._child_gui_command(
+            installer_shell=None,
+            chromium_bin="chromium",
+            tokens_file="/run/kyth-installer/child-tokens.json",
+            launcher_file="/run/kyth-installer/launcher.html",
+            socket_path=None,
+            sandboxed=True,
+        )
+        self.assertNotIn("--no-sandbox", user_cmd)
+        self.assertNotIn("--disable-setuid-sandbox", user_cmd)
+        root_cmd = app._child_gui_command(
+            installer_shell=None,
+            chromium_bin="chromium",
+            tokens_file="/run/kyth-installer/child-tokens.json",
+            launcher_file="/run/kyth-installer/launcher.html",
+            socket_path=None,
+            sandboxed=False,
+        )
+        self.assertIn("--no-sandbox", root_cmd)
+
     def test_build_writes_material_and_never_embeds_secrets_in_argv(self):
         with tempfile.TemporaryDirectory() as tmp:
             tokens_file = str(Path(tmp) / "child-tokens.json")

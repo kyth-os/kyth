@@ -285,6 +285,20 @@ def _prepare_partition_target_storage(
     unmount_filesystem = phase_dependency("unmount_filesystem")
     _run_cmd = phase_dependency("_run_cmd")
     _build_bootc_install_cmd = phase_dependency("_build_bootc_install_cmd")
+    # Fresh re-probe immediately before anything destructive: the explicit
+    # alongside/manual path validated once at plan time, and a stale
+    # selection (USB replug/udev rename, a mount from another shell between
+    # review and commit) would otherwise format the wrong volume. The
+    # guided paths already revalidate twice; this matches them.
+    from .. import plan as _plan_module
+    _parent = _plan_module._parent_disk(target_part)
+    if not _parent:
+        raise RuntimeError(
+            f"The selected target {target_part} vanished during the final disk scan; "
+            "re-scan disks and choose the partition again. Nothing was formatted."
+        )
+    _fresh_snapshot = _plan_module._probe_storage(_parent)
+    _plan_module._validate_partition_target(_parent, target_part, "target partition", snapshot=_fresh_snapshot)
     log(f"Target partition : {target_part}")
     log(f"EFI partition    : {efi_part or '(none detected)'}")
 

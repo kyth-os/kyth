@@ -13,6 +13,7 @@ INSTALLER = ROOT / "build_files" / "kyth-installer" / "kyth_installer"
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
 from kyth_installer import install, post_routes  # noqa: E402
+from kyth_installer import plan as plan_module  # noqa: E402
 from kyth_installer.phases import common as phases_common  # noqa: E402
 from kyth_installer.phases import finalize as phases_finalize  # noqa: E402
 from kyth_installer.phases import storage as phases_storage  # noqa: E402
@@ -183,6 +184,12 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                     phases_storage, "_stop_power_watch",
                 ), mock.patch.object(
                     phases_storage, "_disk_image_hold", return_value=contextlib.nullcontext(),
+                ), mock.patch.object(
+                    plan_module, "_parent_disk", return_value="/dev/sda",
+                ), mock.patch.object(
+                    plan_module, "_probe_storage", return_value=mock.Mock(),
+                ), mock.patch.object(
+                    plan_module, "_validate_partition_target", return_value=None,
                 ):
                     run_command.return_value.stdout = "UUID=abc\n"
                     run_command.return_value.returncode = 0
@@ -353,6 +360,14 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         ), mock.patch.object(
             install,
             "require_root",
+        ), mock.patch.object(
+            # Fresh re-probe before format must pass so the worker reaches
+            # the failing _run_cmd it is actually testing.
+            plan_module, "_parent_disk", return_value="/dev/sda",
+        ), mock.patch.object(
+            plan_module, "_probe_storage", return_value=mock.Mock(),
+        ), mock.patch.object(
+            plan_module, "_validate_partition_target", return_value=None,
         ):
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
@@ -476,6 +491,12 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             phases_storage,
             "_disk_image_hold",
             return_value=contextlib.nullcontext(),
+        ), mock.patch.object(
+            plan_module, "_parent_disk", return_value="/dev/sda",
+        ), mock.patch.object(
+            plan_module, "_probe_storage", return_value=mock.Mock(),
+        ), mock.patch.object(
+            plan_module, "_validate_partition_target", return_value=None,
         ):
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0

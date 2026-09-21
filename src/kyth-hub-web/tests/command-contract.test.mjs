@@ -551,6 +551,16 @@ test("bug-hunt round 4: secrets stay out of strings, writes stay atomic", async 
   assert.match(rust, /allowed_pst_path\(&source\.to_string_lossy/, "PST must re-verify at use time");
 });
 
+test("bug-hunt round 5: untrusted archives stay untrusted", async () => {
+  // Restore never auto-enables services, flatpak/mime restores gate ids
+  // with -- separators, stderr drains on a thread, exports never truncate.
+  const transfer = await readFile(resolve(root, "../kyth-shared-rs/src/setup_transfer.rs"), "utf8");
+  assert.match(transfer, /enable_dynamic_lock/, "restore must need an explicit flag for Dynamic Lock");
+  assert.match(transfer, /valid_desktop_id/, "mime restores must shape-check desktop ids");
+  assert.match(transfer, /kyth-transfer-stderr/, "stderr must drain on a background thread");
+  assert.match(transfer, /create_new\(true\)/, "export names must reserve atomically");
+});
+
 test("bug-hunt round 2 closes races and verifier gaps", async () => {
   // VPN refuses duplicate connects on any live state, the cloud backup
   // dir is excluded, flatpak restores validate ids, HOME containment

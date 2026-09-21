@@ -3,9 +3,12 @@ from __future__ import annotations
 import logging
 
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
+
+from .atomic_io import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -50,17 +53,44 @@ def load_network_preset(path: Path | None = None) -> dict[str, Any]:
     }
 
 
+def _toml_str(value: Any, default: str = "") -> str:
+    """Render a TOML basic string with escaping.
+
+    Saver dicts can carry arbitrary text (drive names, remotes, repos); a
+    raw f-string interpolation lets `"` + newline inject whole sections
+    the root daemon later parses (rclone remote hijack). Escape controls,
+    backslash, and quote.
+    """
+    text = str(value) if value is not None else default
+    if not text:
+        text = default
+    return '"' + text.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t") + '"'
+
+
+def _toml_name(value: Any) -> str:
+    """Validate a TOML section/key name (drive names); reject injection."""
+    name = str(value or "")
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}", name):
+        raise ValueError(f"refusing unsafe drive name {name!r}")
+    return name
+
+
 def save_network_preset(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p = network_config_path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
+    dns = str(cfg.get("dns", "quad9"))
+    if dns not in ("quad9", "cloudflare", "google", "off"):
+        dns = "quad9"
+    zone = str(cfg.get("firewall_zone", "public"))
+    if zone not in ("home", "public", "work", "block"):
+        zone = "public"
     lines=["# Kyth network preset — DoT + firewalld, offline\n"]
-    lines.append(f'dns = "{cfg.get("dns","quad9")}"')
+    lines.append(f'dns = {_toml_str(dns)}')
     lines.append(f'doh = {str(bool(cfg.get("doh", True))).lower()}')
-    lines.append(f'firewall_zone = "{cfg.get("firewall_zone","public")}"')
+    lines.append(f'firewall_zone = {_toml_str(zone)}')
     lines.append(f'dns_strict = {str(bool(cfg.get("dns_strict", False))).lower()}')
     lines.append(f'vpn_dns_exclusive = {str(bool(cfg.get("vpn_dns_exclusive", False))).lower()}')
     lines.append(f'vpn_fail_closed = {str(bool(cfg.get("vpn_fail_closed", False))).lower()}')
-    p.write_text("\n".join(lines)+"\n", encoding="utf-8")
+    atomic_write_text(p, "\n".join(lines)+"\n")
     return p
 
 
@@ -85,27 +115,13 @@ def apply_network_preset(cfg: dict[str, Any] | None = None, root: Path = Path("/
     else:
         dest = Path("/etc/systemd/resolved.conf.d/50-kyth.conf")
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # Atomic with rollback: backup existing before replace
-    backup: bytes | None = None
+    # atomic_write_text (mkstemp + fsync + symlink refusal + rename) replaces
+    # the old hand-rolled tmp + backup/rollback: no torn file, no symlink
+    # plant at the predictable 50-kyth.tmp path.
     try:
-        backup = dest.read_bytes() if dest.is_file() else None
-    except OSError:
-        backup = None
-    tmp=dest.with_suffix(".tmp")
-    try:
-        tmp.write_text(f"[Resolve]\nDNS={dns_ip}\nDNSOverTLS={doh}\n", encoding="utf-8")
-        tmp.replace(dest)
+        atomic_write_text(dest, f"[Resolve]\nDNS={dns_ip}\nDNSOverTLS={doh}\n")
         written.append(dest)
     except OSError as exc:
-        # Rollback on failure — prevent half-written resolved.conf leaving DNS off + DoT on
-        try:
-            if backup is None:
-                if dest.is_file():
-                    dest.unlink()
-            else:
-                dest.write_bytes(backup)
-        except OSError:
-            pass
         raise RuntimeError(f"failed to write {dest}: {exc}") from exc
     try:
         import time

@@ -5,6 +5,9 @@ import os, tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+from .network_preset import _toml_str
+
 DEFAULT_SAVE_CLOUD_PATH = Path.home() / ".config" / "kyth" / "save-cloud.toml"
 
 def save_cloud_path(path: Path | None = None) -> Path:
@@ -26,11 +29,10 @@ def load_save_cloud(path: Path | None = None) -> dict[str, Any]:
 
 def save_save_cloud(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p=save_cloud_path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
     lines=["# Kyth save cloud — restic local + rclone remote, offline\n"]
-    lines.append(f'repo = "{cfg.get("repo","/var/cache/kyth/saves")}"')
-    lines.append(f'remote = "{cfg.get("remote","")}"')
+    lines.append(f'repo = {_toml_str(cfg.get("repo"), "/var/cache/kyth/saves")}')
+    lines.append(f'remote = {_toml_str(cfg.get("remote"), "")}')
     lines.append(f'on_battery = {str(bool(cfg.get("on_battery", False))).lower()}')
-    lines.append(f'password_file = "{cfg.get("password_file","")}"')
-    p.write_text("\n".join(lines)+"\n", encoding="utf-8")
+    lines.append(f'password_file = {_toml_str(cfg.get("password_file"), "")}')
+    atomic_write_text(p, "\n".join(lines)+"\n")
     return p

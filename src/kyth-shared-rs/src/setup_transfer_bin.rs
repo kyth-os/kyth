@@ -34,21 +34,27 @@ fn expand_user(value: &str, home: &Path) -> PathBuf {
 
 fn usage() -> ! {
     eprintln!(
-        "Usage: kyth-setup-transfer {{export <destination>|summary <archive>|restore <archive>}}"
+        "Usage: kyth-setup-transfer {{export <destination>|summary <archive>|restore <archive> [--enable-dynamic-lock]}}"
     );
     std::process::exit(2);
 }
 
 fn run() -> Result<i32, String> {
     let mut args = env::args().skip(1);
-    let (command, operand) = match (args.next(), args.next(), args.next()) {
-        (Some(command), Some(operand), None)
-            if ["export", "summary", "restore"].contains(&command.as_str()) =>
-        {
-            (command, operand)
-        }
-        _ => usage(),
-    };
+    let (command, operand, enable_dynamic_lock) =
+        match (args.next(), args.next(), args.next(), args.next()) {
+            (Some(command), Some(operand), None, None)
+                if ["export", "summary", "restore"].contains(&command.as_str()) =>
+            {
+                (command, operand, false)
+            }
+            (Some(command), Some(operand), Some(flag), None)
+                if command == "restore" && flag == "--enable-dynamic-lock" =>
+            {
+                (command, operand, true)
+            }
+            _ => usage(),
+        };
     let home = env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/root"));
@@ -88,6 +94,7 @@ fn run() -> Result<i32, String> {
                 &|args, on_line| stream_command(args, 600, on_line),
                 &print_line,
                 &operand,
+                enable_dynamic_lock,
             )?;
             println!(
                 "Setup restored: {} settings paths, {} default app associations, {} apps installed or updated.",

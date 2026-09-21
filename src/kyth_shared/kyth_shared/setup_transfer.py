@@ -8,6 +8,7 @@ import datetime as dt
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -112,10 +113,13 @@ def _copy_into_payload(home: Path, payload: Path, rel: str) -> bool:
         return False
     target = payload / "files" / rel
     target.parent.mkdir(parents=True, exist_ok=True)
-    if source.is_dir():
-        shutil.copytree(source, target, symlinks=True)
+    # Dereference on export (mirror the Rust side): preserving $HOME
+    # symlinks into the archive would let a hostile/shared archive re-plant
+    # arbitrary links in $HOME at restore time.
+    if source.is_dir() and not source.is_symlink():
+        shutil.copytree(source, target, symlinks=False)
     else:
-        shutil.copy2(source, target, follow_symlinks=False)
+        shutil.copy2(source, target, follow_symlinks=True)
     return True
 
 
@@ -124,7 +128,29 @@ def export_setup(destination: str) -> Path:
     dest = Path(destination).expanduser().resolve()
     dest.mkdir(parents=True, exist_ok=True)
     timestamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
-    archive = dest / f"{ARCHIVE_PREFIX}-{timestamp}.tar.gz"
+    # Second-precision names collide: two exports in the same second (or a
+    # leftover from an earlier run) must never silently truncate an existing
+    # archive. Reserve the name with O_EXCL (atomic even across concurrent
+    # exports), bumping the stamp until the reservation succeeds.
+    archive: Path | None = None
+    archive_fd: int | None = None
+    for counter in range(100):
+        candidate = dest / (
+            f"{ARCHIVE_PREFIX}-{timestamp}.tar.gz"
+            if counter == 0
+            else f"{ARCHIVE_PREFIX}-{timestamp}-{counter:02d}.tar.gz"
+        )
+        try:
+            archive_fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            continue
+        archive = candidate
+        break
+    if archive is None or archive_fd is None:
+        raise FileExistsError(
+            f"Too many existing archives for timestamp {timestamp}; "
+            "move or rename older exports and retry."
+        )
 
     with tempfile.TemporaryDirectory(prefix="kyth-setup-export-") as tmp:
         payload = Path(tmp) / ARCHIVE_PREFIX
@@ -158,10 +184,15 @@ def export_setup(destination: str) -> Path:
         (payload / "manifest.json").write_text(
             json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
-        with tarfile.open(archive, "w:gz", format=tarfile.PAX_FORMAT) as tar:
-            tar.add(payload, arcname=ARCHIVE_PREFIX, recursive=True)
+        # Write through the O_EXCL-reserved fd: the name cannot have been
+        # taken between reservation and this write.
+        with os.fdopen(archive_fd, "wb") as raw:
+            archive_fd = None
+            with tarfile.open(fileobj=raw, mode="w:gz", format=tarfile.PAX_FORMAT) as tar:
+                tar.add(payload, arcname=ARCHIVE_PREFIX, recursive=True)
 
-    archive.chmod(0o600)
+    # Mode 0600 was set atomically at reservation time (os.open), so no
+    # chmod is needed — and none could be TOCTOU-safe here anyway.
     print(f"Setup archive created: {archive}", flush=True)
     print("Passwords, browser sessions, SMB credentials, and cloud OAuth tokens were not included.", flush=True)
     return archive
@@ -180,6 +211,32 @@ def _safe_extract(archive: Path, destination: Path) -> Path:
     payload = destination / ARCHIVE_PREFIX
     if not payload.is_dir():
         raise ValueError("This is not a KythOS setup archive.")
+    # Symlink sweep (mirror the Rust side): tar plants files/.config/x-style
+    # links at extract time, and restore would recreate them in $HOME. Our
+    # own exporter never writes symlinks, so any is hostile — refuse the
+    # whole archive rather than restoring around it.
+    files_root = payload / "files"
+    links: list[str] = []
+    stack = [files_root]
+    while stack:
+        directory = stack.pop()
+        try:
+            entries = list(directory.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink():
+                    links.append(str(entry))
+                elif entry.is_dir():
+                    stack.append(entry)
+            except OSError:
+                continue
+    if links:
+        raise ValueError(
+            f"Unsafe archive: {len(links)} symlink(s) under files/ (first: {links[0]}). "
+            "Only archives exported by KythOS itself are safe to restore."
+        )
     return payload
 
 
@@ -287,7 +344,14 @@ def _restore_files(payload: Path, home: Path, paths: list[str]) -> int:
 def _restore_defaults(defaults: dict[str, str]) -> int:
     restored = 0
     for mime, desktop in defaults.items():
-        result = _run(["xdg-mime", "default", desktop, mime], timeout=10)
+        # Archive-controlled values: allowlist the mime, shape-check the
+        # desktop id, and separate positionals with -- so `--help` (exit 0)
+        # can never count as restored.
+        if mime not in DEFAULT_MIME_TYPES:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\.desktop", str(desktop or "")):
+            continue
+        result = _run(["xdg-mime", "default", "--", desktop, mime], timeout=10)
         if result is not None and result.returncode == 0:
             restored += 1
     return restored
@@ -308,6 +372,18 @@ def _restore_dynamic_lock(home: Path) -> bool:
     return result is not None and result.returncode == 0
 
 
+def _valid_flatpak_id(app_id: str) -> bool:
+    """Reverse-DNS Flatpak ids only (mirror the Rust gate): manifest content
+    is untrusted, and option-like ids (`--help` exits 0) must never reach
+    the argv."""
+    return (
+        bool(app_id)
+        and len(app_id) <= 200
+        and "." in app_id
+        and all(c.isascii() and (c.isalnum() or c in ".-_") for c in app_id)
+    )
+
+
 def _restore_flatpaks(apps: list[dict[str, str]]) -> tuple[int, int]:
     if not apps or shutil.which("flatpak") is None:
         return 0, len(apps)
@@ -318,7 +394,13 @@ def _restore_flatpaks(apps: list[dict[str, str]]) -> tuple[int, int]:
     failed = 0
     for item in apps:
         app_id = str(item.get("id") or "").strip()
-        if not app_id:
+        # Mirror the Rust side: manifest ids are untrusted archive content.
+        # {"id": "--help"} exits 0 and would be counted "installed"; any
+        # -flag is parsed as an option. Skip + count failed, and separate
+        # positionals with --.
+        if not _valid_flatpak_id(app_id):
+            print(f"Skipping unsafe app id: {app_id!r}", flush=True)
+            failed += 1
             continue
         origin = str(item.get("origin") or "flathub").strip()
         if origin not in remotes:
@@ -326,7 +408,7 @@ def _restore_flatpaks(apps: list[dict[str, str]]) -> tuple[int, int]:
         print(f"Restoring app: {app_id}", flush=True)
         try:
             proc = subprocess.Popen(  # noqa: S603 -- fixed flatpak argv
-                ["flatpak", "install", "-y", "--or-update", origin, app_id],
+                ["flatpak", "install", "-y", "--or-update", "--", origin, app_id],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
@@ -350,7 +432,7 @@ def _restore_flatpaks(apps: list[dict[str, str]]) -> tuple[int, int]:
     return installed, failed
 
 
-def restore_setup(archive_name: str) -> None:
+def restore_setup(archive_name: str, *, enable_dynamic_lock: bool = False) -> None:
     archive = Path(archive_name).expanduser().resolve()
     home = Path.home()
     with tempfile.TemporaryDirectory(prefix="kyth-setup-restore-") as tmp:
@@ -358,7 +440,17 @@ def restore_setup(archive_name: str) -> None:
         manifest = _load_manifest(payload)
         restored_paths = _restore_files(payload, home, manifest.get("copied_paths") or [])
         restored_defaults = _restore_defaults(manifest.get("default_apps") or {})
-        dynamic_lock_restored = _restore_dynamic_lock(home)
+        # Never auto-enable from the restored (untrusted) config alone: a
+        # shared archive must not silently persist a user service. The
+        # config is restored either way; enabling needs the explicit flag.
+        if enable_dynamic_lock:
+            dynamic_lock_restored = _restore_dynamic_lock(home)
+        else:
+            dynamic_lock_restored = False
+            print(
+                "Dynamic Lock config restored but left off — re-enable it in Settings if wanted.",
+                flush=True,
+            )
         apps_ok, apps_failed = _restore_flatpaks(manifest.get("flatpaks") or [])
 
     _run(["kbuildsycoca6", "--noincremental"], timeout=30)
@@ -386,6 +478,11 @@ def main() -> int:
     summary_parser.add_argument("archive")
     restore_parser = sub.add_parser("restore", help="Restore a setup archive")
     restore_parser.add_argument("archive")
+    restore_parser.add_argument(
+        "--enable-dynamic-lock",
+        action="store_true",
+        help="Also re-enable the Dynamic Lock user unit if the restored config opts in (off by default: restored configs are untrusted).",
+    )
     args = parser.parse_args()
 
     try:
@@ -394,7 +491,7 @@ def main() -> int:
         elif args.command == "summary":
             print(archive_summary(args.archive))
         else:
-            restore_setup(args.archive)
+            restore_setup(args.archive, enable_dynamic_lock=args.enable_dynamic_lock)
     except (OSError, ValueError, tarfile.TarError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr, flush=True)
         return 1

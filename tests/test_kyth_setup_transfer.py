@@ -116,6 +116,101 @@ class SetupTransferTests(unittest.TestCase):
             self.assertIn("Unsafe archive path", str(ctx.exception))
 
 
+    def test_extract_refuses_symlinks_under_files(self):
+        st = self.transfer
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            payload = tmp / "payload" / st.ARCHIVE_PREFIX
+            (payload / "files" / ".config").mkdir(parents=True)
+            (payload / "files" / ".config" / "real").write_text("x")
+            # Relative link passes tar's data filter but must still hit the
+            # sweep: our exporter never writes symlinks, so any is hostile.
+            (payload / "files" / ".config" / "evil").symlink_to("real")
+            (payload / "manifest.json").write_text(json.dumps({
+                "format": "KythOS setup transfer", "version": st.ARCHIVE_VERSION,
+                "copied_paths": [], "flatpaks": [], "default_apps": {},
+            }))
+            archive = tmp / "link.tar.gz"
+            with tarfile.open(archive, "w:gz") as tar:
+                tar.add(tmp / "payload" / st.ARCHIVE_PREFIX, arcname=st.ARCHIVE_PREFIX)
+            # Simulate what _safe_extract sees post-extract: sweep the payload.
+            with self.assertRaisesRegex(ValueError, "symlink"):
+                st._safe_extract(archive, tmp / "dest")
+
+    def test_export_never_truncates_existing_archive(self):
+        st = self.transfer
+        with tempfile.TemporaryDirectory() as tmpdir:
+            dest = Path(tmpdir)
+            first = st.export_setup(str(dest))
+            self.assertTrue(first.is_file())
+            first_bytes = first.read_bytes()
+            # Squat on the name the next export would take: it must bump to
+            # a fresh name, never truncate this file.
+            import datetime as _dt
+            stamp = _dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+            squat = dest / f"{st.ARCHIVE_PREFIX}-{stamp}.tar.gz"
+            squat.write_bytes(b"squatted")
+            second = st.export_setup(str(dest))
+            # The squatted name survives untouched. Same second -> the
+            # export bumps (-01); next second -> a fresh stamp name. Either
+            # way nothing is truncated.
+            self.assertEqual(squat.read_bytes(), b"squatted")
+            self.assertTrue(second.is_file())
+            self.assertTrue(second.name != squat.name or "-01.tar.gz" in second.name)
+
+    def test_restore_flatpaks_rejects_flags_and_separates_positionals(self):
+        st = self.transfer
+        seen = []
+
+        class Proc:
+            stdout = iter(["ok\n"])
+            def wait(self, timeout=None):
+                return 0
+
+        def fake_popen(argv, **kwargs):
+            seen.append(argv)
+            return Proc()
+
+        apps = [{"id": "--help", "origin": "flathub"}, {"id": "org.example.App", "origin": "flathub"}]
+        with patch.object(st.shutil, "which", return_value="/usr/bin/flatpak"), \
+             patch.object(st, "_run") as mock_run, \
+             patch.object(st.subprocess, "Popen", side_effect=fake_popen):
+            mock_run.return_value = type("R", (), {"stdout": "flathub"})()
+            ok, failed = st._restore_flatpaks(apps)
+        self.assertEqual((ok, failed), (1, 1))
+        self.assertEqual(len(seen), 1)
+        self.assertIn("--", seen[0])
+
+    def test_restore_defaults_allowlists_mime_and_desktop(self):
+        st = self.transfer
+        seen = []
+        with patch.object(st, "_run", side_effect=lambda argv, **kw: seen.append(argv) or type("R", (), {"returncode": 0})()):
+            n = st._restore_defaults({
+                "text/plain": "org.kde.kwrite.desktop",
+                "text/html": "--help",
+                "evil/type": "org.kde.kwrite.desktop",
+                "text/plain2": "x",
+            })
+        # Only the legit pair runs, with -- separating positionals.
+        self.assertEqual(n, 1)
+        self.assertEqual(seen, [["xdg-mime", "default", "--", "org.kde.kwrite.desktop", "text/plain"]])
+
+    def test_export_dereferences_symlinks(self):
+        st = self.transfer
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home = Path(tmpdir) / "home"
+            (home / ".config").mkdir(parents=True)
+            (home / ".config" / "real").write_text("data")
+            (home / ".config" / "link").symlink_to("/etc/hostname")
+            payload = Path(tmpdir) / "payload"
+            payload.mkdir()
+            with patch.object(st.Path, "home", return_value=home):
+                self.assertTrue(st._copy_into_payload(home, payload, ".config/link"))
+            copied = payload / "files" / ".config" / "link"
+            self.assertTrue(copied.is_file())
+            self.assertFalse(copied.is_symlink())
+
+
 class BytesIO(MagicMock):
     """Helper for mocking tarball files."""
     def __init__(self, data):
