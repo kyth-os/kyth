@@ -11,6 +11,7 @@ from typing import Callable
 _logger = logging.getLogger(__name__)
 
 from .config import BIOS_BOOT_BYTES
+from .execution import InstallCancelled
 from .plan_types import InstallPlan
 
 
@@ -200,11 +201,16 @@ __all__ = ["CommitDependencies", "commit_new_kythos_partition", "ensure_bios_boo
 def shrink_ntfs_filesystem_guarded(
     partition: str, new_size: int, shrink_bytes: int, log, *, shrink_filesystem,
     human_size, marker_root: Path = Path("/run/kyth-installer"),
+    cancel_event=None, register_mount=None, release_mount=None,
 ) -> None:
     """Shrink NTFS before table mutation and record the non-atomic boundary."""
     log(f"NTFS resize requested: shrink {partition} by {human_size(shrink_bytes)}")
     try:
-        shrink_filesystem(partition, "ntfs", new_size, log)
+        shrink_filesystem(partition, "ntfs", new_size, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
+    except InstallCancelled:
+        # Never swallow cancellation as a shrink failure: the handler below
+        # would log "no destructive write" and CONTINUE to the table commit.
+        raise
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         log(
             "NTFS filesystem shrink failed — no partition table change was made. "
@@ -303,7 +309,7 @@ def prepare_ntfs_resize_target(
     partition_start, shrink_filesystem_guarded, run_command, as_root, settle,
     commit_partition, resize_partition=None,
     marker_root: Path = Path("/run/kyth-installer"),
-    ntfs_fs_size=None,
+    ntfs_fs_size=None, cancel_event=None, register_mount=None, release_mount=None,
 ) -> tuple[str, str]:
     """Shrink a validated NTFS target and commit a partition in its freed tail."""
     try:
@@ -358,7 +364,7 @@ def prepare_ntfs_resize_target(
     old_end = start + current_size - sector
     new_end = start + new_ntfs_size - sector
 
-    shrink_filesystem_guarded(partition, new_ntfs_size, shrink_bytes, log)
+    shrink_filesystem_guarded(partition, new_ntfs_size, shrink_bytes, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
 
     def shrink_partition_boundary() -> None:
         log("Shrinking partition boundary...")
@@ -421,10 +427,10 @@ def prepare_explicit_install_plan(
 __all__.append("prepare_explicit_install_plan")
 
 
-def prepare_guided_install_plan(state, log, *, validate_target, prepare_target) -> InstallPlan:
+def prepare_guided_install_plan(state, log, *, validate_target, prepare_target, cancel_event=None, register_mount=None, release_mount=None) -> InstallPlan:
     """Revalidate and convert a guided target into the alongside execution mode."""
     validate_target(state)
-    disk, target_partition = prepare_target(state, log)
+    disk, target_partition = prepare_target(state, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
     return InstallPlan("alongside", disk=disk, target_partition=target_partition)
 
 
@@ -449,10 +455,13 @@ def prepare_install_plan(
             report.errors[0] if report.errors else "Install plan validation failed"
         )
     plan = plan_from_state(state)
+    cancel_event = getattr(context, "cancel_requested", None)
+    register_mount = getattr(context, "register_mount", None)
+    release_mount = getattr(context, "release_mount", None)
     if plan.mode == "resize_ntfs":
-        return prepare_ntfs(state, log)
+        return prepare_ntfs(state, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
     if plan.mode == "free_space":
-        return prepare_free_space(state, log)
+        return prepare_free_space(state, log, cancel_event=cancel_event)
     return prepare_explicit(plan, state, context)
 
 

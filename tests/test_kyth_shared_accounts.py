@@ -26,6 +26,24 @@ def _write(path: pathlib.Path, content: str) -> None:
 
 
 class EnsureSystemAccountsTests(unittest.TestCase):
+    def test_write_lines_is_atomic_on_mid_stream_kill(self):
+        # Fault-inject the writer dying during `tee`: the original file
+        # must be byte-identical afterward (old-or-new, never partial) —
+        # the content only ever lands via same-dir temp + rename.
+        import subprocess as _sp
+        original = "root:!locked:19700:0:99999:7:::\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            target = pathlib.Path(tmp) / "shadow"
+            target.write_text(original)
+            def dying_run(argv, **kwargs):
+                if argv[0] == "tee":
+                    raise _sp.CalledProcessError(1, argv)
+                return _sp.CompletedProcess(argv, 0, stdout="", stderr="")
+            with self.assertRaises(_sp.CalledProcessError):
+                accounts._write_lines(target, ["root:HACKED:1:2:3:4:5:6:7"], 0o000, dying_run)
+            self.assertEqual(target.read_text(), original)
+            self.assertFalse((pathlib.Path(tmp) / "shadow.tmp").exists())
+
     def test_merges_missing_records_and_locks_down_shadow(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
@@ -122,6 +140,12 @@ class EnsureSystemAccountsTests(unittest.TestCase):
                 if argv[0] == "chmod":
                     pathlib.Path(argv[2]).chmod(int(argv[1], 8))
                     return subprocess.CompletedProcess(argv, 0)
+                if argv[0] == "mv":
+                    import shutil as _mv_shutil
+                    _mv_shutil.move(argv[1], argv[2])
+                    return subprocess.CompletedProcess(argv, 0)
+                if argv[0] == "sync":
+                    return subprocess.CompletedProcess(argv, 0)
                 return subprocess.CompletedProcess(argv, 0)
 
             accounts.ensure_system_accounts(str(root), lambda _msg: None, run=fake_run)
@@ -186,7 +210,17 @@ def _fake_useradd_run(useradd_uid_gid="1000:1000"):
             path.write_text(kwargs.get("input", ""))  # lgtm[py/clear-text-storage-sensitive-data]
             return subprocess.CompletedProcess(argv, 0)
         if argv[0] == "chmod":
-            pathlib.Path(argv[2]).chmod(int(argv[1], 8))
+            # Record the requested mode, but keep the fixture readable: the
+            # test runner is non-root, so a real 0o000 would make the
+            # content assertions below unreadable. Mode intent is asserted
+            # from `calls` instead.
+            pathlib.Path(argv[2]).chmod(int(argv[1], 8) | 0o600)
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "mv":
+            import shutil as _mv_shutil
+            _mv_shutil.move(argv[1], argv[2])
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "sync":
             return subprocess.CompletedProcess(argv, 0)
         if argv[0] == "chown":
             return subprocess.CompletedProcess(argv, 0)
@@ -218,6 +252,12 @@ class CreateInstallerUserTests(unittest.TestCase):
             self.assertIn("alice:x:1000:1000:", passwd)
             self.assertIn("alice:$6$fakehash:", shadow)
             self.assertEqual(shadow.count("root:!locked"), 1)
+            # Shadow must be locked to 0o000 (asserted from the recorded
+            # chmod call — the fixture itself stays readable for non-root).
+            # Note: the chmod lands on the same-dir temp (renamed over
+            # shadow after), so match the mode, not the final path.
+            zero_chmods = [c for c in calls if c[0] == "chmod" and c[1] == "0"]
+            self.assertTrue(zero_chmods)
 
             var_home = root / "ostree/deploy/default/var/home/alice"
             self.assertTrue(var_home.is_dir())

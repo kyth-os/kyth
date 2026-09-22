@@ -137,6 +137,31 @@ class SetupTransferTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "symlink"):
                 st._safe_extract(archive, tmp / "dest")
 
+    def test_extract_refuses_size_bomb_before_any_write(self):
+        st = self.transfer
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
+            payload = tmp / "payload" / st.ARCHIVE_PREFIX
+            (payload / "files").mkdir(parents=True)
+            (payload / "manifest.json").write_text("{}")
+            # Sparse file claiming 5 MiB with the cap mocked to 1 MiB:
+            # exercises the size gate without streaming gigabytes.
+            sparse = tmp / "sparse.bin"
+            with open(sparse, "wb") as fh:
+                fh.truncate(5 * 1024**2)
+            (payload / "files" / "sparse.bin").hardlink_to(sparse)
+            archive = tmp / "bomb.tar.gz"
+            with tarfile.open(archive, "w:gz") as tar:
+                tar.add(tmp / "payload" / st.ARCHIVE_PREFIX, arcname=st.ARCHIVE_PREFIX)
+            dest = tmp / "dest"
+            dest.mkdir()
+            before = set(dest.iterdir())
+            with patch.object(st, "_MAX_ARCHIVE_BYTES", 1024**2):
+                with self.assertRaisesRegex(ValueError, "exceeds"):
+                    st._safe_extract(archive, dest)
+            # Refused before any member was written.
+            self.assertEqual(set(dest.iterdir()), before)
+
     def test_export_never_truncates_existing_archive(self):
         st = self.transfer
         with tempfile.TemporaryDirectory() as tmpdir:

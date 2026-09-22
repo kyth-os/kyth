@@ -228,7 +228,25 @@ pub fn prune_trash(home: &Path, days: i64, now_secs: i64) -> usize {
             continue;
         }
         if let Some(name) = info.file_stem() {
-            let target = files_dir.join(name);
+            // Containment gate (mirror the Python side): a crafted info
+            // name like `..trashinfo` has stem `.` (target = files/ itself)
+            // and `...trashinfo` has stem `..` (target = Trash/ itself).
+            // Only direct children are ever deleted.
+            let name = name.to_string_lossy();
+            let confined = !name.is_empty()
+                && name != "."
+                && name != ".."
+                && !name.contains('/')
+                && !name.contains('\0');
+            if !confined {
+                let _ = std::fs::remove_file(info);
+                continue;
+            }
+            let target = files_dir.join(name.as_ref());
+            if target.parent() != Some(files_dir.as_path()) {
+                let _ = std::fs::remove_file(info);
+                continue;
+            }
             if target.exists() {
                 let is_real_dir = std::fs::symlink_metadata(&target)
                     .is_ok_and(|meta| meta.file_type().is_dir() && !meta.file_type().is_symlink());
@@ -261,6 +279,31 @@ mod tests {
         assert_eq!(find_dedupe_targets(directory.path()), vec![target]);
         assert!(supports_dedupe_filesystem(" BTRFS\n"));
         assert!(!supports_dedupe_filesystem("ext4"));
+    }
+
+    #[test]
+    fn prune_trash_refuses_dotdot_stems() {
+        // `..trashinfo` has stem `.` (target = files/ itself),
+        // `...trashinfo` has stem `..` (target = Trash/ itself).
+        let home = tempdir().unwrap();
+        let info_dir = home.path().join(".local/share/Trash/info");
+        let files_dir = home.path().join(".local/share/Trash/files");
+        fs::create_dir_all(&info_dir).unwrap();
+        fs::create_dir_all(&files_dir).unwrap();
+        let old = "[Trash Info]\nPath=x\nDeletionDate=2020-01-01T00:00:00\n";
+        for name in ["..trashinfo", "...trashinfo", "legit.trashinfo"] {
+            fs::write(info_dir.join(name), old).unwrap();
+        }
+        fs::write(files_dir.join("victim"), "keep me").unwrap();
+        fs::write(files_dir.join("legit"), "old").unwrap();
+        // Hostile infos are removed without counting (only real prunes
+        // count); the legit entry prunes its file.
+        assert_eq!(prune_trash(home.path(), 1, 1_769_000_000), 1);
+        assert!(files_dir.is_dir());
+        assert!(files_dir.join("victim").is_file());
+        assert!(!files_dir.join("legit").exists());
+        assert!(!info_dir.join("..trashinfo").exists());
+        assert!(!info_dir.join("...trashinfo").exists());
     }
 
     #[test]

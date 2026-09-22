@@ -664,6 +664,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan, "run_command", side_effect=fake_run), \
              patch.object(self.plan, "ntfs_filesystem_size_bytes", return_value=256 * 1024**3), \
+             patch("kyth_installer.assurance._battery_check", return_value=None), \
              tempfile.TemporaryDirectory() as marker_dir:
             # marker_root MUST be a throwaway temp dir: the real default
             # (/run/kyth-installer) is a live system path, and a shrink
@@ -681,7 +682,7 @@ class InstallerPlanTests(unittest.TestCase):
         # real shrink) now lives in fsresize.shrink_filesystem, with its own
         # tests — this test only verifies it's invoked before the partition
         # boundary moves, and with the right target size.
-        mock_shrink.assert_called_once_with(partition, "ntfs", 192 * 1024**3, unittest.mock.ANY)
+        mock_shrink.assert_called_once_with(partition, "ntfs", 192 * 1024**3, unittest.mock.ANY, cancel_event=None, register_mount=None, release_mount=None)
         flattened = [" ".join(cmd) for cmd in commands]
         mock_disk_service.resize_partition.assert_called_once_with(
             "/dev/nvme0n1", 3, 128 * 1024**3, 192 * 1024**3,
@@ -737,6 +738,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "_is_gpt_disk", return_value=True), \
              patch.object(self.plan, "run_command", side_effect=fake_run), \
              patch.object(self.plan, "ntfs_filesystem_size_bytes", return_value=256 * 1024**3), \
+             patch("kyth_installer.assurance._battery_check", return_value=None), \
              tempfile.TemporaryDirectory() as marker_dir:
             with self.assertRaisesRegex(RuntimeError, "mkfs.btrfs exploded"):
                 self.plan._prepare_ntfs_resize_target(

@@ -505,5 +505,66 @@ class ServerBootstrapHeaderTests(unittest.TestCase):
         handler.send_error.assert_called_once_with(403, 'Forbidden')
 
 
+class ServerSlowLorisTests(unittest.TestCase):
+    def test_stalled_connections_do_not_starve_legit_requests(self):
+        import socket as _socket
+        import threading as _threading
+        srv = server._Server(('127.0.0.1', 0), server.Handler)
+        self.assertTrue(srv.daemon_threads)
+        self.assertEqual(srv.timeout, 10)
+        port = srv.server_address[1]
+        thread = _threading.Thread(target=srv.serve_forever, kwargs={'poll_interval': 0.05}, daemon=True)
+        thread.start()
+        self.addCleanup(srv.shutdown)
+        self.addCleanup(srv.server_close)
+        # Saturate every handler slot with stalled connections, then some.
+        stalls = []
+        try:
+            for _ in range(server._Server._MAX_HANDLERS + 5):
+                sock = _socket.create_connection(('127.0.0.1', port), timeout=5)
+                sock.sendall(b"GET /api/config HTTP/1.1\r\nHost: x\r\n")
+                stalls.append(sock)
+            # Over capacity, the next connection is refused FAST (reset or
+            # EOF) — never queued behind 37 stalled handlers for 10s each.
+            import time as _t0
+            started = _t0.monotonic()
+            probe = _socket.create_connection(('127.0.0.1', port), timeout=5)
+            try:
+                probe.settimeout(5)
+                probe.sendall(b'GET /api/config HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n')
+                try:
+                    while probe.recv(64):
+                        pass
+                except (ConnectionResetError, BrokenPipeError):
+                    pass
+            finally:
+                probe.close()
+            self.assertLess(_t0.monotonic() - started, 5)
+        finally:
+            for sock in stalls:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+        # Once the stalls drain, a legit request is served again.
+        import time as _time
+        deadline = _time.monotonic() + 15
+        answered = b""
+        while _time.monotonic() < deadline:
+            try:
+                probe = _socket.create_connection(('127.0.0.1', port), timeout=5)
+                try:
+                    probe.settimeout(5)
+                    probe.sendall(b'GET /api/config HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n')
+                    answered = probe.recv(64)
+                finally:
+                    probe.close()
+                if answered.startswith(b"HTTP/"):
+                    break
+            except OSError:
+                _time.sleep(0.2)
+        self.assertTrue(answered.startswith(b"HTTP/"))
+
+
 if __name__ == "__main__":
     unittest.main()

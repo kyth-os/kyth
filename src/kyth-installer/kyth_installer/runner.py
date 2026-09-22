@@ -41,6 +41,7 @@ _ALLOWED_EXECUTABLES = frozenset({
     "localectl",
     "lsblk",
     "mkdir",
+    "mv",
     "mkfs.btrfs",
     "mkfs.ext4",
     "mkfs.fat",

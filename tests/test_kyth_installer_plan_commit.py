@@ -187,7 +187,7 @@ class PlanCommitTests(unittest.TestCase):
         self.assertEqual(result, ("/dev/sda", "/dev/sda3"))
         self.assertEqual(dependencies["validate_target"].call_count, 2)
         dependencies["shrink_filesystem_guarded"].assert_called_once_with(
-            "/dev/sda2", 80, 20, mock.ANY,
+            "/dev/sda2", 80, 20, mock.ANY, cancel_event=None, register_mount=None, release_mount=None,
         )
         commit_call = dependencies["commit_partition"].call_args
         self.assertEqual(commit_call.args[:3], ("/dev/sda", 1080, 1100))

@@ -497,10 +497,58 @@ class _Server(ThreadingHTTPServer):
     # Allow the port to be reused immediately if the previous process crashed
     # and left a TIME_WAIT socket — prevents EADDRINUSE on rapid restarts.
     allow_reuse_address = True
+    # Slow-loris hardening: BaseHTTPRequestHandler reads request line/headers
+    # on a blocking socket, and ThreadingHTTPServer spawns one thread per
+    # connection with no cap. Without these, any local process can dribble
+    # headers on N connections and pin a root thread each, starving the UI
+    # mid-install. Timeouts bound each stall; daemon threads let shutdown
+    # proceed; the semaphore caps concurrent handlers (same pattern as the
+    # /api/stream slots).
+    daemon_threads = True
+    timeout = 10
+    _MAX_HANDLERS = 32
+    _handler_slots = threading.BoundedSemaphore(_MAX_HANDLERS)
+
+    def process_request(self, request, client_address):
+        if not type(self)._handler_slots.acquire(blocking=False):
+            try:
+                request.close()
+            except OSError:
+                pass
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            type(self)._handler_slots.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            type(self)._handler_slots.release()
 
     def __init__(self, server_address, handler_class, context: InstallerContext | None = None):
         self.context = context or InstallerContext()
         super().__init__(server_address, handler_class)
+        # Apply the stall bound to the listening socket too (inherited by
+        # accepted connections on most platforms; handlers additionally get
+        # it via socket_options below). getattr: unit tests may stub out the
+        # parent __init__ (no real socket) to check construction semantics.
+        try:
+            listen_sock = getattr(self, "socket", None)
+            if listen_sock is not None:
+                listen_sock.settimeout(self.timeout)
+        except OSError:
+            pass
+
+    def get_request(self):
+        request, address = super().get_request()
+        try:
+            request.settimeout(self.timeout)
+        except OSError:
+            pass
+        return request, address
 
 
 def _peer_uid(connection: socket.socket) -> int | None:

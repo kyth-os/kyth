@@ -21,6 +21,13 @@ from kyth_shared.commands import run_text
 
 ARCHIVE_VERSION = 1
 ARCHIVE_PREFIX = "kyth-setup"
+
+# Archive-bomb gates, mirroring system/updater.py: setup archives are
+# small settings bundles, so these bounds are generous — they exist to
+# refuse hostile input fast, before any byte is written.
+_MAX_ARCHIVE_MEMBERS = 100_000
+_MAX_ARCHIVE_BYTES = 16 * 1024**3
+
 FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
 
 # Deliberately excludes browser profiles, KWallet data, rclone.conf, and SMB
@@ -199,9 +206,39 @@ def export_setup(destination: str) -> Path:
 
 
 def _safe_extract(archive: Path, destination: Path) -> Path:
+    # Archive-bomb gates (mirror system/updater.py): count + summed-size
+    # pre-checks BEFORE extractall, so a hostile member-count bomb can't OOM
+    # getmembers() and a sparse/huge archive can't fill the disk before any
+    # validation of cost. Plus a free-space preflight on the destination.
     with tarfile.open(archive, "r:gz") as tar:
         base = destination.resolve()
-        for member in tar.getmembers():
+        members = tar.getmembers()
+        if len(members) > _MAX_ARCHIVE_MEMBERS:
+            raise ValueError(
+                f"Unsafe archive: {len(members)} members exceeds the "
+                f"{_MAX_ARCHIVE_MEMBERS} member limit."
+            )
+        total = 0
+        for member in members:
+            total += member.size
+            if total > _MAX_ARCHIVE_BYTES:
+                raise ValueError(
+                    "Unsafe archive: expanded size exceeds the "
+                    f"{_MAX_ARCHIVE_BYTES // 1024**3} GiB limit."
+                )
+        try:
+            anchor = destination
+            while not anchor.exists():
+                anchor = anchor.parent
+            free = shutil.disk_usage(anchor).free
+        except OSError:
+            free = 0
+        if total > free:
+            raise ValueError(
+                "Unsafe archive: not enough free space on the destination "
+                f"filesystem (needs {total} bytes, has {free})."
+            )
+        for member in members:
             target = (destination / member.name).resolve()
             try:
                 target.relative_to(base)

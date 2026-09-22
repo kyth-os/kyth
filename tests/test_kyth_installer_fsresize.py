@@ -20,7 +20,7 @@ class ShrinkFilesystemDispatchTests(unittest.TestCase):
     def test_ntfs_dispatches_to_shrink_ntfs(self):
         with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda1", "ntfs", 10 * 1024**3, lambda _m: None)
-        mock_shrink.assert_called_once_with("/dev/sda1", 10 * 1024**3, unittest.mock.ANY)
+        mock_shrink.assert_called_once_with("/dev/sda1", 10 * 1024**3, unittest.mock.ANY, cancel_event=None)
 
     def test_ntfs3_dispatches_to_shrink_ntfs(self):
         with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
@@ -30,7 +30,7 @@ class ShrinkFilesystemDispatchTests(unittest.TestCase):
     def test_ext4_dispatches_to_shrink_ext(self):
         with patch.object(fsresize, "_shrink_ext") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda2", "ext4", 5 * 1024**3, lambda _m: None)
-        mock_shrink.assert_called_once_with("/dev/sda2", 5 * 1024**3, unittest.mock.ANY)
+        mock_shrink.assert_called_once_with("/dev/sda2", 5 * 1024**3, unittest.mock.ANY, cancel_event=None)
 
     def test_ext2_and_ext3_also_dispatch_to_shrink_ext(self):
         for fstype in ("ext2", "ext3"):
@@ -41,7 +41,63 @@ class ShrinkFilesystemDispatchTests(unittest.TestCase):
     def test_btrfs_dispatches_to_shrink_btrfs(self):
         with patch.object(fsresize, "_shrink_btrfs") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda3", "btrfs", 20 * 1024**3, lambda _m: None)
-        mock_shrink.assert_called_once_with("/dev/sda3", 20 * 1024**3, unittest.mock.ANY)
+        mock_shrink.assert_called_once_with("/dev/sda3", 20 * 1024**3, unittest.mock.ANY, cancel_event=None, register_mount=None, release_mount=None)
+
+    def test_cancel_before_shrink_raises_before_any_backend(self):
+        import threading
+        from kyth_installer.execution import InstallCancelled
+        event = threading.Event()
+        event.set()
+        with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
+            with self.assertRaises(InstallCancelled):
+                fsresize.shrink_filesystem(
+                    "/dev/sda1", "ntfs", 10 * 1024**3, lambda _m: None,
+                    cancel_event=event,
+                )
+        mock_shrink.assert_not_called()
+
+    def test_cancel_event_reaches_stream_runner(self):
+        import threading
+        event = threading.Event()
+        seen = {}
+        fake_runner = MagicMock()
+        def capture(command, *args, **kwargs):
+            seen.update(kwargs)
+            raise RuntimeError("stop here")
+        fake_runner.run.side_effect = capture
+        with patch.object(fsresize, "_runner", fake_runner):
+            with self.assertRaises(RuntimeError):
+                fsresize._stream_typed(
+                    {"operation": "noop"}, lambda _m: None,
+                    cancel_event=event,
+                )
+        self.assertIs(seen.get("cancel_event"), event)
+
+    def test_btrfs_temp_mount_is_registered_released_and_lazy_retried(self):
+        import tempfile as _tempfile
+        registered, released, unmounts = [], [], []
+        def fake_run_typed(payload, **kwargs):
+            if payload.get("operation") == "unmount_filesystem":
+                unmounts.append(payload)
+                # First unmount is busy; lazy retry succeeds.
+                if payload.get("lazy"):
+                    return MagicMock(returncode=0)
+                return MagicMock(returncode=1)
+            return MagicMock(returncode=0)
+        with patch.object(fsresize, "_run_typed", side_effect=fake_run_typed), \
+             patch.object(fsresize, "_stream_typed", side_effect=RuntimeError("resize exploded")), \
+             patch.object(fsresize, "_require_tools", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "resize exploded"):
+                fsresize._shrink_btrfs(
+                    "/dev/sda3", 20 * 1024**3, lambda _m: None,
+                    register_mount=registered.append,
+                    release_mount=released.append,
+                )
+        # Mount was tracked, then released even on failure; the busy
+        # unmount fell back to a lazy detach.
+        self.assertEqual(len(registered), 1)
+        self.assertEqual(released, registered)
+        self.assertTrue(any(u.get("lazy") for u in unmounts))
 
     def test_bitlocker_is_rejected_with_a_targeted_message(self):
         with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
