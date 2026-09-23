@@ -38,6 +38,15 @@ fn normalize_kernel_flavor(value: &str) -> String {
     }
 }
 
+/// Install modes whose storage phase formats a Btrfs target with `@` and
+/// `@home` subvolumes (`prepare_btrfs_target`), so configuration must mount
+/// `@home` at /var/home and persist it in fstab. Python rewrote free_space
+/// and resize_ntfs to "alongside" after partitioning, so all three share the
+/// alongside-home step; manual installs configure /home via manual mounts.
+fn lays_out_home_subvolume(mode: &str) -> bool {
+    matches!(mode, "alongside" | "free_space" | "resize_ntfs")
+}
+
 /// Disk-helper request that mounts the target ESP at `mountpoint`. An ESP the
 /// live session already has mounted is bind-mounted from that mountpoint:
 /// the helper keys bind mounts on the `bind` field, and without it treats the
@@ -748,12 +757,12 @@ impl NativePhaseExecutor {
                 .map_err(|message| NativePhaseError::Execution { phase, message })?;
         let result = (|| {
             match self.storage_plan.mode.as_str() {
-                "alongside" => {
+                mode if lays_out_home_subvolume(mode) => {
                     let target_device = target
                         .or_else(|| self.storage_plan.target_partition.clone())
                         .ok_or_else(|| NativePhaseError::Execution {
                             phase,
-                            message: "alongside install has no configured target partition"
+                            message: "filesystem install has no configured target partition"
                                 .to_string(),
                         })?;
                     self.execute_fixed_helper(
@@ -1765,6 +1774,21 @@ mod tests {
         }))
         .expect("frontend request should decode");
         assert!(!alongside.execution.bootc.wipe);
+    }
+
+    #[test]
+    fn every_mode_that_creates_home_subvolume_mounts_it() {
+        // free_space and resize_ntfs build the same @/@home layout as
+        // alongside; skipping alongside-home for them left @home empty and
+        // unmounted, with /var/home silently living inside @.
+        for mode in ["alongside", "free_space", "resize_ntfs"] {
+            assert!(lays_out_home_subvolume(mode), "{mode}");
+        }
+        // wipe: bootc to-disk owns the layout. manual: /home comes from the
+        // user's own manual mounts.
+        for mode in ["wipe", "manual"] {
+            assert!(!lays_out_home_subvolume(mode), "{mode}");
+        }
     }
 
     #[test]
