@@ -8,11 +8,14 @@ rpm-ostree is unavailable (toolbox/CI).
 from __future__ import annotations
 
 import fnmatch
+import json
 import logging
 import os
 import tomllib
 from pathlib import Path
 from typing import Any
+
+from .atomic_io import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +78,14 @@ def save_kargs(cfg: dict[str, Any], path: Path | None = None) -> Path:
         prof = "balanced"
     add = [str(x) for x in cfg.get("custom_add", []) if isinstance(x, (str, int, float))] if isinstance(cfg.get("custom_add"), list) else []
     rem = [str(x) for x in cfg.get("custom_remove", []) if isinstance(x, (str, int, float))] if isinstance(cfg.get("custom_remove"), list) else []
-    lines = ["# Kyth kargs perf profile — offline, revertible\n", f'profile = "{prof}"\n']
-    add_repr = ", ".join(f'"{x}"' for x in add)
-    rem_repr = ", ".join(f'"{x}"' for x in rem)
+    def _toml_str(value: str) -> str:
+        return json.dumps(str(value), ensure_ascii=False)
+    lines = ["# Kyth kargs perf profile — offline, revertible\n", f"profile = {_toml_str(prof)}\n"]
+    add_repr = ", ".join(_toml_str(x) for x in add)
+    rem_repr = ", ".join(_toml_str(x) for x in rem)
     lines.append(f"custom_add = [{add_repr}]\n")
     lines.append(f"custom_remove = [{rem_repr}]\n")
-    p.write_text("".join(lines), encoding="utf-8")
+    atomic_write_text(p, "".join(lines), mode=0o600)
     return p
 
 

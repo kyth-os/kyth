@@ -2146,7 +2146,22 @@ fn dispatch_kargs_apply(action: &str) -> ExitCode {
             if let Err(code) = ensure_root("kargs-apply", &[action.to_string()]) {
                 return code;
             }
-            ExitCode::SUCCESS
+            // Profile save (gaming|performance|balanced) is separate. `apply`
+            // used to return success without touching the kernel cmdline, so
+            // Hub/ujust reported "applied" while mitigations=off never landed.
+            // Fail closed until a bootc/rpm-ostree kargs writer exists.
+            let config = gaming_kargs::load_kargs(&config_path);
+            let cmdline = std::fs::read_to_string("/proc/cmdline").unwrap_or_default();
+            match gaming_kargs::apply_is_ready(&config, &cmdline) {
+                Ok(()) => {
+                    println!("kargs-apply already in sync");
+                    ExitCode::SUCCESS
+                }
+                Err(detail) => {
+                    eprintln!("kyth-kargs-apply: {detail}");
+                    ExitCode::from(1)
+                }
+            }
         }
         _ => {
             eprintln!("Usage: kyth-kargs-apply [gaming|performance|balanced|apply|status]");

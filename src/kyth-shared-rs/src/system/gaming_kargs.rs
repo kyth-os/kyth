@@ -264,6 +264,21 @@ pub fn kargs_drift(config: &KargsConfig, cmdline: &str) -> KargsDrift {
     }
 }
 
+/// Kernel cmdline mutation is not wired yet. Return Ok when the running
+/// cmdline already matches the desired profile; otherwise explain the
+/// drift so `kargs-apply apply` cannot report success for a no-op.
+pub fn apply_is_ready(config: &KargsConfig, cmdline: &str) -> Result<(), String> {
+    let drift = kargs_drift(config, cmdline);
+    if drift.missing.is_empty() && drift.extra.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "refusing to claim success: kernel cmdline is not in sync (missing [{}], extra [{}]). Profile is saved; reboot-time kargs apply is not wired.",
+        drift.missing.join(", "),
+        drift.extra.join(", ")
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +333,23 @@ mod tests {
             ]
         );
         assert_eq!(drift.extra, vec!["quiet"]);
+    }
+
+    #[test]
+    fn apply_is_ready_fails_closed_when_cmdline_drifts() {
+        let config = KargsConfig {
+            profile: "gaming".into(),
+            custom_add: Vec::new(),
+            custom_remove: Vec::new(),
+        };
+        let error = apply_is_ready(&config, "quiet splash").unwrap_err();
+        assert!(error.contains("refusing to claim success"), "{error}");
+        assert!(error.contains("mitigations=off"), "{error}");
+        let in_sync = KargsConfig {
+            profile: "balanced".into(),
+            custom_add: Vec::new(),
+            custom_remove: Vec::new(),
+        };
+        assert!(apply_is_ready(&in_sync, "quiet splash").is_ok());
     }
 }

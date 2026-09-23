@@ -274,6 +274,23 @@ pub fn save_irq(path: impl AsRef<Path>, config: &IrqConfig) -> std::io::Result<(
         Some(0o600),
     )
 }
+/// irqbalance --banned-cpus list: digits, commas, and single dashes only.
+/// Anything else would land unquoted in a systemd ExecStart= line.
+pub fn valid_cpu_list(value: &str) -> bool {
+    let value = value.trim();
+    if value.is_empty()
+        || value.starts_with([',', '-'])
+        || value.ends_with([',', '-'])
+        || value.contains("--")
+        || value.contains(",,")
+    {
+        return false;
+    }
+    value
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || byte == b',' || byte == b'-')
+}
+
 pub fn generate_irq(
     config: &IrqConfig,
     destination: impl AsRef<Path>,
@@ -286,14 +303,18 @@ pub fn generate_irq(
         }
         return Ok(None);
     }
-    let banned = if config.isolated_cpus.is_empty() {
-        if cpus.is_empty() {
-            "1"
-        } else {
-            cpus
-        }
+    let banned = if valid_cpu_list(&config.isolated_cpus) {
+        config.isolated_cpus.as_str()
+    } else if valid_cpu_list(cpus) {
+        cpus.trim()
     } else {
-        &config.isolated_cpus
+        // Never default to "1": that silently bans CPU 1 on every machine
+        // that hasn't set isolated_cpus, including dual-core laptops where
+        // CPU 1 is half the system. Fail closed until a real list is known.
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "irq-tune gaming needs an isolated_cpus list (e.g. 0,2-3); refusing to ban CPU 1 by default",
+        ));
     };
     crate::atomic_io::atomic_write_text(destination, &format!("# Kyth IRQ affinity — generated\n[Service]\nExecStart=\nExecStart=/usr/sbin/irqbalance --banirq=0 --banned-cpus={banned}\n"), Some(0o644))?;
     Ok(Some(destination.to_path_buf()))
@@ -387,5 +408,34 @@ mod tests {
         let irq = dir.path().join("irq.toml");
         std::fs::write(&irq, "profile = \"kyth\"\nisolated_cpus = \"0,2-3\"\n").unwrap();
         assert_eq!(load_irq(&irq).isolated_cpus, "0,2-3");
+    }
+
+    #[test]
+    fn irq_generate_refuses_the_cpu1_default_and_unsafe_lists() {
+        let dir = tempdir().unwrap();
+        let dest = dir.path().join("99-kyth-irq.conf");
+        let empty = IrqConfig {
+            profile: "kyth".into(),
+            isolated_cpus: String::new(),
+        };
+        let error = generate_irq(&empty, &dest, "").unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(!dest.exists(), "must not write a drop-in that bans CPU 1");
+
+        let poison = IrqConfig {
+            profile: "kyth".into(),
+            isolated_cpus: "1; id".into(),
+        };
+        assert!(generate_irq(&poison, &dest, "").is_err());
+        assert!(!dest.exists());
+
+        let ok = IrqConfig {
+            profile: "kyth".into(),
+            isolated_cpus: "0,2-3".into(),
+        };
+        generate_irq(&ok, &dest, "").unwrap();
+        let text = std::fs::read_to_string(&dest).unwrap();
+        assert!(text.contains("--banned-cpus=0,2-3"));
+        assert!(!text.contains(';'));
     }
 }

@@ -6,6 +6,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_SHADER_TMPFS_PATH = Path("/etc/kyth/shader-tmpfs.toml")
 DEFAULT_FSTAB_DROPIN = Path("/etc/systemd/system/home.mount.d/99-kyth-shader.conf")  # placeholder, actual fstab handled via helper
 DEFAULT_TMPFS = Path("/etc/tmpfiles.d/99-kyth-shader.conf")
@@ -42,7 +44,11 @@ def save_shader_tmpfs(cfg: dict[str, Any], path: Path | None = None) -> Path:
     size = str(cfg.get("size", "2G"))
     if size not in ("1G", "2G", "4G"):
         size = "2G"
-    p.write_text(f"# Kyth shader tmpfs — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\n", encoding="utf-8")
+    atomic_write_text(
+        p,
+        f"# Kyth shader tmpfs — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\n",
+        mode=0o600,
+    )
     return p
 
 

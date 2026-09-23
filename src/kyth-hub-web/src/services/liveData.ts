@@ -1547,7 +1547,7 @@ export async function invokeBootcSwitchBranch(branch: string): Promise<string> {
 export async function invokeGuardianExecute(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction(`Run Guardian fix ${recipeId}? It may change system configuration.`)) return "Cancelled.";
-  return await invoke<string>("guardian_execute_recipe", { recipeId });
+  return await invokeBounded<string>("guardian_execute_recipe", { recipeId }, 90_000);
 }
 export async function dismissGuardianRecommendation(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");

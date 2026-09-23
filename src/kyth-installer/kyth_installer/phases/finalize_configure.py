@@ -70,7 +70,16 @@ def configure_installed_system(
                     if fstab_path.is_file():
                         fstab_path.unlink()
                 else:
-                    fstab_path.write_bytes(fstab_backup)
+                    tmp = fstab_path.with_suffix(".tmp")
+                    tmp.write_bytes(fstab_backup)
+                    try:
+                        tmp.replace(fstab_path)
+                    except OSError:
+                        try:
+                            tmp.unlink()
+                        except OSError:
+                            pass
+                        raise
                 log("Rolled back fstab to pre-configure state due to error")
             except OSError as rb_exc:
                 log(f"Warning: fstab rollback failed: {rb_exc}")
