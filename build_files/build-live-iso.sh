@@ -125,7 +125,9 @@ echo "==> Assembling ISO with Titanoboa"
 "${ROOTFUL_PODMAN}" run --rm -i \
 	--network host \
 	--cap-add sys_admin --security-opt label=disable \
-	-v "${TITANOBOA_DIR}/build_iso.sh:/src/build_iso.sh:ro" \
+	-v "${TITANOBOA_DIR}/build_iso.sh:/src/titanoboa-build_iso.sh:ro" \
+	-v "${REPO_ROOT}/build_files/scripts/titanoboa-iso-wrapper.sh:/src/build_iso.sh:ro" \
+	-v "${REPO_ROOT}/installer/iso.yaml:/kyth/iso.yaml:ro" \
 	--mount type=image,source="${LIVE_TAG}",dst=/rootfs \
 	-v "${WORK}:/output" \
 	quay.io/fedora/fedora:44 /src/build_iso.sh

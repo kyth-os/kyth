@@ -196,6 +196,11 @@
           "name": "remove-waydroid",
           "owner": "fixture::build_files/just/kyth/containers/waydroid.just",
           "ownership": "build-only"
+        },
+        {
+          "name": "remove-waydroid-confirmed",
+          "owner": "fixture::build_files/just/kyth/containers/waydroid.just",
+          "ownership": "build-only"
         }
       ],
       "installed_implementation": "not-installed",
@@ -14242,6 +14247,36 @@
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "build-time",
       "rollback": "restore previous installed umu.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
+      "cutover": "replace installed titanoboa-iso-wrapper.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/titanoboa-iso-wrapper.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "titanoboa-iso-wrapper.sh",
+      "owner": "fixture::build_files/scripts/titanoboa-iso-wrapper.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/titanoboa-iso-wrapper.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/titanoboa-iso-wrapper.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed titanoboa-iso-wrapper.sh entry point",
       "runtime_active": false,
       "runtime_authority": "build-only",
       "runtime_scope": "build",
