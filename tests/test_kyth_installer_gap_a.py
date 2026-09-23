@@ -9,9 +9,34 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_installer.disk import _lookup as lookup_mod
 from kyth_installer import assurance
+from kyth_installer import system as system_mod
 from kyth_installer.disk import _probe as probe_mod
 from kyth_installer.phases import common as common_mod
 import kyth_installer.disk as disk_mod
+
+
+class DeployEtcTests(unittest.TestCase):
+    def test_single_deployment_resolves(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            etc = Path(tmp) / "ostree" / "deploy" / "default" / "deploy" / "abc123" / "etc"
+            etc.mkdir(parents=True)
+            self.assertEqual(system_mod.find_deploy_etc(tmp), str(etc))
+
+    def test_no_deployment_returns_none(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(system_mod.find_deploy_etc(tmp))
+
+    def test_multiple_deployments_fail_closed(self):
+        # Staged update + current checkout: guessing by sort order could
+        # configure the stale deployment (no login account on boot).
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            for digest in ("aaa111", "zzz999"):
+                (Path(tmp) / "ostree" / "deploy" / "default" / "deploy" / digest / "etc").mkdir(parents=True)
+            with self.assertRaisesRegex(RuntimeError, "Multiple ostree deployments"):
+                system_mod.find_deploy_etc(tmp)
 
 
 class LookupGapTests(unittest.TestCase):

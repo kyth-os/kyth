@@ -9,6 +9,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_ZSWAP_PATH = Path("/etc/kyth/zswap.toml")
 DEFAULT_CONF = Path("/etc/sysctl.d/99-kyth-zswap.conf")
 DEFAULT_MOD = Path("/etc/modprobe.d/99-kyth-zswap.conf")
@@ -49,9 +51,13 @@ def save_zswap(cfg: dict[str, Any], path: Path | None = None) -> Path:
     if prof not in ("balanced", "kyth"):
         prof = "balanced"
     comp = str(cfg.get("compressor", "zstd"))
+    if comp not in ("zstd", "lz4", "lzo"):
+        comp = "zstd"
     zpool = str(cfg.get("zpool", "zsmalloc"))
+    if zpool not in ("zsmalloc", "zbud", "z3fold"):
+        zpool = "zsmalloc"
     lines = ["# Kyth zswap — offline\n", f'profile = "{prof}"\n', f'compressor = "{comp}"\n', f'zpool = "{zpool}"\n']
-    p.write_text("".join(lines), encoding="utf-8")
+    atomic_write_text(p, "".join(lines), mode=0o600)
     return p
 
 
@@ -69,13 +75,23 @@ def generate_zswap(cfg: dict[str, Any] | None = None, conf: Path | None = None, 
                 pass
         return None
     comp = str(cfg.get("compressor", "zstd"))
+    if comp not in ("zstd", "lz4", "lzo"):
+        comp = "zstd"
     zpool = str(cfg.get("zpool", "zsmalloc"))
+    if zpool not in ("zsmalloc", "zbud", "z3fold"):
+        zpool = "zsmalloc"
     conf.parent.mkdir(parents=True, exist_ok=True)
     mod.parent.mkdir(parents=True, exist_ok=True)
-    conf.write_text(f"# Kyth zswap — generated\nvm.zswap_enabled = 1\nvm.zswap_compressor = {comp}\nvm.zswap_zpool = {zpool}\n", encoding="utf-8")
-    tmp = mod.with_suffix(".tmp")
-    tmp.write_text(f"# Kyth zswap — generated\noptions zswap enabled=1 compressor={comp} zpool={zpool}\n", encoding="utf-8")
-    tmp.replace(mod)
+    atomic_write_text(
+        conf,
+        f"# Kyth zswap — generated\nvm.zswap_enabled = 1\nvm.zswap_compressor = {comp}\nvm.zswap_zpool = {zpool}\n",
+        mode=0o644,
+    )
+    atomic_write_text(
+        mod,
+        f"# Kyth zswap — generated\noptions zswap enabled=1 compressor={comp} zpool={zpool}\n",
+        mode=0o644,
+    )
     return conf
 
 

@@ -213,6 +213,10 @@ pub fn fetch_github_latest_release(
 }
 
 /// Download a URL to `dest`.
+///
+/// Refuses symlink destinations first: `curl -o` follows symlinks, so a
+/// pre-planted link at a predictable name would let root truncate/write
+/// through to an arbitrary file.
 pub fn download_file(
     run: &dyn for<'x> Fn(&'x [String], u64) -> Option<(i32, String)>,
     url: &str,
@@ -220,6 +224,12 @@ pub fn download_file(
     headers: &BTreeMap<String, String>,
     timeout_secs: u64,
 ) -> Result<(), String> {
+    if std::fs::symlink_metadata(dest).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        return Err(format!(
+            "Refusing to download through symlink: {}",
+            dest.display()
+        ));
+    }
     match (run)(
         &curl_download_argv(url, dest, headers, timeout_secs),
         timeout_secs + 5,
@@ -234,18 +244,32 @@ pub fn download_file(
 }
 
 /// Scratch directory removed on drop, mirroring `TemporaryDirectory`.
+///
+/// The name carries a time/nonce suffix (not just the pid) and creation
+/// uses `create_dir` — never `create_dir_all` over a pre-existing path:
+/// this runs as root with a shared /tmp, so a pid-predictable name lets
+/// any local user pre-plant a symlink or dir at the workdir path (root
+/// `curl -o` would then write through the link). A pre-existing path is a
+/// fail-closed error, not a reuse.
 pub struct TempWorkdir {
     path: PathBuf,
 }
 
 impl TempWorkdir {
     pub fn create(prefix: &str) -> Result<Self, String> {
-        let path = std::env::temp_dir().join(format!("{prefix}-{}", std::process::id()));
-        if path.exists() {
-            std::fs::remove_dir_all(&path).ok();
-        }
-        std::fs::create_dir_all(&path)
+        let nonce: u64 = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.subsec_nanos() as u64 ^ ((std::process::id() as u64) << 32))
+            .unwrap_or_else(|_| std::process::id() as u64);
+        let path = std::env::temp_dir().join(format!("{prefix}-{nonce:x}"));
+        std::fs::create_dir(&path)
             .map_err(|error| format!("Cannot create temporary directory: {error}"))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+                .map_err(|error| format!("Cannot secure temporary directory: {error}"))?;
+        }
         Ok(Self { path })
     }
 
@@ -565,6 +589,39 @@ mod tests {
     use super::*;
     use std::os::unix::ffi::OsStrExt;
     use std::time::Duration;
+
+    #[test]
+    fn workdir_names_are_unique_and_preexisting_paths_fail_closed() {
+        let first = TempWorkdir::create("kyth-test").unwrap();
+        let second = TempWorkdir::create("kyth-test").unwrap();
+        assert_ne!(first.path(), second.path());
+        // A pre-planted symlink or dir at a workdir-style path is never
+        // reused or removed: create_dir fails closed on it.
+        let planted = std::env::temp_dir().join("kyth-test-planted");
+        let _ = std::fs::remove_file(&planted);
+        let _ = std::fs::remove_dir_all(&planted);
+        std::os::unix::fs::symlink("/etc/hostname", &planted).unwrap();
+        assert!(std::fs::create_dir(&planted).is_err());
+        let _ = std::fs::remove_file(&planted);
+    }
+
+    #[test]
+    fn download_refuses_symlink_destinations() {
+        let dir = TempWorkdir::create("kyth-test").unwrap();
+        let link = dir.path().join("rclone.zip");
+        std::os::unix::fs::symlink("/etc/hostname", &link).unwrap();
+        let run = |_: &[String], _: u64| -> Option<(i32, String)> {
+            panic!("curl must never run against a symlink dest")
+        };
+        assert!(download_file(
+            &run,
+            "https://example.invalid/x",
+            &link,
+            &BTreeMap::new(),
+            5
+        )
+        .is_err());
+    }
 
     fn runner() -> impl for<'x> Fn(&'x [String], u64) -> Option<(i32, String)> {
         |argv: &[String], secs: u64| {

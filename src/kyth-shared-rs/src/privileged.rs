@@ -288,9 +288,17 @@ fn run_operation(spec: ExecSpec) -> Result<String, String> {
     let mut command = Command::new(&spec.argv[0]);
     command
         .args(&spec.argv[1..])
-        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // Stdin is /dev/null unless the op carries explicit input: a pipe held
+    // open forever turns any unexpected helper prompt (new fwupd flow,
+    // recipe confirmation) into a 900s hang. Fail fast instead; ops that
+    // need input (keys, shares) keep piped+close below.
+    if spec.stdin.is_some() {
+        command.stdin(Stdio::piped());
+    } else {
+        command.stdin(Stdio::null());
+    }
     // Own process group so the timeout kill below reaches forked
     // grandchildren (fwupdmgr helpers, ujust chains) instead of leaving
     // root orphans a retry would race.
@@ -605,6 +613,21 @@ mod tests {
         std::process::Command::new(if success { "true" } else { "false" })
             .status()
             .expect("exit probe")
+    }
+
+    #[test]
+    fn operation_without_input_gets_null_stdin_not_a_dead_pipe() {
+        // `cat` with no input spec must fail fast (EOF on /dev/null),
+        // not hang until the operation timeout.
+        let started = std::time::Instant::now();
+        let result = run_operation(ExecSpec {
+            argv: vec!["cat".to_string()],
+            stdin: None,
+        });
+        assert!(started.elapsed() < std::time::Duration::from_secs(30));
+        // cat with empty stdin exits 0 with empty output; the point is it
+        // returned at all instead of hanging.
+        assert!(result.is_ok());
     }
 
     #[test]

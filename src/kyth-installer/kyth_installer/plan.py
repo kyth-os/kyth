@@ -256,6 +256,7 @@ def _validate_resize_ntfs_target(
 def _shrink_ntfs_filesystem_guarded(
     partition: str, new_ntfs_size: int, shrink_bytes: int, log,
     *, marker_root: Path = Path("/run/kyth-installer"),
+    cancel_event=None, register_mount=None, release_mount=None,
 ) -> None:
     """Shrink the NTFS filesystem in place, with explicit non-atomic warning.
 
@@ -277,12 +278,13 @@ def _shrink_ntfs_filesystem_guarded(
     _plan_commit.shrink_ntfs_filesystem_guarded(
         partition, new_ntfs_size, shrink_bytes, log,
         shrink_filesystem=shrink_filesystem, human_size=_human_size,
-        marker_root=marker_root,
+        marker_root=marker_root, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount,
     )
 
 
 def _prepare_ntfs_resize_target(
     config: dict, log, *, marker_root: Path = Path("/run/kyth-installer"),
+    cancel_event=None, register_mount=None, release_mount=None,
 ) -> tuple[str, str]:
     """See ``_shrink_ntfs_filesystem_guarded`` for why ``marker_root`` is injectable."""
     return _plan_commit.prepare_ntfs_resize_target(
@@ -298,9 +300,10 @@ def _prepare_ntfs_resize_target(
         partition_number=_partition_number,
         block_size=_block_size_bytes,
         partition_start=_partition_start_bytes,
-        shrink_filesystem_guarded=lambda partition, new_size, shrink_bytes, log: (
+        shrink_filesystem_guarded=lambda partition, new_size, shrink_bytes, log, cancel_event=None, register_mount=None, release_mount=None: (
             _shrink_ntfs_filesystem_guarded(
                 partition, new_size, shrink_bytes, log, marker_root=marker_root,
+                cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount,
             )
         ),
         run_command=run_command,
@@ -310,6 +313,7 @@ def _prepare_ntfs_resize_target(
         commit_partition=_commit_new_kythos_partition,
         marker_root=marker_root,
         ntfs_fs_size=ntfs_filesystem_size_bytes,
+        cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount,
     )
 
 def _validate_free_space_target(
@@ -329,7 +333,7 @@ def _validate_free_space_target(
     )
 
 
-def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
+def _prepare_free_space_target(config: dict, log, cancel_event=None) -> tuple[str, str]:
     return _plan_commit.prepare_free_space_target(
         config, log, validate_target=_validate_free_space_target,
         required_tools=("parted", "partprobe", "udevadm", "mkfs.btrfs", "sgdisk"),
@@ -337,10 +341,11 @@ def _prepare_free_space_target(config: dict, log) -> tuple[str, str]:
         commit_partition=_commit_new_kythos_partition,
     )
 
-def _prepare_ntfs_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
+def _prepare_ntfs_install_plan(state: dict | InstallRequest, log, cancel_event=None, register_mount=None, release_mount=None) -> InstallPlan:
     return _plan_commit.prepare_guided_install_plan(
         state, log, validate_target=_validate_resize_ntfs_target,
         prepare_target=_prepare_ntfs_resize_target,
+        cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount,
     )
 
 def _prepare_free_space_install_plan(state: dict | InstallRequest, log) -> InstallPlan:

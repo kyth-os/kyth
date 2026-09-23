@@ -86,7 +86,8 @@ pub fn generate(
         "# Kyth work cache — generated\nd /run/kyth-work-cache 0755 1000 1000 -\n",
         Some(0o644),
     )?;
-    let content = format!("[Unit]\nDescription=Kyth work cache — Code/cargo tmpfs\nAfter=local-fs.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/sh -c 'mkdir -p /run/kyth-work-cache && mount -t tmpfs -o size={},mode=0755 tmpfs /run/kyth-work-cache && mkdir -p /run/kyth-work-cache/vscode /run/kyth-work-cache/cargo'\nExecStop=/bin/sh -c 'umount /run/kyth-work-cache 2>/dev/null || true'\n[Install]\nWantedBy=multi-user.target\n", config.size);
+    let size = normalize_size(Some(&config.size));
+    let content = format!("[Unit]\nDescription=Kyth work cache — Code/cargo tmpfs\nAfter=local-fs.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/sh -c 'mkdir -p /run/kyth-work-cache && mount -t tmpfs -o size={size},mode=0755 tmpfs /run/kyth-work-cache && mkdir -p /run/kyth-work-cache/vscode /run/kyth-work-cache/cargo'\nExecStop=/bin/sh -c 'umount /run/kyth-work-cache 2>/dev/null || true'\n[Install]\nWantedBy=multi-user.target\n");
     crate::atomic_io::atomic_write_text(service, &content, Some(0o644))?;
     Ok(Some(service.to_path_buf()))
 }
@@ -136,5 +137,25 @@ mod tests {
         assert_eq!(status(&service), "off");
         std::fs::write(&service, "unit").unwrap();
         assert_eq!(status(&service), "enabled");
+    }
+
+    #[test]
+    fn generate_normalizes_poison_size_before_execstart() {
+        let directory = tempdir().unwrap();
+        let tmpfiles = directory.path().join("tmpfiles");
+        let service = directory.path().join("service");
+        generate(
+            &WorkCacheConfig {
+                enabled: true,
+                size: "1G; id".into(),
+            },
+            &tmpfiles,
+            &service,
+        )
+        .unwrap();
+        let text = std::fs::read_to_string(&service).unwrap();
+        assert!(text.contains("size=1G,mode=0755"));
+        assert!(!text.contains(';'));
+        assert!(!text.contains("id"));
     }
 }

@@ -252,21 +252,30 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
 }
 
 /// Phase 2: guardian execute_recipe (Repair/Diagnostics mutating)
+///
+/// Async + spawn_blocking: the recipe runs up to 30s plus verification
+/// probes; a sync command pinned a Tauri worker (and the UI's await) for
+/// the whole run. The shared single-flight slot in `execute_recipe` makes
+/// a double-click return "already running" instead of a second repair.
 #[tauri::command]
-fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
-    let state = kyth_shared::guardian::load_state();
-    if !kyth_shared::guardian::is_pending_recipe(&state, &recipe_id) {
-        return Err("recipe not pending".to_string());
-    }
-    // Guardian ids are dotted (`audio.restart`) and are not just recipes —
-    // handing them to the typed Hub action bridge ran nothing and reported "launched" for
-    // every one of them, advisory notifications included. `execute_recipe`
-    // carries guardian.py's own eligibility gate and runs the recipe's argv.
-    let detail = kyth_shared::guardian::execute_recipe(&recipe_id)?;
-    Ok(format!(
-        "{}: {detail}",
-        kyth_shared::guardian::recipe_title(&recipe_id)
-    ))
+async fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = kyth_shared::guardian::load_state();
+        if !kyth_shared::guardian::is_pending_recipe(&state, &recipe_id) {
+            return Err("recipe not pending".to_string());
+        }
+        // Guardian ids are dotted (`audio.restart`) and are not just recipes —
+        // handing them to the typed Hub action bridge ran nothing and reported "launched" for
+        // every one of them, advisory notifications included. `execute_recipe`
+        // carries guardian.py's own eligibility gate and runs the recipe's argv.
+        let detail = kyth_shared::guardian::execute_recipe(&recipe_id)?;
+        Ok(format!(
+            "{}: {detail}",
+            kyth_shared::guardian::recipe_title(&recipe_id)
+        ))
+    })
+    .await
+    .map_err(|error| format!("Guardian repair task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -351,6 +360,15 @@ fn smb_mount(share: String) -> Result<String, String> {
             .any(|character| character.is_control() || character.is_whitespace())
     {
         return Err("Enter a valid SMB share such as smb://server/share.".to_string());
+    }
+    // Credentials in the URI would sit in the gio child's argv, readable
+    // by every local user via /proc for up to 30s. Refuse; the desktop
+    // keyring prompt collects them safely.
+    if kyth_shared::system::smb::smb_uri_has_userinfo(share) {
+        return Err(
+            "Enter smb://server/share without a username or password; you'll be prompted for credentials."
+                .to_string(),
+        );
     }
 
     // Never echo the raw URI: `smb://user:password@host/share` carries
@@ -1865,14 +1883,43 @@ fn exe_handler_set_auto_bottles(enabled: bool) -> Result<(), String> {
     let path = exe_handler_config_path();
     let directory = path.parent().ok_or("invalid Kyth configuration path")?;
     fs::create_dir_all(directory).map_err(|error| format!("Could not save preference: {error}"))?;
-    fs::write(
-        path,
-        format!(
-            "[exe-handler]\nauto_bottles={}\n",
-            if enabled { "true" } else { "false" }
-        ),
-    )
-    .map_err(|error| format!("Could not save preference: {error}"))
+    // Parse-modify-write, preserving every other key/section: a bare
+    // fs::write of the two known lines would discard anything else a user
+    // or a future version stores here. Atomic temp + fsync + rename so a
+    // crash mid-write never leaves a truncated file.
+    let desired = format!("auto_bottles={}", if enabled { "true" } else { "false" });
+    let mut lines: Vec<String> = match fs::read_to_string(&path) {
+        Ok(text) => text.lines().map(str::to_string).collect(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(error) => return Err(format!("Could not save preference: {error}")),
+    };
+    let mut in_section = false;
+    let mut section_seen = false;
+    let mut key_written = false;
+    for line in &mut lines {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && trimmed.ends_with(']') {
+            in_section = trimmed == "[exe-handler]";
+            section_seen = section_seen || in_section;
+        } else if in_section
+            && trimmed
+                .split_once('=')
+                .is_some_and(|(key, _)| key.trim() == "auto_bottles")
+        {
+            *line = desired.clone();
+            key_written = true;
+        }
+    }
+    if !key_written {
+        if !section_seen {
+            lines.push("[exe-handler]".to_string());
+        }
+        lines.push(desired);
+    }
+    let mut rendered = lines.join("\n");
+    rendered.push('\n');
+    kyth_shared::atomic_io::atomic_write_text(&path, &rendered, Some(0o600))
+        .map_err(|error| format!("Could not save preference: {error}"))
 }
 
 #[tauri::command]

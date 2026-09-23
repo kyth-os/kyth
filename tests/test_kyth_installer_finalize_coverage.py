@@ -518,6 +518,8 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_fstab = mock.Mock()
         mock_fstab.is_file.return_value = True
         mock_fstab.read_bytes.return_value = b"orig"
+        mock_tmp = mock.Mock()
+        mock_fstab.with_suffix.return_value = mock_tmp
         mock_etc_path = mock.MagicMock()
         mock_etc_path.__truediv__.return_value = mock_fstab
         mock_etc_path.parent = pathlib.Path("/config/deploy")
@@ -544,7 +546,8 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
                     unmount_configuration=mock.Mock(),
                     run_command=mock.Mock(),
                 )
-        mock_fstab.write_bytes.assert_called_once_with(b"orig")
+        mock_tmp.write_bytes.assert_called_once_with(b"orig")
+        mock_tmp.replace.assert_called_once_with(mock_fstab)
         self.assertTrue(any("Rolled back" in c.args[0] for c in log.call_args_list))
 
     def test_rollback_write_oserror_is_logged(self):
@@ -557,7 +560,9 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_fstab = mock.Mock()
         mock_fstab.is_file.return_value = True
         mock_fstab.read_bytes.return_value = b"orig"
-        mock_fstab.write_bytes.side_effect = OSError("write fail")
+        mock_tmp = mock.Mock()
+        mock_tmp.write_bytes.side_effect = OSError("write fail")
+        mock_fstab.with_suffix.return_value = mock_tmp
         mock_etc_path = mock.MagicMock()
         mock_etc_path.__truediv__.return_value = mock_fstab
         mock_etc_path.parent = pathlib.Path("/config/deploy")

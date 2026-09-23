@@ -48,20 +48,29 @@ def _read_lines(path: Path, run: RunFn) -> list[str]:
 
 
 def _write_lines(path: Path, lines: list[str], mode: int, run: RunFn) -> None:
-    """Write a target-tree file via elevated mkdir/tee/chmod.
+    """Write a target-tree file via elevated mkdir/tee/chmod/mv.
 
     passwd uses the literal "x" placeholder; shadow records contain hashes.
     Always go through ``run`` so account databases never depend on this
     process being able to open the mounted deploy tree itself.
+
+    Atomicity: the content lands in a same-directory temp file first and is
+    renamed over the target, so a kill or power loss mid-write leaves the
+    original intact (old-or-new, never a half-written /etc/shadow), with
+    the final mode applied to the temp before it ever appears at the target
+    name. A filesystem-wide ``sync`` follows for rename durability.
     """
     path_str = str(path)
+    tmp_str = path_str + ".tmp"
     content = "\n".join(lines) + "\n"
     # Idempotent: only mkdir if parent missing (avoids unnecessary writes)
     if run(["test", "-d", str(path.parent)], check=False, capture_output=True).returncode != 0:
         run(["mkdir", "-p", str(path.parent)], check=True)
-    run(["tee", path_str], input=content, text=True, stdout=subprocess.DEVNULL, check=True)
+    run(["tee", tmp_str], input=content, text=True, stdout=subprocess.DEVNULL, check=True)
     # mode is an integer permission (e.g. 0o644); chmod wants octal digits.
-    run(["chmod", f"{mode:o}", path_str], check=True)
+    run(["chmod", f"{mode:o}", tmp_str], check=True)
+    run(["mv", tmp_str, path_str], check=True)
+    run(["sync", path_str], check=False)
 
 
 def _path_exists(path: Path, run: RunFn) -> bool:
@@ -195,12 +204,11 @@ def create_installer_user(
             new_lines.append(line)
     if not hash_written:
         raise RuntimeError(f"User '{username}' not found in shadow after useradd")
-    # Plain overwrite, not _write_lines: shadow already exists with whatever
-    # permissions useradd/a prior ensure_system_accounts left it at, and
-    # callers are required to run ensure_system_accounts again afterward to
-    # re-lock it down — this just replaces the content in place.
-    content = "\n".join(new_lines) + "\n"
-    run(["tee", str(etc / "shadow")], input=content, text=True, stdout=subprocess.DEVNULL, check=True)
+    # Atomic content swap via _write_lines (temp + rename): shadow's
+    # canonical mode is 0o000 (ensure_system_accounts writes it so), and the
+    # post-create re-lock still runs afterward. Never truncate stream the
+    # live file: a kill mid-tee would leave a half-written /etc/shadow.
+    _write_lines(etc / "shadow", new_lines, 0o000, run)
 
     uid, gid = "1000", "1000"
     for line in _read_lines(etc / "passwd", run):
@@ -228,13 +236,20 @@ def main(argv: list[str] | None = None) -> int:
     if len(args) == 1:
         ensure_system_accounts(args[0], print, run=_default_run)
         return 0
-    if len(args) == 5 and args[0] == "create-user":
-        _, deploy_root, target_root, username, password_hash = args
+    if len(args) == 4 and args[0] == "create-user":
+        # The password hash NEVER travels in argv: it would sit world-readable
+        # in /proc/<pid>/cmdline for the whole call. It arrives on stdin
+        # instead (piped by the caller, never a terminal prompt).
+        _, deploy_root, target_root, username = args
+        password_hash = sys.stdin.read().strip()
+        if not password_hash:
+            print("create-user: password hash missing on stdin", file=sys.stderr)
+            return 64
         create_installer_user(deploy_root, target_root, username, password_hash, print, run=_default_run)
         return 0
     print(
         "Usage: python3 -m kyth_shared.accounts DEPLOY_ROOT\n"
-        "       python3 -m kyth_shared.accounts create-user DEPLOY_ROOT TARGET_ROOT USERNAME PASSWORD_HASH",
+        "       echo HASH | python3 -m kyth_shared.accounts create-user DEPLOY_ROOT TARGET_ROOT USERNAME",
         file=sys.stderr,
     )
     return 64

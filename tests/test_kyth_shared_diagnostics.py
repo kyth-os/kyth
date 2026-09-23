@@ -134,6 +134,38 @@ class DiagnosticsTests(unittest.TestCase):
                 mock_popen.assert_called_once()
 
 
+
+class IssueDraftTests(unittest.TestCase):
+    def test_same_second_reports_get_distinct_drafts(self):
+        import tempfile
+        from kyth_shared import diagnostics as diag_mod
+        with tempfile.TemporaryDirectory() as state:
+            with mock.patch.dict('os.environ', {'XDG_STATE_HOME': state}):
+                first, _ = diag_mod.create_github_issue_draft(title='a', body='one', open_browser=False)
+                second, _ = diag_mod.create_github_issue_draft(title='b', body='two', open_browser=False)
+                self.assertNotEqual(first, second)
+                self.assertTrue(pathlib.Path(first).is_file())
+                self.assertTrue(pathlib.Path(second).is_file())
+
+    def test_unreadable_body_raises_without_access_check(self):
+        from kyth_shared import diagnostics as diag_mod
+        with self.assertRaises(FileNotFoundError):
+            diag_mod.create_github_issue_draft(body_file='/nonexistent-body-xyz', open_browser=False)
+
+    def test_huge_body_is_capped(self):
+        import tempfile
+        from kyth_shared import diagnostics as diag_mod
+        with tempfile.TemporaryDirectory() as tmp:
+            big = pathlib.Path(tmp) / 'big.txt'
+            big.write_text('x' * (300 * 1024))
+            with tempfile.TemporaryDirectory() as state:
+                with mock.patch.dict('os.environ', {'XDG_STATE_HOME': state}):
+                    draft, _ = diag_mod.create_github_issue_draft(body_file=str(big), open_browser=False)
+                    content = pathlib.Path(draft).read_text()
+                    self.assertLess(len(content), 300 * 1024)
+                    self.assertIn('truncated', content)
+
+
 if __name__ == "__main__":
     unittest.main()
 

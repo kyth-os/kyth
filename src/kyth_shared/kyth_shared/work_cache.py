@@ -7,6 +7,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_WORK_CACHE_PATH = Path("/etc/kyth/work-cache.toml")
@@ -44,7 +46,11 @@ def save_work_cache(cfg: dict[str, Any], path: Path | None = None) -> Path:
     size = str(cfg.get("size", "1G"))
     if size not in ("1G", "2G", "4G"):
         size = "1G"
-    p.write_text(f"# Kyth work cache — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\n", encoding="utf-8")
+    atomic_write_text(
+        p,
+        f"# Kyth work cache — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\n",
+        mode=0o600,
+    )
     return p
 
 

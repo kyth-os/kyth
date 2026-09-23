@@ -557,16 +557,19 @@ impl Default for SccacheConfig {
         }
     }
 }
+fn normalize_sccache_size(size: &str) -> String {
+    matches!(size, "5G" | "10G" | "20G" | "50G")
+        .then(|| size.to_string())
+        .unwrap_or_else(|| "10G".into())
+}
+
 pub fn load_sccache(path: impl AsRef<Path>) -> SccacheConfig {
     parse(path)
         .map(|v| {
             let size = v.get("size").and_then(toml::Value::as_str).unwrap_or("10G");
             SccacheConfig {
                 enabled: bool_value(v.get("enabled"), false),
-                size: matches!(size, "5G" | "10G" | "20G" | "50G")
-                    .then_some(size)
-                    .unwrap_or("10G")
-                    .into(),
+                size: normalize_sccache_size(size),
             }
         })
         .unwrap_or_default()
@@ -586,12 +589,12 @@ pub fn sccache_env(config: &SccacheConfig) -> Option<String> {
     config.enabled.then(|| {
         format!(
             "# Kyth sccache — generated\nSCCACHE_DIR=/var/cache/sccache\nSCCACHE_CACHE_SIZE={}\n",
-            config.size
+            normalize_sccache_size(&config.size)
         )
     })
 }
 pub fn sccache_service(config: &SccacheConfig) -> Option<String> {
-    config.enabled.then(|| format!("[Unit]\nDescription=Kyth sccache server — Rust/C cache\nAfter=network.target\n[Service]\nType=simple\nEnvironment=SCCACHE_DIR=/var/cache/sccache\nEnvironment=SCCACHE_CACHE_SIZE={}\nExecStart=/usr/bin/sccache --start-server\nExecStop=/usr/bin/sccache --stop-server\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n", config.size))
+    config.enabled.then(|| format!("[Unit]\nDescription=Kyth sccache server — Rust/C cache\nAfter=network.target\n[Service]\nType=simple\nEnvironment=SCCACHE_DIR=/var/cache/sccache\nEnvironment=SCCACHE_CACHE_SIZE={}\nExecStart=/usr/bin/sccache --start-server\nExecStop=/usr/bin/sccache --stop-server\nRestart=on-failure\n[Install]\nWantedBy=multi-user.target\n", normalize_sccache_size(&config.size)))
 }
 pub fn generate_sccache(
     config: &SccacheConfig,
@@ -1007,5 +1010,17 @@ mod tests {
         .unwrap()
         .contains("2000"));
         assert!(thp_collapse_dropin(true).is_some());
+    }
+
+    #[test]
+    fn sccache_service_normalizes_poison_size() {
+        let unit = sccache_service(&SccacheConfig {
+            enabled: true,
+            size: "10G; id".into(),
+        })
+        .unwrap();
+        assert!(unit.contains("SCCACHE_CACHE_SIZE=10G"));
+        assert!(!unit.contains("id"));
+        assert!(!unit.contains(';'));
     }
 }

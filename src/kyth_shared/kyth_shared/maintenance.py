@@ -54,8 +54,18 @@ def prune_trash(days: int = 30) -> None:
                 # Resolve original file name from trashinfo stem or Path name
                 # In Trash spec, the file in files/ has the same name as the trashinfo (minus extension)
                 name = info_file.stem
+                # Containment gate: a crafted info name like `..trashinfo`
+                # has stem `.` (target = files/ itself) and `...trashinfo`
+                # has stem `..` (target = Trash/ itself) — either would
+                # mass-delete recoverable trash. Only direct children ever.
+                if not name or name in (".", "..") or "/" in name or "\x00" in name:
+                    info_file.unlink(missing_ok=True)
+                    continue
                 # Decode url-encoded names if necessary, but files/ uses the same filesystem name
                 target_path = files_dir / name
+                if target_path.parent != files_dir:
+                    info_file.unlink(missing_ok=True)
+                    continue
 
                 # Safely delete
                 if target_path.exists():

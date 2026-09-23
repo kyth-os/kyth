@@ -264,6 +264,79 @@ pub fn kargs_drift(config: &KargsConfig, cmdline: &str) -> KargsDrift {
     }
 }
 
+/// Kernel cmdline mutation is not a silent no-op. Return Ok when the running
+/// cmdline already matches the desired profile; otherwise explain the
+/// drift so `kargs-apply apply` cannot report success for a no-op.
+pub fn apply_is_ready(config: &KargsConfig, cmdline: &str) -> Result<(), String> {
+    match kargs_apply_action(config, cmdline, false, false) {
+        Ok(KargsApplyAction::AlreadyInSync) => Ok(()),
+        Ok(KargsApplyAction::NeedsMutation { .. }) => Err(
+            "refusing to claim success: kernel cmdline is not in sync and no writer was offered"
+                .into(),
+        ),
+        Err(error) => Err(error),
+    }
+}
+
+pub fn valid_karg(token: &str) -> bool {
+    let token = token.trim();
+    if token.is_empty() || token.len() > 128 || token.starts_with('-') {
+        return false;
+    }
+    token.bytes().all(|byte| {
+        byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'=' | b'-' | b',')
+    })
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum KargsApplyAction {
+    AlreadyInSync,
+    NeedsMutation {
+        program: &'static str,
+        args: Vec<String>,
+    },
+}
+
+/// Plan a `bootc kargs` / `rpm-ostree kargs` mutation. Never interpolates
+/// unsanitized tokens onto argv.
+pub fn kargs_apply_action(
+    config: &KargsConfig,
+    cmdline: &str,
+    bootc_exists: bool,
+    rpm_ostree_exists: bool,
+) -> Result<KargsApplyAction, String> {
+    let drift = kargs_drift(config, cmdline);
+    for token in drift.missing.iter().chain(drift.extra.iter()) {
+        if !valid_karg(token) {
+            return Err(format!(
+                "refusing unsafe kernel argument {token:?}; profile is saved only"
+            ));
+        }
+    }
+    if drift.missing.is_empty() && drift.extra.is_empty() {
+        return Ok(KargsApplyAction::AlreadyInSync);
+    }
+    let program = if bootc_exists {
+        "bootc"
+    } else if rpm_ostree_exists {
+        "rpm-ostree"
+    } else {
+        return Err(format!(
+            "refusing to claim success: kernel cmdline is not in sync (missing [{}], extra [{}]). Neither bootc nor rpm-ostree is available to mutate kernel args.",
+            drift.missing.join(", "),
+            drift.extra.join(", ")
+        ));
+    };
+    let mut args = vec!["kargs".to_string()];
+    for token in &drift.missing {
+        args.push(format!("--append={token}"));
+    }
+    for token in &drift.extra {
+        args.push(format!("--delete={token}"));
+    }
+    Ok(KargsApplyAction::NeedsMutation { program, args })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +391,59 @@ mod tests {
             ]
         );
         assert_eq!(drift.extra, vec!["quiet"]);
+    }
+
+    #[test]
+    fn apply_is_ready_fails_closed_when_cmdline_drifts() {
+        let config = KargsConfig {
+            profile: "gaming".into(),
+            custom_add: Vec::new(),
+            custom_remove: Vec::new(),
+        };
+        let error = apply_is_ready(&config, "quiet splash").unwrap_err();
+        assert!(error.contains("refusing to claim success"), "{error}");
+        assert!(error.contains("mitigations=off"), "{error}");
+        let in_sync = KargsConfig {
+            profile: "balanced".into(),
+            custom_add: Vec::new(),
+            custom_remove: Vec::new(),
+        };
+        assert!(apply_is_ready(&in_sync, "quiet splash").is_ok());
+    }
+
+    #[test]
+    fn kargs_apply_action_builds_bootc_argv_and_rejects_poison() {
+        let config = KargsConfig {
+            profile: "gaming".into(),
+            custom_add: Vec::new(),
+            custom_remove: vec!["quiet".into()],
+        };
+        match kargs_apply_action(&config, "quiet splash", true, false).unwrap() {
+            KargsApplyAction::NeedsMutation { program, args } => {
+                assert_eq!(program, "bootc");
+                assert_eq!(args.first().map(String::as_str), Some("kargs"));
+                assert!(args.iter().any(|a| a == "--append=mitigations=off"));
+                assert!(args.iter().any(|a| a == "--delete=quiet"));
+                assert!(args.iter().all(|a| !a.contains(';')));
+            }
+            other => panic!("expected mutation, got {other:?}"),
+        }
+        let poison = KargsConfig {
+            profile: "balanced".into(),
+            custom_add: Vec::new(),
+            custom_remove: vec!["quiet;id".into()],
+        };
+        assert!(kargs_apply_action(&poison, "quiet;id", true, false).is_err());
+        let synced = KargsConfig {
+            profile: "balanced".into(),
+            custom_add: Vec::new(),
+            custom_remove: Vec::new(),
+        };
+        assert!(matches!(
+            kargs_apply_action(&synced, "quiet splash", true, false).unwrap(),
+            KargsApplyAction::AlreadyInSync
+        ));
+        let missing_writer = kargs_apply_action(&config, "quiet splash", false, false).unwrap_err();
+        assert!(missing_writer.contains("bootc") || missing_writer.contains("rpm-ostree"));
     }
 }

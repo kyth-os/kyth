@@ -129,20 +129,68 @@ fn main() -> std::process::ExitCode {
     if let Some(parent) = target.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
-    match std::fs::copy(&extracted, &target) {
-        Ok(_) => set_executable(&target),
-        Err(error) => fail(format!(
+    // Same-dir temp + fsync + atomic rename: copying directly over the live
+    // binary truncates it in place — a concurrent exec runs partial bytes
+    // and a power loss leaves a corrupt /usr/local/bin/rclone.
+    let staging = target.with_extension("new");
+    if let Err(error) = (|| -> Result<(), String> {
+        std::fs::copy(&extracted, &staging)
+            .map_err(|error| format!("copy to staging failed: {error}"))?;
+        set_executable(&staging);
+        {
+            let file = std::fs::OpenOptions::new()
+                .read(true)
+                .open(&staging)
+                .map_err(|error| format!("fsync staging failed: {error}"))?;
+            file.sync_all()
+                .map_err(|error| format!("fsync staging failed: {error}"))?;
+        }
+        std::fs::rename(&staging, &target)
+            .map_err(|error| format!("atomic replace failed: {error}"))?;
+        Ok(())
+    })() {
+        let _ = std::fs::remove_file(&staging);
+        fail(format!(
             "ERROR: Failed to install rclone binary to {}: {error}",
             target.display()
-        )),
+        ));
     }
+    // Verify the installed binary reports the target version — a short or
+    // corrupt write must fail loudly, never print "installed".
     match run(&[RCLONE_BIN.to_string(), "--version".to_string()], 30) {
-        Some((_, stdout)) => {
-            println!("rclone installed: {}", stdout.lines().next().unwrap_or(""));
+        Some((0, stdout)) => {
+            let first = stdout.lines().next().unwrap_or("");
+            println!("rclone installed: {first}");
+            if !first.contains(rclone_ver.as_str()) {
+                fail(format!(
+                    "ERROR: installed rclone version mismatch (expected {rclone_ver}, got {first})"
+                ));
+            }
+        }
+        Some((code, _)) => {
+            fail(format!(
+                "ERROR: installed rclone failed its version check (exit {code})"
+            ));
         }
         None => {
-            println!("rclone installed, but version check failed: rclone could not be executed")
+            fail("ERROR: installed rclone could not be executed".to_string());
         }
     }
     std::process::ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    /// The installed binary must report the target version: first line of
+    /// `rclone --version` contains the version string.
+    fn version_line_matches(first_line: &str, target: &str) -> bool {
+        first_line.contains(target)
+    }
+
+    #[test]
+    fn version_gate_accepts_match_and_rejects_mismatch() {
+        assert!(version_line_matches("rclone v1.66.0", "v1.66.0"));
+        assert!(!version_line_matches("rclone v1.65.0", "v1.66.0"));
+        assert!(!version_line_matches("", "v1.66.0"));
+    }
 }

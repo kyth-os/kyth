@@ -10,7 +10,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.performance import (
-    flush_page_caches,
     get_amd_ccd0_cpus,
     get_cpu_topology,
     get_current_epp,
@@ -89,15 +88,6 @@ class PerformanceTests(unittest.TestCase):
         mock_which.return_value = "/bin/powerprofilesctl"
         mock_run.return_value = mock.Mock(returncode=0, stdout="performance\n")
         self.assertEqual(get_power_profile(), "performance")
-
-    @mock.patch("os.access")
-    @mock.patch("os.sync")
-    def test_flush_page_caches(self, mock_sync, mock_access) -> None:
-        mock_access.return_value = True
-        with mock.patch("pathlib.Path.write_text") as mock_write:
-            flush_page_caches()
-            mock_sync.assert_called_once()
-            mock_write.assert_called_once_with("3\n", encoding="utf-8")
 
     @mock.patch("os.access")
     def test_set_transparent_hugepages(self, mock_access) -> None:

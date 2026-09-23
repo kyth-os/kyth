@@ -136,14 +136,17 @@ class PlanCommitTests(unittest.TestCase):
             )
         self.assertIn("no partition table change", log.call_args.args[0])
 
-    def test_ntfs_shrink_tolerates_marker_write_failure(self):
+    def test_ntfs_shrink_fails_closed_on_marker_write_failure(self):
+        # The shrink succeeded but its retry guard could not be recorded:
+        # proceeding would let a retry double-shrink with no marker.
         marker_root = mock.Mock()
         marker_root.mkdir.side_effect = PermissionError("read-only runtime")
         shrink = mock.Mock()
-        plan_commit.shrink_ntfs_filesystem_guarded(
-            "/dev/sda2", 100, 20, mock.Mock(), shrink_filesystem=shrink,
-            human_size=str, marker_root=marker_root,
-        )
+        with self.assertRaisesRegex(RuntimeError, "marker could not be"):
+            plan_commit.shrink_ntfs_filesystem_guarded(
+                "/dev/sda2", 100, 20, mock.Mock(), shrink_filesystem=shrink,
+                human_size=str, marker_root=marker_root,
+            )
         shrink.assert_called_once()
 
     def test_free_space_preparation_revalidates_after_unmount(self):
@@ -184,7 +187,7 @@ class PlanCommitTests(unittest.TestCase):
         self.assertEqual(result, ("/dev/sda", "/dev/sda3"))
         self.assertEqual(dependencies["validate_target"].call_count, 2)
         dependencies["shrink_filesystem_guarded"].assert_called_once_with(
-            "/dev/sda2", 80, 20, mock.ANY,
+            "/dev/sda2", 80, 20, mock.ANY, cancel_event=None, register_mount=None, release_mount=None,
         )
         commit_call = dependencies["commit_partition"].call_args
         self.assertEqual(commit_call.args[:3], ("/dev/sda", 1080, 1100))

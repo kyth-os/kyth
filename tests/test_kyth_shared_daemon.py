@@ -77,6 +77,48 @@ class DaemonTests(unittest.TestCase):
         daemon2.load_config()
         self.assertEqual(daemon2.get_poll_interval(), 10.0)
 
+    def test_non_finite_or_out_of_range_poll_interval_is_sanitized(self):
+        # TOML parses inf/nan; they used to escape run() as OverflowError /
+        # ValueError from int(interval * 2) and kill the daemon.
+        cases = {
+            float("inf"): 10.0,
+            float("-inf"): 10.0,
+            float("nan"): 10.0,
+            0: 10.0,
+            -5: 10.0,
+            0.01: BaseDaemon.MIN_POLL_INTERVAL,
+            1e12: BaseDaemon.MAX_POLL_INTERVAL,
+        }
+        for raw, expected in cases.items():
+            daemon = MockDaemon(
+                default_config={"poll_interval": raw},
+                poll_interval_key="poll_interval",
+                default_poll_interval=10.0,
+            )
+            daemon.load_config()
+            got = daemon.get_poll_interval()
+            self.assertEqual(got, expected, f"raw={raw!r}")
+            int(got * 2)  # the loop's own conversion must not raise
+
+    @mock.patch("signal.signal")
+    @mock.patch("time.sleep")
+    def test_run_survives_a_loop_tick_with_infinite_interval(self, _sleep, _signal):
+        daemon = MockDaemon(
+            default_config={"poll_interval": float("inf")},
+            poll_interval_key="poll_interval",
+            default_poll_interval=1.0,
+        )
+        polls = []
+
+        def poll_once():
+            polls.append(1)
+            if len(polls) >= 2:
+                daemon.running = False
+
+        daemon.poll = poll_once
+        self.assertEqual(daemon.run(), 0)
+        self.assertEqual(len(polls), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

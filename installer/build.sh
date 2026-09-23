@@ -500,7 +500,8 @@ cp -av /usr/lib/efi/*/*/EFI /boot/efi/
 cp -v /boot/efi/EFI/fedora/grubx64.efi /boot/efi/EFI/BOOT/fbx64.efi || true
 
 # ── iso.yaml for the GRUB menu ────────────────────────────────────────────────
-mkdir -p /usr/lib/bootc-image-builder
+mkdir -p /usr/lib/bootc-image-builder /etc/kyth
 cp /src/installer/iso.yaml /usr/lib/bootc-image-builder/iso.yaml
+cp /src/installer/iso.yaml /etc/kyth/iso.yaml
 
 dnf clean all

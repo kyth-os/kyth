@@ -11,6 +11,7 @@ from typing import Callable
 _logger = logging.getLogger(__name__)
 
 from .config import BIOS_BOOT_BYTES
+from .execution import InstallCancelled
 from .plan_types import InstallPlan
 
 
@@ -200,11 +201,16 @@ __all__ = ["CommitDependencies", "commit_new_kythos_partition", "ensure_bios_boo
 def shrink_ntfs_filesystem_guarded(
     partition: str, new_size: int, shrink_bytes: int, log, *, shrink_filesystem,
     human_size, marker_root: Path = Path("/run/kyth-installer"),
+    cancel_event=None, register_mount=None, release_mount=None,
 ) -> None:
     """Shrink NTFS before table mutation and record the non-atomic boundary."""
     log(f"NTFS resize requested: shrink {partition} by {human_size(shrink_bytes)}")
     try:
-        shrink_filesystem(partition, "ntfs", new_size, log)
+        shrink_filesystem(partition, "ntfs", new_size, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
+    except InstallCancelled:
+        # Never swallow cancellation as a shrink failure: the handler below
+        # would log "no destructive write" and CONTINUE to the table commit.
+        raise
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
         log(
             "NTFS filesystem shrink failed — no partition table change was made. "
@@ -222,7 +228,17 @@ def shrink_ntfs_filesystem_guarded(
         marker = marker_root / f"ntfs-shrunk-{partition.replace('/', '_')}"
         marker.write_text(f"{new_size}\n")
     except (OSError, ValueError) as exc:
-        _logger.debug("ntfs marker write failed for %s: %s", partition, exc, exc_info=True)
+        # Fail closed: the shrink SUCCEEDED but its retry guard could not be
+        # recorded. Proceeding would let a retry double-shrink the volume
+        # with no marker and (if the probe also fails) no signal. Abort
+        # before any table commit instead.
+        raise RuntimeError(
+            f"NTFS filesystem shrink completed, but its progress marker could not be "
+            f"recorded ({exc}). Aborting before the partition table change: the "
+            f"filesystem is at its new smaller size while the partition still "
+            f"describes the old size. Reboot, let Windows extend the volume back, "
+            f"or reboot the live ISO before retrying."
+        ) from exc
 
 
 def _fail_if_ntfs_already_shrunk(partition: str, partition_size_bytes: int, log, *, ntfs_fs_size=None) -> None:
@@ -231,19 +247,28 @@ def _fail_if_ntfs_already_shrunk(partition: str, partition_size_bytes: int, log,
     A previous shrink whose table change was rolled back (or a retry after a
     reboot that wiped the tmpfs `/run` marker) leaves exactly this shape:
     filesystem < partition. Shrinking again on top would compound the loss,
-    so refuse with remediation instead. Best-effort: an unreadable size
-    (None) falls back to the in-session marker check below. No probe
-    dependency means no probe (unit-test hermeticity) — production wires
-    the real `ntfsresize --info` probe through `plan.py`.
+    so refuse with remediation instead. `ntfs_fs_size=None` means no probe
+    was wired (unit-test hermeticity) — that returns so the in-session
+    marker check below still applies. But a WIRED probe that errors or
+    returns garbage fails closed: `ntfsresize --info` fails on dirty,
+    hibernated, or damaged volumes, which are exactly the volumes that must
+    not be shrunk.
     """
     probe = ntfs_fs_size
     if probe is None:
         return
     try:
         fs_size = probe(partition)
-    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
-        return
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+        raise RuntimeError(
+            "Could not read the live NTFS filesystem size — the volume may be "
+            f"dirty, hibernated, or damaged ({exc}). Refusing to shrink an "
+            "unverifiable volume: run chkdsk from Windows (or clear hibernation "
+            "with a full shutdown) and retry."
+        ) from exc
     if not isinstance(fs_size, int) or fs_size <= 0:
+        # None strictly means "could not attempt" (helper missing) or
+        # unparsable output — fall back to the in-session marker check.
         return
     tolerance = 64 * 1024 * 1024
     if fs_size < partition_size_bytes - tolerance:
@@ -284,7 +309,7 @@ def prepare_ntfs_resize_target(
     partition_start, shrink_filesystem_guarded, run_command, as_root, settle,
     commit_partition, resize_partition=None,
     marker_root: Path = Path("/run/kyth-installer"),
-    ntfs_fs_size=None,
+    ntfs_fs_size=None, cancel_event=None, register_mount=None, release_mount=None,
 ) -> tuple[str, str]:
     """Shrink a validated NTFS target and commit a partition in its freed tail."""
     try:
@@ -339,7 +364,7 @@ def prepare_ntfs_resize_target(
     old_end = start + current_size - sector
     new_end = start + new_ntfs_size - sector
 
-    shrink_filesystem_guarded(partition, new_ntfs_size, shrink_bytes, log)
+    shrink_filesystem_guarded(partition, new_ntfs_size, shrink_bytes, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
 
     def shrink_partition_boundary() -> None:
         log("Shrinking partition boundary...")
@@ -402,10 +427,10 @@ def prepare_explicit_install_plan(
 __all__.append("prepare_explicit_install_plan")
 
 
-def prepare_guided_install_plan(state, log, *, validate_target, prepare_target) -> InstallPlan:
+def prepare_guided_install_plan(state, log, *, validate_target, prepare_target, cancel_event=None, register_mount=None, release_mount=None) -> InstallPlan:
     """Revalidate and convert a guided target into the alongside execution mode."""
     validate_target(state)
-    disk, target_partition = prepare_target(state, log)
+    disk, target_partition = prepare_target(state, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
     return InstallPlan("alongside", disk=disk, target_partition=target_partition)
 
 
@@ -430,10 +455,13 @@ def prepare_install_plan(
             report.errors[0] if report.errors else "Install plan validation failed"
         )
     plan = plan_from_state(state)
+    cancel_event = getattr(context, "cancel_requested", None)
+    register_mount = getattr(context, "register_mount", None)
+    release_mount = getattr(context, "release_mount", None)
     if plan.mode == "resize_ntfs":
-        return prepare_ntfs(state, log)
+        return prepare_ntfs(state, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
     if plan.mode == "free_space":
-        return prepare_free_space(state, log)
+        return prepare_free_space(state, log, cancel_event=cancel_event)
     return prepare_explicit(plan, state, context)
 
 

@@ -1,9 +1,12 @@
 """Overlay per-game MangoHud+vkBasalt — overlay.toml, offline."""
 from __future__ import annotations
 
+import json
 import os, tomllib
 from pathlib import Path
 from typing import Any
+
+from .atomic_io import atomic_write_text
 
 DEFAULT_OVERLAY_PATH = Path.home() / ".config" / "kyth" / "overlay.toml"
 
@@ -31,14 +34,20 @@ def load_overlay(path: Path | None = None) -> dict[str, dict[str, Any]]:
 
 def save_overlay(games: dict[str, dict[str, Any]], path: Path | None = None) -> Path:
     p=overlay_path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
     lines=["# Kyth per-game overlay MangoHud+vkBasalt\n"]
     for app in sorted(games):
-        lines.append(f'[games."{app}"]')
-        lines.append(f'mangohud_layout = "{games[app].get("mangohud_layout","fps+frametime")}"')
-        lines.append(f'vkbasalt = "{games[app].get("vkbasalt","off")}"')
+        app_id = str(app)
+        if not app_id or any(c in app_id for c in "\n\r"):
+            continue
+        layout = str(games[app].get("mangohud_layout","fps+frametime"))
+        vk = str(games[app].get("vkbasalt","off"))
+        if vk not in ("cas","off","sharp"):
+            vk = "off"
+        lines.append(f"[games.{json.dumps(app_id, ensure_ascii=False)}]")
+        lines.append(f"mangohud_layout = {json.dumps(layout, ensure_ascii=False)}")
+        lines.append(f"vkbasalt = {json.dumps(vk)}")
         lines.append("")
-    p.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(p, "\n".join(lines), mode=0o600)
     return p
 
 def env_for_app(app: str, path: Path | None = None) -> dict[str,str]:

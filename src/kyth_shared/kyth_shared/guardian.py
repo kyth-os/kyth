@@ -756,14 +756,21 @@ def install_model(manifest_path: Path = MODEL_MANIFEST) -> Path:
     deadline = time.monotonic() + 600
     try:
         with urllib.request.urlopen(str(manifest["url"]), timeout=30) as response, os.fdopen(fd, "wb") as output:  # nosec B310 -- load_manifest() above already rejects any non-https:// URL
-            # Content-Length gate before streaming 1GiB — fail early on mismatch
+            # Content-Length gate before streaming 1GiB — fail early on
+            # mismatch. Parse inside the try (missing/unparsable header
+            # falls back to the streaming gate), but COMPARE outside it:
+            # raising the mismatch inside the same try gets swallowed by
+            # the except below and streams the whole GiB before the final
+            # check catches it.
             try:
                 clen = response.headers.get("Content-Length")
-                if clen is not None and int(clen) != int(manifest["size"]):
-                    raise ValueError(f"Content-Length {clen} != manifest size {manifest['size']}")
+                expected = int(manifest["size"]) if clen is not None else None
+                announced = int(clen) if clen is not None else None
             except (ValueError, TypeError, AttributeError):
                 # Header missing or unparsable — fall back to streaming size gate
-                pass
+                announced, expected = None, None
+            if announced is not None and expected is not None and announced != expected:
+                raise ValueError(f"Content-Length {announced} != manifest size {expected}")
             while chunk := response.read(1024 * 1024):
                 if time.monotonic() > deadline:
                     raise TimeoutError("model download exceeded 600s deadline")

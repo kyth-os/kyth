@@ -6,6 +6,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_LOADER_PATH = Path("/etc/kyth/loader.toml")
 DEFAULT_LOADER_CONF = Path("/boot/loader/loader.conf")
 
@@ -45,13 +47,7 @@ def save_loader(cfg: dict[str, Any], path: Path | None = None) -> Path:
         to = 0 if fast else 2
     to = max(0, min(10, to))
     content = f"# Kyth loader — offline\nfast = {str(fast).lower()}\ntimeout = {to}\n"
-    tmp = p.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    try:
-        tmp.replace(p)
-    except OSError:
-        # Fallback: ensure parent fsync on failure path already exists
-        p.write_text(content, encoding="utf-8")
+    atomic_write_text(p, content, mode=0o600)
     return p
 
 
@@ -68,12 +64,14 @@ def generate_loader_conf(cfg: dict[str, Any] | None = None, dest: Path | None = 
         except OSError:
             pass
         return None
-    to = int(cfg.get("timeout", 0))
+    try:
+        to = int(cfg.get("timeout", 0))
+    except (TypeError, ValueError):
+        to = 0
+    to = max(0, min(10, to))
     dest.parent.mkdir(parents=True, exist_ok=True)
     content = f"# Kyth loader fast-path — generated, greenboot-aware\ntimeout {to}\n"
-    tmp = dest.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(dest)
+    atomic_write_text(dest, content, mode=0o644)
     return dest
 
 

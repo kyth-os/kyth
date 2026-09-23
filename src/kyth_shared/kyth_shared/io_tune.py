@@ -11,6 +11,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_IO_TUNE_PATH = Path("/etc/kyth/io.toml")
 DEFAULT_RULE_PATH = Path("/etc/udev/rules.d/61-kyth-io-tune.rules")
 
@@ -56,7 +58,7 @@ def save_io_tune(cfg: dict[str, Any], path: Path | None = None) -> Path:
         ra = 128
     ra = max(8, min(4096, ra))
     lines = ["# Kyth I/O tune — offline\n", f'profile = "{prof}"\n', f"read_ahead_kb = {ra}\n"]
-    p.write_text("".join(lines), encoding="utf-8")
+    atomic_write_text(p, "".join(lines), mode=0o600)
     return p
 
 
@@ -72,7 +74,11 @@ def generate_io_udev(cfg: dict[str, Any] | None = None, dest: Path | None = None
         except OSError:
             pass
         return None
-    ra = int(cfg.get("read_ahead_kb", 2048))
+    try:
+        ra = int(cfg.get("read_ahead_kb", 2048))
+    except (TypeError, ValueError):
+        ra = 2048
+    ra = max(8, min(4096, ra))
     # NVMe kyth profile: none scheduler + read_ahead + wbt off; SATA fallback mq-deadline
     content = (
         "# Kyth I/O tune — generated, remove with ujust io-tune default\n"
@@ -83,9 +89,7 @@ def generate_io_udev(cfg: dict[str, Any] | None = None, dest: Path | None = None
         'ACTION=="add|change", KERNEL=="sd[a-z]*", ATTR{queue/read_ahead_kb}="1024"\n'
     )
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(dest)
+    atomic_write_text(dest, content, mode=0o644)
     return dest
 
 

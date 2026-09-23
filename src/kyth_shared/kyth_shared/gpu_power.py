@@ -46,6 +46,8 @@ def save_gpu_power(cfg: dict[str, Any], path: Path | None = None) -> Path:
     if prof not in ("balanced", "kyth"):
         prof = "balanced"
     dpm = str(cfg.get("dpm", "auto"))
+    if dpm not in ("auto", "high", "low"):
+        dpm = "auto"
     lines = ["# Kyth GPU power — offline\n", f'profile = "{prof}"\n', f'dpm = "{dpm}"\n']
     _atomic_write_text(p, "".join(lines), encoding="utf-8")
     return p
@@ -56,7 +58,9 @@ def apply_gpu_power(cfg: dict[str, Any] | None = None) -> bool:
         cfg = load_gpu_power()
     prof = str(cfg.get("profile", "balanced"))
     # map kyth → high, balanced → auto
-    target = cfg.get("dpm", "high" if prof == "kyth" else "auto")
+    target = str(cfg.get("dpm", "high" if prof == "kyth" else "auto"))
+    if target not in ("auto", "high", "low"):
+        target = "auto"
     ok = False
     for g in Path("/sys/class/drm").glob("card*/device/power_dpm_force_performance_level"):
         try:

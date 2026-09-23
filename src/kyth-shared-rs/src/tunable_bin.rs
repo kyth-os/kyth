@@ -2146,7 +2146,44 @@ fn dispatch_kargs_apply(action: &str) -> ExitCode {
             if let Err(code) = ensure_root("kargs-apply", &[action.to_string()]) {
                 return code;
             }
-            ExitCode::SUCCESS
+            let config = gaming_kargs::load_kargs(&config_path);
+            let cmdline = std::fs::read_to_string("/proc/cmdline").unwrap_or_default();
+            let bootc = Path::new("/usr/bin/bootc").is_file();
+            let rpm_ostree = Path::new("/usr/bin/rpm-ostree").is_file();
+            match gaming_kargs::kargs_apply_action(&config, &cmdline, bootc, rpm_ostree) {
+                Ok(gaming_kargs::KargsApplyAction::AlreadyInSync) => {
+                    println!("kargs-apply already in sync");
+                    ExitCode::SUCCESS
+                }
+                Ok(gaming_kargs::KargsApplyAction::NeedsMutation { program, args }) => {
+                    let mut argv = Vec::with_capacity(args.len() + 1);
+                    argv.push(program.to_string());
+                    argv.extend(args);
+                    match kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(60))
+                    {
+                        Ok(output) if output.status.success() => {
+                            println!("kargs-apply staged via {program}");
+                            ExitCode::SUCCESS
+                        }
+                        Ok(output) => {
+                            let stderr = String::from_utf8_lossy(&output.stderr);
+                            eprintln!(
+                                "kyth-kargs-apply: {program} kargs failed ({:?}): {stderr}",
+                                output.status.code()
+                            );
+                            ExitCode::from(1)
+                        }
+                        Err(error) => {
+                            eprintln!("kyth-kargs-apply: {error}");
+                            ExitCode::from(1)
+                        }
+                    }
+                }
+                Err(detail) => {
+                    eprintln!("kyth-kargs-apply: {detail}");
+                    ExitCode::from(1)
+                }
+            }
         }
         _ => {
             eprintln!("Usage: kyth-kargs-apply [gaming|performance|balanced|apply|status]");
@@ -2321,6 +2358,57 @@ fn sysfs_path(subdirectory: &str) -> PathBuf {
         .join(subdirectory)
 }
 
+fn master_apply_paths() -> gaming_master::MasterApplyPaths {
+    gaming_master::MasterApplyPaths {
+        kargs_config: module_config_path("kargs.toml", "/etc/kyth/kargs.toml"),
+        thp_config: module_config_path("thp.toml", "/etc/kyth/thp.toml"),
+        thp_dropin: generated_path(
+            "sysctl.d",
+            "99-kyth-thp.conf",
+            "/etc/sysctl.d/99-kyth-thp.conf",
+        ),
+        irq_config: kyth_shared::system::runtime_preferences::irq_path(None::<&Path>),
+        irq_dropin: generated_path(
+            "systemd/irqbalance.service.d",
+            "99-kyth-irq.conf",
+            "/etc/systemd/system/irqbalance.service.d/99-kyth-irq.conf",
+        ),
+        btrfs_config: btrfs_perf::config_path(None::<&Path>),
+        btrfs_dropin: generated_path(
+            "systemd/root.mount.d",
+            "99-kyth-btrfs.conf",
+            btrfs_perf::DEFAULT_DROP_IN,
+        ),
+        zswap_config: zswap::config_path(None::<&Path>),
+        zswap_sysctl: generated_path(
+            "sysctl.d",
+            "99-kyth-zswap.conf",
+            "/etc/sysctl.d/99-kyth-zswap.conf",
+        ),
+        zswap_modprobe: generated_path(
+            "modprobe.d",
+            "99-kyth-zswap.conf",
+            "/etc/modprobe.d/99-kyth-zswap.conf",
+        ),
+        ananicy_config: ananicy::config_path(None::<&Path>),
+        ananicy_rule: generated_path(
+            "ananicy.d",
+            "99-kyth-gaming.conf",
+            "/etc/ananicy.d/99-kyth-gaming.conf",
+        ),
+    }
+}
+
+fn apply_master_children(gaming: bool) {
+    for (name, status) in gaming_master::apply_children(gaming, &master_apply_paths()) {
+        if status == "ok" {
+            println!("gaming-master {name} ok");
+        } else {
+            eprintln!("kyth-gaming-master: {name} {status}");
+        }
+    }
+}
+
 fn dispatch_gaming_master(action: &str) -> ExitCode {
     let config_path = gaming_master::master_config_path(None::<&Path>);
     match action {
@@ -2344,6 +2432,7 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
             if profile == Profile::Balanced {
                 eprintln!("kyth-gaming-master: staying balanced ({reason})");
             }
+            apply_master_children(profile == Profile::Gaming);
             println!("gaming-master {}", profile.as_str());
             ExitCode::SUCCESS
         }
@@ -2355,6 +2444,7 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
                 eprintln!("kyth-gaming-master: {error}");
                 return ExitCode::from(1);
             }
+            apply_master_children(false);
             println!("gaming-master balanced");
             ExitCode::SUCCESS
         }
@@ -2373,6 +2463,8 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
                 }
                 eprintln!("kyth-gaming-master: staying balanced ({reason})");
             }
+            apply_master_children(profile == Profile::Gaming);
+            println!("gaming-master {}", profile.as_str());
             ExitCode::SUCCESS
         }
         _ => {

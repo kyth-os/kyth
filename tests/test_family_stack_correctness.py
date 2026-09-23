@@ -79,6 +79,30 @@ class TestBluetoothQuantumGuard(unittest.TestCase):
             self.assertEqual(out, dest)
             self.assertIn("quantum       = 128", qdest.read_text(encoding="utf-8"))
 
+    def test_poison_or_huge_quantum_is_clamped(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "99-kyth-gaming.lua"
+            qdest = Path(tmp) / "99-kyth-gaming.conf"
+            cfg_path = Path(tmp) / "pipewire-gaming.toml"
+            saved = pipewire_gaming.save_pipewire_gaming(
+                {"profile": "gaming", "quantum": 999999}, cfg_path
+            )
+            loaded = pipewire_gaming.load_pipewire_gaming(saved)
+            self.assertEqual(loaded["quantum"], 2048)
+            pipewire_gaming.generate_pipewire_gaming(
+                {"profile": "gaming", "quantum": 0}, dest, qdest, bt_active=False
+            )
+            body = dest.read_text(encoding="utf-8")
+            self.assertIn("period-size\"] = 32", body)
+            poison_dest = Path(tmp) / "poison.lua"
+            poison_q = Path(tmp) / "poison.conf"
+            pipewire_gaming.generate_pipewire_gaming(
+                {"profile": "gaming", "quantum": "1; id"}, poison_dest, poison_q, bt_active=False
+            )
+            poison_body = poison_dest.read_text(encoding="utf-8")
+            self.assertNotIn(";", poison_body)
+            self.assertNotIn("id", poison_body)
+
     def test_probe_fails_closed_without_tools(self):
         with (
             patch("shutil.which", return_value=None),

@@ -47,6 +47,34 @@ class MaintenanceTests(unittest.TestCase):
             self.assertFalse(trashinfo_file.exists())
             self.assertFalse(target_file.exists())
 
+    def test_prune_trash_refuses_dotdot_stems(self) -> None:
+        # `..trashinfo` has stem `.` (target = files/ itself),
+        # `...trashinfo` has stem `..` (target = Trash/ itself). Neither
+        # may delete outside its own entry; legit entries still prune.
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp_path = pathlib.Path(tmpdir)
+            info_dir = tmp_path / ".local/share/Trash/info"
+            files_dir = tmp_path / ".local/share/Trash/files"
+            info_dir.mkdir(parents=True)
+            files_dir.mkdir(parents=True)
+            old = "[Trash Info]\nPath=x\nDeletionDate=2026-07-20T14:30:00\n"
+            (info_dir / "..trashinfo").write_text(old, encoding="utf-8")
+            (info_dir / "...trashinfo").write_text(old, encoding="utf-8")
+            (info_dir / "legit.trashinfo").write_text(old, encoding="utf-8")
+            victim = files_dir / "victim"
+            victim.write_text("keep me", encoding="utf-8")
+            legit = files_dir / "legit"
+            legit.write_text("old", encoding="utf-8")
+
+            with mock.patch("pathlib.Path.home", return_value=tmp_path):
+                prune_trash(days=1)
+
+            self.assertTrue(files_dir.is_dir())
+            self.assertTrue(victim.is_file())
+            self.assertFalse(legit.exists())
+            self.assertFalse((info_dir / "..trashinfo").exists())
+            self.assertFalse((info_dir / "...trashinfo").exists())
+
     @mock.patch("subprocess.run")
     @mock.patch("shutil.which")
     def test_cleanup_flatpaks(self, mock_which, mock_run) -> None:

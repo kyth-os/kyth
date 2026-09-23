@@ -1,6 +1,7 @@
 """Standard daemon lifecycle and execution class for KythOS daemons."""
 from __future__ import annotations
 
+import math
 import logging
 import signal
 import sys
@@ -86,13 +87,23 @@ class BaseDaemon(ABC):
         """Interrupt current sleeping/polling delay to cycle the loop immediately."""
         self.should_poll = True
 
+    # Bounds for user-configured poll intervals. Config is user-writable
+    # TOML, which parses `inf`/`nan`; int(inf*2) raises OverflowError and
+    # int(nan*2) ValueError — neither caught by the loop — so one bad line
+    # used to kill the daemon (and SIGHUP-reloading it killed it again).
+    MIN_POLL_INTERVAL = 0.5
+    MAX_POLL_INTERVAL = 3600.0
+
     def get_poll_interval(self) -> float:
-        """Get the current polling loop interval duration."""
+        """Get the current polling loop interval duration (finite, clamped)."""
         val = self.config.get(self.poll_interval_key, self.default_poll_interval)
         try:
-            return float(val)
-        except (ValueError, TypeError):
+            interval = float(val)
+        except (ValueError, TypeError, OverflowError):
             return self.default_poll_interval
+        if not math.isfinite(interval) or interval <= 0:
+            return self.default_poll_interval
+        return min(max(interval, self.MIN_POLL_INTERVAL), self.MAX_POLL_INTERVAL)
 
     @abstractmethod
     def on_start(self) -> None:

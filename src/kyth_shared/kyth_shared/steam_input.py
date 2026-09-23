@@ -6,9 +6,12 @@ without one inherit the global steam-deadzone profile at read time via
 """
 from __future__ import annotations
 
+import json
 import os, tomllib
 from pathlib import Path
 from typing import Any
+
+from .atomic_io import atomic_write_text
 
 DEFAULT_STEAM_INPUT_PATH = Path.home() / ".config" / "kyth" / "steam-input.toml"
 
@@ -47,17 +50,20 @@ def load_steam_input(path: Path | None = None) -> dict[str, dict[str, Any]]:
 
 def save_steam_input(games: dict[str, dict[str, Any]], path: Path | None = None) -> Path:
     p=steam_input_path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
     lines=["# Kyth Steam Input per-game"]
     for app in sorted(games):
-        lines.append(f'[games."{app}"]')
-        lines.append(f'layout = "{games[app].get("layout","gamepad")}"')
+        app_id = str(app)
+        if not app_id or any(c in app_id for c in "\n\r"):
+            continue
+        lines.append(f"[games.{json.dumps(app_id, ensure_ascii=False)}]")
+        layout = str(games[app].get("layout","gamepad"))
+        lines.append(f"layout = {json.dumps(layout, ensure_ascii=False)}")
         lines.append(f'gyro = {str(bool(games[app].get("gyro",False))).lower()}')
         dz = _clamp_deadzone(games[app].get("deadzone"))
         if dz is not None:
             lines.append(f'deadzone = {dz}')
         lines.append("")
-    p.write_text("\n".join(lines)+"\n", encoding="utf-8")
+    atomic_write_text(p, "\n".join(lines)+"\n", mode=0o600)
     return p
 
 def effective_deadzone(app: str, games: dict[str, dict[str, Any]] | None = None, global_deadzone: float = DEFAULT_DEADZONE) -> float:

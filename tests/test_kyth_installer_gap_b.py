@@ -75,6 +75,20 @@ class ServerGapTests(unittest.TestCase):
                 # Instead directly call the branch via _json
                 h._json([])
 
+    def test_localectl_in_runner_allowlist_and_locales_use_it(self):
+        # localectl is a read-only query like timedatectl: without it in
+        # _ALLOWED_EXECUTABLES every locale/keymap lookup falls back to
+        # en_US/us singletons and strict validation rejects the world.
+        from kyth_installer import runner as runner_mod
+        from kyth_installer import system as system_mod
+        self.assertIn('localectl', runner_mod._ALLOWED_EXECUTABLES)
+        fake = mock.Mock(return_value=mock.Mock(stdout='de_DE.UTF-8\nfr_FR.UTF-8\n', returncode=0))
+        with mock.patch.object(system_mod, 'run_command', fake):
+            self.assertEqual(system_mod.list_locales(), ['de_DE.UTF-8', 'fr_FR.UTF-8'])
+            self.assertEqual(fake.call_args.args[0][0], 'localectl')
+        with mock.patch.object(system_mod, 'run_command', side_effect=OSError('no localectl')):
+            self.assertEqual(system_mod.list_locales(), ['en_US.UTF-8'])
+
     def test_rescue_probe_imports(self):
         h = server_mod.Handler.__new__(server_mod.Handler)
         # _rescue_probe does from .system import _as_root and from .runner import run_command

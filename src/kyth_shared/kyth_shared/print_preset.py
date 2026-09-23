@@ -11,6 +11,8 @@ import os, tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_PRINT_PATH = Path("/etc/kyth/print.toml")
 
 def print_config_path(path: Path | None = None) -> Path:
@@ -32,9 +34,8 @@ def load_print(path: Path | None = None) -> dict[str, Any]:
 
 def save_print(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p=print_config_path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
     lines=["# Kyth Print/Scan autopilot — driverless IPP Everywhere (no cups-browsed)"]
     lines.append(f'auto_add = {str(bool(cfg.get("auto_add",True))).lower()}')
     lines.append(f'airscan = {str(bool(cfg.get("airscan",False))).lower()}  # no-op until sane-airscan ships')
-    p.write_text("\n".join(lines)+"\n", encoding="utf-8")
+    atomic_write_text(p, "\n".join(lines)+"\n", mode=0o600)
     return p

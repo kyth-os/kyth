@@ -163,17 +163,31 @@ class NtfsAlreadyShrunkTests(unittest.TestCase):
                 ntfs_fs_size=lambda _part: 60 * 1024**3,
             )
 
-    def test_passes_when_filesystem_matches_partition_or_probe_fails(self):
+    def test_passes_when_filesystem_matches_partition_or_no_probe(self):
         log = mock.Mock()
         plan_commit._fail_if_ntfs_already_shrunk(
             "/dev/sda2", 100 * 1024**3, log,
             ntfs_fs_size=lambda _part: 100 * 1024**3,
         )
-        plan_commit._fail_if_ntfs_already_shrunk(
-            "/dev/sda2", 100 * 1024**3, log,
-            ntfs_fs_size=lambda _part: None,
-        )
+        # No probe wired: in-session marker check below still applies.
         plan_commit._fail_if_ntfs_already_shrunk("/dev/sda2", 100 * 1024**3, log)
+
+    def test_fails_closed_when_probe_errors(self):
+        # A wired probe that cannot read the volume must block the shrink:
+        # ntfsresize refuses dirty/hibernated/damaged volumes — exactly the
+        # ones that must not be shrunk. (The probe itself raises on nonzero
+        # exit; unattemptable/unparsable still yields None and falls back to
+        # the in-session marker check.)
+        log = mock.Mock()
+        def boom(_part):
+            raise OSError("dirty volume")
+        with self.assertRaisesRegex(RuntimeError, "Could not read the live NTFS"):
+            plan_commit._fail_if_ntfs_already_shrunk(
+                "/dev/sda2", 100 * 1024**3, log, ntfs_fs_size=boom,
+            )
+        plan_commit._fail_if_ntfs_already_shrunk(
+            "/dev/sda2", 100 * 1024**3, log, ntfs_fs_size=lambda _part: None,
+        )
 
     def test_prepare_ntfs_refuses_already_shrunk_state(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -215,12 +229,41 @@ class NtfsAlreadyShrunkTests(unittest.TestCase):
         failed = subprocess.CompletedProcess(
             args=["ntfsresize"], returncode=1, stdout="", stderr="",
         )
+        # Nonzero exit = ntfsresize refused the volume (dirty/hibernated/
+        # damaged): the probe raises so callers fail closed instead of
+        # shrinking blind.
         with mock.patch.object(fsresize, "_run_typed", return_value=failed):
-            self.assertIsNone(fsresize.ntfs_filesystem_size_bytes("/dev/sda2"))
+            with self.assertRaisesRegex(RuntimeError, "refused to read"):
+                fsresize.ntfs_filesystem_size_bytes("/dev/sda2")
         with mock.patch.object(
             fsresize, "_run_typed", side_effect=OSError("no helper"),
         ):
             self.assertIsNone(fsresize.ntfs_filesystem_size_bytes("/dev/sda2"))
+
+
+class NtfsProbeEdgeTests(unittest.TestCase):
+    def test_probe_returns_none_on_unparsable_output(self):
+        completed = subprocess.CompletedProcess(
+            args=['ntfsresize'], returncode=0,
+            stdout='garbage with no size line', stderr='',
+        )
+        with mock.patch.object(fsresize, '_run_typed', return_value=completed):
+            self.assertIsNone(fsresize.ntfs_filesystem_size_bytes('/dev/sda2'))
+
+    def test_shrink_falls_back_to_partition_when_parent_probe_breaks(self):
+        # lsblk unavailable: parent lookup fails -> partition itself is used
+        # for the encryption check rather than aborting the probe.
+        with mock.patch(
+            "kyth_installer.assurance._battery_check", return_value=None
+        ), mock.patch(
+            "kyth_installer.disk._parent_disk", side_effect=OSError("no lsblk")
+        ), mock.patch(
+            "kyth_installer.assurance._encryption_check"
+        ) as enc:
+            enc.return_value = None
+            fsresize.validate_shrink_request('/dev/sda2', 'ext4')
+        enc.assert_called_once()
+        self.assertEqual(enc.call_args.kwargs.get('disk'), '/dev/sda2')
 
 
 class SetupRestoreBackupTests(unittest.TestCase):

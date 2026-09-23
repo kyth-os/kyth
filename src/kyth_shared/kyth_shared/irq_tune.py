@@ -11,10 +11,25 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_IRQ_PATH = Path("/etc/kyth/irq.toml")
 DEFAULT_CONF = Path("/etc/systemd/system/irqbalance.service.d/99-kyth-irq.conf")
+
+
+def _valid_cpu_list(value: str) -> bool:
+    value = value.strip()
+    if (
+        not value
+        or value.startswith((",", "-"))
+        or value.endswith((",", "-"))
+        or "--" in value
+        or ",," in value
+    ):
+        return False
+    return all(ch.isdigit() or ch in ",-" for ch in value)
 
 
 def irq_config_path(path: Path | None = None) -> Path:
@@ -50,8 +65,10 @@ def save_irq(cfg: dict[str, Any], path: Path | None = None) -> Path:
     if prof not in ("balanced", "kyth"):
         prof = "balanced"
     cpus = str(cfg.get("isolated_cpus", "")).strip()
+    if not _valid_cpu_list(cpus):
+        cpus = ""
     lines = ["# Kyth IRQ affinity — offline\n", f'profile = "{prof}"\n', f'isolated_cpus = "{cpus}"\n']
-    p.write_text("".join(lines), encoding="utf-8")
+    atomic_write_text(p, "".join(lines), mode=0o600)
     return p
 
 
@@ -78,7 +95,13 @@ def generate_irq_conf(cfg: dict[str, Any] | None = None, dest: Path | None = Non
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
-    banned = cpus or "1"
+    banned = cpus
+    if not banned or not _valid_cpu_list(banned):
+        # Never default to CPU 1: that silently isolates the wrong core
+        # (and on a dual-core machine, half the system).
+        raise ValueError(
+            "irq-tune gaming needs an isolated_cpus list (e.g. 0,2-3); refusing to ban CPU 1 by default"
+        )
     content = (
         "# Kyth IRQ affinity — generated\n"
         "[Service]\n"

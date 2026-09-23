@@ -6,6 +6,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_WINE_SYNC_PATH = Path("/etc/kyth/wine-sync.toml")
 DEFAULT_ENV = Path("/etc/environment.d/99-kyth-wine-sync.conf")
 
@@ -21,13 +23,16 @@ def wine_sync_config_path(path: Path | None = None) -> Path:
 
 def probe_wine_sync() -> dict[str, bool]:
     ntsync = Path("/dev/ntsync").exists() or Path("/sys/module/ntsync").exists()
-    # futex2: check kernel 6.14+ via /proc/kallsyms or assume true on 6.8+ with patch
+    # futex2 landed in 5.16. Do not treat a "6." substring in /proc/version
+    # as proof — that string shows up in lots of banners and would enable
+    # WINEFSYNC on kernels that don't have it.
     futex2 = False
     try:
-        kv = Path("/proc/version").read_text(encoding="utf-8")
-        # heuristic: cachyos 6.8+ has futex2
-        futex2 = "6." in kv
-    except OSError:
+        release = Path("/proc/sys/kernel/osrelease").read_text(encoding="utf-8").strip()
+        version = release.split("-", 1)[0]
+        parts = [int(p) for p in version.split(".")[:2]]
+        futex2 = tuple(parts) >= (5, 16)
+    except (OSError, ValueError):
         pass
     return {"ntsync": ntsync, "futex2": futex2, "esync": True, "fsync": True}
 
@@ -51,7 +56,7 @@ def save_wine_sync(cfg: dict[str, Any], path: Path | None = None) -> Path:
     mode = str(cfg.get("mode", "auto")).lower()
     if mode not in ("auto", "ntsync", "fsync", "esync", "off"):
         mode = "auto"
-    p.write_text(f"# Kyth wine sync — offline\nmode = \"{mode}\"\n", encoding="utf-8")
+    atomic_write_text(p, f"# Kyth wine sync — offline\nmode = \"{mode}\"\n", mode=0o600)
     return p
 
 

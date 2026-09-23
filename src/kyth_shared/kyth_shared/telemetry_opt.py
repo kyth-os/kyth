@@ -16,6 +16,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_TELEMETRY_OPT_PATH = Path("/etc/kyth/telemetry-opt.toml")
 
 
@@ -49,7 +51,11 @@ def save_telemetry_opt(cfg: dict[str, Any], path: Path | None = None) -> Path:
     en = bool(cfg.get("enabled", False))
     cols = [str(c) for c in cfg.get("collectors", []) if isinstance(c, str)] if isinstance(cfg.get("collectors"), list) else []
     cols_s = ", ".join(f'"{c}"' for c in cols)
-    p.write_text(f"# Kyth telemetry opt — offline\nenabled = {str(en).lower()}\ncollectors = [{cols_s}]\n", encoding="utf-8")
+    atomic_write_text(
+        p,
+        f"# Kyth telemetry opt — offline\nenabled = {str(en).lower()}\ncollectors = [{cols_s}]\n",
+        mode=0o600,
+    )
     return p
 
 

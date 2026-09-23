@@ -97,6 +97,7 @@ class GuidedInstallPlanFacadeTests(unittest.TestCase):
             {"install_mode": "resize_ntfs"}, print,
             validate_target=plan._validate_resize_ntfs_target,
             prepare_target=plan._prepare_ntfs_resize_target,
+            cancel_event=None, register_mount=None, release_mount=None,
         )
 
     def test_prepare_free_space_install_plan_forwards_with_free_space_target_functions(self):

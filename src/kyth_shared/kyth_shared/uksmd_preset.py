@@ -11,6 +11,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_UKSMD_PATH = Path("/etc/kyth/uksmd.toml")
 
 
@@ -30,9 +32,13 @@ def load_uksmd(path: Path | None = None) -> dict[str, Any]:
             data = tomllib.load(_f)
     except (OSError, tomllib.TOMLDecodeError):
         return {"enabled": False, "max_cpu_percent": 20}
+    try:
+        cpu = int(data.get("max_cpu_percent", 20))
+    except (TypeError, ValueError):
+        cpu = 20
     return {
         "enabled": bool(data.get("enabled", False)),
-        "max_cpu_percent": max(5, min(80, int(data.get("max_cpu_percent", 20)))),
+        "max_cpu_percent": max(5, min(80, cpu)),
     }
 
 
@@ -40,9 +46,13 @@ def save_uksmd(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p = uksmd_config_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
     en = bool(cfg.get("enabled", False))
-    cpu = max(5, min(80, int(cfg.get("max_cpu_percent", 20))))
+    try:
+        cpu = int(cfg.get("max_cpu_percent", 20))
+    except (TypeError, ValueError):
+        cpu = 20
+    cpu = max(5, min(80, cpu))
     lines = ["# Kyth uksmd — offline, opt-in\n", f"enabled = {str(en).lower()}\n", f"max_cpu_percent = {cpu}\n"]
-    p.write_text("".join(lines), encoding="utf-8")
+    atomic_write_text(p, "".join(lines), mode=0o600)
     return p
 
 
@@ -83,10 +93,12 @@ def generate_uksmd_conf(cfg: dict[str, Any] | None = None, dest: Path | None = N
         except OSError:
             pass
         return None
-    cpu = int(cfg.get("max_cpu_percent", 20))
+    try:
+        cpu = int(cfg.get("max_cpu_percent", 20))
+    except (TypeError, ValueError):
+        cpu = 20
+    cpu = max(5, min(80, cpu))
     content = f"# Kyth uksmd — generated\n[daemon]\nmax_cpu_percent = {cpu}\nscan_sleep_millisecs = 200\n"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(dest)
+    atomic_write_text(dest, content, mode=0o644)
     return dest
