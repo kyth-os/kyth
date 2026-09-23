@@ -98,5 +98,25 @@ class WineSyncProbeTests(unittest.TestCase):
         self.assertFalse(probe["futex2"])
 
 
+class SteamInputQuoteTests(unittest.TestCase):
+    def test_save_quotes_poison_app_id(self) -> None:
+        from kyth_shared.steam_input import load_steam_input, save_steam_input
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "steam-input.toml"
+            save_steam_input(
+                {
+                    '570"]\nlayout = "hack': {"layout": 'gamepad"\ngyro = true', "gyro": False},
+                    "570": {"layout": "gamepad", "gyro": True, "deadzone": 0.1},
+                },
+                path,
+            )
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn("layout = \"hack", text)
+            loaded = load_steam_input(path)
+            self.assertIn("570", loaded)
+            self.assertTrue(loaded["570"]["gyro"])
+
+
 if __name__ == "__main__":
     unittest.main()

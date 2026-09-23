@@ -6,6 +6,8 @@ import os, tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_STEAM_DEADZONE_PATH = Path("/etc/kyth/steam-deadzone.toml")
@@ -40,18 +42,21 @@ def load_steam_deadzone(path: Path | None = None) -> dict[str, Any]:
 
 def save_steam_deadzone(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p = steam_deadzone_path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
     prof = str(cfg.get("profile", "balanced")).lower()
     if prof not in ("balanced", "gaming"):
         prof = "balanced"
-    dz = float(cfg.get("deadzone", 0.05 if prof == "gaming" else 0.15))
+    try:
+        dz = float(cfg.get("deadzone", 0.05 if prof == "gaming" else 0.15))
+    except (TypeError, ValueError):
+        dz = 0.05 if prof == "gaming" else 0.15
+    dz = max(0.0, min(0.3, dz))
     lines = [
         "# Kyth steam deadzone — offline",
         f'profile = "{prof}"',
         f"deadzone = {dz}",
         "",
     ]
-    p.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(p, "\n".join(lines), mode=0o600)
     return p
 
 

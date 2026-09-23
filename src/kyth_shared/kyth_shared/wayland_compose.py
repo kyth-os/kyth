@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from .atomic_io import atomic_write_text
+
 SOFTWARE_COMPOSE_ENV: dict[str, str] = {
     "LIBGL_ALWAYS_SOFTWARE": "1",
     "GALLIUM_DRIVER": "llvmpipe",
@@ -127,7 +129,7 @@ def migrate_greeter_last_session(path: Path | None = None) -> bool:
     if not changed:
         return False
     try:
-        target.write_text(rewritten, encoding="utf-8")
+        atomic_write_text(target, rewritten, mode=0o600)
     except OSError:
         return False
     return True
@@ -144,7 +146,7 @@ def migrate_user_dmrc(home: Path | None = None) -> bool:
     if not changed:
         return False
     try:
-        path.write_text(rewritten, encoding="utf-8")
+        atomic_write_text(path, rewritten, mode=0o600)
     except OSError:
         return False
     return True
@@ -213,7 +215,7 @@ def write_greeter_compose_env(path: Path | None = None) -> bool:
         body = "".join(f"{key}={value}\n" for key, value in SOFTWARE_COMPOSE_ENV.items())
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(body, encoding="utf-8")
+        atomic_write_text(target, body, mode=0o644)
     except OSError:
         return False
     return True
