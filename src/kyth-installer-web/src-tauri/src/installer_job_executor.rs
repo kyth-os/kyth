@@ -38,6 +38,29 @@ fn normalize_kernel_flavor(value: &str) -> String {
     }
 }
 
+/// Disk-helper request that mounts the target ESP at `mountpoint`. An ESP the
+/// live session already has mounted is bind-mounted from that mountpoint:
+/// the helper keys bind mounts on the `bind` field, and without it treats the
+/// mountpoint path as a device, which its `/dev/` device gate rejects.
+fn efi_mount_operation(
+    efi: &crate::installer_storage::EfiPartition,
+    mountpoint: &str,
+) -> serde_json::Value {
+    match &efi.mounted_at {
+        Some(source) => serde_json::json!({
+            "operation": "mount_filesystem",
+            "device": source,
+            "mountpoint": mountpoint,
+            "bind": true
+        }),
+        None => serde_json::json!({
+            "operation": "mount_filesystem",
+            "device": efi.name,
+            "mountpoint": mountpoint
+        }),
+    }
+}
+
 impl NativeInstallRequest {
     /// Decode the flat HTTP representation used by the existing frontend.
     /// Secrets are consumed into the typed request and never serialized back.
@@ -1501,16 +1524,7 @@ impl NativePhaseExecutor {
                 "path": mountpoint
             }),
         )?;
-        let mut operation = serde_json::json!({
-            "operation": "mount_filesystem",
-            "device": efi.name,
-            "mountpoint": mountpoint
-        });
-        if let Some(source) = efi.mounted_at {
-            operation["device"] = serde_json::Value::String(source);
-            operation["options"] = serde_json::json!(["bind"]);
-        }
-        self.execute_disk_helper(phase, cancellation, &operation)?;
+        self.execute_disk_helper(phase, cancellation, &efi_mount_operation(&efi, mountpoint))?;
         self.register_mount(mountpoint)?;
         Ok(())
     }
@@ -1702,6 +1716,37 @@ mod tests {
     use crate::installer_bootc::BootcInstallInput;
     use crate::installer_configuration::ConfigurationInput;
     use crate::installer_secure_boot::SecureBootInput;
+
+    #[test]
+    fn efi_mount_requests_build_through_the_disk_helper() {
+        use crate::installer_disk::{build_plan, DiskOperationInput};
+        use crate::installer_storage::EfiPartition;
+        let mountpoint = "/var/tmp/kyth-alongside-target/boot/efi";
+        let plan = |efi: &EfiPartition| {
+            let input: DiskOperationInput =
+                serde_json::from_value(efi_mount_operation(efi, mountpoint))
+                    .expect("request decodes");
+            build_plan(input).map(|plan| plan.argv)
+        };
+        // An ESP the live session already mounted must bind-mount, not be
+        // rejected as a non-/dev "device" after the target was formatted.
+        let mounted = EfiPartition {
+            name: "/dev/sda1".into(),
+            mounted_at: Some("/mnt/esp".into()),
+        };
+        assert_eq!(
+            plan(&mounted).expect("bind mount validates"),
+            ["/usr/sbin/mount", "--bind", "/mnt/esp", mountpoint]
+        );
+        let unmounted = EfiPartition {
+            name: "/dev/sda1".into(),
+            mounted_at: None,
+        };
+        assert_eq!(
+            plan(&unmounted).expect("device mount validates"),
+            ["/usr/sbin/mount", "/dev/sda1", mountpoint]
+        );
+    }
 
     #[test]
     fn run_guarded_skips_restore_on_success() {
