@@ -20,7 +20,11 @@ pub(crate) struct AssuranceCheck {
 
 #[derive(Clone, Debug)]
 pub(crate) struct AssuranceInput {
+    /// Physical ostree sysroot: boot metadata and `ostree/deploy` live here.
     pub target_root: String,
+    /// The installed deployment checkout; its `etc/` is the booted system's
+    /// `/etc` (the sysroot has none of its own).
+    pub deploy_root: String,
     pub hostname: String,
     pub locale: String,
     pub keymap: String,
@@ -107,7 +111,11 @@ fn boot_metadata_reason(root: &Path) -> Option<&'static str> {
 pub(crate) fn validate(input: AssuranceInput) -> Result<Vec<AssuranceCheck>, String> {
     let root = safe_target_root(&input.target_root)?;
     real_directory(&root, "target root")?;
-    let etc = root.join("etc");
+    let deploy = safe_target_root(&input.deploy_root)?;
+    if !deploy.starts_with(root.join("ostree/deploy")) {
+        return Err("installed deployment is not inside the target root".to_string());
+    }
+    let etc = deploy.join("etc");
     real_directory(&etc, "/etc tree")?;
 
     let hostname_path = etc.join("hostname");
@@ -222,9 +230,12 @@ pub(crate) fn validate(input: AssuranceInput) -> Result<Vec<AssuranceCheck>, Str
 mod tests {
     use super::*;
 
+    const DEPLOY: &str = "ostree/deploy/default/deploy/abc123.0";
+
     fn input(root: &Path) -> AssuranceInput {
         AssuranceInput {
             target_root: root.to_string_lossy().into_owned(),
+            deploy_root: root.join(DEPLOY).to_string_lossy().into_owned(),
             hostname: "kyth-box".to_string(),
             locale: "en_US.UTF-8".to_string(),
             keymap: "us".to_string(),
@@ -236,7 +247,8 @@ mod tests {
     fn target_fixture() -> tempfile::TempDir {
         let directory = tempfile::tempdir().expect("temporary target");
         let root = directory.path();
-        let etc = root.join("etc");
+        // The real layout: no sysroot /etc, only the deployment's.
+        let etc = root.join(DEPLOY).join("etc");
         std::fs::create_dir_all(&etc).unwrap();
         std::fs::write(etc.join("hostname"), "kyth-box\n").unwrap();
         std::fs::write(etc.join("locale.conf"), "LANG=en_US.UTF-8\n").unwrap();
@@ -248,7 +260,6 @@ mod tests {
         .unwrap();
         std::fs::write(etc.join("fstab"), "# generated\n").unwrap();
         std::os::unix::fs::symlink("/usr/share/zoneinfo/UTC", etc.join("localtime")).unwrap();
-        std::fs::create_dir_all(root.join("ostree/deploy/default")).unwrap();
         directory
     }
 
@@ -261,14 +272,25 @@ mod tests {
     }
 
     #[test]
-    fn rejects_missing_boot_metadata_and_path_traversal() {
+    fn rejects_missing_deployment_and_path_traversal() {
         let directory = target_fixture();
         std::fs::remove_dir_all(directory.path().join("ostree")).unwrap();
-        assert!(validate(input(directory.path()))
-            .expect_err("boot metadata is required")
-            .contains("boot metadata"));
+        assert!(validate(input(directory.path())).is_err());
         let mut unsafe_input = input(directory.path());
         unsafe_input.target_root = "/tmp/../etc".to_string();
         assert!(validate(unsafe_input).is_err());
+    }
+
+    #[test]
+    fn checks_the_deployment_etc_and_rejects_a_foreign_deployment() {
+        // A sysroot-level etc/ is not what the installed system boots with.
+        let directory = target_fixture();
+        let checks = validate(input(directory.path())).expect("real layout passes");
+        assert!(checks.iter().all(|check| check.status == "pass"));
+        let mut outside = input(directory.path());
+        outside.deploy_root = "/var/tmp/somewhere-else".to_string();
+        assert!(validate(outside)
+            .unwrap_err()
+            .contains("not inside the target root"));
     }
 }

@@ -213,6 +213,77 @@ pub(crate) fn build_plan(input: ConfigurationInput) -> Result<ConfigurationPlan,
     })
 }
 
+/// Locate the single installed deployment under a physical ostree sysroot.
+///
+/// bootc lays the target out with `ostree admin init-fs --modern`, which
+/// creates only `boot/` and `ostree/`: the sysroot has no `etc/` of its own.
+/// The installed system's `/etc` is the one inside its deployment checkout,
+/// `ostree/deploy/default/deploy/<checksum>.<serial>/etc`. Mirrors Python's
+/// `find_deploy_etc`, including failing closed when more than one deployment
+/// is present instead of guessing which one will boot.
+pub(crate) fn find_deploy_root(physical_root: &str) -> Result<String, String> {
+    let root = safe_root(physical_root)?;
+    let deployments = Path::new(&root).join("ostree/deploy/default/deploy");
+    let entries = fs::read_dir(&deployments).map_err(|error| {
+        format!("Installed deployment could not be located for final configuration: {error}")
+    })?;
+    let mut found = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("could not list deployments: {error}"))?;
+        let path = entry.path();
+        let is_real_dir = |candidate: &Path| {
+            fs::symlink_metadata(candidate)
+                .map(|metadata| metadata.is_dir() && !metadata.file_type().is_symlink())
+                .unwrap_or(false)
+        };
+        if is_real_dir(&path) && is_real_dir(&path.join("etc")) {
+            found.push(path);
+        }
+    }
+    match found.as_slice() {
+        [] => Err(
+            "Installed deployment could not be located for final configuration.".to_string(),
+        ),
+        [only] => only
+            .to_str()
+            .map(str::to_string)
+            .ok_or_else(|| "installed deployment path is not valid UTF-8".to_string()),
+        many => Err(format!(
+            "Multiple ostree deployments found under {root} ({}); refusing to guess which one to configure.",
+            many.len()
+        )),
+    }
+}
+
+impl ConfigurationPlan {
+    /// The same plan, writing into `deploy_root/etc` instead of the
+    /// sysroot the plan was built against before any deployment existed.
+    pub(crate) fn for_deployment(&self, deploy_root: &str) -> Result<ConfigurationPlan, String> {
+        let deploy_root = safe_root(deploy_root)?;
+        let old_etc = format!("{}/etc/", self.target_root);
+        let writes =
+            self.writes
+                .iter()
+                .map(|write| {
+                    let file = write.path.strip_prefix(&old_etc).ok_or_else(|| {
+                        "configuration write is outside the planned /etc".to_string()
+                    })?;
+                    Ok(ConfigWrite {
+                        path: format!("{deploy_root}/etc/{file}"),
+                        content: write.content.clone(),
+                        mode: write.mode,
+                    })
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+        Ok(ConfigurationPlan {
+            target_root: deploy_root,
+            writes,
+            localtime_target: self.localtime_target.clone(),
+            executor: self.executor,
+        })
+    }
+}
+
 pub(crate) fn apply_plan(plan: ConfigurationPlan) -> Result<(), String> {
     for write in &plan.writes {
         let mut file = OpenOptions::new();
@@ -377,6 +448,67 @@ mod tests {
             std::fs::read_link(etc.join("localtime")).unwrap(),
             Path::new("/usr/share/zoneinfo/UTC")
         );
+    }
+
+    /// A physical sysroot as bootc leaves it: `boot/` and `ostree/`, with
+    /// the only `etc/` inside the deployment checkout.
+    fn sysroot_fixture(deployments: &[&str]) -> tempfile::TempDir {
+        let directory = tempfile::tempdir().expect("temporary sysroot");
+        std::fs::create_dir(directory.path().join("boot")).unwrap();
+        let deploy = directory.path().join("ostree/deploy/default/deploy");
+        std::fs::create_dir_all(&deploy).unwrap();
+        for name in deployments {
+            std::fs::create_dir_all(deploy.join(name).join("etc")).unwrap();
+            std::fs::write(deploy.join(format!("{name}.origin")), "[origin]\n").unwrap();
+        }
+        directory
+    }
+
+    #[test]
+    fn configuration_lands_in_the_deployment_etc_not_the_sysroot() {
+        // The sysroot has no /etc: writing {sysroot}/etc/hostname failed
+        // with ENOENT on every native install, after the image was written.
+        let sysroot = sysroot_fixture(&["abc123.0"]);
+        let root = sysroot.path().to_string_lossy().into_owned();
+        let plan = build_plan(ConfigurationInput {
+            target_root: root.clone(),
+            hostname: "kyth-box".to_string(),
+            timezone: "UTC".to_string(),
+            locale: "en_US.UTF-8".to_string(),
+            keymap: "us".to_string(),
+        })
+        .expect("configuration should validate");
+        assert!(apply_plan(plan.clone()).is_err(), "sysroot has no /etc");
+
+        let deploy = find_deploy_root(&root).expect("single deployment is found");
+        assert!(
+            deploy.ends_with("/ostree/deploy/default/deploy/abc123.0"),
+            "{deploy}"
+        );
+        apply_plan(plan.for_deployment(&deploy).expect("plan retargets")).expect("applies");
+        let etc = Path::new(&deploy).join("etc");
+        assert_eq!(
+            std::fs::read_to_string(etc.join("hostname")).unwrap(),
+            "kyth-box\n"
+        );
+        assert_eq!(
+            std::fs::read_link(etc.join("localtime")).unwrap(),
+            Path::new("/usr/share/zoneinfo/UTC")
+        );
+        assert!(!sysroot.path().join("etc").exists());
+    }
+
+    #[test]
+    fn deployment_lookup_fails_closed_on_none_or_several() {
+        let none = sysroot_fixture(&[]);
+        assert!(find_deploy_root(&none.path().to_string_lossy())
+            .unwrap_err()
+            .contains("could not be located"));
+        let two = sysroot_fixture(&["abc123.0", "def456.0"]);
+        assert!(find_deploy_root(&two.path().to_string_lossy())
+            .unwrap_err()
+            .contains("refusing to guess"));
+        assert!(find_deploy_root("/tmp/../etc").is_err());
     }
 
     #[test]

@@ -754,9 +754,14 @@ impl NativePhaseExecutor {
             })?
             .clone();
         let config = &self.execution_plan.configuration;
-        let fstab =
-            installer_configuration::snapshot_fstab(&format!("{}/etc/fstab", config.target_root))
-                .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        // config.target_root is the physical sysroot, which has no /etc of
+        // its own; the installed system's /etc is inside the deployment the
+        // image phase just wrote. Every /etc write below goes there.
+        let deploy_root = installer_configuration::find_deploy_root(&config.target_root)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        let deploy_fstab = format!("{deploy_root}/etc/fstab");
+        let fstab = installer_configuration::snapshot_fstab(&deploy_fstab)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
         let result = (|| {
             match self.storage_plan.mode.as_str() {
                 mode if lays_out_home_subvolume(mode) => {
@@ -774,17 +779,19 @@ impl NativePhaseExecutor {
                         &serde_json::json!({
                             "config_root": config.target_root,
                             "target_device": target_device,
-                            "fstab_path": format!("{}/etc/fstab", config.target_root),
+                            "fstab_path": deploy_fstab,
                         }),
                     )?;
                 }
                 "manual" => {
                     if let Some(mounts) = &self.manual_mounts {
+                        let mut mounts = mounts.clone();
+                        mounts.fstab_path = deploy_fstab.clone();
                         self.execute_fixed_helper(
                             phase,
                             cancellation,
                             "manual-mounts",
-                            &serde_json::to_value(mounts).map_err(|error| {
+                            &serde_json::to_value(&mounts).map_err(|error| {
                                 NativePhaseError::Execution {
                                     phase,
                                     message: format!("could not encode manual mounts: {error}"),
@@ -795,19 +802,28 @@ impl NativePhaseExecutor {
                 }
                 _ => {}
             }
-            installer_configuration::apply_plan(config.clone())
+            let deployed = config
+                .for_deployment(&deploy_root)
+                .map_err(|message| NativePhaseError::Execution { phase, message })?;
+            installer_configuration::apply_plan(deployed)
                 .map_err(|message| NativePhaseError::Execution { phase, message })?;
             if let Some(account) = &self.account {
-                let request =
-                    serde_json::to_value(account).map_err(|error| NativePhaseError::Execution {
+                // useradd --root and the shadow edit need the deployment;
+                // the home directory stays under the sysroot's shared /var.
+                let mut account = account.clone();
+                account.deploy_root = deploy_root.clone();
+                let request = serde_json::to_value(&account).map_err(|error| {
+                    NativePhaseError::Execution {
                         phase,
                         message: format!("could not encode create-user request: {error}"),
-                    })?;
+                    }
+                })?;
                 self.execute_fixed_helper(phase, cancellation, "create-user", &request)?;
             }
             let assurance =
                 crate::installer_assurance::validate(crate::installer_assurance::AssuranceInput {
                     target_root: config.target_root.clone(),
+                    deploy_root: deploy_root.clone(),
                     hostname: config
                         .writes
                         .iter()
