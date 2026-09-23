@@ -11,6 +11,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_IRQ_PATH = Path("/etc/kyth/irq.toml")
@@ -63,8 +65,10 @@ def save_irq(cfg: dict[str, Any], path: Path | None = None) -> Path:
     if prof not in ("balanced", "kyth"):
         prof = "balanced"
     cpus = str(cfg.get("isolated_cpus", "")).strip()
+    if not _valid_cpu_list(cpus):
+        cpus = ""
     lines = ["# Kyth IRQ affinity — offline\n", f'profile = "{prof}"\n', f'isolated_cpus = "{cpus}"\n']
-    p.write_text("".join(lines), encoding="utf-8")
+    atomic_write_text(p, "".join(lines), mode=0o600)
     return p
 
 

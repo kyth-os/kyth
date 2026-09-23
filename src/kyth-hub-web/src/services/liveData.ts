@@ -193,7 +193,7 @@ export async function fetchGuardianSnapshot(): Promise<GuardianSnapshot | null> 
 interface GuardianActionLaunch { job: string; state: "running"; detail: string; }
 function guardianJob(launch: GuardianActionLaunch): string { if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Guardian action did not start."); return launch.job; }
 export async function runGuardianCheck(investigate = false): Promise<string> {
-  return guardianJob(await invoke<GuardianActionLaunch>("guardian_check", { investigate }));
+  return guardianJob(await invokeBounded<GuardianActionLaunch>("guardian_check", { investigate }, 90_000));
 }
 export async function waitGuardianCheck(job: string): Promise<string> {
   trackJob("guardian", job);
@@ -508,7 +508,7 @@ export const cancelSecurityJob = (): Promise<string> => cancelTracked("security"
 export const cancelGamingJob = (): Promise<string> => cancelTracked("gaming", "gaming_job_cancel");
 export async function runGuardianControl(action: string): Promise<string> {
   if (!confirmUserAction(`Change Guardian setting: ${action}?`)) return "Cancelled.";
-  const job = guardianJob(await invoke<GuardianActionLaunch>("guardian_control", { action }));
+  const job = guardianJob(await invokeBounded<GuardianActionLaunch>("guardian_control", { action }, 90_000));
   return await waitGuardianCheck(job);
 }
 
@@ -546,7 +546,7 @@ function privilegedActionPrompt(operation: string, payload: PrivilegedPayload): 
 
 export async function runPrivilegedAction(operation: string, payload: PrivilegedPayload = {}): Promise<string> {
   if (!confirmUserAction(privilegedActionPrompt(operation, payload))) return "Cancelled.";
-  const launch = await invoke<PrivilegedActionLaunch>("privileged_action", { operation, payload });
+  const launch = await invokeBounded<PrivilegedActionLaunch>("privileged_action", { operation, payload }, 90_000);
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Privileged operation did not start.");
   const job = launch.job;
   trackJob("privileged", job);
@@ -1019,7 +1019,7 @@ async function waitUpdateLaunch(launch: UpdateActionLaunch): Promise<string> {
 
 async function runHubAction(recipe: string): Promise<string> {
   if (!inTauriShell()) throw new Error("This action is only available in the Hub app.");
-  return await waitHubActionLaunch(await invoke<HubActionLaunch>("run_hub_action", { action: recipe }));
+  return await waitHubActionLaunch(await invokeBounded<HubActionLaunch>("run_hub_action", { action: recipe }, 90_000));
 }
 
 export async function runHubRecipeAction(recipe: string): Promise<string> {

@@ -14,6 +14,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_MASTER_PATH = Path("/etc/kyth/gaming-performance.toml")
@@ -47,7 +49,11 @@ def save_master(cfg: dict[str, Any], path: Path | None = None) -> Path:
     prof = str(cfg.get("profile", "balanced")).lower()
     if prof not in ("balanced", "gaming"):
         prof = "balanced"
-    p.write_text(f"# Kyth master gaming performance — offline\nprofile = \"{prof}\"\n", encoding="utf-8")
+    atomic_write_text(
+        p,
+        f"# Kyth master gaming performance — offline\nprofile = \"{prof}\"\n",
+        mode=0o600,
+    )
     return p
 
 

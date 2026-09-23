@@ -6,6 +6,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_DISTROBOX_CACHE_PATH = Path("/etc/kyth/distrobox-cache.toml")
 DEFAULT_TMPFILES = Path("/etc/tmpfiles.d/99-kyth-distrobox.conf")
 DEFAULT_SERVICE = Path("/etc/systemd/system/kyth-distrobox-cache.service")
@@ -60,7 +62,11 @@ def save_distrobox_cache(cfg: dict[str, Any], path: Path | None = None) -> Path:
     # dict straight into generate_ — never persist a hostile string.
     size = _norm_distrobox_size(cfg.get("size"))
     csz = _norm_ccache_size(cfg.get("ccache_size"))
-    p.write_text(f"# Kyth distrobox cache — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\nccache_size = \"{csz}\"\n", encoding="utf-8")
+    atomic_write_text(
+        p,
+        f"# Kyth distrobox cache — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\nccache_size = \"{csz}\"\n",
+        mode=0o600,
+    )
     return p
 
 

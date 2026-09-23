@@ -18,12 +18,21 @@ from pathlib import Path
 from typing import Any
 
 from kyth_shared.commands import run_optional
+from .atomic_io import atomic_write_text
 
 DEFAULT_PIPEWIRE_GAMING_PATH = Path("/etc/kyth/pipewire-gaming.toml")
 DEFAULT_CONF = Path("/etc/wireplumber/main.lua.d/99-kyth-gaming.lua")
 DEFAULT_QUANTUM_DROPIN = Path("/etc/pipewire/pipewire.conf.d/99-kyth-gaming.conf")
 GAMING_QUANTUM = 128
 BASE_QUANTUM_TEMPLATE = Path("/usr/share/kyth/pipewire-gaming-128.conf")
+
+
+def _clamp_quantum(raw: object) -> int:
+    try:
+        quantum = int(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        quantum = GAMING_QUANTUM
+    return max(32, min(2048, quantum))
 
 
 def pipewire_gaming_config_path(path: Path | None = None) -> Path:
@@ -45,11 +54,7 @@ def load_pipewire_gaming(path: Path | None = None) -> dict[str, Any]:
     prof = str(data.get("profile", "balanced")).lower()
     if prof not in ("balanced", "gaming"):
         prof = "balanced"
-    try:
-        q = int(data.get("quantum", 128))
-    except (TypeError, ValueError):
-        q = 128
-    q = max(32, min(2048, q))
+    q = _clamp_quantum(data.get("quantum", 128))
     return {"profile": prof, "quantum": q}
 
 
@@ -59,14 +64,14 @@ def save_pipewire_gaming(cfg: dict[str, Any], path: Path | None = None) -> Path:
     prof = str(cfg.get("profile", "balanced")).lower()
     if prof not in ("balanced", "gaming"):
         prof = "balanced"
-    q = int(cfg.get("quantum", 128))
+    q = _clamp_quantum(cfg.get("quantum", 128))
     lines = [
         "# Kyth PipeWire gaming — offline",
         f'profile = "{prof}"',
         f"quantum = {q}",
         "",
     ]
-    p.write_text("\n".join(lines), encoding="utf-8")
+    atomic_write_text(p, "\n".join(lines), mode=0o600)
     return p
 
 
@@ -158,7 +163,7 @@ def generate_pipewire_gaming(
         # any stale drop-in. The ALSA wireplumber rules below only match
         # alsa_output.* — wired/USB gaming audio keeps low latency.
         _remove_quantum_dropin(quantum_dropin)
-    q = int(cfg.get("quantum", GAMING_QUANTUM))
+    q = _clamp_quantum(cfg.get("quantum", GAMING_QUANTUM))
     lines = [
         "-- Kyth PipeWire gaming — generated",
         "table.insert(alsa_monitor.rules, {",

@@ -29,6 +29,17 @@ class IrqTuneFailClosedTests(unittest.TestCase):
             self.assertNotIn(";", text)
 
 
+class IrqSaveSanitizesTests(unittest.TestCase):
+    def test_save_drops_poison_isolated_cpus(self) -> None:
+        from kyth_shared.irq_tune import load_irq, save_irq
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "irq.toml"
+            save_irq({"profile": "kyth", "isolated_cpus": "1; id"}, path)
+            loaded = load_irq(path)
+            self.assertEqual(loaded["isolated_cpus"], "")
+
+
 class KargsQuoteTests(unittest.TestCase):
     def test_save_kargs_round_trips_quoted_custom_add(self) -> None:
         from kyth_shared.kargs_preset import load_kargs, save_kargs
