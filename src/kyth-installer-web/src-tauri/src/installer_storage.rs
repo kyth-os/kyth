@@ -85,10 +85,85 @@ pub(crate) struct PartitionProbe {
     pub size_bytes: u64,
     pub start_bytes: u64,
     pub fstype: String,
+    pub label: String,
     pub efi: bool,
     pub current: bool,
     pub in_use: bool,
     pub read_only: bool,
+}
+
+/// Filesystems that always signal somebody else's data. The alongside and
+/// manual paths run `mkfs.btrfs -f` on the target, so accepting one of these
+/// would destroy a Windows/macOS/data volume outright. Mirrors Python's
+/// `_UNSAFE_ALONGSIDE_FSTYPES` (`plan_validate.py`).
+const FOREIGN_DATA_FSTYPES: &[&str] = &[
+    "ntfs",
+    "ntfs3",
+    "bitlocker",
+    "apfs",
+    "hfsplus",
+    "hfs",
+    "exfat",
+];
+
+/// Why a partition must not be formatted as the KythOS target, if it looks
+/// like it holds someone's data. `fstype` must already be lowercased.
+fn foreign_data_reason(fstype: &str, label: &str, role: &str) -> Option<String> {
+    let label = label.trim();
+    let labeled = if label.is_empty() {
+        String::new()
+    } else {
+        format!(" labeled {label:?}")
+    };
+    if FOREIGN_DATA_FSTYPES.contains(&fstype) {
+        return Some(format!(
+            "The selected {role} holds a {fstype} filesystem{labeled} and installing there \
+would destroy its contents. Back up its data, or choose an empty partition, unallocated \
+space, or the Windows-shrink option."
+        ));
+    }
+    if !fstype.is_empty() && fstype != "btrfs" && !label.is_empty() {
+        return Some(format!(
+            "The selected {role} is a labeled {fstype} volume ({label:?}) that appears to hold \
+data, and installing there would format it. Back up its contents, clear the partition \
+first, or choose a different target."
+        ));
+    }
+    None
+}
+
+/// Re-validate the alongside/manual target against a fresh snapshot
+/// immediately before it is formatted. Mirrors Python's
+/// `_validate_partition_target` plus its parent-disk check: the partition
+/// must be on the selected disk, must not be the ESP, must be unmounted,
+/// unstacked, writable, large enough, and must not look like it holds data.
+pub(crate) fn validate_replace_target(
+    input: &str,
+    disk: &str,
+    partition: &str,
+    role: &str,
+) -> Result<PartitionProbe, String> {
+    let probe = partition_probe_from_snapshot(input, disk, partition)?;
+    if probe.efi {
+        return Err(format!(
+            "The EFI system partition cannot be used as the KythOS {role}."
+        ));
+    }
+    if probe.current || probe.in_use || probe.read_only {
+        return Err(format!(
+            "The selected {role} is mounted, read-only, or has active encrypted/LVM mappings."
+        ));
+    }
+    if probe.size_bytes < MIN_KYTHOS_BYTES {
+        return Err(format!(
+            "The {role} is too small. At least {} GiB is required.",
+            MIN_KYTHOS_BYTES / (1024 * 1024 * 1024)
+        ));
+    }
+    if let Some(reason) = foreign_data_reason(&probe.fstype, &probe.label, role) {
+        return Err(reason);
+    }
+    Ok(probe)
 }
 
 /// The ESP selected from a fresh snapshot, including a safe live-session
@@ -385,7 +460,11 @@ pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, Stri
                     let replaceable =
                         size_bytes >= MIN_KYTHOS_BYTES && !efi && !current && !in_use && !read_only;
                     let is_windows = matches!(fstype.as_str(), "ntfs" | "ntfs3");
-                    let alongside_candidate = replaceable && !is_windows;
+                    let label = device.label.clone().unwrap_or_default();
+                    // Same content gate the commit path enforces, so the UI
+                    // never offers a partition the format step will refuse.
+                    let alongside_candidate =
+                        replaceable && foreign_data_reason(&fstype, &label, "").is_none();
                     let ntfs_resize_candidate =
                         replaceable && is_windows && size_bytes >= NTFS_MIN_BYTES;
                     partitions.push(PartitionRecord {
@@ -393,7 +472,7 @@ pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, Stri
                         size_bytes,
                         start_bytes: device.start.unwrap_or(0).saturating_mul(512),
                         fstype,
-                        label: device.label.clone().unwrap_or_default(),
+                        label,
                         parttype,
                         mountpoints: mounts,
                         efi,
@@ -537,6 +616,7 @@ pub(crate) fn partition_probe_from_snapshot(
                 size_bytes: device.size.unwrap_or(0),
                 start_bytes: device.start.unwrap_or(0).saturating_mul(512),
                 fstype,
+                label: device.label.clone().unwrap_or_default(),
                 efi,
                 current: !mounts.is_empty(),
                 in_use: !device.children.is_empty(),
@@ -1011,5 +1091,100 @@ mod tests {
             storage_preflight_from_snapshot("not-json", "/dev/sda").is_err()
                 && storage_preflight_from_snapshot("{}", "../../etc").is_err()
         );
+    }
+
+    /// Two disks: sda holds an ESP plus a spread of replace candidates; sdb
+    /// holds an empty partition that belongs to a *different* disk.
+    const REPLACE_SNAPSHOT: &str = r#"{"blockdevices":[
+        {"name":"/dev/sda","type":"disk","size":1099511627776,"children":[
+            {"name":"/dev/sda1","type":"part","partn":1,"size":536870912,"start":2048,"fstype":"vfat","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b","mountpoints":[null]},
+            {"name":"/dev/sda2","type":"part","partn":2,"size":137438953472,"start":1050624,"fstype":"exfat","label":"Photos","mountpoints":[null]},
+            {"name":"/dev/sda3","type":"part","partn":3,"size":137438953472,"start":269486080,"fstype":"ntfs","mountpoints":[null]},
+            {"name":"/dev/sda4","type":"part","partn":4,"size":137438953472,"start":537921536,"fstype":"ext4","label":"backups","mountpoints":[null]},
+            {"name":"/dev/sda5","type":"part","partn":5,"size":137438953472,"start":806356992,"fstype":"","mountpoints":[null]},
+            {"name":"/dev/sda6","type":"part","partn":6,"size":137438953472,"start":1074792448,"fstype":"btrfs","label":"KythOS","mountpoints":[null]},
+            {"name":"/dev/sda7","type":"part","partn":7,"size":1073741824,"start":1343227904,"fstype":"","mountpoints":[null]},
+            {"name":"/dev/sda8","type":"part","partn":8,"size":137438953472,"start":1345325056,"fstype":"apfs","mountpoints":[null]}
+        ]},
+        {"name":"/dev/sdb","type":"disk","size":274877906944,"children":[
+            {"name":"/dev/sdb1","type":"part","partn":1,"size":137438953472,"start":2048,"fstype":"","mountpoints":[null]}
+        ]}
+    ]}"#;
+
+    #[test]
+    fn replace_target_refuses_partitions_that_hold_someone_elses_data() {
+        // The alongside/manual commit runs mkfs.btrfs -f on this partition.
+        // Before this gate, nothing between the frontend and the format
+        // re-checked the partition itself: an exFAT photo library, an
+        // unlocked Windows NTFS volume, or an APFS volume would be wiped.
+        for (partition, needle) in [
+            ("/dev/sda2", "exfat filesystem labeled \"Photos\""),
+            ("/dev/sda3", "ntfs filesystem"),
+            ("/dev/sda8", "apfs filesystem"),
+            ("/dev/sda4", "labeled ext4 volume (\"backups\")"),
+        ] {
+            let error = validate_replace_target(
+                REPLACE_SNAPSHOT,
+                "/dev/sda",
+                partition,
+                "target partition",
+            )
+            .expect_err(partition);
+            assert!(error.contains(needle), "{partition}: {error}");
+        }
+    }
+
+    #[test]
+    fn replace_target_refuses_esp_small_and_cross_disk_partitions() {
+        let esp =
+            validate_replace_target(REPLACE_SNAPSHOT, "/dev/sda", "/dev/sda1", "root partition")
+                .unwrap_err();
+        assert!(esp.contains("EFI system partition"), "{esp}");
+        let small = validate_replace_target(
+            REPLACE_SNAPSHOT,
+            "/dev/sda",
+            "/dev/sda7",
+            "target partition",
+        )
+        .unwrap_err();
+        assert!(small.contains("too small"), "{small}");
+        // Every other safety gate validates `disk`; the format runs on
+        // `target_partition`. They must be the same disk.
+        let cross_disk = validate_replace_target(
+            REPLACE_SNAPSHOT,
+            "/dev/sda",
+            "/dev/sdb1",
+            "target partition",
+        )
+        .unwrap_err();
+        assert!(
+            cross_disk.contains("not present on the target disk"),
+            "{cross_disk}"
+        );
+    }
+
+    #[test]
+    fn replace_target_accepts_empty_and_existing_kythos_btrfs_partitions() {
+        for partition in ["/dev/sda5", "/dev/sda6"] {
+            let probe = validate_replace_target(
+                REPLACE_SNAPSHOT,
+                "/dev/sda",
+                partition,
+                "target partition",
+            )
+            .unwrap_or_else(|error| panic!("{partition}: {error}"));
+            assert_eq!(probe.name, partition);
+        }
+    }
+
+    #[test]
+    fn alongside_candidates_match_the_commit_content_gate() {
+        let partitions = parse_partitions(REPLACE_SNAPSHOT).expect("snapshot should parse");
+        let offered: Vec<&str> = partitions
+            .iter()
+            .filter(|part| part.alongside_candidate)
+            .map(|part| part.name.as_str())
+            .collect();
+        assert_eq!(offered, ["/dev/sda5", "/dev/sda6", "/dev/sdb1"]);
     }
 }

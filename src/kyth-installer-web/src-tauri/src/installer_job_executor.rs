@@ -1531,15 +1531,34 @@ impl NativePhaseExecutor {
                 // the image phase; there is no separate storage mutation.
                 return Ok(());
             }
-            "alongside" | "manual" => self
-                .storage_plan
-                .target_partition
-                .as_deref()
-                .ok_or_else(|| NativePhaseError::Execution {
-                    phase,
-                    message: "filesystem install has no target partition".to_string(),
-                })?
-                .to_string(),
+            "alongside" | "manual" => {
+                let requested = self
+                    .storage_plan
+                    .target_partition
+                    .as_deref()
+                    .ok_or_else(|| NativePhaseError::Execution {
+                        phase,
+                        message: "filesystem install has no target partition".to_string(),
+                    })?;
+                // prepare_btrfs_target formats this partition. Every gate
+                // above validates `disk`; re-check the partition itself
+                // (on that disk, not the ESP, unmounted, big enough, not
+                // holding someone's data) against a fresh snapshot.
+                let role = if self.storage_plan.mode == "manual" {
+                    "root partition"
+                } else {
+                    "target partition"
+                };
+                let snapshot = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+                crate::installer_storage::validate_replace_target(
+                    &snapshot,
+                    &self.storage_plan.disk,
+                    requested,
+                    role,
+                )
+                .map_err(|message| NativePhaseError::Execution { phase, message })?
+                .name
+            }
             "free_space" => {
                 let start = self.storage_plan.free_region_start.ok_or_else(|| {
                     NativePhaseError::Execution {
