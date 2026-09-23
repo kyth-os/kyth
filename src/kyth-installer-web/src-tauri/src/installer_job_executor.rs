@@ -118,6 +118,10 @@ impl NativeInstallRequest {
             install_mode.as_str(),
             "alongside" | "manual" | "free_space" | "resize_ntfs"
         );
+        // Implied by the mode, never a separate request key: bootc to-disk
+        // refuses a partitioned disk without --wipe, and no frontend sends
+        // one. Filesystem installs never wipe the disk.
+        let erase_disk = install_mode == "wipe";
         let target_root = if filesystem_install {
             "/var/tmp/kyth-alongside-target".to_string()
         } else {
@@ -181,7 +185,7 @@ impl NativeInstallRequest {
                     skip_fetch_check: flag("skip_fetch_check", false),
                     skip_finalize: flag("skip_finalize", false),
                     root_subvolume: flag("root_subvolume", filesystem_install),
-                    wipe: flag("wipe", false),
+                    wipe: erase_disk,
                     encryption: text("encryption", "none"),
                     tpm_recovery_ack: flag("tpm_recovery_ack", false),
                 },
@@ -1727,6 +1731,41 @@ mod tests {
     use crate::installer_bootc::BootcInstallInput;
     use crate::installer_configuration::ConfigurationInput;
     use crate::installer_secure_boot::SecureBootInput;
+
+    #[test]
+    fn erase_disk_install_always_passes_wipe_to_bootc() {
+        // Neither frontend sends a `wipe` key (native_main.rs as_request,
+        // the web InstallRequest type). bootc install to-disk refuses a disk
+        // with existing partitions unless --wipe is passed ("Detected
+        // existing partitions on ...; use e.g. `wipefs` or --wipe"), so the
+        // default "Erase full disk" mode must imply it, as Python did.
+        let request = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+            "install_mode": "wipe",
+            "acknowledged_irreversible": true,
+        }))
+        .expect("frontend request should decode");
+        assert!(request.execution.bootc.wipe);
+        let plan = crate::installer_bootc::build_plan(request.execution.bootc)
+            .expect("bootc plan validates");
+        assert!(
+            plan.argv.iter().any(|arg| arg == "--wipe"),
+            "{:?}",
+            plan.argv
+        );
+
+        // Filesystem installs write into a prepared mountpoint and never
+        // wipe the disk.
+        let alongside = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+            "install_mode": "alongside",
+            "target_partition": "sda3",
+            "wipe": true,
+            "acknowledged_irreversible": true,
+        }))
+        .expect("frontend request should decode");
+        assert!(!alongside.execution.bootc.wipe);
+    }
 
     #[test]
     fn efi_mount_requests_build_through_the_disk_helper() {
