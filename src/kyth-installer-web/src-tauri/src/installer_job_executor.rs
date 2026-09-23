@@ -1097,6 +1097,75 @@ impl NativePhaseExecutor {
         }
     }
 
+    /// Pure control-flow core of [`Self::guarded_table_mutation`]: run `body`,
+    /// and on failure invoke `restore` before propagating the original error.
+    /// A restore failure never replaces or masks the mutation's own error —
+    /// callers learn what actually broke the disk operation.
+    fn run_guarded<T, E>(
+        body: impl FnOnce() -> Result<T, E>,
+        restore: impl FnOnce(),
+    ) -> Result<T, E> {
+        match body() {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                restore();
+                Err(error)
+            }
+        }
+    }
+
+    /// Back up `disk`'s partition table, run `body`, and restore the table if
+    /// `body` fails. Mirrors Python's `PartitionTableGuard`
+    /// (`storage_guard.py`), which both the manual Journal commit
+    /// (`installer_journal.rs`'s `commit_request`, already ported) and this
+    /// guided-install partition creation share in the Python original —
+    /// `commit_new_kythos_partition` always wraps bios-boot creation, the
+    /// new KythOS partition, and (for a resize-NTFS install) the preceding
+    /// `resizepart` boundary move in one backed-up/restored scope. Restore
+    /// runs on a fresh, never-cancelled token (like `cleanup_mounts`): a
+    /// cancellation that triggered `body`'s failure must not also block the
+    /// table restore.
+    fn guarded_table_mutation<T>(
+        &self,
+        phase: Phase,
+        body: impl FnOnce() -> Result<T, NativePhaseError>,
+    ) -> Result<T, NativePhaseError> {
+        let directory = tempfile::Builder::new()
+            .prefix("kyth-partition-")
+            .tempdir()
+            .map_err(|error| NativePhaseError::Execution {
+                phase,
+                message: format!("could not create partition backup directory: {error}"),
+            })?;
+        let backup_path = directory
+            .path()
+            .join("partition-table.backup")
+            .to_string_lossy()
+            .into_owned();
+        let backup_cancellation = CancellationToken::default();
+        self.execute_disk_helper(
+            phase,
+            &backup_cancellation,
+            &serde_json::json!({
+                "operation": "backup_table",
+                "disk": &self.storage_plan.disk,
+                "backup_path": backup_path,
+            }),
+        )?;
+        Self::run_guarded(body, || {
+            let restore_cancellation = CancellationToken::default();
+            let _ = self.execute_disk_helper(
+                phase,
+                &restore_cancellation,
+                &serde_json::json!({
+                    "operation": "restore_table",
+                    "disk": &self.storage_plan.disk,
+                    "backup_path": backup_path,
+                }),
+            );
+        })
+    }
+
     fn create_target_partition(
         &self,
         phase: Phase,
@@ -1499,9 +1568,13 @@ impl NativePhaseExecutor {
                         message: "selected free space is no longer available".to_string(),
                     });
                 }
-                self.create_target_partition(phase, cancellation, start, end)?
+                self.guarded_table_mutation(phase, || {
+                    self.create_target_partition(phase, cancellation, start, end)
+                })?
             }
-            "resize_ntfs" => self.resize_ntfs_target(phase, cancellation)?,
+            "resize_ntfs" => {
+                self.guarded_table_mutation(phase, || self.resize_ntfs_target(phase, cancellation))?
+            }
             _ => {
                 return Err(NativePhaseError::InvalidPlan {
                     phase,
@@ -1610,6 +1683,40 @@ mod tests {
     use crate::installer_bootc::BootcInstallInput;
     use crate::installer_configuration::ConfigurationInput;
     use crate::installer_secure_boot::SecureBootInput;
+
+    #[test]
+    fn run_guarded_skips_restore_on_success() {
+        let mut restore_calls = 0;
+        let result: Result<i32, &str> =
+            NativePhaseExecutor::run_guarded(|| Ok(42), || restore_calls += 1);
+        assert_eq!(result, Ok(42));
+        assert_eq!(restore_calls, 0, "restore must not run on success");
+    }
+
+    #[test]
+    fn run_guarded_restores_on_failure_and_preserves_the_original_error() {
+        // The guided-install partition-create/resize-NTFS paths lost their
+        // partition-table backup/restore safety net in the Rust port (the
+        // manual Journal commit kept it) — Python's `PartitionTableGuard`
+        // always restores on any failure inside the guarded scope. A failing
+        // restore (e.g. the disk helper itself errors) must never mask what
+        // actually broke the mutation.
+        let mut restore_ran = false;
+        let restore_outcome: Result<(), &str> = Err("restore also failed");
+        let result: Result<i32, &str> = NativePhaseExecutor::run_guarded(
+            || Err("original failure"),
+            || {
+                restore_ran = true;
+                let _ = restore_outcome;
+            },
+        );
+        assert_eq!(
+            result,
+            Err("original failure"),
+            "the original error must survive even when restore itself fails"
+        );
+        assert!(restore_ran, "restore must run exactly once on failure");
+    }
 
     fn request(with_account: bool) -> NativeInstallRequest {
         NativeInstallRequest {
