@@ -187,5 +187,28 @@ class GpuPowerAllowlistTests(unittest.TestCase):
             self.assertNotIn("id", path.read_text(encoding="utf-8"))
 
 
+class UksmdClampTests(unittest.TestCase):
+    def test_generate_clamps_cpu_percent(self) -> None:
+        from kyth_shared.uksmd_preset import generate_uksmd_conf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "uksmd.conf"
+            generate_uksmd_conf({"enabled": True, "max_cpu_percent": 999}, dest)
+            text = dest.read_text(encoding="utf-8")
+            self.assertIn("max_cpu_percent = 80", text)
+            self.assertNotIn("999", text)
+
+
+class ThpTuneClampTests(unittest.TestCase):
+    def test_generate_clamps_scan_sleep(self) -> None:
+        from kyth_shared.thp_tune import generate_thp_conf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "99-kyth-thp.conf"
+            generate_thp_conf({"profile": "kyth", "scan_sleep_ms": 1}, dest)
+            text = dest.read_text(encoding="utf-8")
+            self.assertIn("kernel.khugepaged_scan_sleep_millisecs = 1000", text)
+
+
 if __name__ == "__main__":
     unittest.main()

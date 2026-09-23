@@ -10,6 +10,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_THP_PATH = Path("/etc/kyth/thp.toml")
 DEFAULT_SYSCTL = Path("/etc/sysctl.d/99-kyth-thp.conf")
 THP_ENABLED = Path("/sys/kernel/mm/transparent_hugepage/enabled")
@@ -57,7 +59,7 @@ def save_thp(cfg: dict[str, Any], path: Path | None = None) -> Path:
         sl = 10000
     sl = max(1000, min(60000, sl))
     lines = ["# Kyth THP — offline\n", f'profile = "{prof}"\n', f"scan_sleep_ms = {sl}\n"]
-    p.write_text("".join(lines), encoding="utf-8")
+    atomic_write_text(p, "".join(lines), mode=0o600)
     return p
 
 
@@ -72,7 +74,11 @@ def generate_thp_conf(cfg: dict[str, Any] | None = None, dest: Path | None = Non
         except OSError:
             pass
         return None
-    sl = int(cfg.get("scan_sleep_ms", 10000))
+    try:
+        sl = int(cfg.get("scan_sleep_ms", 10000))
+    except (TypeError, ValueError):
+        sl = 10000
+    sl = max(1000, min(60000, sl))
     content = (
         "# Kyth THP — generated\n"
         "vm.compaction_proactiveness = 0\n"
@@ -81,9 +87,7 @@ def generate_thp_conf(cfg: dict[str, Any] | None = None, dest: Path | None = Non
         "kernel.khugepaged_max_ptes_none = 511\n"
     )
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dest.with_suffix(".tmp")
-    tmp.write_text(content, encoding="utf-8")
-    tmp.replace(dest)
+    atomic_write_text(dest, content, mode=0o644)
     return dest
 
 
