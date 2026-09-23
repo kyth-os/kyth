@@ -236,13 +236,20 @@ def main(argv: list[str] | None = None) -> int:
     if len(args) == 1:
         ensure_system_accounts(args[0], print, run=_default_run)
         return 0
-    if len(args) == 5 and args[0] == "create-user":
-        _, deploy_root, target_root, username, password_hash = args
+    if len(args) == 4 and args[0] == "create-user":
+        # The password hash NEVER travels in argv: it would sit world-readable
+        # in /proc/<pid>/cmdline for the whole call. It arrives on stdin
+        # instead (piped by the caller, never a terminal prompt).
+        _, deploy_root, target_root, username = args
+        password_hash = sys.stdin.read().strip()
+        if not password_hash:
+            print("create-user: password hash missing on stdin", file=sys.stderr)
+            return 64
         create_installer_user(deploy_root, target_root, username, password_hash, print, run=_default_run)
         return 0
     print(
         "Usage: python3 -m kyth_shared.accounts DEPLOY_ROOT\n"
-        "       python3 -m kyth_shared.accounts create-user DEPLOY_ROOT TARGET_ROOT USERNAME PASSWORD_HASH",
+        "       echo HASH | python3 -m kyth_shared.accounts create-user DEPLOY_ROOT TARGET_ROOT USERNAME",
         file=sys.stderr,
     )
     return 64

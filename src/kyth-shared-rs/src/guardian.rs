@@ -14,6 +14,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
+/// Global single-flight slot for user-initiated Guardian repairs.
+static RECIPE_SLOT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub const SCHEMA_VERSION: u32 = 1;
 /// Same as `guardian.py`'s `NOTIFY_THROTTLE_S` — the window
 /// `pending_recommendations` considers "still relevant" for the mission
@@ -664,6 +667,21 @@ pub fn execute_recipe(recipe_id: &str) -> Result<String, String> {
     if recipe.command.is_empty() || !matches!(recipe.risk, "safe" | "confirm") {
         return Err(NOT_ELIGIBLE.to_string());
     }
+    // Single-flight: the cooldown check reads history that is only written
+    // when a run FINISHES, so a double-click (or a retry while the first run
+    // is still in its 30s command + verification) used to launch two
+    // concurrent mutating repairs — e.g. two interleaved
+    // `nmcli networking off/on` captive fixes that can leave networking off.
+    // Hold one global slot for the whole run.
+    let _slot = match RECIPE_SLOT.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err("another Guardian repair is already running".to_string());
+        }
+        // A poisoned slot means a previous run panicked; the slot itself
+        // holds no data, so it is safe to reclaim.
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+    };
     let state = load_state();
     if cooldown_active(&state, recipe) {
         return Err("repair cooldown is active".to_string());
@@ -939,6 +957,22 @@ pub fn recent_history(state: &Value, limit: usize) -> Vec<HistoryItem> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn concurrent_repair_is_refused_while_slot_is_held() {
+        // Simulate a repair in flight by holding the slot; a second
+        // eligible recipe must be refused as "already running" before it
+        // reads state, checks cooldown, or runs anything.
+        let _held = RECIPE_SLOT.lock().unwrap_or_else(|p| p.into_inner());
+        let error = execute_recipe("audio.restart").unwrap_err();
+        assert!(error.contains("already running"), "{error}");
+    }
+
+    #[test]
+    fn ineligible_recipe_is_rejected_before_taking_the_slot() {
+        // Unknown ids never contend for the slot (no false "already running").
+        let _held = RECIPE_SLOT.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(execute_recipe("no.such-recipe").unwrap_err(), NOT_ELIGIBLE);
+    }
     #[test]
     fn model_decision_requires_exact_allowed_shape() {
         let allowed = ["audio.restart"];

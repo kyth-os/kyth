@@ -252,21 +252,30 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
 }
 
 /// Phase 2: guardian execute_recipe (Repair/Diagnostics mutating)
+///
+/// Async + spawn_blocking: the recipe runs up to 30s plus verification
+/// probes; a sync command pinned a Tauri worker (and the UI's await) for
+/// the whole run. The shared single-flight slot in `execute_recipe` makes
+/// a double-click return "already running" instead of a second repair.
 #[tauri::command]
-fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
-    let state = kyth_shared::guardian::load_state();
-    if !kyth_shared::guardian::is_pending_recipe(&state, &recipe_id) {
-        return Err("recipe not pending".to_string());
-    }
-    // Guardian ids are dotted (`audio.restart`) and are not just recipes —
-    // handing them to the typed Hub action bridge ran nothing and reported "launched" for
-    // every one of them, advisory notifications included. `execute_recipe`
-    // carries guardian.py's own eligibility gate and runs the recipe's argv.
-    let detail = kyth_shared::guardian::execute_recipe(&recipe_id)?;
-    Ok(format!(
-        "{}: {detail}",
-        kyth_shared::guardian::recipe_title(&recipe_id)
-    ))
+async fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = kyth_shared::guardian::load_state();
+        if !kyth_shared::guardian::is_pending_recipe(&state, &recipe_id) {
+            return Err("recipe not pending".to_string());
+        }
+        // Guardian ids are dotted (`audio.restart`) and are not just recipes —
+        // handing them to the typed Hub action bridge ran nothing and reported "launched" for
+        // every one of them, advisory notifications included. `execute_recipe`
+        // carries guardian.py's own eligibility gate and runs the recipe's argv.
+        let detail = kyth_shared::guardian::execute_recipe(&recipe_id)?;
+        Ok(format!(
+            "{}: {detail}",
+            kyth_shared::guardian::recipe_title(&recipe_id)
+        ))
+    })
+    .await
+    .map_err(|error| format!("Guardian repair task failed: {error}"))?
 }
 
 #[tauri::command]
@@ -351,6 +360,15 @@ fn smb_mount(share: String) -> Result<String, String> {
             .any(|character| character.is_control() || character.is_whitespace())
     {
         return Err("Enter a valid SMB share such as smb://server/share.".to_string());
+    }
+    // Credentials in the URI would sit in the gio child's argv, readable
+    // by every local user via /proc for up to 30s. Refuse; the desktop
+    // keyring prompt collects them safely.
+    if kyth_shared::system::smb::smb_uri_has_userinfo(share) {
+        return Err(
+            "Enter smb://server/share without a username or password; you'll be prompted for credentials."
+                .to_string(),
+        );
     }
 
     // Never echo the raw URI: `smb://user:password@host/share` carries

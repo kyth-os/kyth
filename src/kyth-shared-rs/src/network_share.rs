@@ -62,7 +62,30 @@ pub fn validate_mount_point(value: Option<&Value>) -> Result<String, String> {
     {
         return Err("mount_point is outside an approved prefix".into());
     }
+    // Depth floor: mounting directly on a prefix root (or a bare home dir
+    // like /home/alice, which would hide the user's whole home and collide
+    // with fstab-generated units) is refused. Shares live at least one
+    // level below the prefix root; under /home/ that means /home/<user>/<dir>.
+    let depth = path.split('/').filter(|part| !part.is_empty()).count();
+    let min_depth = if path.starts_with("/home/") { 3 } else { 2 };
+    if depth < min_depth {
+        return Err(
+            "mount_point must be a subdirectory, not a prefix root or home directory".into(),
+        );
+    }
     Ok(path)
+}
+
+/// Marker embedded in every unit file Hub writes. Add/remove refuse to
+/// touch unit files lacking it, so a share can never overwrite, stop, or
+/// delete an admin-configured (fstab, other tool) mount unit that happens
+/// to map to the same path.
+const UNIT_OWNERSHIP_MARKER: &str = "Description=KythOS SMB Share ";
+
+fn unit_is_hub_owned(unit_path: &Path) -> bool {
+    std::fs::read_to_string(unit_path)
+        .map(|text| text.contains(UNIT_OWNERSHIP_MARKER))
+        .unwrap_or(false)
 }
 
 fn validate_name(value: Option<&Value>) -> Result<String, String> {
@@ -264,6 +287,13 @@ pub fn add_share(request: &ShareRequest) -> Result<String, String> {
     let unit = mount_unit(&request.mount_point)?;
     let credential_path = safe_artifact_path(Path::new(CREDENTIALS_DIR), &request.name);
     let unit_path = safe_artifact_path(Path::new(UNIT_DIR), &unit);
+    // Never overwrite an admin-configured unit that happens to map to the
+    // same path: only Hub-owned (marker-bearing) units may be replaced.
+    if unit_path.is_file() && !unit_path.is_symlink() && !unit_is_hub_owned(&unit_path) {
+        return Err(format!(
+            "refusing to overwrite {unit}: not a KythOS-managed share unit"
+        ));
+    }
     ensure_no_symlink_in_path(Path::new(&request.mount_point))?;
     fs::create_dir_all(&request.mount_point).map_err(|error| error.to_string())?;
 
@@ -298,13 +328,20 @@ pub fn add_share(request: &ShareRequest) -> Result<String, String> {
 
 pub fn remove_share(request: &ShareRequest) -> Result<String, String> {
     let unit = mount_unit(&request.mount_point)?;
-    let _ = run_systemctl(&["stop", &unit], 30);
-    let _ = run_systemctl(&["disable", &unit], 30);
     let unit_path = safe_artifact_path(Path::new(UNIT_DIR), &unit);
     let credential_path = safe_artifact_path(Path::new(CREDENTIALS_DIR), &request.name);
     if unit_path.is_symlink() || credential_path.is_symlink() {
         return Err("refusing to remove a symlinked share artifact".into());
     }
+    // Ownership first: never stop/disable/delete a foreign unit. (The old
+    // code stopped and disabled before checking anything.)
+    if unit_path.is_file() && !unit_is_hub_owned(&unit_path) {
+        return Err(format!(
+            "refusing to remove {unit}: not a KythOS-managed share unit"
+        ));
+    }
+    let _ = run_systemctl(&["stop", &unit], 30);
+    let _ = run_systemctl(&["disable", &unit], 30);
     let _ = fs::remove_file(unit_path);
     if credential_path.is_file() {
         let argv = vec![
@@ -394,5 +431,43 @@ mod tests {
         let request = validate_request(&value, false).unwrap();
         assert!(request.password.is_none());
         assert!(request.server.is_none());
+    }
+
+    #[test]
+    fn mount_point_depth_floor_rejects_roots_and_home_dirs() {
+        // Prefix roots and bare home dirs would hide live mounts/homes and
+        // collide with fstab-generated units.
+        for bad in ["/mnt", "/mnt/", "/media", "/home/alice", "/home/alice/"] {
+            let value = json!({"name":"s", "mount_point":bad});
+            assert!(
+                validate_mount_point(value.get("mount_point")).is_err(),
+                "{bad} must be rejected"
+            );
+        }
+        for good in [
+            "/mnt/media",
+            "/media/usb",
+            "/home/alice/share",
+            "/run/media/alice/usb",
+        ] {
+            let value = json!({"name":"s", "mount_point":good});
+            assert!(
+                validate_mount_point(value.get("mount_point")).is_ok(),
+                "{good} must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn ownership_marker_distinguishes_hub_units_from_foreign() {
+        let dir = tempfile::tempdir().unwrap();
+        let hub_unit = dir.path().join("hub.mount");
+        std::fs::write(&hub_unit, "[Unit]\nDescription=KythOS SMB Share media\n").unwrap();
+        assert!(unit_is_hub_owned(&hub_unit));
+        let foreign_unit = dir.path().join("foreign.mount");
+        std::fs::write(&foreign_unit, "[Unit]\nDescription=Admin disk\n").unwrap();
+        assert!(!unit_is_hub_owned(&foreign_unit));
+        // Missing file reads as not-owned (fail closed on remove).
+        assert!(!unit_is_hub_owned(&dir.path().join("absent.mount")));
     }
 }

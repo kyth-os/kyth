@@ -7,6 +7,7 @@ logic; these tests exercise the shared implementation directly.
 """
 from __future__ import annotations
 
+import io
 import pathlib
 import subprocess
 import sys
@@ -309,13 +310,27 @@ class CreateInstallerUserTests(unittest.TestCase):
     def test_cli_dispatches_create_user_with_parsed_arguments(self):
         # useradd --root needs real root, so this checks main()'s own
         # argument parsing/dispatch rather than re-testing create_installer_user.
-        with mock.patch.object(accounts, "create_installer_user") as mocked:
-            rc = accounts.main(["create-user", "/deploy", "/target", "dave", "$6$h"])
+        with mock.patch.object(accounts, "create_installer_user") as mocked, \
+             mock.patch.object(accounts.sys, "stdin", io.StringIO("$6$h\n")):
+            rc = accounts.main(["create-user", "/deploy", "/target", "dave"])
         self.assertEqual(rc, 0)
         mocked.assert_called_once()
         args, kwargs = mocked.call_args
         self.assertEqual(args[:4], ("/deploy", "/target", "dave", "$6$h"))
         self.assertIs(kwargs["run"], accounts._default_run)
+
+    def test_cli_refuses_hash_in_argv_and_requires_stdin(self):
+        # The hash must never travel in argv (/proc cmdline is world-readable).
+        with mock.patch.object(accounts, "create_installer_user") as mocked:
+            rc = accounts.main(["create-user", "/deploy", "/target", "dave", "$6$h"])
+        self.assertEqual(rc, 64)
+        mocked.assert_not_called()
+        # Empty stdin is also refused, not passed through as a blank hash.
+        with mock.patch.object(accounts, "create_installer_user") as mocked, \
+             mock.patch.object(accounts.sys, "stdin", io.StringIO("")):
+            rc = accounts.main(["create-user", "/deploy", "/target", "dave"])
+        self.assertEqual(rc, 64)
+        mocked.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -155,18 +155,6 @@ def get_power_profile() -> str:
     return "n/a"
 
 
-def flush_page_caches() -> None:
-    """Flush memory page cache."""
-    drop_caches = Path("/proc/sys/vm/drop_caches")
-    if os.access(drop_caches, os.W_OK):
-        try:
-            os.sync()
-            drop_caches.write_text("3\n", encoding="utf-8")
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-            logger.debug("handled expected exception", exc_info=True)
-            pass
-
-
 def set_transparent_hugepages(setting: str) -> None:
     """Set transparent hugepages mode (e.g. 'madvise')."""
     thp = Path("/sys/kernel/mm/transparent_hugepage/enabled")
@@ -186,17 +174,6 @@ def switch_sched_ext_profile(profile: str) -> None:
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
-
-
-def apply_game_boost() -> bool:
-    """Apply system optimizations for gaming performance (EPP, THP, caches)."""
-    success = False
-    if set_epp("performance"):
-        success = True
-    set_transparent_hugepages("madvise")
-    flush_page_caches()
-    switch_sched_ext_profile("gaming")
-    return success
 
 
 def apply_nvme_tuning() -> bool:

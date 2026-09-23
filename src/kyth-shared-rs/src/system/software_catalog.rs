@@ -253,9 +253,12 @@ pub fn parse_appstream_results(raw: &str) -> Vec<AppStreamApp> {
         .collect()
 }
 
-/// Query the installed Flathub catalog. This is intentionally bounded and
-/// read-only; Flatpak remains the authority for what is currently available.
-pub fn appstream_search(query: &str) -> Vec<AppStreamApp> {
+/// Build the bounded `flatpak search` argv, or `None` for invalid queries.
+///
+/// `--` ends option parsing: a query like `-foo` (punctuation is allowed)
+/// was otherwise parsed by flatpak as an unknown option, exited non-zero,
+/// and silently showed "no results".
+fn appstream_search_argv(query: &str) -> Option<Vec<String>> {
     let query = query.trim();
     if query.is_empty()
         || query.len() > 80
@@ -263,17 +266,25 @@ pub fn appstream_search(query: &str) -> Vec<AppStreamApp> {
             .chars()
             .all(|c| c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace())
     {
-        return Vec::new();
+        return None;
     }
-    let Some(output) = command_output(
-        &[
-            "flatpak",
-            "search",
-            "--columns=application,name,summary",
-            query,
-        ],
-        Duration::from_secs(10),
-    ) else {
+    Some(vec![
+        "flatpak".to_string(),
+        "search".to_string(),
+        "--columns=application,name,summary".to_string(),
+        "--".to_string(),
+        query.to_string(),
+    ])
+}
+
+/// Query the installed Flathub catalog. This is intentionally bounded and
+/// read-only; Flatpak remains the authority for what is currently available.
+pub fn appstream_search(query: &str) -> Vec<AppStreamApp> {
+    let Some(argv) = appstream_search_argv(query) else {
+        return Vec::new();
+    };
+    let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
+    let Some(output) = command_output(&argv_refs, Duration::from_secs(10)) else {
         return Vec::new();
     };
     if !output.status.success() {
@@ -531,6 +542,21 @@ pub fn familiar_apps() -> Vec<FamiliarApp> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appstream_search_ends_options_before_the_query() {
+        let argv = appstream_search_argv("-foo").expect("dash query is valid input");
+        let dash = argv.iter().position(|arg| arg == "--").expect("needs --");
+        assert_eq!(argv[dash + 1], "-foo");
+        assert_eq!(argv.last().map(String::as_str), Some("-foo"));
+        // Whitespace is trimmed; bounds still enforced.
+        assert_eq!(
+            appstream_search_argv("  steam ").unwrap().last().unwrap(),
+            "steam"
+        );
+        assert!(appstream_search_argv("").is_none());
+        assert!(appstream_search_argv(&"x".repeat(81)).is_none());
+    }
 
     #[test]
     fn block_device_gate_covers_real_disk_shapes() {

@@ -50,6 +50,16 @@ pub fn redact_smb_uri(share: &str) -> String {
     format!("smb://{host}{after_authority}")
 }
 
+/// True when the URI's authority carries userinfo (`user[:pass]@`).
+/// Such URIs must never be spawned: the child argv is world-readable via
+/// /proc/<pid>/cmdline for the whole (up to 30s) mount. Credentials go
+/// through gio's keyring prompt instead.
+pub fn smb_uri_has_userinfo(share: &str) -> bool {
+    let rest = share.strip_prefix("smb://").unwrap_or(share);
+    let authority = rest.split('/').next().unwrap_or("");
+    authority.contains('@')
+}
+
 fn run_with_timeout(cmd: &[String], timeout: Duration) -> Option<(i32, String, String)> {
     if cmd.is_empty() {
         return None;
@@ -97,6 +107,15 @@ mod tests {
         );
         assert_eq!(redact_smb_uri("smb://nas/share"), "smb://nas/share");
         assert_eq!(redact_smb_uri("smb://nas"), "smb://nas");
+    }
+    #[test]
+    fn userinfo_detection_blocks_credential_uris_only() {
+        assert!(smb_uri_has_userinfo("smb://user:s3cret@nas/share"));
+        assert!(smb_uri_has_userinfo("smb://user@nas/share"));
+        assert!(!smb_uri_has_userinfo("smb://nas/share"));
+        assert!(!smb_uri_has_userinfo("smb://nas"));
+        // An @ in the share path is not userinfo.
+        assert!(!smb_uri_has_userinfo("smb://nas/team@share"));
     }
     #[test]
     fn discover_no_host() {

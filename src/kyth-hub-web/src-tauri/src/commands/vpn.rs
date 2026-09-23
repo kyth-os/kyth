@@ -887,12 +887,15 @@ pub(crate) fn vpn_connect(
         }
         // Same-tick double connects share a nanos id: suffix until free so
         // the second runtime never silently replaces the first (same
-        // generation discipline as JobStore::start).
+        // generation discipline as JobStore::start). The suffix is
+        // `-{round}` (not `#{round}`): the frontend's persisted-slot
+        // JOB_ID_PATTERN (`^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$`) dropped `#`
+        // ids on reload, leaving a live VPN job with a dead Cancel.
         let mut unique = job.clone();
         let mut round = 1u32;
         while store.contains_key(&unique) {
             round += 1;
-            unique = format!("{job}#{round}");
+            unique = vpn_collision_id(&job, round);
         }
         store.insert(unique.clone(), runtime.clone());
         unique
@@ -1097,9 +1100,43 @@ pub(crate) fn set_vpn_protection(
     set_vpn_protection_at(&preset_path(), vpn_fail_closed, vpn_dns_exclusive)
 }
 
+/// Collision suffix for same-tick VPN job ids. Must stay inside the
+/// frontend's persisted-slot `JOB_ID_PATTERN` (`…-<digits>`), or a reload
+/// drops the slot and the live connection's Cancel goes dead.
+fn vpn_collision_id(job: &str, round: u32) -> String {
+    format!("{job}-{round}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collision_ids_match_the_frontend_job_id_pattern() {
+        // Mirror of liveData.ts JOB_ID_PATTERN: ^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$
+        let matches = |id: &str| {
+            let Some((head, digits)) = id.rsplit_once('-') else {
+                return false;
+            };
+            !digits.is_empty()
+                && digits.bytes().all(|b| b.is_ascii_digit())
+                && head
+                    .bytes()
+                    .next()
+                    .is_some_and(|b| b.is_ascii_alphanumeric())
+                && head
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+        };
+        let base = "vpn-1758585600123456789";
+        assert!(matches(base));
+        for round in 2..5 {
+            let id = vpn_collision_id(base, round);
+            assert!(matches(&id), "{id} must survive frontend reattach");
+            assert_ne!(id, base);
+        }
+        assert!(!matches(&format!("{base}#2")), "old # suffix was the bug");
+    }
 
     #[test]
     fn saml_cookie_claim_debounces_second_callback() {

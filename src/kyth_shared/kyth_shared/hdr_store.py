@@ -5,6 +5,8 @@ import os, tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 
 DEFAULT_HDR_STORE_PATH = Path("/etc/kyth/hdr-store.toml")
 KWINRC = Path.home() / ".config/kwinrc"
@@ -31,9 +33,11 @@ def load_hdr_store(path: Path | None = None) -> dict[str, Any]:
 
 def save_hdr_store(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p = hdr_store_path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
     pr = bool(cfg.get("preserve", True))
-    p.write_text(f"# Kyth HDR store — offline\npreserve = {str(pr).lower()}\n", encoding="utf-8")
+    # Atomic temp+fsync+rename (like display_hdr/vrr/flatpak_trim): a kill
+    # or power loss mid-write left truncated TOML, which load_hdr_store
+    # silently read as the default — discarding the user's choice.
+    atomic_write_text(p, f"# Kyth HDR store — offline\npreserve = {str(pr).lower()}\n", mode=0o644)
     return p
 
 
