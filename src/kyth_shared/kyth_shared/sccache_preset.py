@@ -6,6 +6,8 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from .atomic_io import atomic_write_text
+
 DEFAULT_SCCACHE_PATH = Path("/etc/kyth/sccache.toml")
 DEFAULT_ENV = Path("/etc/environment.d/99-kyth-sccache.conf")
 DEFAULT_SERVICE = Path("/etc/systemd/system/sccache.service")
@@ -39,7 +41,13 @@ def save_sccache(cfg: dict[str, Any], path: Path | None = None) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     en = bool(cfg.get("enabled", False))
     size = str(cfg.get("size", "10G"))
-    p.write_text(f"# Kyth sccache — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\n", encoding="utf-8")
+    if size not in ("5G", "10G", "20G", "50G"):
+        size = "10G"
+    atomic_write_text(
+        p,
+        f"# Kyth sccache — offline\nenabled = {str(en).lower()}\nsize = \"{size}\"\n",
+        mode=0o600,
+    )
     return p
 
 
@@ -57,9 +65,15 @@ def generate_sccache(cfg: dict[str, Any] | None = None, env: Path | None = None,
                 pass
         return None
     size = str(cfg.get("size", "10G"))
+    if size not in ("5G", "10G", "20G", "50G"):
+        size = "10G"
     try:
         env.parent.mkdir(parents=True, exist_ok=True)
-        env.write_text(f"# Kyth sccache — generated\nSCCACHE_DIR=/var/cache/sccache\nSCCACHE_CACHE_SIZE={size}\n", encoding="utf-8")
+        atomic_write_text(
+            env,
+            f"# Kyth sccache — generated\nSCCACHE_DIR=/var/cache/sccache\nSCCACHE_CACHE_SIZE={size}\n",
+            mode=0o644,
+        )
     except OSError:
         pass
     content = f"""[Unit]
@@ -77,9 +91,7 @@ WantedBy=multi-user.target
 """
     try:
         service.parent.mkdir(parents=True, exist_ok=True)
-        tmp = service.with_suffix(".tmp")
-        tmp.write_text(content, encoding="utf-8")
-        tmp.replace(service)
+        atomic_write_text(service, content, mode=0o644)
     except OSError:
         return None
     return env

@@ -210,5 +210,30 @@ class ThpTuneClampTests(unittest.TestCase):
             self.assertIn("kernel.khugepaged_scan_sleep_millisecs = 1000", text)
 
 
+class LoaderTimeoutClampTests(unittest.TestCase):
+    def test_generate_clamps_timeout(self) -> None:
+        from kyth_shared.boot_loader import generate_loader_conf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "loader.conf"
+            generate_loader_conf({"fast": True, "timeout": 999}, dest)
+            text = dest.read_text(encoding="utf-8")
+            self.assertIn("timeout 10", text)
+            self.assertNotIn("999", text)
+
+
+class SccachePythonSizeTests(unittest.TestCase):
+    def test_generate_allowlists_size(self) -> None:
+        from kyth_shared.sccache_preset import generate_sccache
+
+        with tempfile.TemporaryDirectory() as tmp:
+            env = Path(tmp) / "99-kyth-sccache.conf"
+            service = Path(tmp) / "sccache.service"
+            generate_sccache({"enabled": True, "size": "10G; id"}, env, service)
+            unit = service.read_text(encoding="utf-8")
+            self.assertIn("SCCACHE_CACHE_SIZE=10G", unit)
+            self.assertNotIn("id", unit)
+
+
 if __name__ == "__main__":
     unittest.main()
