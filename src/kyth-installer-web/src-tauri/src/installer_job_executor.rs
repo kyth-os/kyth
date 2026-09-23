@@ -1564,6 +1564,17 @@ impl NativePhaseExecutor {
                     "target partition"
                 };
                 let snapshot = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+                if self.storage_plan.mode == "alongside" {
+                    // Unlike free-space/NTFS-shrink, alongside never creates
+                    // a BIOS boot partition. A missing /sys/firmware/efi
+                    // reads as legacy BIOS: the stricter answer.
+                    crate::installer_storage::validate_alongside_bios_boot(
+                        &snapshot,
+                        &self.storage_plan.disk,
+                        std::path::Path::new("/sys/firmware/efi").exists(),
+                    )
+                    .map_err(|message| NativePhaseError::Execution { phase, message })?;
+                }
                 crate::installer_storage::validate_replace_target(
                     &snapshot,
                     &self.storage_plan.disk,

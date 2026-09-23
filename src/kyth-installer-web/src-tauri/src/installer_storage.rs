@@ -691,6 +691,43 @@ pub(crate) fn has_bios_boot_partition(input: &str) -> Result<bool, String> {
         .any(|partition| partition.parttype.eq_ignore_ascii_case(BIOS_BOOT_GUID)))
 }
 
+/// Refuse an alongside install that a legacy-BIOS boot could not start.
+/// GRUB on a GPT disk booted from legacy BIOS needs a BIOS boot partition;
+/// without one it falls back to blocklists, which Btrfs rejects. Alongside
+/// reuses an existing partition and never creates one (free-space and
+/// NTFS-shrink installs do), so it must fail before formatting anything.
+/// UEFI boots use the ESP and are unaffected. Mirrors Python's
+/// `_needs_bios_boot` refusal in `plan_validate.py`.
+pub(crate) fn validate_alongside_bios_boot(
+    input: &str,
+    disk: &str,
+    uefi_boot: bool,
+) -> Result<(), String> {
+    if uefi_boot {
+        return Ok(());
+    }
+    let (_, is_gpt) = disk_metadata(input, disk)?;
+    if !is_gpt {
+        return Ok(());
+    }
+    let disk = normalize_device_path(disk)
+        .ok_or_else(|| "BIOS boot query has an invalid disk".to_string())?;
+    let has_bios_boot = parse_partitions(input)?.iter().any(|partition| {
+        on_selected_disk(&partition.name, &disk)
+            && partition.parttype.eq_ignore_ascii_case(BIOS_BOOT_GUID)
+    });
+    if has_bios_boot {
+        return Ok(());
+    }
+    Err(
+        "Legacy BIOS on GPT requires a 1 MiB BIOS boot partition for GRUB. Create a 1 MiB \
+partition with the bios_grub flag in the manual partition editor, or use free-space/NTFS-shrink \
+install which creates it automatically. Without it GRUB falls back to blocklists, which Btrfs \
+rejects."
+            .to_string(),
+    )
+}
+
 /// Microsoft basic-data GUID: the Windows-indicator partition type.
 const WINDOWS_DATA_GUID: &str = "ebd0a0a2-b9e5-4433-87c0-68b6b72699c7";
 
@@ -1175,6 +1212,41 @@ mod tests {
             .unwrap_or_else(|error| panic!("{partition}: {error}"));
             assert_eq!(probe.name, partition);
         }
+    }
+
+    fn bios_snapshot(pttype: &str, sda_parts: &str, sdb_parts: &str) -> String {
+        format!(
+            r#"{{"blockdevices":[
+                {{"name":"/dev/sda","type":"disk","size":1099511627776,"pttype":"{pttype}","children":[{sda_parts}]}},
+                {{"name":"/dev/sdb","type":"disk","size":274877906944,"pttype":"gpt","children":[{sdb_parts}]}}
+            ]}}"#
+        )
+    }
+
+    #[test]
+    fn alongside_refuses_legacy_bios_gpt_without_a_bios_boot_partition() {
+        let esp = r#"{"name":"/dev/sda1","type":"part","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b"}"#;
+        let bios = format!(r#"{{"name":"/dev/sda2","type":"part","parttype":"{BIOS_BOOT_GUID}"}}"#);
+        let other_disk_bios =
+            format!(r#"{{"name":"/dev/sdb1","type":"part","parttype":"{BIOS_BOOT_GUID}"}}"#);
+
+        // Legacy BIOS + GPT + no BIOS boot partition: GRUB cannot boot Btrfs.
+        let missing = bios_snapshot("gpt", esp, "");
+        let error = validate_alongside_bios_boot(&missing, "/dev/sda", false).unwrap_err();
+        assert!(error.contains("BIOS boot partition"), "{error}");
+        // A BIOS boot partition on a different disk does not help this one.
+        let elsewhere = bios_snapshot("gpt", esp, &other_disk_bios);
+        assert!(validate_alongside_bios_boot(&elsewhere, "/dev/sda", false).is_err());
+
+        // UEFI boots, MBR disks, and disks that already have one are fine.
+        assert!(validate_alongside_bios_boot(&missing, "/dev/sda", true).is_ok());
+        let mbr = bios_snapshot("dos", esp, "");
+        assert!(validate_alongside_bios_boot(&mbr, "/dev/sda", false).is_ok());
+        let present = bios_snapshot("gpt", &format!("{esp},{bios}"), "");
+        assert!(validate_alongside_bios_boot(&present, "/dev/sda", false).is_ok());
+
+        // An unknown disk fails closed rather than skipping the check.
+        assert!(validate_alongside_bios_boot(&missing, "/dev/sdz", false).is_err());
     }
 
     #[test]
