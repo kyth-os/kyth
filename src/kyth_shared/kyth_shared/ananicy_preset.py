@@ -56,6 +56,8 @@ def save_ananicy(cfg: dict[str, Any], path: Path | None = None) -> Path:
         nice = -12
     nice = max(-20, min(0, nice))
     ioc = str(cfg.get("ioclass", "realtime"))
+    if ioc not in ("realtime", "best-effort", "idle"):
+        ioc = "realtime"
     lines = ["# Kyth ananicy — offline\n", f'profile = "{prof}"\n', f"nice = {nice}\n", f'ioclass = "{ioc}"\n']
     import tempfile
 
@@ -94,8 +96,14 @@ def generate_ananicy(cfg: dict[str, Any] | None = None, dest: Path | None = None
         except (OSError, ValueError):
             pass
         return None
-    nice = int(cfg.get("nice", -12))
+    try:
+        nice = int(cfg.get("nice", -12))
+    except (TypeError, ValueError):
+        nice = -12
+    nice = max(-20, min(0, nice))
     ioc = str(cfg.get("ioclass", "realtime"))
+    if ioc not in ("realtime", "best-effort", "idle"):
+        ioc = "realtime"
     # minimal ananicy-cpp rule: match gaming.slice cgroup
     content = (
         "# Kyth ananicy gaming — generated\n"

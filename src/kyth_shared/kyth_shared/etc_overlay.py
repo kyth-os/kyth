@@ -3,11 +3,14 @@
 Like preset.toml, declarative overlay under /usr/etc → /etc via tmpfiles, atomic apply + rollback marker.
 """
 from __future__ import annotations
+import json
 import logging
 
 import os
 import tomllib
 from pathlib import Path
+
+from .atomic_io import atomic_write_text
 
 logger = logging.getLogger(__name__)
 
@@ -42,13 +45,13 @@ def load_overlay(path: Path | None = None) -> dict[str, str]:
 
 def save_overlay(files: dict[str, str], path: Path | None = None) -> Path:
     cfg_path = overlay_path(path)
-    cfg_path.parent.mkdir(parents=True, exist_ok=True)
     lines = ["# Kyth etc overlay — offline staged /etc merge\n", "[files]"]
     for dest in sorted(files):
-        # escape
-        escaped = files[dest].replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
-        lines.append(f'"{dest}" = "{escaped}"')
-    cfg_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        dest_key = str(dest)
+        if not dest_key or any(c in dest_key for c in "\n\r"):
+            continue
+        lines.append(f"{json.dumps(dest_key, ensure_ascii=False)} = {json.dumps(str(files[dest]), ensure_ascii=False)}")
+    atomic_write_text(cfg_path, "\n".join(lines) + "\n", mode=0o600)
     return cfg_path
 
 

@@ -118,5 +118,51 @@ class SteamInputQuoteTests(unittest.TestCase):
             self.assertTrue(loaded["570"]["gyro"])
 
 
+class OverlayQuoteTests(unittest.TestCase):
+    def test_save_quotes_poison_app_id(self) -> None:
+        from kyth_shared.overlay_preset import load_overlay, save_overlay
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "overlay.toml"
+            save_overlay(
+                {
+                    '570"]\nvkbasalt = "cas': {"mangohud_layout": "fps", "vkbasalt": "off"},
+                    "570": {"mangohud_layout": "fps+frametime", "vkbasalt": "cas"},
+                },
+                path,
+            )
+            text = path.read_text(encoding="utf-8")
+            self.assertNotIn('vkbasalt = "cas\n', text)
+            loaded = load_overlay(path)
+            self.assertEqual(loaded["570"]["vkbasalt"], "cas")
+
+
+class IoTuneClampTests(unittest.TestCase):
+    def test_generate_clamps_read_ahead(self) -> None:
+        from kyth_shared.io_tune import generate_io_udev
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "61-kyth-io-tune.rules"
+            generate_io_udev({"profile": "kyth", "read_ahead_kb": 999999}, dest)
+            text = dest.read_text(encoding="utf-8")
+            self.assertIn('ATTR{queue/read_ahead_kb}="4096"', text)
+            self.assertNotIn("999999", text)
+
+
+class AnanicyIoclassTests(unittest.TestCase):
+    def test_generate_allowlists_ioclass(self) -> None:
+        from kyth_shared.ananicy_preset import generate_ananicy
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "99-kyth-gaming.conf"
+            generate_ananicy(
+                {"profile": "kyth", "nice": -12, "ioclass": 'realtime","pwn":true'},
+                dest,
+            )
+            text = dest.read_text(encoding="utf-8")
+            self.assertIn('"ioclass":"realtime"', text)
+            self.assertNotIn("pwn", text)
+
+
 if __name__ == "__main__":
     unittest.main()
