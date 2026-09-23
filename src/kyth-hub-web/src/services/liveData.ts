@@ -1057,7 +1057,7 @@ export async function fetchSmbBrowse(host?: string | null): Promise<{ ok: boolea
 }
 export async function mountSmbShare(share: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Share mounting is available from the installed Kyth Hub.");
-  return await invoke<string>("smb_mount", { share });
+  return await invokeBounded<string>("smb_mount", { share }, 90_000);
 }
 export interface ConfiguredNetworkShare {
   name: string;
@@ -1080,18 +1080,18 @@ export async function fetchConfiguredNetworkShares(): Promise<ConfiguredNetworkS
 export async function addNetworkShare(share: NetworkShareInput): Promise<string> {
   const detail = await runPrivilegedAction("network_share_add", { ...share });
   if (detail === "Cancelled.") return detail;
-  const saved = await invoke<SmbActionResult>("smb_save_configured_share", { share: {
+  const saved = await invokeBounded<SmbActionResult>("smb_save_configured_share", { share: {
     name: share.name, server: share.server, share_path: share.share_path,
     mount_point: share.mount_point, username: share.username, domain: share.domain,
     auto_mount: share.auto_mount,
-  } });
+  } }, 90_000);
   if (saved.state !== "complete") throw new Error(saved.detail || "Network share configuration was not saved.");
   return detail;
 }
 export async function removeNetworkShare(share: Pick<ConfiguredNetworkShare, "name" | "mount_point">): Promise<string> {
   const detail = await runPrivilegedAction("network_share_remove", { ...share });
   if (detail === "Cancelled.") return detail;
-  const removed = await invoke<SmbActionResult>("smb_remove_configured_share", { name: share.name });
+  const removed = await invokeBounded<SmbActionResult>("smb_remove_configured_share", { name: share.name }, 90_000);
   if (removed.state !== "complete") throw new Error(removed.detail || "Network share configuration was not removed.");
   return detail;
 }
@@ -1157,7 +1157,7 @@ async function waitHubJob(job: string, limit = 7200): Promise<string> {
 export async function runCloudSync(remote: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Cloud sync is available from the installed Kyth Hub.");
   if (!confirmUserAction(`Copy ${remote} to its saved local folder? Files already here are kept; overwritten ones are backed up first.`)) return "Cancelled.";
-  return await waitHubJob(await invoke<string>("cloud_sync_now", { remote }));
+  return await waitHubJob(await invokeBounded<string>("cloud_sync_now", { remote }, 90_000));
 }
 export async function openBackupApp(): Promise<string> {
   if (!inTauriShell()) throw new Error("Backup is available from the installed Kyth Hub.");
@@ -1240,7 +1240,7 @@ export async function startVpnConnection(profile: { gateway: string; protocol: s
   // The Tauri binding is snake_case (`os_emulation`): map the camelCase
   // profile field at the boundary or the invoke fails to deserialize.
   const { gateway, protocol, osEmulation, username, password } = profile;
-  const job = await invoke<string>("vpn_connect", { gateway, protocol, os_emulation: osEmulation, username, password });
+  const job = await invokeBounded<string>("vpn_connect", { gateway, protocol, os_emulation: osEmulation, username, password }, 90_000);
   // Tracked like every other cancellable job: Disconnect/Cancel keeps reaching
   // the real backend job after a reload via the reattached slot, and a second
   // connect is rejected while one owns the domain. Untracked when the
@@ -1256,7 +1256,7 @@ export async function fetchVpnConnectionStatus(job: string): Promise<VpnConnecti
 export async function disconnectVpnConnection(job: string): Promise<string> {
   if (!inTauriShell()) throw new Error("VPN connections require the installed Kyth Hub.");
   try {
-    return await invoke<string>("vpn_disconnect", { job });
+    return await invokeBounded<string>("vpn_disconnect", { job }, 90_000);
   } finally {
     untrackJob("vpn", job);
   }
@@ -1288,7 +1288,7 @@ export async function fetchVpnProtectionStatus(): Promise<VpnProtectionStatus | 
 export async function setVpnProtection(protection: { vpnFailClosed: boolean; vpnDnsExclusive: boolean }): Promise<string> {
   if (!inTauriShell()) throw new Error("VPN protection toggles require the installed Kyth Hub.");
   // The Tauri binding is snake_case: map camelCase fields at the boundary.
-  return await invoke<string>("set_vpn_protection", { vpn_fail_closed: protection.vpnFailClosed, vpn_dns_exclusive: protection.vpnDnsExclusive });
+  return await invokeBounded<string>("set_vpn_protection", { vpn_fail_closed: protection.vpnFailClosed, vpn_dns_exclusive: protection.vpnDnsExclusive }, 90_000);
 }
 export async function fetchVpnSavedProfile(): Promise<VpnSavedProfile | null> {
   if (!inTauriShell()) return null;

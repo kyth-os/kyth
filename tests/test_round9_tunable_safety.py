@@ -164,5 +164,28 @@ class AnanicyIoclassTests(unittest.TestCase):
             self.assertNotIn("pwn", text)
 
 
+class FcitxLatencyClampTests(unittest.TestCase):
+    def test_save_clamps_latency(self) -> None:
+        from kyth_shared.fcitx_latency import load_fcitx_latency, save_fcitx_latency
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "fcitx-latency.toml"
+            save_fcitx_latency({"profile": "gaming", "latency_ms": 9999}, path)
+            loaded = load_fcitx_latency(path)
+            self.assertEqual(loaded["latency_ms"], 100)
+
+
+class GpuPowerAllowlistTests(unittest.TestCase):
+    def test_save_drops_poison_dpm(self) -> None:
+        from kyth_shared.gpu_power import load_gpu_power, save_gpu_power
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "gpu-power.toml"
+            save_gpu_power({"profile": "kyth", "dpm": "high; id"}, path)
+            loaded = load_gpu_power(path)
+            self.assertEqual(loaded["dpm"], "auto")
+            self.assertNotIn("id", path.read_text(encoding="utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -44,7 +44,11 @@ def save_fcitx_latency(cfg: dict[str, Any], path: Path | None = None) -> Path:
     prof = str(cfg.get("profile", "balanced")).lower()
     if prof not in ("balanced", "gaming"):
         prof = "balanced"
-    lat = int(cfg.get("latency_ms", 10 if prof == "gaming" else 50))
+    try:
+        lat = int(cfg.get("latency_ms", 10 if prof == "gaming" else 50))
+    except (TypeError, ValueError):
+        lat = 10 if prof == "gaming" else 50
+    lat = max(5, min(100, lat))
     _atomic_write_text(p, f"# Kyth fcitx5 latency — offline\nprofile = \"{prof}\"\nlatency_ms = {lat}\n", encoding="utf-8")
     return p
 
