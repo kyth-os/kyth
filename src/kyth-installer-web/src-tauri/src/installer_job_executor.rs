@@ -192,7 +192,9 @@ impl NativeInstallRequest {
                         text("disk", "")
                     },
                     skip_fetch_check: flag("skip_fetch_check", false),
-                    skip_finalize: flag("skip_finalize", false),
+                    // bootc's finalize remounts the target read-only; the
+                    // configuration phase still has to write into it.
+                    skip_finalize: filesystem_install,
                     root_subvolume: flag("root_subvolume", filesystem_install),
                     wipe: erase_disk,
                     encryption: text("encryption", "none"),
@@ -1774,6 +1776,52 @@ mod tests {
         }))
         .expect("frontend request should decode");
         assert!(!alongside.execution.bootc.wipe);
+    }
+
+    #[test]
+    fn filesystem_installs_skip_bootc_finalize() {
+        // Without --skip-finalize, bootc to-filesystem ends by remounting
+        // the target read-only ("finally mounting it readonly"), and the
+        // configuration phase that follows must write hostname, locale,
+        // fstab, and the user account into that same filesystem. No
+        // frontend sends `skip_finalize`; Python always passed it here.
+        for (mode, extra) in [
+            ("alongside", serde_json::json!({"target_partition": "sda3"})),
+            (
+                "free_space",
+                serde_json::json!({"free_region_start": 1048576, "free_region_end": 68720525312_i64}),
+            ),
+            (
+                "resize_ntfs",
+                serde_json::json!({"resize_partition": "sda2", "resize_gib": 64}),
+            ),
+            ("manual", serde_json::json!({"target_partition": "sda3"})),
+        ] {
+            let mut body = serde_json::json!({
+                "disk": "sda",
+                "install_mode": mode,
+                "acknowledged_irreversible": true,
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                body[key] = value.clone();
+            }
+            let request = NativeInstallRequest::from_http(body).expect(mode);
+            assert!(request.execution.bootc.skip_finalize, "{mode}");
+            let plan = crate::installer_bootc::build_plan(request.execution.bootc).expect(mode);
+            assert!(
+                plan.argv.iter().any(|arg| arg == "--skip-finalize"),
+                "{mode}: {:?}",
+                plan.argv
+            );
+        }
+        let wipe = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+            "install_mode": "wipe",
+            "acknowledged_irreversible": true,
+        }))
+        .expect("wipe request decodes");
+        let plan = crate::installer_bootc::build_plan(wipe.execution.bootc).expect("wipe plan");
+        assert!(!plan.argv.iter().any(|arg| arg == "--skip-finalize"));
     }
 
     #[test]
