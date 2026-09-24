@@ -333,6 +333,17 @@ class HubWebCoverageTests(unittest.TestCase):
 
 
 class HubWebUpdateActionTests(unittest.TestCase):
+    def test_stage_failure_refreshes_state_and_preserves_diagnostics(self):
+        overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
+        messages = (HUB_WEB / "components" / "updateMessages.ts").read_text(encoding="utf-8")
+
+        stage = overview.split("  async function stage()", 1)[1].split("  async function updateApps()", 1)[0]
+        self.assertIn("const next = await fetchUpdatesSnapshot()", stage)
+        self.assertIn("if (next.status?.staged)", stage)
+        self.assertIn("setStagedLatch(true)", stage)
+        self.assertIn("Details:", messages)
+        self.assertNotIn("Your current system has not changed.", messages)
+
     def test_updates_overview_can_apply_only_the_pending_flatpak_updates(self):
         overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
         live_data = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")

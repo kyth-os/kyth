@@ -28,16 +28,26 @@ export function friendlyAvailabilityResult(state: string, staged: boolean, detai
 export function friendlyActionError(action: string, error: unknown): string {
   const detail = error instanceof Error ? error.message : String(error);
   const lower = detail.toLowerCase();
+  const withDetails = (message: string): string => {
+    const concise = detail.trim();
+    return concise && concise !== message ? `${message} Details: ${concise}` : message;
+  };
 
   if (lower.includes("[privileged]")) {
-    return "A KythOS helper service isn't running, so this couldn't finish. Update KythOS and restart, then try again.";
+    const message = action === "stage"
+      ? "The update helper couldn't finish. Check update status before retrying."
+      : "A KythOS helper service isn't running, so this couldn't finish. Update KythOS and restart, then try again.";
+    return action === "stage" ? withDetails(message) : message;
   }
   if (lower.includes("privileged service")) {
-    return "The system update helper isn't running, so this couldn't finish. Update KythOS and restart, then try again.";
+    const message = action === "stage"
+      ? "The update helper couldn't finish. Check update status before retrying."
+      : "The system update helper isn't running, so this couldn't finish. Update KythOS and restart, then try again.";
+    return action === "stage" ? withDetails(message) : message;
   }
   if (lower.includes("timed out") || lower.includes("timeout") || lower.includes("network") || lower.includes("unavailable")) {
     if (action === "stage") {
-      return "KythOS couldn't reach the update registry before the check timed out. Your current system has not changed.";
+      return withDetails("KythOS couldn't reach the update registry. Check your connection and update status before retrying.");
     }
     return "We couldn't reach the update service. Check your internet connection and try again.";
   }
@@ -46,12 +56,12 @@ export function friendlyActionError(action: string, error: unknown): string {
   }
   if (action === "stage") {
     if (lower.includes("not enough free disk space") || lower.includes("no space left")) {
-      return "KythOS needs more free disk space before it can download this update. Your current system has not changed.";
+      return withDetails("KythOS needs more free disk space before it can stage this update. Check update status before retrying.");
     }
     if (lower.includes("already running") || lower.includes("in progress") || lower.includes("locked")) {
-      return "Another system update is already in progress. Your current system has not changed.";
+      return withDetails("Another system update is already in progress. Check its status before retrying.");
     }
-    return "KythOS couldn't prepare the update. Your current system has not changed.";
+    return withDetails("KythOS couldn't confirm that the update is staged. Check update status before retrying.");
   }
   if (action === "apps") {
     return `We couldn't update every app. Check your connection, then try again. Details: ${detail}`;

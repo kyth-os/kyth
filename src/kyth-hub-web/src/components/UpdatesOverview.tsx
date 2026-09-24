@@ -232,18 +232,41 @@ export function UpdatesOverview() {
   }
 
   async function stage(): Promise<string> {
+    let detail: string;
     try {
-      const detail = await invokeBootcUpgrade();
-      // The job completed: the deployment is staged even if the next
-      // probe has not caught up. Latch the staged UI now; refresh hands
-      // back to live data as soon as the backend confirms.
-      setStagedLatch(true);
-      setStageProgress(null);
-      await refresh();
-      return friendlyActionResult("stage", detail);
+      detail = await invokeBootcUpgrade();
     } catch (error) {
+      // A helper can stage successfully and then fail while reporting or
+      // finalizing. Refresh authoritative state before telling the user to retry.
+      try {
+        invalidateSharedReads(
+          "updates-snapshot",
+          "bootc-snapshot",
+          "pending-updates",
+          "update-status",
+          "update-health",
+          "probe:bootc-status-data",
+          "probe:bootc-branch",
+          "probe:flatpak-updates",
+        );
+        const next = await fetchUpdatesSnapshot();
+        setReadings(next);
+        setLoaded(true);
+        if (next.status?.staged) {
+          setStagedLatch(true);
+          setStageProgress(null);
+          return friendlyActionResult("stage", "Update staged and promoted to the next boot.");
+        }
+      } catch { /* keep the original stage error; its detail is more useful */ }
       throw new Error(friendlyActionError("stage", error));
     }
+    // The stage job itself succeeded. Do not reclassify it as failed if the
+    // follow-up status refresh is temporarily unavailable; the latch keeps
+    // the next action at Restart to apply.
+    setStagedLatch(true);
+    setStageProgress(null);
+    await refresh().catch(() => undefined);
+    return friendlyActionResult("stage", detail);
   }
 
   async function updateApps(): Promise<string> {

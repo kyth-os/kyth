@@ -158,8 +158,10 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updatesOverview, /Choose “Restart to apply”/);
   assert.match(updatesOverview, /<ActionStatus/);
   assert.match(updateMessages, /We couldn't reach the update service/);
-  assert.match(updateMessages, /couldn't reach the update registry before the check timed out/);
-  assert.match(updateMessages, /current system has not changed/);
+  assert.match(updateMessages, /couldn't reach the update registry/);
+  assert.doesNotMatch(updateMessages, /current system has not changed/);
+  assert.match(updateMessages, /confirm that the update is staged/);
+  assert.match(updateMessages, /Details:/);
   assert.match(updatesOverview, /Free up some disk space/);
   assert.match(updatesOverview, /Your current system is still safe to use/);
   assert.match(updateMessages, /The update is downloaded and ready/);
