@@ -171,6 +171,55 @@ pub fn login_paths(home: &Path) -> Vec<String> {
     paths
 }
 
+/// Rootless podman overlay layer dirs under each `$home`. `restorecon -D`
+/// writes `security.sehash` on every directory it visits; overlayfs copy-up
+/// of those dirs in a user namespace returns EPERM, which breaks dnf/apt
+/// inside distrobox/toolbox. The full-home walk must exclude these.
+pub fn overlay_exclude_paths(home_root: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    let Ok(homes) = std::fs::read_dir(home_root) else {
+        return out;
+    };
+    for home in homes.flatten() {
+        let path = home.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let overlay = path.join(".local/share/containers/storage/overlay");
+        if overlay.is_dir() {
+            out.push(overlay);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// `restorecon -RF -D -T0 [-e overlay...] <home_root>`
+pub fn full_restorecon_argv(home_root: &Path) -> Vec<String> {
+    let mut argv = vec![
+        "/sbin/restorecon".to_string(),
+        "-RF".to_string(),
+        "-D".to_string(),
+        "-T0".to_string(),
+    ];
+    for overlay in overlay_exclude_paths(home_root) {
+        argv.push("-e".to_string());
+        argv.push(overlay.to_string_lossy().into_owned());
+    }
+    argv.push(home_root.display().to_string());
+    argv
+}
+
+/// Strip leftover `security.sehash` digests from overlay layers that a
+/// previous un-excluded `restorecon -D` already labeled.
+pub fn overlay_sehash_cleanup_argv(overlay: &Path) -> Vec<String> {
+    vec![
+        "/usr/bin/restorecon_xattr".to_string(),
+        "-rD".to_string(),
+        overlay.to_string_lossy().into_owned(),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -244,5 +293,38 @@ mod tests {
         assert!(paths.iter().any(|path| path == &home.to_string_lossy()));
         assert!(paths.iter().any(|path| path.ends_with(".config")));
         assert!(!paths.iter().any(|path| path.ends_with("Documents")));
+    }
+
+    #[test]
+    fn overlay_exclude_paths_skips_homes_without_container_storage() {
+        let dir = tempfile::tempdir().unwrap();
+        let alice = dir.path().join("alice");
+        std::fs::create_dir_all(alice.join(".config")).unwrap();
+        assert!(overlay_exclude_paths(dir.path()).is_empty());
+    }
+
+    #[test]
+    fn full_restorecon_argv_excludes_rootless_overlay_layers() {
+        // restorecon -D writes security.sehash on every directory it walks.
+        // Overlayfs copy-up of those dirs in a rootless userns returns EPERM,
+        // so dnf/apt inside distrobox cannot replace image-layer files.
+        let dir = tempfile::tempdir().unwrap();
+        let overlay = dir
+            .path()
+            .join("alice/.local/share/containers/storage/overlay");
+        std::fs::create_dir_all(&overlay).unwrap();
+        std::fs::create_dir_all(dir.path().join("bob/Documents")).unwrap();
+        let argv = full_restorecon_argv(dir.path());
+        assert_eq!(argv[0], "/sbin/restorecon");
+        assert!(argv
+            .windows(2)
+            .any(|pair| { pair[0] == "-e" && pair[1] == overlay.to_string_lossy() }));
+        assert_eq!(
+            argv.last().map(String::as_str),
+            Some(dir.path().to_str().unwrap())
+        );
+        assert!(!argv
+            .windows(2)
+            .any(|pair| { pair[0] == "-e" && pair[1].contains("bob") }));
     }
 }

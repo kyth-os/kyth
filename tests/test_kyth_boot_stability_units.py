@@ -72,7 +72,7 @@ class BootStabilityUnitTests(unittest.TestCase):
         # data — that would reintroduce the same size-dependent stall.
         self.assertNotIn("restorecon -RF", fast_script)
         self.assertNotIn("restorecon -RF -T0 /var/home", fast_script)
-        self.assertIn("restorecon -RF -D -T0 /var/home", full_script)
+        self.assertIn("restorecon -RF -D -T0", full_script)
         self.assertIn("selinux-relabel-home-full.stamp", full_script)
         self.assertIn("selinux-relabel-home.stamp", fast_script)
         # Both scripts run under set -euo pipefail; a failing `ostree admin
@@ -105,6 +105,9 @@ class BootStabilityUnitTests(unittest.TestCase):
 
     def test_full_relabel_uses_resumable_digests_and_long_timeout(self) -> None:
         unit = SELINUX_UNIT.read_text(encoding="utf-8")
+        shared = (ROOT / "src/kyth-shared-rs/src/system/selinux_relabel.rs").read_text(
+            encoding="utf-8"
+        )
         full_bin = (ROOT / "src/kyth-shared-rs/src/selinux_relabel_home_full_bin.rs").read_text(
             encoding="utf-8"
         )
@@ -113,8 +116,33 @@ class BootStabilityUnitTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         full_service = unit.split("RELABELFULLEOF", 1)[1].split("RELABELFULLEOF", 1)[0]
         self.assertIn("TimeoutStartSec=86400", full_service)
-        self.assertIn('"-D".to_string()', full_bin)
-        self.assertIn("restorecon -RF -D -T0 /var/home", full_script)
+        self.assertIn("full_restorecon_argv", full_bin)
+        self.assertIn('"-D".to_string()', shared)
+        self.assertIn("restorecon -RF -D -T0", full_script)
+
+    def test_full_relabel_excludes_rootless_overlay_from_digest_walk(self) -> None:
+        """restorecon -D writes security.sehash on every directory.
+
+        Overlayfs copy-up of those directories in a rootless user namespace
+        returns EPERM, so dnf/apt inside distrobox cannot replace files that
+        still live only in the image layer. The full-home walk must exclude
+        rootless overlay storage and strip leftover sehash xattrs.
+        """
+        full_bin = (ROOT / "src/kyth-shared-rs/src/selinux_relabel_home_full_bin.rs").read_text(
+            encoding="utf-8"
+        )
+        shared = (ROOT / "src/kyth-shared-rs/src/system/selinux_relabel.rs").read_text(
+            encoding="utf-8"
+        )
+        full_script = (
+            SELINUX_UNIT.parents[1] / "kyth-selinux-relabel-home-full"
+        ).read_text(encoding="utf-8")
+        self.assertIn("overlay_exclude_paths", full_bin)
+        self.assertIn("overlay_sehash_cleanup_argv", full_bin)
+        self.assertIn("restorecon_xattr", shared)
+        self.assertIn("storage/overlay", full_script)
+        self.assertIn("restorecon_xattr", full_script)
+        self.assertNotIn("/sbin/restorecon -RF -D -T0 /var/home\n", full_script)
 
     def test_plocate_prunes_cache_dependency_and_metadata_trees_without_replacing_vendor_defaults(self) -> None:
         script_path = (

@@ -2,8 +2,12 @@
 set -euo pipefail
 
 # Exhaustive background relabel of the rest of /var/home (game installs,
-# container storage, build caches, ...) that kyth-selinux-relabel-home
-# deliberately skips to stay bounded before the greeter. This unit is NOT
+# build caches, ...) that kyth-selinux-relabel-home deliberately skips to
+# stay bounded before the greeter. Rootless overlay storage is excluded:
+# restorecon -D writes security.sehash, and overlayfs copy-up of those
+# directories in a user namespace returns EPERM (dnf/apt inside distrobox
+# then fail with "Directory not empty" / "Operation not permitted").
+# This unit is NOT
 # Before=plasmalogin.service — it must never be able to delay login — and
 # runs at idle I/O/CPU priority (see the .service file) so it does not starve
 # a session that's already running.
@@ -66,13 +70,27 @@ else
 	stamp_value="deployment:${deployment_id}"
 fi
 
+# Always strip leftover sehash from overlay layers, even when the restorecon
+# walk is skipped — a previous un-excluded -D pass leaves boxes unable to
+# upgrade until this runs once on an already-stamped host.
+restorecon_excludes=()
+for home in /var/home/*; do
+	overlay="${home}/.local/share/containers/storage/overlay"
+	if [ -d "$overlay" ]; then
+		restorecon_excludes+=(-e "$overlay")
+		if command -v restorecon_xattr >/dev/null 2>&1; then
+			restorecon_xattr -rD "$overlay" || true
+		fi
+	fi
+done
+
 if [ -r "$STAMP_FILE" ] && [ "$(cat "$STAMP_FILE")" = "$stamp_value" ]; then
 	echo "kyth-selinux-relabel-home-full: active SELinux policy already relabeled, skipping"
 	exit 0
 fi
 
 echo "kyth-selinux-relabel-home-full: relabeling /var/home (full tree, background) for stamp ${stamp_value}"
-/sbin/restorecon -RF -D -T0 /var/home
+/sbin/restorecon -RF -D -T0 "${restorecon_excludes[@]}" /var/home
 
 mkdir -p "$STAMP_DIR"
 printf '%s' "$stamp_value" >"$STAMP_FILE"
