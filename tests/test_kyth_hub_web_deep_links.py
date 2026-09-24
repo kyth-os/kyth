@@ -149,5 +149,11 @@ class HubWebDeepLinkTests(unittest.TestCase):
         # valid Hub launch look like a deep-link failure in the VM.
         self.assertIn('invoke("acceptance_record", { event, detail })', ACCEPTANCE_TS)
 
+    def test_deep_link_route_lookup_rejects_inherited_object_keys(self):
+        # Object.prototype keys are not Hub pages; accepting them can send
+        # malformed launcher input to inherited function values.
+        self.assertIn("Object.prototype.hasOwnProperty.call(ROUTE_FOR_PAGE, text)", DEEP_LINK_CODE)
+        self.assertNotRegex(DEEP_LINK_CODE, r"\btext\s+in\s+ROUTE_FOR_PAGE")
+
 if __name__ == "__main__":
     unittest.main()

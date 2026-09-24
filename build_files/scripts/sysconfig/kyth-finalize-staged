@@ -20,7 +20,10 @@ _prepare_boot() {
 	# already a mount, bind the real /boot over it. Never remount /sysroot/boot
 	# — it is often not a mount point ("mount point not mounted or bad option").
 	if [[ -d /sysroot/boot ]] && ! findmnt -n /sysroot/boot >/dev/null 2>&1; then
-		mount --bind /boot /sysroot/boot 2>/dev/null || true
+		if ! mount --bind /boot /sysroot/boot 2>/dev/null; then
+			echo "kyth-finalize-staged: could not bind /boot to /sysroot/boot" >&2
+			return 1
+		fi
 	fi
 	return 0
 }

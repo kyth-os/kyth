@@ -5,6 +5,7 @@ Balanced leaves irqbalance defaults.
 """
 from __future__ import annotations
 import logging
+import re
 
 import os
 import tomllib
@@ -21,15 +22,13 @@ DEFAULT_CONF = Path("/etc/systemd/system/irqbalance.service.d/99-kyth-irq.conf")
 
 def _valid_cpu_list(value: str) -> bool:
     value = value.strip()
-    if (
-        not value
-        or value.startswith((",", "-"))
-        or value.endswith((",", "-"))
-        or "--" in value
-        or ",," in value
-    ):
+    if not value or re.fullmatch(r"\d+(?:-\d+)?(?:,\d+(?:-\d+)?)*", value) is None:
         return False
-    return all(ch.isdigit() or ch in ",-" for ch in value)
+    for item in value.split(","):
+        bounds = item.split("-")
+        if len(bounds) == 2 and int(bounds[0]) > int(bounds[1]):
+            return False
+    return True
 
 
 def irq_config_path(path: Path | None = None) -> Path:

@@ -116,8 +116,8 @@ pub struct SnapshotSendPlan {
     pub snapshot_path: String,
     /// `btrfs subvolume snapshot -r /home <snapshot_path>`
     pub snapshot_argv: Vec<String>,
-    /// `btrfs send <snapshot_path>` streamed at `usb_target` (never the live
-    /// subvolume: `btrfs send` requires a read-only snapshot).
+    /// `btrfs send -f <usb_target> <snapshot_path>` stores the send stream at the target
+    /// (never the live subvolume: send requires a read-only snapshot).
     pub send_argv: Vec<String>,
     /// `btrfs subvolume delete <snapshot_path>` (cleanup after send).
     pub cleanup_argv: Vec<String>,
@@ -141,8 +141,9 @@ pub fn snapshot_then_send_plan(
         send_argv: vec![
             "btrfs".to_string(),
             "send".to_string(),
-            format!("{}/.snapshots/{staging_name}", home.trim_end_matches('/')),
+            "-f".to_string(),
             usb_target.to_string(),
+            format!("{}/.snapshots/{staging_name}", home.trim_end_matches('/')),
         ],
         cleanup_argv: vec![
             "btrfs".to_string(),
@@ -530,9 +531,16 @@ mod tests {
         assert_eq!(plan.snapshot_argv[4], "/home");
         // Send the snapshot — the live subvolume must not appear as the
         // send source (btrfs send requires a read-only snapshot).
-        assert!(plan.send_argv.iter().any(|arg| arg == "send"));
-        assert!(plan.send_argv.iter().any(|arg| arg == &plan.snapshot_path));
-        assert!(!plan.send_argv.iter().any(|arg| arg == "/home"));
+        assert_eq!(
+            plan.send_argv,
+            vec![
+                "btrfs",
+                "send",
+                "-f",
+                "/run/media/alice/BACKUP/home.btrfs",
+                plan.snapshot_path.as_str()
+            ]
+        );
         // Cleanup removes the staging snapshot afterwards.
         assert_eq!(plan.cleanup_argv[..3], ["btrfs", "subvolume", "delete"]);
         assert_eq!(plan.cleanup_argv[3], plan.snapshot_path);

@@ -10,6 +10,10 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${KYTH_ISO_OUTPUT:-${REPO_ROOT}/output/live-iso}"
 BASE_IMAGE="${INSTALLER_BASE_IMAGE:-ghcr.io/kyth-os/kyth:${SOURCE_TAG}}"
 INSTALL_SOURCE_IMAGE="${BASE_IMAGE}"
+IS_LOCAL_IMAGE=false
+if [[ "${BASE_IMAGE}" == localhost/* || "${BASE_IMAGE}" == localhost:*/* ]]; then
+	IS_LOCAL_IMAGE=true
+fi
 LIVE_TAG="${KYTH_LIVE_TAG:-localhost/kyth-live:${SOURCE_TAG}}"
 TITANOBOA_REF="7737f4748458252ac827dca14b3d6dd09298472a"
 TITANOBOA_DIR="${TITANOBOA_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/kyth/titanoboa}"
@@ -29,7 +33,7 @@ INSTALLER_BUILD_HASH="${INSTALLER_BUILD_HASH:-$(sha256sum \
 	build_files/kyth_shared/kyth_shared/vm_acceptance.py \
 	build_files/kyth-vm-acceptance.service | sha256sum | awk '{print $1}')}"
 
-if [[ "${BASE_IMAGE}" == localhost/* ]] &&
+if [[ "${IS_LOCAL_IMAGE}" == true ]] &&
 	! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}" &&
 	command -v docker >/dev/null &&
 	docker image inspect "${BASE_IMAGE}" >/dev/null 2>&1; then
@@ -41,7 +45,7 @@ fi
 # builder embeds the local image into the ISO through the OCI layout.  Keep the
 # public registry reference as the update target, but never publish a local
 # test image as a side effect of a local ISO build.
-if [[ "${BASE_IMAGE}" == localhost/* ]]; then
+if [[ "${IS_LOCAL_IMAGE}" == true ]]; then
 	if ! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}"; then
 		echo "ERROR: local installer image is unavailable to Podman: ${BASE_IMAGE}" >&2
 		exit 1
@@ -91,7 +95,7 @@ _titanoboa_ok="/tmp/kyth-titanoboa-ok.$$"
 # localhost/* images, which are loaded from Docker above and have no registry.
 echo "==> Building KythOS live payload from ${BASE_IMAGE}"
 pull_flag=(--pull=newer)
-[[ "${BASE_IMAGE}" == localhost/* ]] && pull_flag=()
+[[ "${IS_LOCAL_IMAGE}" == true ]] && pull_flag=()
 "${ROOTFUL_PODMAN}" build \
 	"${pull_flag[@]}" \
 	--cap-add SYS_ADMIN \

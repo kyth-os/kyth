@@ -38,7 +38,7 @@ export function routeForPage(page: string): string {
 function resolvePage(page: string): { route: string; known: boolean } {
   const text = page.trim();
   if (!text) return { route: "/", known: false };
-  if (text in ROUTE_FOR_PAGE) return { route: ROUTE_FOR_PAGE[text], known: true };
+  if (Object.prototype.hasOwnProperty.call(ROUTE_FOR_PAGE, text)) return { route: ROUTE_FOR_PAGE[text], known: true };
 
   const lowered = text.toLowerCase();
   if (WELCOME_ALIASES.has(lowered)) return { route: "/", known: true };

@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 import os
+import re
 import shutil
 
 from .commands import run as run_command
@@ -27,25 +28,33 @@ def get_cpu_topology() -> tuple[str, str]:
     return vendor, model
 
 
+def _model_reports_3d_vcache(text: str) -> bool:
+    """Recognize AMD X3D model names, not unrelated CPU flags like 3DNow."""
+    for line in text.splitlines():
+        key, separator, value = line.partition(":")
+        if separator and key.strip().lower() in {"model name", "model"}:
+            normalized = value.lower()
+            if re.search(r"x3d\b", normalized) or "3d v-cache" in normalized:
+                return True
+    return False
+
+
 def has_3d_vcache() -> bool:
-    """Check if the system has AMD 3D V-Cache."""
+    """Check whether the CPU model identifies AMD 3D V-Cache."""
     try:
-        # Check /proc/cpuinfo or lscpu
         with open("/proc/cpuinfo", "r", encoding="utf-8") as f:
-            for line in f:
-                if "3d" in line.lower():
-                    return True
+            if _model_reports_3d_vcache(f.read()):
+                return True
     except (OSError, ValueError) as exc:
         logger.debug("has_3d_vcache cpuinfo read failed: %s", exc, exc_info=True)
 
     if shutil.which("lscpu"):
         try:
             res = run_command(["lscpu"], capture_output=True, text=True, check=False)
-            if "3d" in res.stdout.lower():
+            if _model_reports_3d_vcache(res.stdout):
                 return True
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
-            pass
     return False
 
 

@@ -28,6 +28,15 @@ class IrqTuneFailClosedTests(unittest.TestCase):
             self.assertIn("--banned-cpus=0,2-3", text)
             self.assertNotIn(";", text)
 
+    def test_generate_rejects_malformed_cpu_range(self) -> None:
+        from kyth_shared.irq_tune import generate_irq_conf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "99-kyth.conf"
+            with self.assertRaises(ValueError):
+                generate_irq_conf({"profile": "kyth", "isolated_cpus": "1-2-3"}, dest)
+            self.assertFalse(dest.exists())
+
 
 class IrqSaveSanitizesTests(unittest.TestCase):
     def test_save_drops_poison_isolated_cpus(self) -> None:

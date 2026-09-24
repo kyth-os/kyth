@@ -15,6 +15,17 @@ fn successful(program: &str, args: &[&str], timeout: Duration) -> bool {
     run(program, args, timeout).is_ok_and(|output| output.status.success())
 }
 
+fn bind_result(result: Result<Output, String>) -> Result<(), String> {
+    match result {
+        Ok(output) if output.status.success() => Ok(()),
+        Ok(output) => Err(format!(
+            "could not bind /boot to /sysroot/boot: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Err(format!("could not bind /boot to /sysroot/boot: {error}")),
+    }
+}
+
 pub fn prepare_boot() -> Result<(), String> {
     let remounted = successful(
         "mount",
@@ -32,11 +43,11 @@ pub fn prepare_boot() -> Result<(), String> {
     if sysroot_boot.is_dir()
         && !successful("findmnt", &["-n", "/sysroot/boot"], Duration::from_secs(5))
     {
-        let _ = run(
+        bind_result(run(
             "mount",
             &["--bind", "/boot", "/sysroot/boot"],
             Duration::from_secs(15),
-        );
+        ))?;
     }
     Ok(())
 }
@@ -62,4 +73,28 @@ pub fn finalize_staged(reboot: bool) -> Result<String, String> {
         }
     }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::process::ExitStatusExt;
+
+    #[test]
+    fn bind_failure_is_returned_instead_of_reported_as_prepared() {
+        let output = Output {
+            status: std::process::ExitStatus::from_raw(1 << 8),
+            stdout: Vec::new(),
+            stderr: b"permission denied".to_vec(),
+        };
+        let error = bind_result(Ok(output)).unwrap_err();
+        assert!(error.contains("could not bind /boot to /sysroot/boot"));
+        assert!(error.contains("permission denied"));
+    }
+
+    #[test]
+    fn bind_timeout_or_spawn_failure_is_returned() {
+        let error = bind_result(Err("timed out".to_string())).unwrap_err();
+        assert!(error.contains("timed out"));
+    }
 }

@@ -32,9 +32,14 @@ class PerformanceTests(unittest.TestCase):
             self.assertEqual(model, "AMD Ryzen 7 7800X3D 8-Core Processor")
 
     def test_has_3d_vcache(self) -> None:
-        cpuinfo = "flags\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowprefetch...\n"
+        cpuinfo = "model name : AMD Ryzen 7 7800X3D 8-Core Processor\nflags : fpu sse 3dnowprefetch\n"
         with mock.patch("builtins.open", mock.mock_open(read_data=cpuinfo)):
             self.assertTrue(has_3d_vcache())
+
+    def test_3dnow_cpu_flag_is_not_3d_vcache(self) -> None:
+        cpuinfo = "vendor_id : AuthenticAMD\nmodel name : AMD Athlon(tm) 64 X2 Dual Core Processor 5000+\nflags : fpu sse 3dnow 3dnowprefetch\n"
+        with mock.patch("builtins.open", mock.mock_open(read_data=cpuinfo)), mock.patch("shutil.which", return_value=None):
+            self.assertFalse(has_3d_vcache())
 
     @mock.patch("pathlib.Path.is_file")
     @mock.patch("pathlib.Path.read_text")

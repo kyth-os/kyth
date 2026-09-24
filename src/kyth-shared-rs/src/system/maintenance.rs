@@ -162,11 +162,28 @@ pub fn parse_deletion_epoch(text: &str) -> Option<i64> {
     let hour: i32 = fields.next()?.parse().ok()?;
     let minute: i32 = fields.next()?.parse().ok()?;
     let second: i32 = fields.next()?.parse().ok()?;
-    if fields.next().is_some() {
+    if fields.next().is_some()
+        || !(1..=9999).contains(&year)
+        || !(1..=12).contains(&month)
+        || !(0..=23).contains(&hour)
+        || !(0..=59).contains(&minute)
+        || !(0..=59).contains(&second)
+    {
+        return None;
+    }
+    let year_mod = year.rem_euclid(400);
+    let leap_year = year_mod % 4 == 0 && (year_mod % 100 != 0 || year_mod == 0);
+    let days_in_month = match month {
+        2 if leap_year => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    };
+    if !(1..=days_in_month).contains(&day) {
         return None;
     }
     let mut broken = unsafe { std::mem::zeroed::<libc::tm>() };
-    broken.tm_year = year - 1900;
+    broken.tm_year = year.checked_sub(1900)?;
     broken.tm_mon = month - 1;
     broken.tm_mday = day;
     broken.tm_hour = hour;
@@ -358,8 +375,37 @@ mod tests {
             parse_deletion_epoch("2026-07-20T09:30:00-05:00").unwrap(),
             naive
         );
-        assert!(parse_deletion_epoch("not a date").is_none());
+        assert!(parse_deletion_epoch("0000-01-01T00:00:00").is_none());
+        assert!(parse_deletion_epoch("10000-01-01T00:00:00").is_none());
+        assert!(parse_deletion_epoch("2026-01-99T00:00:00").is_none());
+        assert!(parse_deletion_epoch("2026-13-01T00:00:00").is_none());
+        assert!(parse_deletion_epoch("2026-07-20T24:00:00").is_none());
+        assert!(parse_deletion_epoch("2026-07-20T09:60:00").is_none());
+        assert!(parse_deletion_epoch("2026-07-20T09:30:60").is_none());
         assert!(parse_deletion_epoch("2026-07-20").is_none());
+    }
+
+    #[test]
+    fn malformed_deletion_date_never_prunes_trash() {
+        let home = tempdir().unwrap();
+        let info = home.path().join(".local/share/Trash/info");
+        let files = home.path().join(".local/share/Trash/files");
+        fs::create_dir_all(&info).unwrap();
+        fs::create_dir_all(&files).unwrap();
+        fs::write(
+            info.join("keep.trashinfo"),
+            "[Trash Info]\nPath=/tmp/keep\nDeletionDate=2026-01-99T00:00:00\n",
+        )
+        .unwrap();
+        fs::write(files.join("keep"), "important data").unwrap();
+
+        let now = parse_deletion_epoch("2026-07-01T00:00:00").unwrap();
+        assert_eq!(prune_trash(home.path(), 1, now), 0);
+        assert!(info.join("keep.trashinfo").is_file());
+        assert_eq!(
+            fs::read_to_string(files.join("keep")).unwrap(),
+            "important data"
+        );
     }
 
     #[test]

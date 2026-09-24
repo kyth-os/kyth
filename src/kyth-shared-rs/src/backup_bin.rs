@@ -187,7 +187,15 @@ fn main() -> std::process::ExitCode {
                 // Snapshot-then-send: freeze a read-only snapshot of /home,
                 // stream the snapshot (never the live subvolume) to USB, then
                 // delete the staging snapshot.
-                let plan = snapshot_then_send_plan("/home", "kyth-send", &usb.to_string_lossy());
+                let stream_path = usb.join(format!(
+                    "kyth-home-{}.btrfs",
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos()
+                ));
+                let plan =
+                    snapshot_then_send_plan("/home", "kyth-send", &stream_path.to_string_lossy());
                 let staged = run(&plan.snapshot_argv, 120, "btrfs snapshot for send");
                 if !staged {
                     failed = true;

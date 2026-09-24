@@ -312,6 +312,11 @@ class BootStabilityUnitTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("ExecStart=-/usr/libexec/kyth-finalize-staged prepare-boot", body)
         self.assertNotIn("mount -o remount,bind,rw /boot", body)
+        finalize = (ROOT / "build_files/scripts/sysconfig/kyth-finalize-staged").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('echo "kyth-finalize-staged: could not bind /boot to /sysroot/boot"', finalize)
+        self.assertNotIn("mount --bind /boot /sysroot/boot 2>/dev/null || true", finalize)
 
     def test_splash_and_branding_wait_for_writable_boot(self) -> None:
         body = BOOT_SPLASH.read_text(encoding="utf-8")

@@ -19,7 +19,19 @@ pub fn cpu_topology(text: &str) -> (String, String) {
 }
 
 pub fn has_3d_vcache(text: &str) -> bool {
-    text.to_ascii_lowercase().contains("3d")
+    text.lines().any(|line| {
+        let Some((key, value)) = line.split_once(':') else {
+            return false;
+        };
+        if !matches!(
+            key.trim().to_ascii_lowercase().as_str(),
+            "model name" | "model"
+        ) {
+            return false;
+        }
+        let model = value.to_ascii_lowercase();
+        model.contains("x3d") || model.contains("3d v-cache")
+    })
 }
 
 pub fn epp_value(text: Option<&str>) -> String {
@@ -54,7 +66,10 @@ mod tests {
             cpu_topology("vendor_id : AuthenticAMD\nmodel name : Ryzen 7 7800X3D\n"),
             ("AuthenticAMD".into(), "Ryzen 7 7800X3D".into())
         );
-        assert!(has_3d_vcache("AMD Ryzen 7 7800X3D"));
+        assert!(has_3d_vcache("model name : AMD Ryzen 7 7800X3D"));
+        assert!(!has_3d_vcache(
+            "model name : AMD Athlon 64 X2\nflags : 3dnow 3dnowprefetch"
+        ));
         assert_eq!(cpu_topology(""), ("Unknown".into(), "Generic CPU".into()));
     }
 

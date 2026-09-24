@@ -11,6 +11,12 @@ LIVE = ROOT / "build_files/build-live-iso.sh"
 
 
 class TitanoboaIsoWrapperTests(unittest.TestCase):
+    def test_local_registry_with_port_uses_local_image_path(self) -> None:
+        live = LIVE.read_text(encoding="utf-8")
+        self.assertIn('"${BASE_IMAGE}" == localhost:*/*', live)
+        self.assertIn('[[ "${IS_LOCAL_IMAGE}" == true ]] && pull_flag=()', live)
+        self.assertIn('if [[ "${IS_LOCAL_IMAGE}" == true ]]; then', live)
+
     def test_wrapper_falls_back_to_bind_mounted_iso_yaml(self) -> None:
         text = WRAPPER.read_text(encoding="utf-8")
         self.assertIn("/kyth/iso.yaml", text)

@@ -8,9 +8,11 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader};
+use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const ARCHIVE_VERSION: u64 = 1;
@@ -719,11 +721,37 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
         .args(rest)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .process_group(0)
         .spawn()
     {
         Ok(child) => child,
         Err(_) => return 1,
     };
+    let process_group = child.id() as libc::pid_t;
+    let timed_out = Arc::new(AtomicBool::new(false));
+    let (timeout_cancel, timeout_cancel_rx) = std::sync::mpsc::channel();
+    let timeout_state = Arc::clone(&timed_out);
+    if std::thread::Builder::new()
+        .name("kyth-transfer-timeout".to_string())
+        .spawn(move || {
+            if timeout_cancel_rx
+                .recv_timeout(Duration::from_secs(timeout_secs))
+                .is_err()
+            {
+                timeout_state.store(true, Ordering::SeqCst);
+                unsafe {
+                    libc::kill(-process_group, libc::SIGKILL);
+                }
+            }
+        })
+        .is_err()
+    {
+        unsafe {
+            libc::kill(-process_group, libc::SIGKILL);
+        }
+        let _ = child.wait();
+        return 1;
+    }
     // Drain stderr concurrently so a verbose child can never fill the pipe
     // and deadlock the stdout loop below.
     let stderr_lines = std::sync::mpsc::channel::<String>();
@@ -778,6 +806,10 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
             }
         }
     }
+    if timed_out.load(Ordering::SeqCst) {
+        return 1;
+    }
+    let _ = timeout_cancel.send(());
     code
 }
 
@@ -903,6 +935,26 @@ pub fn restore_setup(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn stream_command_timeout_kills_descendants_holding_stdout_open() {
+        let args = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "sleep 5 & exit 0".to_string(),
+        ];
+        let started = Instant::now();
+        let code = stream_command(&args, 1, &|_| {});
+
+        assert_ne!(
+            code, 0,
+            "timeout must not report the exited shell as success"
+        );
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "the timeout must not wait for the background process to close stdout"
+        );
+    }
 
     #[test]
     fn desktop_id_gate_rejects_flags_and_garbage() {

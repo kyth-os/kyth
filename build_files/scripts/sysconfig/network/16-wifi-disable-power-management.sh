@@ -152,46 +152,8 @@ NETFALLBACKDESKTOPEOF
 
 write_config /etc/NetworkManager/dispatcher.d/80-kyth-wired-or-wireless 0755 <<'NMWIREDEOF'
 #!/usr/bin/env bash
-set -u
-
-iface="${1:-${DEVICE_IFACE:-}}"
-action="${2:-${NM_DISPATCHER_ACTION:-}}"
-case "${action}" in
-    up|down) ;;
-    *) exit 0 ;;
-esac
-
-command -v nmcli >/dev/null 2>&1 || exit 0
-
-uuid="${CONNECTION_UUID:-}"
-[[ -n "${uuid}" ]] || exit 0
-
-type="$(nmcli -g connection.type connection show "${uuid}" 2>/dev/null || true)"
-[[ "${type}" == "802-3-ethernet" ]] || exit 0
-
-stamp=/var/lib/kyth/wifi-off-for-wired
-
-other_ethernet_active() {
-    nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null |
-        awk -F: -v skip="${iface}" \
-            '$1 != skip && $2 == "ethernet" && $3 == "connected" { found = 1 } END { exit !found }'
-}
-
-case "${action}" in
-    up)
-        if [[ "$(nmcli -g WIFI radio 2>/dev/null)" == "enabled" ]]; then
-            mkdir -p /var/lib/kyth
-            : >"${stamp}"
-            nmcli radio wifi off >/dev/null 2>&1 || true
-        fi
-        ;;
-    down)
-        if [[ -e "${stamp}" ]] && ! other_ethernet_active; then
-            rm -f "${stamp}"
-            nmcli radio wifi on >/dev/null 2>&1 || true
-        fi
-        ;;
-esac
-
+# Keep the legacy dispatcher installed as a no-op so systems upgrading from
+# older KythOS releases stop persisting NetworkManager's Wi-Fi radio as off.
+# Ethernet and Wi-Fi can remain active together; users control the radio.
 exit 0
 NMWIREDEOF
