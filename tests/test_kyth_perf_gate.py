@@ -92,6 +92,19 @@ class PerfGateCoreTests(unittest.TestCase):
             result = check_perf_gate(current_ms=12.0, ledger=ledger)
         self.assertEqual(result["last"], 12.0)  # the most recent line, not the first
 
+    def test_reads_median_metric_while_accepting_legacy_p95_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ledger = Path(tmp) / "perf-ledger.jsonl"
+            ledger.write_text('{"median": 100.0}\n', encoding="utf-8")
+            result = check_perf_gate(current_ms=115.0, ledger=ledger)
+            self.assertEqual(result["last"], 100.0)
+            self.assertFalse(result["pass"])
+
+            ledger.write_text('{"p95": 100.0}\n', encoding="utf-8")
+            legacy = check_perf_gate(current_ms=103.0, ledger=ledger)
+            self.assertEqual(legacy["last"], 100.0)
+            self.assertTrue(legacy["pass"])
+
     def test_disabled_gate_always_passes(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = Path(tmp) / "perf-gate.toml"

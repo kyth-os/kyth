@@ -26,9 +26,13 @@ source "../../lib/config-helpers.sh"
 #   - kyth-selinux-relabel-home-full.service: does the exhaustive `-R` pass in
 #     the background, off the login-critical path, at idle I/O/CPU priority.
 #
-# Each is gated on its own per-deployment stamp: only relabel when the booted
-# deployment differs from the last one relabeled for. If a user needs to force
-# a relabel, they can remove /var/lib/kyth/selinux-relabel-home*.stamp.
+# The login-critical unit is keyed to each deployment; the exhaustive full
+# tree is keyed to active file-context policy content, with a deployment
+# fallback if policy files cannot be read.
+# To force a full correction, remove the full stamp and run
+# `restorecon -RF -I -T0 /var/home`; `-I` bypasses stored security.sehash
+# directory digests. Remove the fast stamp separately only to force its
+# login-critical subset on the next boot.
 write_config /usr/lib/systemd/system/kyth-selinux-relabel-home.service <<'RELABELEOF'
 [Unit]
 Description=SELinux relabel /var/home login-critical paths (once per deployment)
@@ -64,7 +68,7 @@ RELABELEOF
 # foreground disk I/O in an already-running session.
 write_config /usr/lib/systemd/system/kyth-selinux-relabel-home-full.service <<'RELABELFULLEOF'
 [Unit]
-Description=SELinux relabel /var/home (full tree, background, once per deployment)
+Description=SELinux relabel /var/home (full tree, background, once per file-context policy)
 DefaultDependencies=no
 After=local-fs.target kyth-selinux-relabel-home.service
 ConditionSecurity=selinux
@@ -86,10 +90,11 @@ RemainAfterExit=yes
 IOSchedulingClass=idle
 CPUSchedulingPolicy=idle
 Nice=19
-# Generous but finite: a hung restorecon should eventually be killed and
-# retried next boot instead of running forever, but this must stay far
-# looser than the login-path unit's cap above.
-TimeoutStartSec=3600
+# Generous but finite: the first full pass can take hours on large homes;
+# keep it off the login path at idle priority, allow up to 24 hours, and let
+# the native runner enforce the same bound. `restorecon -D` persists per-dir
+# policy digests so a later boot can continue after an interrupted pass.
+TimeoutStartSec=86400
 
 [Install]
 WantedBy=multi-user.target

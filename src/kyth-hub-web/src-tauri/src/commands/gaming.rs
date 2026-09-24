@@ -6,6 +6,7 @@
 //! `kyth_shared::system::gaming_tools`, `gaming_perf`, and `gaming_per_game`.
 
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -15,7 +16,7 @@ use kyth_shared::system::gaming_perf::{self, ProfileGoal};
 use kyth_shared::system::gaming_tools::{self, GAMING_TOOLS};
 use kyth_shared::system::jobs::{timeout_for, JobTimeoutClass};
 
-use super::job::{failure_detail, spawn_argv_job, start_job};
+use super::job::{failure_detail, spawn_argv_job, spawn_task_job, start_job, update_job};
 
 #[derive(Serialize)]
 pub(crate) struct GamingToolResponse {
@@ -48,33 +49,31 @@ fn validated_gaming_tool(flatpak_id: &str) -> Result<&'static gaming_tools::Gami
     gaming_tools::find_gaming_tool(flatpak_id).ok_or_else(|| "unknown gaming tool".to_string())
 }
 
-/// Ensure the per-user Flathub remote exists before an install. Runs
-/// bounded and inline (not in the job): the install job's argv must stay a
-/// single flatpak invocation with no shell chaining.
-fn ensure_flathub_user_remote() -> Result<(), String> {
-    let argv = vec![
-        "flatpak".to_string(),
-        "remote-add".to_string(),
-        "--user".to_string(),
-        "--if-not-exists".to_string(),
-        "flathub".to_string(),
-        "https://dl.flathub.org/repo/flathub.flatpakrepo".to_string(),
-    ];
-    let output = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(60))
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::TimedOut {
-                "Flathub setup took too long and was stopped.".to_string()
-            } else {
-                format!("could not start flatpak: {error}")
-            }
-        })?;
+/// Ensure the per-user Flathub remote exists. This runs inside the tracked,
+/// cancellable install workflow, before its separate `flatpak install` argv.
+fn ensure_flathub_user_remote(cancel: &AtomicBool) -> Result<(), String> {
+    let mut command = Command::new("flatpak");
+    command.args([
+        "remote-add",
+        "--user",
+        "--if-not-exists",
+        "flathub",
+        "https://dl.flathub.org/repo/flathub.flatpakrepo",
+    ]);
+    let output = kyth_shared::system::process::run_bounded_command_cancel(
+        command,
+        Duration::from_secs(60),
+        cancel,
+    )
+    .map_err(|error| match error.kind() {
+        std::io::ErrorKind::TimedOut => "Flathub setup took too long and was stopped.".to_string(),
+        std::io::ErrorKind::Interrupted => "Flathub setup was cancelled.".to_string(),
+        _ => format!("Could not start Flathub setup: {error}"),
+    })?;
     if output.status.success() {
         Ok(())
     } else {
-        Err(format!(
-            "flatpak remote-add failed (exit {})",
-            output.status.code().unwrap_or(-1)
-        ))
+        Err(failure_detail("Flathub setup", &output))
     }
 }
 
@@ -82,42 +81,46 @@ fn ensure_flathub_user_remote() -> Result<(), String> {
 pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaunch, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
     let name = tool.name.to_string();
-    let launch_detail = format!("Installing {name}…");
-    // Pure argv, no shell: the id comes from a fixed catalog today, but a
-    // single bad catalog entry or refactor must never become shell
-    // injection. Uninstall already uses this form.
-    // Note: remote-add runs inline first (bounded, best-effort); install is
-    // the job's argv.
-    if let Err(error) = ensure_flathub_user_remote() {
-        return Err(format!("Could not set up Flathub: {error}"));
-    }
-    let argv = vec![
-        "flatpak".to_string(),
-        "install".to_string(),
-        "--user".to_string(),
-        "-y".to_string(),
-        "flathub".to_string(),
-        flatpak_id,
-    ];
-    let job = start_job("gaming-install", &format!("Installing {name}…"))?;
-    spawn_argv_job(
-        job.clone(),
-        argv,
-        timeout_for(JobTimeoutClass::ToolInstall),
-        move |result| match result {
+    let launch_detail = "Setting up Flathub…".to_string();
+    let job = start_job("gaming-install", &launch_detail)?;
+    let worker_name = name.clone();
+    spawn_task_job(job.clone(), move |worker_job, cancel| {
+        update_job(&worker_job, "Setting up Flathub…");
+        if let Err(error) = ensure_flathub_user_remote(&cancel) {
+            return (
+                "failed".into(),
+                format!("Could not set up Flathub: {error}"),
+            );
+        }
+        if cancel.load(Ordering::Relaxed) {
+            return ("cancelled".into(), "Cancelled.".into());
+        }
+
+        update_job(&worker_job, &format!("Installing {worker_name}…"));
+        let mut command = Command::new("flatpak");
+        command.args(["install", "--user", "-y", "flathub"]);
+        command.arg(flatpak_id);
+        match kyth_shared::system::process::run_bounded_command_cancel(
+            command,
+            timeout_for(JobTimeoutClass::ToolInstall),
+            &cancel,
+        ) {
             Ok(output) if output.status.success() => {
-                ("complete".to_string(), format!("{name} installed."))
+                ("complete".into(), format!("{worker_name} installed."))
             }
-            Ok(output) => (
-                "failed".to_string(),
-                failure_detail("Installation", &output),
-            ),
-            Err(err) => (
-                "failed".to_string(),
-                format!("Could not start installation: {err}"),
-            ),
-        },
-    );
+            Ok(output) => ("failed".into(), failure_detail("Installation", &output)),
+            Err(error) => {
+                let detail = match error.kind() {
+                    std::io::ErrorKind::TimedOut => {
+                        "Installation took too long and was stopped.".to_string()
+                    }
+                    std::io::ErrorKind::Interrupted => "Installation was cancelled.".to_string(),
+                    _ => format!("Could not start installation: {error}"),
+                };
+                ("failed".into(), detail)
+            }
+        }
+    });
     Ok(GamingActionLaunch {
         job,
         state: "running".into(),

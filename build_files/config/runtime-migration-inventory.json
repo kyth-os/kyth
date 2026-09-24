@@ -13415,7 +13415,7 @@
       "cutover": "replace installed 16-wifi-disable-power-management.sh entry point after parity gates",
       "function_inventory": [
         {
-          "name": "other_ethernet_active",
+          "name": "__main__",
           "owner": "fixture::build_files/scripts/sysconfig/network/16-wifi-disable-power-management.sh",
           "ownership": "build-only"
         }
@@ -14094,6 +14094,36 @@
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "build-time",
       "rollback": "restore previous installed 41-polkit-systemd-flatpak-service-authorization-for-w.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
+      "cutover": "replace installed 44-plocate-home-cache-pruning.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/sysconfig/systemd/44-plocate-home-cache-pruning.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "44-plocate-home-cache-pruning.sh",
+      "owner": "fixture::build_files/scripts/sysconfig/systemd/44-plocate-home-cache-pruning.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/sysconfig/systemd/44-plocate-home-cache-pruning.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/sysconfig/systemd/44-plocate-home-cache-pruning.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed 44-plocate-home-cache-pruning.sh entry point",
       "runtime_active": false,
       "runtime_authority": "build-only",
       "runtime_scope": "build",

@@ -26,13 +26,53 @@ if [ -z "$deployment_id" ]; then
 	deployment_id="fallback-$(stat -c %Y /usr 2>/dev/null || echo 0)"
 fi
 
-if [ -r "$STAMP_FILE" ] && [ "$(cat "$STAMP_FILE")" = "$deployment_id" ]; then
-	echo "kyth-selinux-relabel-home-full: already relabeled full tree for this deployment, skipping"
+# Full relabels are keyed to active file-context policy content, so ordinary
+# OS deployments do not trigger another enormous /var/home walk. If the active
+# policy cannot be read, fall back conservatively to the deployment id.
+policy_fingerprint=""
+if [ -r /etc/selinux/config ]; then
+	selinux_type="$(awk -F= '
+		/^[[:space:]]*#/ { next }
+		{
+			key = $1
+			gsub(/[[:space:]]/, "", key)
+			if (key == "SELINUXTYPE") {
+				value = $2
+				gsub(/^[[:space:]\"]+|[[:space:]\"]+$/, "", value)
+				print value
+				exit
+			}
+		}
+	' /etc/selinux/config 2>/dev/null || true)"
+	if [[ "$selinux_type" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+		contexts_dir="/etc/selinux/${selinux_type}/contexts/files"
+		mapfile -d '' context_files < <(
+			LC_ALL=C find "$contexts_dir" -maxdepth 1 -type f -name 'file_contexts*' -print0 2>/dev/null |
+				LC_ALL=C sort -z
+		)
+		if ((${#context_files[@]} > 0)); then
+			policy_fingerprint="$(
+				for context_file in "${context_files[@]}"; do
+					printf '%s\0' "${context_file##*/}"
+					cat "$context_file"
+				done | sha256sum | awk '{print $1}'
+			)" || policy_fingerprint=""
+		fi
+	fi
+fi
+if [ -n "$policy_fingerprint" ]; then
+	stamp_value="selinux-file-contexts-sha256:${policy_fingerprint}"
+else
+	stamp_value="deployment:${deployment_id}"
+fi
+
+if [ -r "$STAMP_FILE" ] && [ "$(cat "$STAMP_FILE")" = "$stamp_value" ]; then
+	echo "kyth-selinux-relabel-home-full: active SELinux policy already relabeled, skipping"
 	exit 0
 fi
 
-echo "kyth-selinux-relabel-home-full: relabeling /var/home (full tree, background) for deployment ${deployment_id}"
-/sbin/restorecon -RF -T0 /var/home
+echo "kyth-selinux-relabel-home-full: relabeling /var/home (full tree, background) for stamp ${stamp_value}"
+/sbin/restorecon -RF -D -T0 /var/home
 
 mkdir -p "$STAMP_DIR"
-printf '%s' "$deployment_id" >"$STAMP_FILE"
+printf '%s' "$stamp_value" >"$STAMP_FILE"

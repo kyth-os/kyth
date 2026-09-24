@@ -539,6 +539,19 @@ test("bug-hunt round 3: installer fail-closed and daemon bounds", async () => {
   assert.match(installerPlan, /checked_mul\(BYTES_PER_GIB\)/, "GiB math must be checked");
 });
 
+test("Gaming Flathub setup runs as a visible phase inside the tracked install job", async () => {
+  const gaming = await readFile(resolve(root, "src-tauri/src/commands/gaming.rs"), "utf8");
+  const install = gaming.match(/pub\(crate\) fn gaming_tool_install[\s\S]*?\n}\n/)?.[0] ?? "";
+  assert.notEqual(install, "", "gaming_tool_install not found");
+  const started = install.indexOf("start_job(");
+  const worker = install.indexOf("spawn_task_job(");
+  const setup = install.indexOf("ensure_flathub_user_remote");
+  const installCommand = install.indexOf("run_bounded_command_cancel");
+  assert.ok(started >= 0 && started < worker, "create the tracked job before starting its worker");
+  assert.ok(worker < setup && setup < installCommand, "run tracked Flathub setup before the install command");
+  assert.match(install, /Setting up Flathub/, "the running job must expose setup as a visible phase");
+});
+
 test("bug-hunt round 4: secrets stay out of strings, writes stay atomic", async () => {
   // SMB status strings never carry userinfo, shares save atomically, M365
   // shortcuts use create_new, gaming installs run pure argv with a bounded

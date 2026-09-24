@@ -1,10 +1,12 @@
-//! Shared deployment-stamp logic for the two SELinux relabel oneshots
-//! (`kyth-selinux-relabel-home`, fast login-critical paths; and
-//! `kyth-selinux-relabel-home-full`, the exhaustive background pass).
+//! Shared stamp logic for two SELinux relabel oneshots. The login-critical
+//! subset remains keyed to the deployment id; the exhaustive background pass
+//! is keyed to active file-context policy content to avoid needless full-home
+//! walks after every deployment.
 //!
-//! Native port of the `deployment_id` + stamp-file protocol in
-//! `build_files/scripts/sysconfig/kyth-selinux-relabel-home{,-full}`.
+//! The retained shell fixtures under `build_files/scripts/sysconfig` mirror
+//! the same intent; the native binaries are installed in production.
 
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -56,16 +58,94 @@ pub fn deployment_id() -> String {
     format!("fallback-{mtime}")
 }
 
-/// True when the stamp file already records this deployment (skip the pass).
-pub fn already_done(stamp_dir: &Path, stamp_name: &str, deployment: &str) -> bool {
+fn selinux_type_from_config(contents: &str) -> Option<String> {
+    for line in contents.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "SELINUXTYPE" {
+            continue;
+        }
+        let value = value.trim().trim_matches(['"', '\'']);
+        if value.is_empty()
+            || !value
+                .chars()
+                .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'))
+        {
+            return None;
+        }
+        return Some(value.to_string());
+    }
+    None
+}
+
+/// Hash the active policy's file-context inputs in a deterministic order.
+/// On any read error or missing input, return `None` so callers fall back to
+/// the deployment stamp rather than incorrectly skipping a relabel.
+pub fn file_contexts_fingerprint_in(contexts_dir: &Path) -> Option<String> {
+    let mut paths = Vec::new();
+    for entry in std::fs::read_dir(contexts_dir).ok()? {
+        let entry = entry.ok()?;
+        let path = entry.path();
+        let name = path.file_name()?.to_string_lossy();
+        if !name.starts_with("file_contexts") {
+            continue;
+        }
+        if !entry.metadata().ok()?.is_file() {
+            continue;
+        }
+        paths.push(path);
+    }
+    paths.sort();
+    if paths.is_empty() {
+        return None;
+    }
+
+    let mut hasher = Sha256::new();
+    for path in paths {
+        let name = path.file_name()?.to_string_lossy();
+        let content = std::fs::read(&path).ok()?;
+        hasher.update(name.as_bytes());
+        hasher.update([0]);
+        hasher.update(content);
+    }
+    Some(format!("{:x}", hasher.finalize()))
+}
+
+/// Current active SELinux file-context policy fingerprint, if it is readable.
+pub fn active_file_contexts_fingerprint() -> Option<String> {
+    let config = std::fs::read_to_string("/etc/selinux/config").ok()?;
+    let selinux_type = selinux_type_from_config(&config)?;
+    let contexts_dir = Path::new("/etc/selinux")
+        .join(selinux_type)
+        .join("contexts/files");
+    file_contexts_fingerprint_in(&contexts_dir)
+}
+
+/// Full relabels are keyed to policy content, so a new deployment with the
+/// same labeling rules does not trigger another enormous `/var/home` walk.
+/// If policy cannot be measured, stay conservative and key by deployment.
+pub fn full_relabel_stamp(policy_fingerprint: Option<&str>, deployment: &str) -> String {
+    match policy_fingerprint {
+        Some(fingerprint) => format!("selinux-file-contexts-sha256:{fingerprint}"),
+        None => format!("deployment:{deployment}"),
+    }
+}
+
+/// True when the stamp file already records this relabel key (skip the pass).
+pub fn already_done(stamp_dir: &Path, stamp_name: &str, stamp_value: &str) -> bool {
     std::fs::read_to_string(stamp_dir.join(stamp_name))
-        .map(|stamped| stamped == deployment)
+        .map(|stamped| stamped == stamp_value)
         .unwrap_or(false)
 }
 
-pub fn write_stamp(stamp_dir: &Path, stamp_name: &str, deployment: &str) {
+pub fn write_stamp(stamp_dir: &Path, stamp_name: &str, stamp_value: &str) {
     let _ = std::fs::create_dir_all(stamp_dir);
-    let _ = std::fs::write(stamp_dir.join(stamp_name), deployment);
+    let _ = std::fs::write(stamp_dir.join(stamp_name), stamp_value);
 }
 
 pub fn stamp_dir() -> PathBuf {
@@ -108,6 +188,41 @@ mod tests {
             }
         }
         assert_eq!(found.as_deref(), Some("fedora-atomic 1a2b3c4d5e.0"));
+    }
+
+    #[test]
+    fn parses_active_selinux_type_safely() {
+        assert_eq!(
+            selinux_type_from_config("# policy\nSELINUXTYPE=targeted\n"),
+            Some("targeted".into())
+        );
+        assert_eq!(selinux_type_from_config("SELINUXTYPE=../targeted"), None);
+    }
+
+    #[test]
+    fn file_contexts_fingerprint_changes_with_policy_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("file_contexts");
+        let compiled = dir.path().join("file_contexts.bin");
+        std::fs::write(&source, "home labels v1").unwrap();
+        std::fs::write(&compiled, "compiled v1").unwrap();
+        let first = file_contexts_fingerprint_in(dir.path()).unwrap();
+        assert_eq!(first, file_contexts_fingerprint_in(dir.path()).unwrap());
+
+        std::fs::write(&source, "home labels v2").unwrap();
+        let second = file_contexts_fingerprint_in(dir.path()).unwrap();
+        assert_ne!(first, second);
+    }
+
+    #[test]
+    fn full_stamp_ignores_deployment_but_tracks_policy() {
+        let first = full_relabel_stamp(Some("policy-a"), "deployment-1");
+        assert_eq!(first, full_relabel_stamp(Some("policy-a"), "deployment-2"));
+        assert_ne!(first, full_relabel_stamp(Some("policy-b"), "deployment-2"));
+        assert_ne!(
+            full_relabel_stamp(None, "deployment-1"),
+            full_relabel_stamp(None, "deployment-2")
+        );
     }
 
     #[test]

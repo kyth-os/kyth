@@ -73,13 +73,14 @@ pub fn save(path: impl AsRef<Path>, config: PerfGateConfig) -> std::io::Result<(
     crate::atomic_io::atomic_write_text(path, &text, Some(0o600))
 }
 
-fn last_p95(ledger: impl AsRef<Path>) -> Option<f64> {
+fn last_median(ledger: impl AsRef<Path>) -> Option<f64> {
     let raw = std::fs::read_to_string(ledger).ok()?;
     raw.lines().rev().take(10).find_map(|line| {
-        serde_json::from_str::<Value>(line)
-            .ok()?
-            .get("p95")?
-            .as_f64()
+        let value = serde_json::from_str::<Value>(line).ok()?;
+        value
+            .get("median")
+            .or_else(|| value.get("p95"))
+            .and_then(Value::as_f64)
     })
 }
 
@@ -98,7 +99,7 @@ pub fn check(
             delta: None,
         };
     }
-    let last = last_p95(ledger);
+    let last = last_median(ledger);
     let delta = last.zip(current_ms).map(|(last, current)| {
         if last != 0.0 {
             (current - last) / last * 100.0
@@ -134,10 +135,20 @@ mod tests {
             }
         );
         let ledger = directory.path().join("ledger.jsonl");
-        std::fs::write(&ledger, "{\"p95\": 100}\n{\"p95\": 120}\n").unwrap();
+        std::fs::write(&ledger, "{\"median\": 100}\n{\"median\": 120}\n").unwrap();
         let result = check(PerfGateConfig::default(), Some(130.0), &ledger);
         assert_eq!(result.last, Some(120.0));
         assert_eq!(result.delta, Some(8.33));
+        assert!(result.pass);
+    }
+
+    #[test]
+    fn reads_legacy_p95_rows() {
+        let directory = tempdir().unwrap();
+        let ledger = directory.path().join("ledger.jsonl");
+        std::fs::write(&ledger, "{\"p95\": 120}\n").unwrap();
+        let result = check(PerfGateConfig::default(), Some(130.0), &ledger);
+        assert_eq!(result.last, Some(120.0));
         assert!(result.pass);
     }
 

@@ -154,6 +154,21 @@ impl JobStore {
             .map(|entry| entry.cancel.clone())
     }
 
+    /// Update progress text without changing job state. Terminal/cancelled
+    /// jobs are immutable so a late worker cannot overwrite the user's final
+    /// status with a stale phase.
+    pub fn update_detail(&self, id: &str, detail: String) -> bool {
+        let mut inner = self.lock();
+        let Some(entry) = inner.entries.get_mut(id) else {
+            return false;
+        };
+        if entry.state != STATE_RUNNING {
+            return false;
+        }
+        entry.detail = detail;
+        true
+    }
+
     /// Record a terminal state. Never overwrites `cancelled`: a worker that
     /// was killed late must not resurrect its job. Unknown ids are ignored.
     pub fn finish(&self, id: &str, state: &str, detail: String) {
@@ -293,6 +308,24 @@ mod tests {
         assert_eq!(state, "cancelled");
         let (state, _) = store.status("job-1").unwrap();
         assert_eq!(state, "running");
+    }
+
+    #[test]
+    fn progress_updates_only_running_jobs() {
+        let store = JobStore::default();
+        store_with_running(&store, "job-1");
+        assert!(store.update_detail("job-1", "setup phase".into()));
+        assert_eq!(
+            store.status("job-1"),
+            Some((STATE_RUNNING.into(), "setup phase".into()))
+        );
+        assert!(store.cancel("job-1"));
+        assert!(!store.update_detail("job-1", "late phase".into()));
+        assert_eq!(
+            store.status("job-1"),
+            Some((STATE_CANCELLED.into(), "Cancelled.".into()))
+        );
+        assert!(!store.update_detail("missing", "phase".into()));
     }
 
     #[test]

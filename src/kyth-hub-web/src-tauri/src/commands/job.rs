@@ -151,9 +151,53 @@ pub(crate) fn spawn_argv_job(
     });
 }
 
+pub(crate) fn update_job(job: &str, detail: &str) {
+    jobs().update_detail(job, detail.to_string());
+}
+
+/// Run a multi-step cancellable workflow in the shared tracked-job store.
+/// The task receives its id (to publish phase details) and cancellation flag;
+/// a cancelled job remains terminal even if the worker returns later.
+pub(crate) fn spawn_task_job(
+    job: String,
+    task: impl FnOnce(String, Arc<AtomicBool>) -> (String, String) + Send + 'static,
+) {
+    let cancel = cancel_flag(&job).unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
+    std::thread::spawn(move || {
+        let (state, detail) = task(job.clone(), cancel);
+        finish_job(job, &state, detail);
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_job_publishes_phase_and_respects_cancellation() {
+        let job = new_job_id("test-task");
+        let (job, _) = jobs().start(&job, "pending".to_string());
+        let (phase_tx, phase_rx) = std::sync::mpsc::channel();
+        let (continue_tx, continue_rx) = std::sync::mpsc::channel();
+        spawn_task_job(job.clone(), move |worker_job, _cancel| {
+            update_job(&worker_job, "Setting up Flathub…");
+            phase_tx.send(()).unwrap();
+            continue_rx.recv().unwrap();
+            ("complete".into(), "installed".into())
+        });
+
+        phase_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert_eq!(
+            jobs().status(&job),
+            Some(("running".into(), "Setting up Flathub…".into()))
+        );
+        assert!(jobs().cancel(&job));
+        continue_tx.send(()).unwrap();
+        assert_eq!(
+            jobs().status(&job),
+            Some(("cancelled".into(), "Cancelled.".into()))
+        );
+    }
 
     #[test]
     fn empty_argv_fails_the_job_without_spawning() {

@@ -49,14 +49,16 @@ def check_perf_gate(current_ms: float | None = None, ledger: Path = LEDGER, path
     if not cfg.get("enabled"):
         return {"enabled": False, "pass": True}
     threshold = int(cfg.get("threshold", 10))
-    # find last ledger p95
+    # Prefer the correctly labeled median; accept p95 from legacy ledger rows.
     last = None
     try:
         if ledger.exists():
             for line in ledger.read_text(encoding="utf-8").splitlines()[-10:]:
                 try:
                     obj = json.loads(line)
-                    if "p95" in obj:
+                    if "median" in obj:
+                        last = float(obj["median"])
+                    elif "p95" in obj:
                         last = float(obj["p95"])
                 except (json.JSONDecodeError, ValueError, TypeError):
                     pass

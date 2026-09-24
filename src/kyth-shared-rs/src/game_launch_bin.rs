@@ -12,7 +12,7 @@ use std::path::Path;
 use std::time::Duration;
 
 use kyth_shared::system::process::run_bounded;
-use kyth_shared::system::scheduler_arbiter::{current_desired_state, generate_arbiter};
+use kyth_shared::system::scheduler_arbiter::{current_desired_state, flag_path, generate_arbiter};
 
 fn on_path(name: &str) -> bool {
     env::var_os("PATH")
@@ -71,6 +71,73 @@ fn exec_argv(argv: &[String]) -> std::io::Error {
     std::process::Command::new(program).args(args).exec()
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launch_reuses_fresh_arbiter_flag_without_scheduler_probes() {
+        let dir = tempfile::tempdir().unwrap();
+        let flag = dir.path().join("sched-arbiter.json");
+        std::fs::write(
+            &flag,
+            r#"{"chosen":"auto","active":"balanced","scx_active":false,"bore_available":true,"gamemode_pin":false,"allow_ananicy_pin":false}"#,
+        )
+        .unwrap();
+        let mut probes = 0;
+
+        ensure_arbiter_for_launch(&flag, || {
+            probes += 1;
+            Ok(())
+        });
+
+        assert_eq!(probes, 0);
+    }
+
+    #[test]
+    fn incomplete_arbiter_flag_triggers_regeneration() {
+        let dir = tempfile::tempdir().unwrap();
+        let flag = dir.path().join("sched-arbiter.json");
+        std::fs::write(&flag, "{}").unwrap();
+        let mut regenerations = 0;
+
+        ensure_arbiter_for_launch(&flag, || {
+            regenerations += 1;
+            Ok(())
+        });
+
+        assert_eq!(regenerations, 1);
+    }
+}
+
+const ARBITER_CACHE_MAX_AGE: Duration = Duration::from_secs(30);
+
+fn ensure_arbiter_for_launch<F>(flag: &Path, regenerate: F)
+where
+    F: FnOnce() -> std::io::Result<()>,
+{
+    let fresh = std::fs::metadata(flag)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age <= ARBITER_CACHE_MAX_AGE)
+        && std::fs::read(flag)
+            .ok()
+            .and_then(|bytes| {
+                serde_json::from_slice::<kyth_shared::system::scheduler_arbiter::DesiredState>(
+                    &bytes,
+                )
+                .ok()
+            })
+            .is_some_and(|state| {
+                const CHOICES: &[&str] = &["auto", "scx_rusty", "bore", "balanced"];
+                CHOICES.contains(&state.chosen.as_str()) && CHOICES.contains(&state.active.as_str())
+            });
+    if !fresh {
+        let _ = regenerate();
+    }
+}
+
 fn launch(args: &[String]) -> i32 {
     let (use_gamemode, cmd) = parse_args(args);
     if cmd.is_empty() {
@@ -82,7 +149,9 @@ fn launch(args: &[String]) -> i32 {
         return if args.is_empty() { 0 } else { 1 };
     }
     mark_gaming_hint();
-    let _ = generate_arbiter();
+    ensure_arbiter_for_launch(&flag_path(None::<std::path::PathBuf>), || {
+        generate_arbiter().map(|_| ())
+    });
     let mut run_cmd = cmd;
     if use_gamemode && on_path("gamemoderun") {
         run_cmd.insert(0, "gamemoderun".to_string());

@@ -65,7 +65,7 @@ for — see `src/kyth-hub-web/src-tauri/src/main.rs`'s `probe_backend`,
 | `system::ananicy` | Ananicy profile normalization and explicit gaming rule rendering | Service activation and process scheduling remain outside Rust. |
 | `system::flatpak_trim` | Flatpak trim preference and service-presence status | Unit/timer generation and Flatpak execution remain service-owned. |
 | `system::quicksettings` | Brightness/tile preference normalization and persistence | D-Bus brightness application remains outside the shared crate. |
-| `system::perf_gate` | Performance gate config, native dispatch, and recent JSONL p95 regression comparison | Benchmark execution and ledger writes remain outside Rust. |
+| `system::perf_gate` | Performance gate config, native dispatch, and recent JSONL median regression comparison (legacy p95 rows remain readable) | The native `kyth-perf-gate` binary measures and appends ledger samples. |
 | `system::perf_audit` | Stable line-oriented performance-audit text projection, key ordering, and native gaming-audit dispatch | Live tunable collection, probe-cache writes, and systemd queries remain outside Rust. |
 | `system::driver_config`, `gpu_power` | Graphics driver and GPU power preference normalization/persistence plus native gpu-power dispatch | Driver installation and `/sys` power-level writes remain outside Rust. |
 | `system::readahead` | Readahead preference normalization and native tunable-dispatcher status/profile persistence | Filesystem fadvise application remains outside the shared crate. |

@@ -365,71 +365,126 @@ pub fn collect_snapshot() -> serde_json::Map<String, Value> {
 pub fn collect_snapshot_skipping(skip: &[&str]) -> serde_json::Map<String, Value> {
     let mut sections = serde_json::Map::new();
     let skipped = |key: &str| skip.contains(&key);
-    if skipped("bootc-status-data")
-        && skipped("bootc-status-text")
-        && skipped("bootc-branch")
-        && skipped("kernel-flavor")
+    if !["bootc-status-data", "bootc-status-text", "bootc-branch"]
+        .iter()
+        .all(|key| skipped(key))
     {
-        // Fast path needs nothing below; fall through to the per-key gates.
+        let status_data = crate::system::bootc_query::fetch_status_data();
+        let status_text = crate::system::bootc_query::fetch_status_text();
+        let reference = status_data
+            .as_ref()
+            .and_then(crate::system::bootc_query::image_reference_from_status)
+            .or_else(|| {
+                crate::system::bootc_query::image_reference_from_status_with_output(
+                    &status_data.clone().unwrap_or(Value::Null),
+                    &status_text,
+                )
+            });
+        if !skipped("bootc-status-data") {
+            sections.insert(
+                "bootc-status-data".into(),
+                status_data.unwrap_or(Value::Null),
+            );
+        }
+        if !skipped("bootc-status-text") {
+            sections.insert("bootc-status-text".into(), Value::String(status_text));
+        }
+        if !skipped("bootc-branch") {
+            sections.insert(
+                "bootc-branch".into(),
+                crate::system::bootc_policy::branch_from_ref(reference.as_deref())
+                    .map(Value::String)
+                    .unwrap_or(Value::Null),
+            );
+        }
     }
-    let status_data = crate::system::bootc_query::fetch_status_data();
-    let status_text = crate::system::bootc_query::fetch_status_text();
-    let reference = status_data
-        .as_ref()
-        .and_then(crate::system::bootc_query::image_reference_from_status)
-        .or_else(|| {
-            crate::system::bootc_query::image_reference_from_status_with_output(
-                &status_data.clone().unwrap_or(Value::Null),
-                &status_text,
-            )
-        });
-    sections.insert(
-        "bootc-status-data".into(),
-        status_data.unwrap_or(Value::Null),
-    );
-    sections.insert("bootc-status-text".into(), Value::String(status_text));
-    sections.insert(
-        "bootc-branch".into(),
-        crate::system::bootc_policy::branch_from_ref(reference.as_deref())
-            .map(Value::String)
-            .unwrap_or(Value::Null),
-    );
-    sections.insert(
-        "kernel-flavor".into(),
-        Value::String(crate::system::bootc::current_kernel_flavor()),
-    );
-    sections.insert("flatpak-apps".into(), collect_flatpak_apps());
-    // Networked sections are skipped entirely without a default route: the
-    // caller merges fresh system-cache values underneath (user timer) or
-    // keeps the previous cache entry, instead of blanking it with null.
-    if has_default_route() {
-        sections.insert("flatpak-updates".into(), collect_flatpak_updates());
+    if !skipped("kernel-flavor") {
         sections.insert(
-            "network-summary".into(),
-            serde_json::to_value(crate::system::network_identity::get_network_identity())
+            "kernel-flavor".into(),
+            Value::String(crate::system::bootc::current_kernel_flavor()),
+        );
+    }
+    if !skipped("flatpak-apps") {
+        sections.insert("flatpak-apps".into(), collect_flatpak_apps());
+    }
+    if !(skipped("flatpak-updates") && skipped("network-summary")) && has_default_route() {
+        if !skipped("flatpak-updates") {
+            sections.insert("flatpak-updates".into(), collect_flatpak_updates());
+        }
+        if !skipped("network-summary") {
+            sections.insert(
+                "network-summary".into(),
+                serde_json::to_value(crate::system::network_identity::get_network_identity())
+                    .unwrap_or(Value::Null),
+            );
+        }
+    }
+    if !["nvidia-detect", "hardware-summary", "display-detect"]
+        .iter()
+        .all(|key| skipped(key))
+    {
+        if let Some((nvidia, hardware)) = collect_hardware() {
+            if !skipped("nvidia-detect") {
+                sections.insert("nvidia-detect".into(), nvidia);
+            }
+            if !skipped("hardware-summary") {
+                sections.insert("hardware-summary".into(), hardware.clone());
+            }
+            if !skipped("display-detect") {
+                sections.insert("display-detect".into(), hardware);
+            }
+        } else {
+            for key in ["nvidia-detect", "hardware-summary", "display-detect"] {
+                if !skipped(key) {
+                    sections.insert(key.into(), Value::Null);
+                }
+            }
+        }
+    }
+    if !skipped("controllers-detect") {
+        sections.insert(
+            "controllers-detect".into(),
+            serde_json::to_value(crate::system::controllers::detect_controllers())
                 .unwrap_or(Value::Null),
         );
     }
-    if let Some((nvidia, hardware)) = collect_hardware() {
-        sections.insert("nvidia-detect".into(), nvidia);
-        sections.insert("hardware-summary".into(), hardware.clone());
-        sections.insert("display-detect".into(), hardware);
-    } else {
-        sections.insert("nvidia-detect".into(), Value::Null);
-        sections.insert("hardware-summary".into(), Value::Null);
-        sections.insert("display-detect".into(), Value::Null);
+    if !skipped("hardware-snapshot") {
+        sections.insert(
+            "hardware-snapshot".into(),
+            serde_json::to_value(crate::system::gpu::hardware_snapshot_section())
+                .unwrap_or(Value::Null),
+        );
     }
-    sections.insert(
-        "controllers-detect".into(),
-        serde_json::to_value(crate::system::controllers::detect_controllers())
-            .unwrap_or(Value::Null),
-    );
-    sections.insert(
-        "hardware-snapshot".into(),
-        serde_json::to_value(crate::system::gpu::hardware_snapshot_section())
-            .unwrap_or(Value::Null),
-    );
     sections
+}
+
+const CACHEABLE_SECTIONS: &[&str] = &[
+    "bootc-status-data",
+    "bootc-status-text",
+    "bootc-branch",
+    "kernel-flavor",
+    "flatpak-apps",
+    "flatpak-updates",
+    "nvidia-detect",
+    "controllers-detect",
+    "display-detect",
+    "hardware-snapshot",
+    "hardware-summary",
+    "network-summary",
+];
+
+pub fn cacheable_sections_to_skip<'a>(keys: &[&'a str]) -> Vec<&'a str> {
+    keys.iter()
+        .copied()
+        .filter(|key| CACHEABLE_SECTIONS.contains(key))
+        .collect()
+}
+
+pub fn merge_fresh_sections(
+    sections: &mut serde_json::Map<String, Value>,
+    fresh: serde_json::Map<String, Value>,
+) {
+    sections.extend(fresh);
 }
 
 /// Same precedence as the compatibility module's `cache_read_paths` for a
@@ -553,6 +608,34 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::fs;
+
+    #[test]
+    fn a_fully_fresh_cache_skips_all_expensive_snapshot_sections() {
+        let sections = collect_snapshot_skipping(CACHEABLE_SECTIONS);
+        assert!(sections.is_empty());
+    }
+
+    #[test]
+    fn fresh_system_cache_values_override_collected_values() {
+        let mut collected = serde_json::Map::new();
+        collected.insert("bootc-branch".into(), json!("collected"));
+        collected.insert("controllers-detect".into(), json!(["live"]));
+        let fresh = serde_json::Map::from_iter([("bootc-branch".into(), json!("system-cache"))]);
+
+        merge_fresh_sections(&mut collected, fresh);
+
+        assert_eq!(collected["bootc-branch"], "system-cache");
+        assert_eq!(collected["controllers-detect"], json!(["live"]));
+    }
+
+    #[test]
+    fn only_fresh_cacheable_keys_are_selected_for_skipping() {
+        let requested = ["bootc-branch", "controllers-detect", "custom"];
+        assert_eq!(
+            cacheable_sections_to_skip(&requested),
+            vec!["bootc-branch", "controllers-detect"]
+        );
+    }
 
     #[test]
     fn missing_cache_returns_none() {

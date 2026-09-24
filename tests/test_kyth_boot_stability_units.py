@@ -56,7 +56,7 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertNotIn("Before=display-manager", full_unit)
         self.assertIn("Conflicts=shutdown.target", full_unit_sec)
         self.assertIn("IOSchedulingClass=idle", full_service_sec)
-        self.assertIn("TimeoutStartSec=3600", full_service_sec)
+        self.assertIn("TimeoutStartSec=86400", full_service_sec)
         self.assertIn("StartLimitIntervalSec=3600", full_unit_sec)
         self.assertIn("StartLimitBurst=3", full_unit_sec)
         self.assertNotIn("StartLimit", full_service_sec)
@@ -72,7 +72,7 @@ class BootStabilityUnitTests(unittest.TestCase):
         # data — that would reintroduce the same size-dependent stall.
         self.assertNotIn("restorecon -RF", fast_script)
         self.assertNotIn("restorecon -RF -T0 /var/home", fast_script)
-        self.assertIn("restorecon -RF -T0 /var/home", full_script)
+        self.assertIn("restorecon -RF -D -T0 /var/home", full_script)
         self.assertIn("selinux-relabel-home-full.stamp", full_script)
         self.assertIn("selinux-relabel-home.stamp", fast_script)
         # Both scripts run under set -euo pipefail; a failing `ostree admin
@@ -87,6 +87,50 @@ class BootStabilityUnitTests(unittest.TestCase):
         # The top-level restorecon must not be able to hard-fail the whole
         # script the way the per-home loop below it is already guarded.
         self.assertNotIn("\n/sbin/restorecon -F /var/home\n", fast_script)
+
+    def test_full_home_relabel_stamps_selinux_policy_fingerprint(self) -> None:
+        """A deployment-only stamp needlessly repeats multi-hour scans after
+        every OS update; the full pass should rerun when the active file
+        contexts change, not merely when the deployment id changes.
+        """
+        shared = (ROOT / "src/kyth-shared-rs/src/system/selinux_relabel.rs").read_text(
+            encoding="utf-8"
+        )
+        full_bin = (ROOT / "src/kyth-shared-rs/src/selinux_relabel_home_full_bin.rs").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("active_file_contexts_fingerprint", shared)
+        self.assertIn("full_relabel_stamp", full_bin)
+        self.assertNotIn("already_done(&stamp_dir, STAMP, &deployment)", full_bin)
+
+    def test_full_relabel_uses_resumable_digests_and_long_timeout(self) -> None:
+        unit = SELINUX_UNIT.read_text(encoding="utf-8")
+        full_bin = (ROOT / "src/kyth-shared-rs/src/selinux_relabel_home_full_bin.rs").read_text(
+            encoding="utf-8"
+        )
+        full_script = (
+            SELINUX_UNIT.parents[1] / "kyth-selinux-relabel-home-full"
+        ).read_text(encoding="utf-8")
+        full_service = unit.split("RELABELFULLEOF", 1)[1].split("RELABELFULLEOF", 1)[0]
+        self.assertIn("TimeoutStartSec=86400", full_service)
+        self.assertIn('"-D".to_string()', full_bin)
+        self.assertIn("restorecon -RF -D -T0 /var/home", full_script)
+
+    def test_plocate_prunes_cache_dependency_and_metadata_trees_without_replacing_vendor_defaults(self) -> None:
+        script_path = (
+            ROOT
+            / "build_files/scripts/sysconfig/systemd/44-plocate-home-cache-pruning.sh"
+        )
+        self.assertTrue(script_path.is_file(), "install an updatedb drop-in for cache pruning")
+        script = script_path.read_text(encoding="utf-8")
+        self.assertIn("plocate-updatedb.service.d/50-kyth-home-cache-pruning.conf", script)
+        self.assertIn("ExecStart=", script)
+        self.assertNotIn("PRUNEFS=", script)
+        self.assertNotIn("PRUNEPATHS=", script)
+        self.assertIn(
+            'ExecStart=/usr/bin/updatedb --add-prunenames ".cache .git node_modules shadercache"',
+            script,
+        )
 
     def test_boot_mutators_have_timeouts_and_path_trigger_limit(self) -> None:
         body = BOOT_SPLASH.read_text(encoding="utf-8")

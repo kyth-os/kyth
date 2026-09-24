@@ -28,16 +28,15 @@ fn main() -> std::process::ExitCode {
         }
     }
 
-    let mut sections = kyth_shared::system::probe::collect_snapshot();
-    if !system {
-        // User timer (10-min cadence): prefer fresh-enough SYSTEM cache
-        // sections over re-collecting them — the system service already did
-        // the expensive work (bootc, flatpak, hardware). Fresh system values
-        // win; anything stale/missing falls back to what we just collected.
-        for (key, data) in kyth_shared::system::probe::fresh_system_sections() {
-            sections.entry(key).or_insert(data);
-        }
-    }
+    let fresh = if system {
+        serde_json::Map::new()
+    } else {
+        kyth_shared::system::probe::fresh_system_sections()
+    };
+    let fresh_keys = fresh.keys().map(String::as_str).collect::<Vec<_>>();
+    let skip = kyth_shared::system::probe::cacheable_sections_to_skip(&fresh_keys);
+    let mut sections = kyth_shared::system::probe::collect_snapshot_skipping(&skip);
+    kyth_shared::system::probe::merge_fresh_sections(&mut sections, fresh);
     if print_only {
         println!(
             "{}",

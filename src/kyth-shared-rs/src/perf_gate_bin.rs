@@ -41,7 +41,7 @@ fn record(ledger: &Path, current: f64) -> Result<(), String> {
         .map(str::to_string)
         .collect::<Vec<_>>();
     lines.push(serde_json::json!({
-        "p95": (current * 100.0).round() / 100.0,
+        "median": (current * 100.0).round() / 100.0,
         "commit": env::var("GITHUB_SHA").unwrap_or_else(|_| "local".into()),
         "recorded_at": std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_secs(),
     }).to_string());
@@ -113,5 +113,21 @@ fn main() -> std::process::ExitCode {
         std::process::ExitCode::from(1)
     } else {
         std::process::ExitCode::SUCCESS
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn record_uses_the_median_label() {
+        let directory = tempfile::tempdir().unwrap();
+        let ledger = directory.path().join("perf-ledger.jsonl");
+        record(&ledger, 123.456).unwrap();
+        let line = fs::read_to_string(&ledger).unwrap();
+        let value: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
+        assert_eq!(value["median"], 123.46);
+        assert!(value.get("p95").is_none());
     }
 }
