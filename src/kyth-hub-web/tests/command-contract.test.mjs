@@ -110,13 +110,11 @@ test("Updates actions use the native job bridge instead of just recipes", () => 
   assert.doesNotMatch(updatesOverview, /RecipeButton recipe="(?:apply-staged|update-health)"/);
 });
 
-test("App updates poll long enough for the unbounded backend flatpak job and refresh the snapshot cache", () => {
+test("App updates poll long enough for bounded backend work and refresh the snapshot cache", () => {
   const fn = service.match(/export async function updateFlatpaks\(\)[\s\S]*?\n}/)?.[0] ?? "";
   assert.notEqual(fn, "", "updateFlatpaks not found");
-  // update_flatpaks runs an unbounded `flatpak update --user` plus a
-  // privileged system update with a 900s daemon timeout; the poll bound must
-  // outlast that, not give up after ~2 minutes. Bound lives on the shared
-  // per-domain poller now (limit: N) instead of a local for-loop.
+  // Both user and system Flatpak commands are bounded. Keep the wait limit
+  // above those helper deadlines so slow mirrors do not become false failures.
   const shared = fn.match(/limit: (\d+)/)?.[1] ?? fn.match(/for \(let i = 0; i < (\d+); i \+= 1\)/)?.[1] ?? 0;
   assert.ok(Number(shared) >= 3600, `updateFlatpaks poll bound (${shared}) is too short for a real app update`);
   assert.match(fn, /invalidateSharedReads\([^)]*"updates-snapshot"/, "updateFlatpaks must invalidate updates-snapshot so refresh() after the update isn't served a stale cached count");

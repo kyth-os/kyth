@@ -1634,10 +1634,10 @@ export async function updateFlatpaks(): Promise<string> {
   if (!inTauriShell()) throw new Error("App installs are available from the installed Kyth Hub.");
   const launch = await invoke<InstallActionLaunch>("update_flatpaks");
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "App updates did not start.");
-  // The backend runs an unbounded `flatpak update --user` followed by a
-  // privileged system update with a 900s daemon timeout, so a large or
-  // multi-app update can legitimately run for many minutes — mirror
-  // waitUpdateJob's hour-long bound rather than giving up early.
+  // Both Flatpak scopes are bounded server-side, but metadata refresh and
+  // large app/runtime updates can still take several minutes. Keep this poll
+  // limit above the helper timeout rather than turning a slow update into a
+  // false failure.
   trackJob("install", launch.job);
   try {
     const state = await pollJobUntilSettled("install", launch.job, {

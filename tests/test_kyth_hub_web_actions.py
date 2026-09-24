@@ -358,6 +358,69 @@ class HubWebUpdateActionTests(unittest.TestCase):
         self.assertIn('"flatpak_update" => Ok(json!({ "operation": "flatpak_update" }))', privilege)
         self.assertIn('vec!["/usr/bin/flatpak", "update", "--system", "-y"]', shared_privilege)
 
+    def test_flatpak_update_verifies_no_updates_remain_before_reporting_success(self):
+        # A successful `flatpak update` exit code alone is not proof that the
+        # availability query has cleared; keep the page from claiming success
+        # while its authoritative pending count still reports updates.
+        update = MAIN_RS.split("fn update_flatpaks()", 1)[1].split(
+            "#[tauri::command]\nfn install_flatpak", 1
+        )[0]
+        self.assertIn("flatpak_updates_count(false)", update)
+        self.assertIn("flatpak_update_completion", update)
+        self.assertNotIn("Your apps are up to date.", update)
+
+    def test_app_update_refreshes_pending_state_after_failure(self):
+        overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
+        update = overview.split("async function updateApps()", 1)[1].split(
+            "async function apply()", 1
+        )[0]
+        self.assertIn("finally", update)
+        self.assertIn("await refresh().catch(() => undefined)", update)
+
+    def test_app_update_remaining_count_gets_a_truthful_next_step(self):
+        messages = (HUB_WEB / "components" / "updateMessages.ts").read_text(encoding="utf-8")
+        apps = messages.split('if (action === "apps")', 1)[1].split("\n  }", 1)[0]
+        self.assertIn("updates remain", apps.lower())
+        self.assertIn("update remains", apps.lower())
+        self.assertIn("could not be verified", apps.lower())
+        self.assertLess(apps.lower().index("updates remain"), apps.lower().index("check your connection"))
+        self.assertLess(apps.lower().index("could not be verified"), apps.lower().index("check your connection"))
+
+    def test_restart_failure_keeps_the_helper_diagnostic(self):
+        messages = (HUB_WEB / "components" / "updateMessages.ts").read_text(encoding="utf-8")
+        errors = messages.split("export function friendlyActionError", 1)[1]
+        apply_start = errors.index('if (action === "apply")')
+        rollback_start = errors.index('if (action === "rollback")')
+        apply = errors[apply_start:rollback_start]
+        self.assertIn("return withDetails(", apply)
+        self.assertIn("const withDetails", errors)
+        self.assertIn("Details:", errors)
+
+    def test_flatpak_count_keeps_partial_scope_failures_visible(self):
+        source = (
+            ROOT / "src" / "kyth-shared-rs" / "src" / "system" / "update_availability.rs"
+        ).read_text(encoding="utf-8")
+        self.assertIn("if errors.is_empty()", source)
+        self.assertIn("Flatpak update status could not be checked for every installation.", source)
+
+    def test_updates_page_surfaces_separate_system_and_app_statuses(self):
+        overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
+        label = overview.split("const overallLabel", 1)[1].split("const overallTone", 1)[0]
+        tone = overview.split("const overallTone", 1)[1].split("const guidance", 1)[0]
+        self.assertIn(": stagedEffective", label)
+        self.assertIn("stagedEffective", tone)
+        self.assertIn('className="updates-status-grid"', overview)
+        self.assertIn("updates-status-card-${systemStatusTone}", overview)
+        self.assertIn("updates-status-card-${appStatusTone}", overview)
+        self.assertIn("pendingCount > 0", overview)
+
+    def test_app_update_failure_next_step_retries_remaining_updates(self):
+        overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
+        next_step = overview.split("function actionErrorNextStep", 1)[1].split("export function UpdatesOverview", 1)[0]
+        self.assertIn("updates remain", next_step.lower())
+        self.assertIn("update remains", next_step.lower())
+        self.assertIn("Check for updates", next_step)
+
 
 if __name__ == "__main__":
     unittest.main()

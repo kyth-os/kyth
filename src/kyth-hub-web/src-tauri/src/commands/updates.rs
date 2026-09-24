@@ -786,12 +786,14 @@ pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
     if !std::path::Path::new("/usr/libexec/kyth-finalize-staged").exists() {
         return Err("The staged-update finalizer is not installed on this system.".to_string());
     }
-    // Finalize flips the boot target: serialize against upgrade/switch too.
+    // Systemd's shutdown hook finalizes any raw staged deployment; the Hub
+    // only requests the reboot here. Serialize that restart against other
+    // bootc mutations so it cannot race an upgrade/switch.
     let slot = take_mutating_slot()?;
     kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "apply",
-        "Apply staged update",
+        "Restart to apply staged update",
         vec!["sudo", "-A", "/usr/libexec/kyth-finalize-staged", "reboot"]
             .into_iter()
             .map(String::from)

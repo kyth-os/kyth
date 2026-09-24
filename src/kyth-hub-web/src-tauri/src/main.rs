@@ -1412,7 +1412,17 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
         }
         let system_result = commands::privilege::flatpak_update().map(|_| ());
         let (state, detail) = match (user_result, system_result) {
-            (Ok(()), Ok(())) => ("complete", "Your apps are up to date.".to_string()),
+            (Ok(()), Ok(())) => {
+                let (remaining, verification_detail) =
+                    kyth_shared::system::update_availability::flatpak_updates_count(false);
+                match kyth_shared::system::update_availability::flatpak_update_completion(
+                    remaining,
+                    &verification_detail,
+                ) {
+                    Ok(detail) => ("complete", detail),
+                    Err(detail) => ("failed", detail),
+                }
+            },
             (Err(user_error), Ok(())) => (
                 "failed",
                 format!("Your personal apps could not be updated: {user_error}"),

@@ -362,6 +362,20 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn('echo "kyth-finalize-staged: could not bind /boot to /sysroot/boot"', finalize)
         self.assertNotIn("mount --bind /boot /sysroot/boot 2>/dev/null || true", finalize)
 
+    def test_restart_queues_reboot_without_repeating_finalize_in_the_hub(self) -> None:
+        helper = (
+            ROOT / "src/kyth-shared-rs/src/system/boot_finalize.rs"
+        ).read_text(encoding="utf-8")
+        reboot_path = helper.split("pub fn finalize_staged", 1)[1].split("#[cfg(test)]", 1)[0]
+        reboot_branch = reboot_path.split("if reboot", 1)[1].split("}", 1)[0]
+        self.assertIn("request_reboot()", reboot_branch)
+        self.assertIn('["--no-block", "reboot"]', helper)
+        script = (ROOT / "build_files/scripts/sysconfig/kyth-finalize-staged").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('if [[ "${mode}" == "reboot" ]]', script)
+        self.assertIn("exec /usr/bin/systemctl --no-block reboot", script)
+
     def test_splash_and_branding_wait_for_writable_boot(self) -> None:
         body = BOOT_SPLASH.read_text(encoding="utf-8")
         self.assertGreaterEqual(body.count("After=local-fs.target kyth-boot-rw.service"), 2)

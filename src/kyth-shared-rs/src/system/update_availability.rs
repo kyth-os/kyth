@@ -133,17 +133,54 @@ fn flatpak_updates_count_until(use_cached: bool, deadline: Instant) -> (i32, Str
             Err(error) => errors.push(error.to_string()),
         }
     }
+    flatpak_scope_result(total, successful_scope, &errors)
+}
+
+fn flatpak_scope_result(total: i32, successful_scope: bool, errors: &[String]) -> (i32, String) {
     if successful_scope {
-        (total.max(0), String::new())
+        let detail = if errors.is_empty() {
+            String::new()
+        } else {
+            "Flatpak update status could not be checked for every installation.".to_string()
+        };
+        (total.max(0), detail)
     } else {
         (
             0,
             errors
-                .into_iter()
-                .next()
+                .first()
+                .map(|detail| crate::system::process::redact_sensitive_text(detail))
                 .unwrap_or_else(|| "Flatpak update check unavailable.".to_string()),
         )
     }
+}
+
+pub fn flatpak_update_completion(
+    remaining: i32,
+    verification_detail: &str,
+) -> Result<String, String> {
+    let remaining = remaining.max(0);
+    if remaining > 0 {
+        let pending = if remaining == 1 {
+            "1 app update remains".to_string()
+        } else {
+            format!("{remaining} app updates remain")
+        };
+        let detail = if verification_detail.is_empty() {
+            format!("Flatpak update commands finished, but {pending}.")
+        } else {
+            let safe_detail = crate::system::process::redact_sensitive_text(verification_detail);
+            format!("Flatpak update commands finished, but {pending}; verification: {safe_detail}")
+        };
+        return Err(detail);
+    }
+    if !verification_detail.is_empty() {
+        let safe_detail = crate::system::process::redact_sensitive_text(verification_detail);
+        return Err(format!(
+            "Flatpak update commands finished, but pending app updates could not be verified: {safe_detail}"
+        ));
+    }
+    Ok("App updates finished. No app updates remain.".to_string())
 }
 
 #[cfg(test)]
@@ -171,6 +208,43 @@ mod tests {
         assert!(view.update_btn_visible);
         assert!(!view.restart_btn_visible);
         assert!(view.body.contains("2 Flatpak updates"));
+    }
+
+    #[test]
+    fn partial_flatpak_scope_failure_never_looks_like_a_clean_zero() {
+        let (count, detail) =
+            flatpak_scope_result(0, true, &["system installation query failed".to_string()]);
+        assert_eq!(count, 0);
+        assert_eq!(
+            detail,
+            "Flatpak update status could not be checked for every installation."
+        );
+    }
+
+    #[test]
+    fn flatpak_completion_requires_zero_verified_updates() {
+        let remaining = flatpak_update_completion(2, "").unwrap_err();
+        assert!(remaining.contains("2 app updates remain"));
+    }
+
+    #[test]
+    fn flatpak_completion_reports_single_remaining_update_correctly() {
+        let remaining = flatpak_update_completion(1, "").unwrap_err();
+        assert!(remaining.contains("1 app update remains"));
+    }
+
+    #[test]
+    fn flatpak_completion_requires_verification_detail_to_be_empty() {
+        let unknown = flatpak_update_completion(0, "system installation unavailable").unwrap_err();
+        assert!(unknown.contains("could not be verified"));
+    }
+
+    #[test]
+    fn flatpak_completion_reports_success_only_after_no_updates_remain() {
+        assert_eq!(
+            flatpak_update_completion(0, "").unwrap(),
+            "App updates finished. No app updates remain."
+        );
     }
 
     #[test]

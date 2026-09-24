@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Make /boot writable and optionally promote a staged deployment.
+# Prepare /boot and finalize staged deployments before shutdown.
 #
-# Kyth /boot is a read-only btrfs bind of the root subvol (plus autofs).
+# `reboot` only queues a non-blocking system restart; systemd's
+# ostree-finalize-staged shutdown hook finalizes any remaining deployment.
+# Kyth's safe-upgrade path already finalizes after bootc releases its lock.
 # `mount -o remount,rw` is EINVAL; `remount,bind,rw` works.
 #
 # Do not finalize from ostree-finalize-staged.service ExecStart: bootc still
@@ -32,6 +34,12 @@ mode="${1:-}"
 if [[ "${mode}" == "prepare-boot" ]]; then
 	_prepare_boot
 	exit $?
+fi
+if [[ "${mode}" == "reboot" ]]; then
+	# Systemd's ostree-finalize-staged ExecStop performs any remaining
+	# finalization during shutdown. Queue the reboot now rather than trying to
+	# finalize an already-finalized deployment a second time in the Hub path.
+	exec /usr/bin/systemctl --no-block reboot
 fi
 
 if ! _prepare_boot; then

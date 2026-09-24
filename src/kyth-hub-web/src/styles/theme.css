@@ -1478,6 +1478,14 @@ body {
 .updates-guidance-progress-determinate i { animation: none; transition: width .5s ease; }
 @keyframes updates-progress { 0% { transform: translateX(-115%); } 100% { transform: translateX(300%); } }
 .updates-actions-card { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 17px; border: 1px solid var(--hairline); border-radius: 11px; background: rgba(255, 255, 255, .025); }
+.updates-status-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.updates-status-card { display: flex; min-width: 0; flex-direction: column; gap: 5px; padding: 13px 15px; border: 1px solid var(--hairline); border-radius: 11px; background: linear-gradient(145deg, rgba(38, 43, 52, .78), rgba(28, 31, 38, .78)); }
+.updates-status-card-ok { border-color: rgba(91, 214, 158, .24); }
+.updates-status-card-warn { border-color: rgba(239, 182, 90, .34); }
+.updates-status-card-muted { border-color: rgba(120, 183, 255, .2); }
+.updates-status-label { color: var(--text-faint); font-size: 10px; font-weight: 750; letter-spacing: .65px; text-transform: uppercase; }
+.updates-status-card strong { color: var(--text); font-size: 14px; letter-spacing: -.15px; }
+.updates-status-card p { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
 .updates-actions-card h2 { margin: 3px 0 0; color: var(--text); font-size: 16px; letter-spacing: -.25px; }
 .updates-actions-card p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; }
 .updates-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
@@ -1498,6 +1506,7 @@ body {
 
 @media (max-width: 760px) {
   .updates-hero, .updates-actions-card { align-items: flex-start; flex-direction: column; }
+  .updates-status-grid { grid-template-columns: 1fr; }
   .updates-actions { justify-content: flex-start; }
   .work-card-grid { grid-template-columns: 1fr; }
   .play-guidance-grid { grid-template-columns: 1fr; }

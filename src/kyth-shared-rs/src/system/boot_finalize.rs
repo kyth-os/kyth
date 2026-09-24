@@ -53,6 +53,14 @@ pub fn prepare_boot() -> Result<(), String> {
 }
 
 pub fn finalize_staged(reboot: bool) -> Result<String, String> {
+    // A successful Kyth update already finalizes after the bootc lock is
+    // released. Raw bootc staging is finalized by ostree-finalize-staged's
+    // shutdown hook. Re-finalizing here can fail on an already-finalized
+    // deployment and suppress the reboot, so let systemd run that hook during
+    // shutdown and queue the reboot without waiting for the Hub process.
+    if reboot {
+        return request_reboot();
+    }
     if let Err(error) = prepare_boot() {
         eprintln!("kyth-finalize-staged: {error}; trying finalize anyway");
     }
@@ -64,15 +72,31 @@ pub fn finalize_staged(reboot: bool) -> Result<String, String> {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
-    if reboot {
-        let reboot_result = run("/usr/bin/systemctl", &["reboot"], Duration::from_secs(30))?;
-        if !reboot_result.status.success() {
-            return Err(String::from_utf8_lossy(&reboot_result.stderr)
-                .trim()
-                .to_string());
-        }
-    }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+}
+
+fn request_reboot() -> Result<String, String> {
+    request_reboot_with(run)
+}
+
+fn request_reboot_with<F>(mut run_command: F) -> Result<String, String>
+where
+    F: FnMut(&str, &[&str], Duration) -> Result<Output, String>,
+{
+    let output = run_command(
+        "/usr/bin/systemctl",
+        &["--no-block", "reboot"],
+        Duration::from_secs(30),
+    )?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
+    }
+    let detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    Ok(if detail.is_empty() {
+        "Restart requested.".to_string()
+    } else {
+        detail
+    })
 }
 
 #[cfg(test)]
@@ -96,5 +120,36 @@ mod tests {
     fn bind_timeout_or_spawn_failure_is_returned() {
         let error = bind_result(Err("timed out".to_string())).unwrap_err();
         assert!(error.contains("timed out"));
+    }
+
+    #[test]
+    fn reboot_request_is_nonblocking_and_uses_systemd() {
+        let mut calls = Vec::new();
+        let output = Some(Output {
+            status: std::process::ExitStatus::from_raw(0),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        });
+        let mut output = output;
+        let detail = request_reboot_with(|program, args, timeout| {
+            calls.push((
+                program.to_string(),
+                args.iter()
+                    .map(|arg| (*arg).to_string())
+                    .collect::<Vec<_>>(),
+                timeout,
+            ));
+            Ok(output.take().expect("only one reboot command is expected"))
+        })
+        .expect("systemd should accept the reboot request");
+        assert_eq!(detail, "Restart requested.");
+        assert_eq!(
+            calls,
+            vec![(
+                "/usr/bin/systemctl".to_string(),
+                vec!["--no-block".to_string(), "reboot".to_string()],
+                Duration::from_secs(30),
+            )]
+        );
     }
 }

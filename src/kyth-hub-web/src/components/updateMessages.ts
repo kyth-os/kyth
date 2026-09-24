@@ -64,10 +64,16 @@ export function friendlyActionError(action: string, error: unknown): string {
     return withDetails("KythOS couldn't confirm that the update is staged. Check update status before retrying.");
   }
   if (action === "apps") {
+    if (lower.includes("updates remain") || lower.includes("update remains")) {
+      return `Some app updates are still pending. Details: ${detail}`;
+    }
+    if (lower.includes("could not be verified")) {
+      return `The update command finished, but Hub couldn't verify whether all app updates are complete. Details: ${detail}`;
+    }
     return `We couldn't update every app. Check your connection, then try again. Details: ${detail}`;
   }
   if (action === "apply") {
-    return "The update is ready, but KythOS couldn't restart to apply it. Please restart from the system menu.";
+    return withDetails("The update is ready, but the Hub couldn't request a restart to apply it.");
   }
   if (action === "rollback") {
     return "We couldn't prepare the rollback. Please try again.";
