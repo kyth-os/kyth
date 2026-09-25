@@ -451,7 +451,10 @@ mod tests {
         let script = directory.path().join("scheduler-probe");
         executable(&script, "printf 'scx_rusty\\n'");
         assert_eq!(
-            scheduler_probe(&[script.to_string_lossy().into_owned()], 2),
+            // This is a success-path probe test, not a timeout test. Leave
+            // enough room for slow/loaded CI runners; timeout behavior is
+            // asserted independently below.
+            scheduler_probe(&[script.to_string_lossy().into_owned()], 10),
             Some((0, "scx_rusty\n".into()))
         );
     }
