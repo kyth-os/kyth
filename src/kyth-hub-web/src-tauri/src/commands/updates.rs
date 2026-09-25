@@ -118,6 +118,18 @@ fn release_cell(value: &str) -> Option<String> {
     Some(value.to_string())
 }
 
+fn is_markdown_table_divider(cells: &[&str]) -> bool {
+    let divider_cells: Vec<&str> = cells
+        .iter()
+        .map(|cell| cell.trim().trim_matches(':'))
+        .filter(|cell| !cell.is_empty())
+        .collect();
+    !divider_cells.is_empty()
+        && divider_cells.iter().all(|cell| {
+            !cell.is_empty() && cell.bytes().all(|byte| byte == b'-')
+        })
+}
+
 fn release_highlights(body: &str) -> (String, Vec<String>) {
     let mut section = "";
     let mut package_changes = Vec::new();
@@ -146,6 +158,12 @@ fn release_highlights(body: &str) -> (String, Vec<String>) {
             };
             package_changes.push(change);
         } else if section == "Major Packages" && cells.len() >= 4 {
+            if (cells[1].eq_ignore_ascii_case("name")
+                && cells[2].eq_ignore_ascii_case("version"))
+                || is_markdown_table_divider(&cells)
+            {
+                continue;
+            }
             let (Some(name), Some(version)) = (release_cell(cells[1]), release_cell(cells[2]))
             else {
                 continue;
