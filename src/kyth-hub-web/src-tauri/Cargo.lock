@@ -1971,6 +1971,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
+ "tempfile",
  "toml 0.8.2",
 ]
 

@@ -122,9 +122,13 @@ pub fn create_command(config: &Config, git_paths: &[PathBuf], gpu: GpuKind) -> V
     }
     match gpu {
         GpuKind::Nvidia => command.push("--nvidia".into()),
-        GpuKind::Amd | GpuKind::Dri => command.extend([
+        GpuKind::Amd => command.extend([
             "--additional-flags".into(),
             "--device=/dev/kfd --device=/dev/dri --group-add=video --group-add=render".into(),
+        ]),
+        GpuKind::Dri => command.extend([
+            "--additional-flags".into(),
+            "--device=/dev/dri --group-add=video --group-add=render".into(),
         ]),
         GpuKind::Cpu => {}
     }
@@ -183,7 +187,14 @@ pub fn host_git_paths(home: &Path) -> Vec<PathBuf> {
 pub fn box_exists(config: &Config) -> io::Result<bool> {
     let output = run(&["distrobox", "list", "--no-color"], COMMAND_TIMEOUT)?;
     if !output.status.success() {
-        return Ok(false);
+        return Err(io::Error::other(format!(
+            "distrobox list exited with {}",
+            output
+                .status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "no exit code".into())
+        )));
     }
     Ok(String::from_utf8_lossy(&output.stdout)
         .lines()
@@ -285,19 +296,16 @@ pub fn provision_script_for_selection(selected: &[&DevTool]) -> Option<String> {
     script.push_str("if command -v dnf5 >/dev/null 2>&1; then pm=dnf5; else pm=dnf; fi\n");
     if !dnf_packages.is_empty() {
         script.push_str(&format!(
-            "sudo \"$pm\" install -y --skip-unavailable {}\n",
+            "sudo \"$pm\" install -y {}\n",
             dnf_packages.join(" ")
         ));
     }
     if !npm_packages.is_empty() {
-        script.push_str(&format!(
-            "sudo npm install -g {} || true\n",
-            npm_packages.join(" ")
-        ));
+        script.push_str(&format!("sudo npm install -g {}\n", npm_packages.join(" ")));
     }
     if !export_bins.is_empty() {
         script.push_str(&format!(
-            "for binary in {}; do\n  path=\"$(command -v \"$binary\" 2>/dev/null || true)\"\n  test -z \"$path\" || distrobox-export --bin \"$path\" --export-path \"$HOME/.local/bin\" || true\ndone\n",
+            "for binary in {}; do\n  path=\"$(command -v \"$binary\" 2>/dev/null)\" || {{ echo \"ERROR: selected tool did not install binary: $binary\" >&2; exit 1; }}\n  distrobox-export --bin \"$path\" --export-path \"$HOME/.local/bin\"\ndone\n",
             export_bins.join(" ")
         ));
     }
@@ -323,7 +331,7 @@ pub fn host_install_command(tool: &DevTool) -> Option<Vec<String>> {
         InstallMethod::HostScript(url) => Some(vec![
             "bash".into(),
             "-lc".into(),
-            format!("curl -fsSL {} | bash", shell_quote(url)),
+            format!("set -euo pipefail; curl -fsSL {} | bash", shell_quote(url)),
         ]),
         InstallMethod::HostRpmUrl(url) => {
             // dnf5 aliases dnf on Fedora; either resolves the same package.
@@ -331,7 +339,7 @@ pub fn host_install_command(tool: &DevTool) -> Option<Vec<String>> {
                 "bash".into(),
                 "-lc".into(),
                 format!(
-                    "tmp=$(mktemp --suffix=.rpm) && curl -fsSL {} -o \"$tmp\" && sudo dnf install -y \"$tmp\"; rm -f \"$tmp\"",
+                    "set -euo pipefail; tmp=$(mktemp --suffix=.rpm); trap 'rm -f \"$tmp\"' EXIT; curl -fsSL {} -o \"$tmp\"; sudo dnf install -y \"$tmp\"",
                     shell_quote(url),
                 ),
             ])
@@ -492,6 +500,9 @@ mod tests {
         assert!(script.contains("code"));
         assert!(script.contains("@anthropic-ai/claude-code"));
         assert!(script.contains("distrobox-export --bin"));
+        assert!(!script.contains("--skip-unavailable"));
+        assert!(!script.contains("npm install -g @anthropic-ai/claude-code || true"));
+        assert!(script.contains("did not install binary"));
     }
 
     #[test]
@@ -507,15 +518,26 @@ mod tests {
         let hermes = find_dev_tool("hermes-desktop").unwrap();
         let codex_desktop = find_dev_tool("codex-desktop").unwrap();
         let claude_desktop = find_dev_tool("claude-desktop").unwrap();
-        assert!(host_install_command(hermes)
-            .unwrap()
-            .iter()
-            .any(|arg| arg.contains("curl -fsSL")));
-        assert!(host_install_command(codex_desktop)
-            .unwrap()
-            .iter()
-            .any(|arg| arg.contains("dnf install -y")));
+        let script = host_install_command(hermes).unwrap();
+        assert!(script.iter().any(|arg| arg.contains("curl -fsSL")));
+        assert!(script.iter().any(|arg| arg.contains("pipefail")));
+        let rpm = host_install_command(codex_desktop).unwrap();
+        assert!(rpm.iter().any(|arg| arg.contains("dnf install -y")));
+        assert!(rpm.iter().any(|arg| arg.contains("trap 'rm -f")));
         assert!(host_install_command(claude_desktop).is_none());
+    }
+
+    #[test]
+    fn dri_container_flags_do_not_require_an_amd_kfd_device() {
+        let config = Config::from_environment(&BTreeMap::new());
+        let command = create_command(&config, &[], GpuKind::Dri);
+        let flags = command
+            .windows(2)
+            .find(|pair| pair[0] == "--additional-flags")
+            .unwrap()[1]
+            .clone();
+        assert!(flags.contains("/dev/dri"));
+        assert!(!flags.contains("/dev/kfd"));
     }
 
     #[test]

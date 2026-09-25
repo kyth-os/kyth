@@ -292,21 +292,22 @@ pub(crate) fn scx_status() -> Option<ScxStatusResponse> {
     })
 }
 
+fn scheduler_probe(argv: &[String], timeout_secs: u64) -> Option<(i32, String)> {
+    let output =
+        kyth_shared::system::process::run_bounded(argv, Duration::from_secs(timeout_secs)).ok()?;
+    Some((
+        output.status.code().unwrap_or(1),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+    ))
+}
+
 /// Schedulers installed on this machine (short names: rusty, lavd,
 /// bpfland). scx_loader resolves the `scx_` binary, so the list is whatever
 /// `kyth-scx list` reports, falling back to `scx_*` binaries on PATH.
 #[tauri::command]
 pub(crate) fn scx_available() -> Vec<String> {
     use kyth_shared::system::sched_daemon::available_schedulers;
-    let run = |argv: &[String], _timeout_secs: u64| -> Option<(i32, String)> {
-        let (program, args) = argv.split_first()?;
-        let output = Command::new(program).args(args).output().ok()?;
-        Some((
-            output.status.code().unwrap_or(1),
-            String::from_utf8_lossy(&output.stdout).into_owned(),
-        ))
-    };
-    available_schedulers(&run, std::path::Path::new("/usr/bin"))
+    available_schedulers(&scheduler_probe, std::path::Path::new("/usr/bin"))
         .into_iter()
         .map(|name| name.strip_prefix("scx_").unwrap_or(&name).to_string())
         .collect()
@@ -431,4 +432,40 @@ pub(crate) fn save_per_game_profile(
     )
     .map_err(|err| format!("Could not save profile: {err}"))?;
     Ok(format!("Saved {profile} (HDR: {hdr}) for {appid}."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scheduler_probe;
+    use std::os::unix::fs::PermissionsExt;
+    use std::time::{Duration, Instant};
+
+    fn executable(path: &std::path::Path, body: &str) {
+        std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn scheduler_probe_returns_stdout_and_exit_code() {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("scheduler-probe");
+        executable(&script, "printf 'scx_rusty\\n'");
+        assert_eq!(
+            scheduler_probe(&[script.to_string_lossy().into_owned()], 2),
+            Some((0, "scx_rusty\n".into()))
+        );
+    }
+
+    #[test]
+    fn scheduler_probe_honors_timeout_instead_of_hanging_the_hub() {
+        let directory = tempfile::tempdir().unwrap();
+        let script = directory.path().join("scheduler-probe");
+        executable(&script, "sleep 10");
+        let started = Instant::now();
+        assert_eq!(
+            scheduler_probe(&[script.to_string_lossy().into_owned()], 0),
+            None
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
 }

@@ -106,6 +106,16 @@ impl JobStore {
             let Some(victim) = victim else {
                 break;
             };
+            if let Some(entry) = inner.entries.get(&victim) {
+                if entry.state == STATE_RUNNING {
+                    // When every tracked job is live, eviction must tell a
+                    // cancellable worker to stop; otherwise it can keep
+                    // mutating the system after the UI loses its job id.
+                    entry
+                        .cancel
+                        .store(true, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
             inner.order.retain(|id| id != &victim);
             inner.entries.remove(&victim);
         }
@@ -114,8 +124,8 @@ impl JobStore {
     /// Register a job as running and return its cancellation flag, which the
     /// worker thread must hand to the cancellable runner (or hold, for
     /// socket-I/O workers that can only be marked cancelled). A start for
-    /// an id that is ALREADY running (same-tick double start, id reuse
-    /// after eviction) must not clobber it: the first worker would be
+    /// an id that is ALREADY present (same-tick double start, stale client,
+    /// id reuse) must not clobber it: the first worker would be
     /// orphaned, cancels would signal the wrong generation, and finishes
     /// would land on the wrong entry. Suffix until free instead.
     pub fn start(&self, id: &str, detail: String) -> (String, Arc<AtomicBool>) {
@@ -125,11 +135,7 @@ impl JobStore {
         Self::evict_locked(&mut inner);
         let mut unique = id.to_string();
         let mut round = 1u32;
-        while inner
-            .entries
-            .get(&unique)
-            .is_some_and(|entry| entry.state == STATE_RUNNING)
-        {
+        while inner.entries.contains_key(&unique) {
             round += 1;
             unique = format!("{id}#{round}");
         }
@@ -311,6 +317,17 @@ mod tests {
     }
 
     #[test]
+    fn start_suffixes_a_terminal_id_instead_of_resurrecting_it() {
+        let store = JobStore::default();
+        let (first, _) = store.start("reused", "first".to_string());
+        store.finish(&first, STATE_COMPLETE, "done".to_string());
+        let (second, _) = store.start("reused", "second".to_string());
+        assert_eq!(first, "reused");
+        assert_eq!(second, "reused#2");
+        assert_eq!(store.order_len(), 2);
+    }
+
+    #[test]
     fn progress_updates_only_running_jobs() {
         let store = JobStore::default();
         store_with_running(&store, "job-1");
@@ -381,6 +398,18 @@ mod tests {
         // Full of terminal entries plus one running job: inserting evicts
         // terminal entries, never the running one, until none remain.
         assert!(store.status("keep-running").is_some());
+    }
+
+    #[test]
+    fn cap_signals_the_oldest_running_job_before_evicting_it() {
+        let store = JobStore::default();
+        let flags = (0..MAX_JOBS)
+            .map(|index| store_with_running(&store, &format!("live-{index}")))
+            .collect::<Vec<_>>();
+        store_with_running(&store, "overflow");
+        assert!(flags[0].load(std::sync::atomic::Ordering::Relaxed));
+        assert!(!flags[1].load(std::sync::atomic::Ordering::Relaxed));
+        assert!(store.status("live-0").is_none());
     }
 
     #[test]

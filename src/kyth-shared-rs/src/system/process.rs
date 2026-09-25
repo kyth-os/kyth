@@ -16,22 +16,29 @@ use std::time::{Duration, Instant};
 /// unbounded (a compromised helper could stream gigabytes); exceeding the
 /// cap fails the run instead of growing the Hub without limit.
 pub const MAX_CAPTURE_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_INPUT_BYTES: usize = 8 * 1024 * 1024;
+const PIPE_DRAIN_GRACE: Duration = Duration::from_millis(250);
 
 fn read_capped(pipe: &mut dyn Read, limit: usize) -> io::Result<Vec<u8>> {
     let mut buf = Vec::new();
     let mut chunk = [0u8; 8192];
+    let mut exceeded = false;
     loop {
         let count = pipe.read(&mut chunk)?;
         if count == 0 {
-            return Ok(buf);
+            return if exceeded {
+                Err(io::Error::new(
+                    io::ErrorKind::OutOfMemory,
+                    "captured output exceeded its size limit",
+                ))
+            } else {
+                Ok(buf)
+            };
         }
-        if buf.len().saturating_add(count) > limit {
-            return Err(io::Error::new(
-                io::ErrorKind::OutOfMemory,
-                "captured output exceeded its size limit",
-            ));
-        }
-        buf.extend_from_slice(&chunk[..count]);
+        let room = limit.saturating_sub(buf.len());
+        let copied = count.min(room);
+        buf.extend_from_slice(&chunk[..copied]);
+        exceeded |= copied < count;
     }
 }
 
@@ -82,6 +89,40 @@ fn collect_output(
         stdout,
         stderr,
     })
+}
+
+/// Wait for both pipe readers after the direct child exits, but include that
+/// wait in the command's deadline. A grandchild can inherit stdout/stderr
+/// and otherwise keep `JoinHandle::join` blocked after its parent has exited.
+fn collect_output_until(
+    child: &mut std::process::Child,
+    status: ExitStatus,
+    stdout_reader: JoinHandle<io::Result<Vec<u8>>>,
+    stderr_reader: JoinHandle<io::Result<Vec<u8>>>,
+    deadline: Instant,
+) -> io::Result<Output> {
+    let drain_deadline = deadline.min(Instant::now() + PIPE_DRAIN_GRACE);
+    while (!stdout_reader.is_finished() || !stderr_reader.is_finished())
+        && Instant::now() < drain_deadline
+    {
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    if !stdout_reader.is_finished() || !stderr_reader.is_finished() {
+        // The root command has exited but a same-group descendant still owns
+        // a pipe. Tear down that leftover process group before joining.
+        kill_process_group(child);
+    }
+    collect_output(status, stdout_reader, stderr_reader)
+}
+
+fn kill_and_join_readers(
+    child: &mut std::process::Child,
+    stdout_reader: JoinHandle<io::Result<Vec<u8>>>,
+    stderr_reader: JoinHandle<io::Result<Vec<u8>>>,
+) {
+    kill_tree(child);
+    let _ = stdout_reader.join();
+    let _ = stderr_reader.join();
 }
 
 /// Kill a child and everything it forked. Hub-spawned commands (`flatpak`
@@ -215,6 +256,12 @@ pub fn run_bounded_with_input(
     input: &[u8],
     timeout: Duration,
 ) -> io::Result<Output> {
+    if input.len() > MAX_INPUT_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "command input exceeded its size limit",
+        ));
+    }
     let (program, args) = argv
         .split_first()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "command must not be empty"))?;
@@ -240,16 +287,37 @@ pub fn run_bounded_with_input(
     }
     let started = Instant::now();
     loop {
-        match child.try_wait()? {
-            Some(status) => return collect_output(status, stdout_reader, stderr_reader),
-            None if started.elapsed() <= timeout => std::thread::sleep(Duration::from_millis(25)),
-            None => {
-                kill_tree(&mut child);
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "command exceeded its time limit",
-                ));
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if started.elapsed() > timeout {
+                    kill_and_join_readers(&mut child, stdout_reader, stderr_reader);
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "command exceeded its time limit",
+                    ));
+                }
+                return collect_output_until(
+                    &mut child,
+                    status,
+                    stdout_reader,
+                    stderr_reader,
+                    started + timeout,
+                );
             }
+            Ok(None) => {}
+            Err(error) => {
+                kill_and_join_readers(&mut child, stdout_reader, stderr_reader);
+                return Err(error);
+            }
+        }
+        if started.elapsed() <= timeout {
+            std::thread::sleep(Duration::from_millis(25));
+        } else {
+            kill_and_join_readers(&mut child, stdout_reader, stderr_reader);
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "command exceeded its time limit",
+            ));
         }
     }
 }
@@ -277,23 +345,44 @@ pub fn run_bounded_command_cancel(
     let (stdout_reader, stderr_reader) = spawn_pipe_readers(&mut child);
     let started = Instant::now();
     loop {
-        match child.try_wait()? {
-            Some(status) => return collect_output(status, stdout_reader, stderr_reader),
-            None if cancel.load(Relaxed) => {
-                kill_tree(&mut child);
-                return Err(io::Error::new(
-                    io::ErrorKind::Interrupted,
-                    "command was cancelled",
-                ));
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                if started.elapsed() > timeout {
+                    kill_and_join_readers(&mut child, stdout_reader, stderr_reader);
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "command exceeded its time limit",
+                    ));
+                }
+                return collect_output_until(
+                    &mut child,
+                    status,
+                    stdout_reader,
+                    stderr_reader,
+                    started + timeout,
+                );
             }
-            None if started.elapsed() <= timeout => std::thread::sleep(Duration::from_millis(25)),
-            None => {
-                kill_tree(&mut child);
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "command exceeded its time limit",
-                ));
+            Ok(None) => {}
+            Err(error) => {
+                kill_and_join_readers(&mut child, stdout_reader, stderr_reader);
+                return Err(error);
             }
+        }
+        if cancel.load(Relaxed) {
+            kill_and_join_readers(&mut child, stdout_reader, stderr_reader);
+            return Err(io::Error::new(
+                io::ErrorKind::Interrupted,
+                "command was cancelled",
+            ));
+        }
+        if started.elapsed() <= timeout {
+            std::thread::sleep(Duration::from_millis(25));
+        } else {
+            kill_and_join_readers(&mut child, stdout_reader, stderr_reader);
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "command exceeded its time limit",
+            ));
         }
     }
 }
@@ -725,6 +814,36 @@ mod tests {
     }
 
     #[test]
+    fn bounded_runner_kills_pipe_holding_descendants_after_parent_exits() {
+        let started = Instant::now();
+        let output = run_bounded(
+            &["sh".into(), "-c".into(), "sleep 30 & printf done".into()],
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        assert!(output.status.success());
+        assert_eq!(output.stdout, b"done");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn bounded_runner_drains_beyond_capture_cap_then_reports_overflow() {
+        let started = Instant::now();
+        let error = run_bounded(
+            &[
+                "head".into(),
+                "-c".into(),
+                (MAX_CAPTURE_BYTES + 1024).to_string(),
+                "/dev/zero".into(),
+            ],
+            Duration::from_secs(5),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::OutOfMemory);
+        assert!(started.elapsed() < Duration::from_secs(3));
+    }
+
+    #[test]
     fn bounded_runner_terminates_a_stalled_child() {
         let error = run_bounded(
             &["sh".into(), "-c".into(), "sleep 1".into()],
@@ -732,6 +851,16 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+    }
+
+    #[test]
+    fn bounded_runner_does_not_report_success_if_child_exits_after_deadline() {
+        let error = run_bounded(
+            &["sh".into(), "-c".into(), "sleep 0.08".into()],
+            Duration::from_millis(30),
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
     }
 
     #[test]
@@ -765,6 +894,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output.stdout, b"secret");
+    }
+
+    #[test]
+    fn bounded_input_rejects_payloads_over_the_limit_before_spawning() {
+        let oversized = vec![b'x'; MAX_INPUT_BYTES + 1];
+        let error = run_bounded_with_input(&["true".into()], &oversized, Duration::from_secs(2))
+            .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 
     #[test]

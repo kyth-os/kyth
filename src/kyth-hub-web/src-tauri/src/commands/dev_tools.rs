@@ -101,6 +101,18 @@ fn validate_selection(
     if resolved.is_empty() {
         return Err("None of the selected tools are recognized.".to_string());
     }
+    if resolved.len() != selected_ids.len() {
+        return Err("One or more selected tools are no longer available. Refresh the catalog and try again.".to_string());
+    }
+    if let Some(tool) = resolved
+        .iter()
+        .find(|tool| matches!(tool.install, InstallMethod::Manual(_)))
+    {
+        let InstallMethod::Manual(url) = tool.install else {
+            unreachable!();
+        };
+        return Err(format!("{} needs manual installation: {url}", tool.name));
+    }
     Ok(resolved)
 }
 
@@ -124,7 +136,16 @@ pub(crate) fn dev_tools_install_selection(
         use super::job::update_job;
         use std::sync::atomic::Ordering::Relaxed;
 
-        if !ai_dev::box_exists(&box_config).unwrap_or(false) {
+        let box_exists = match ai_dev::box_exists(&box_config) {
+            Ok(exists) => exists,
+            Err(error) => {
+                return (
+                    "failed".into(),
+                    format!("Could not check whether the dev box exists: {error}"),
+                )
+            }
+        };
+        if !box_exists {
             update_job(&worker_job, "Creating the dev box…");
             let home = home_dir();
             let gpu = ai_dev::gpu_kind();
@@ -201,11 +222,19 @@ pub(crate) fn dev_tools_install_selection(
         }) {
             update_job(&worker_job, &format!("Installing {}…", tool.name));
             let Some(argv) = ai_dev::host_install_command(tool) else {
-                continue;
+                return (
+                    "failed".into(),
+                    format!("Could not build the {} install command.", tool.name),
+                );
             };
             let (program, args) = match argv.split_first() {
                 Some(parts) => parts,
-                None => continue,
+                None => {
+                    return (
+                        "failed".into(),
+                        format!("Could not build the {} install command.", tool.name),
+                    )
+                }
             };
             let mut command = std::process::Command::new(program);
             command.args(args);
@@ -264,7 +293,17 @@ mod tests {
     fn rejects_empty_and_unknown_selection() {
         assert!(validate_selection(&[]).is_err());
         assert!(validate_selection(&["not-a-real-tool".to_string()]).is_err());
+        assert!(
+            validate_selection(&["vscode".to_string(), "not-a-real-tool".to_string()]).is_err()
+        );
         assert!(validate_selection(&["vscode".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn manual_tools_are_not_reported_as_installed_by_the_automated_wizard() {
+        let error = validate_selection(&["claude-desktop".to_string()]).unwrap_err();
+        assert!(error.contains("manual installation"));
+        assert!(error.contains("https://"));
     }
 
     #[test]

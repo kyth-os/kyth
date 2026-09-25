@@ -207,13 +207,16 @@ pub(crate) fn privileged_action(
     // The privileged worker only does socket I/O against the root-owned
     // service, so there is no child to kill: cancelling marks the job and
     // its late finish becomes a no-op.
-    let (job, _) = jobs().start(&job, format!("Running {operation}…"));
+    let (job, cancel) = jobs().start(&job, format!("Running {operation}…"));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
-        let result = send_request(request);
-        let (state, detail) = match result {
-            Ok(detail) => ("complete", detail),
-            Err(detail) => ("failed", detail),
+        let (state, detail) = if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            ("cancelled", "Cancelled.".to_string())
+        } else {
+            match send_request(request) {
+                Ok(detail) => ("complete", detail),
+                Err(detail) => ("failed", detail),
+            }
         };
         jobs().finish(&job_for_thread, state, detail);
     });

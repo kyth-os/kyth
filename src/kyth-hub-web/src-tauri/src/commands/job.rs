@@ -127,26 +127,34 @@ pub(crate) fn spawn_argv_job(
     // keeps the worker correct if the entry already expired.
     let cancel = cancel_flag(&job).unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
     std::thread::spawn(move || {
-        let mut command = Command::new(&argv[0]);
-        command.args(&argv[1..]);
-        // Sudo children never inherit the caller environment: clear it and
-        // keep only the minimal desktop set via the shared sanitizer, then
-        // set the askpass helper explicitly. No `-E` passthrough.
-        if argv
-            .first()
-            .is_some_and(|program| program == "sudo" || program.ends_with("/sudo"))
-        {
-            let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
-            let desktop = kyth_shared::commands::environment_for(
-                kyth_shared::commands::EnvironmentPolicy::Desktop,
-                &inherited,
-            );
-            command.env_clear().envs(desktop);
-        }
-        askpass_env(&mut command);
-        let result =
-            kyth_shared::system::process::run_bounded_command_cancel(command, timeout, &cancel);
-        let (state, detail) = on_done(result);
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut command = Command::new(&argv[0]);
+            command.args(&argv[1..]);
+            // Sudo children never inherit the caller environment: clear it and
+            // keep only the minimal desktop set via the shared sanitizer, then
+            // set the askpass helper explicitly. No `-E` passthrough.
+            if argv
+                .first()
+                .is_some_and(|program| program == "sudo" || program.ends_with("/sudo"))
+            {
+                let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+                let desktop = kyth_shared::commands::environment_for(
+                    kyth_shared::commands::EnvironmentPolicy::Desktop,
+                    &inherited,
+                );
+                command.env_clear().envs(desktop);
+            }
+            askpass_env(&mut command);
+            let result =
+                kyth_shared::system::process::run_bounded_command_cancel(command, timeout, &cancel);
+            on_done(result)
+        }));
+        let (state, detail) = result.unwrap_or_else(|_| {
+            (
+                "failed".into(),
+                "Background command worker panicked.".into(),
+            )
+        });
         finish_job(job, &state, detail);
     });
 }
@@ -164,7 +172,9 @@ pub(crate) fn spawn_task_job(
 ) {
     let cancel = cancel_flag(&job).unwrap_or_else(|| Arc::new(AtomicBool::new(false)));
     std::thread::spawn(move || {
-        let (state, detail) = task(job.clone(), cancel);
+        let (state, detail) =
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| task(job.clone(), cancel)))
+                .unwrap_or_else(|_| ("failed".into(), "Background task worker panicked.".into()));
         finish_job(job, &state, detail);
     });
 }
@@ -208,5 +218,26 @@ mod tests {
         });
         let (state, _) = jobs().status(&job).expect("job should resolve");
         assert_eq!(state, "failed");
+    }
+
+    #[test]
+    fn panicking_task_fails_instead_of_leaving_job_running() {
+        let job = new_job_id("test-panic");
+        let (job, _) = jobs().start(&job, "pending".to_string());
+        spawn_task_job(job.clone(), |_worker_job, _cancel| {
+            panic!("simulated worker panic")
+        });
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if jobs()
+                .status(&job)
+                .is_some_and(|(state, _)| state == "failed")
+            {
+                break;
+            }
+            assert!(std::time::Instant::now() < deadline, "job stayed running");
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 }
