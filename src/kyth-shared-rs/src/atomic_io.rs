@@ -6,7 +6,7 @@
 
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -34,6 +34,11 @@ pub fn atomic_write_bytes(
     let parent = path.parent().unwrap_or_else(|| Path::new("."));
     fs::create_dir_all(parent)?;
     refuse_symlink(path)?;
+    let mode = mode.or_else(|| {
+        fs::symlink_metadata(path)
+            .ok()
+            .map(|metadata| metadata.permissions().mode() & 0o777)
+    });
 
     let nonce = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -118,6 +123,22 @@ mod tests {
         atomic_write_text(&path, "first", Some(0o600)).unwrap();
         atomic_write_text(&path, "second", Some(0o600)).unwrap();
         assert_eq!(fs::read_to_string(path).unwrap(), "second");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn replacement_without_explicit_mode_preserves_existing_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("private.txt");
+        fs::write(&path, "first").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        atomic_write_text(&path, "second", None).unwrap();
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
     }
 
     #[test]

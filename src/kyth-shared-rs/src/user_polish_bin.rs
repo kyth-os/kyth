@@ -17,30 +17,43 @@ use kyth_shared::atomic_io::atomic_write_text;
 use kyth_shared::desktop_polish::{self, FOLDER_METADATA, MIME_DEFAULTS, USER_FOLDERS};
 use kyth_shared::system::desktop_plasma::{kreadconfig_argv, kwriteconfig_argv};
 use kyth_shared::system::process::{run_bounded, run_bounded_command};
-use kyth_shared::system::session_config::{
-    restore_snapshot, should_run_plasma_migration, snapshot_before_write,
-};
+use kyth_shared::system::session_config::{restore_snapshot, should_run_plasma_migration};
+
+const SNAPSHOT_PATHS: &[&str] = &[
+    ".config/Code/argv.json",
+    ".config/brave-flags.conf",
+    ".config/BraveSoftware/Brave-Browser/brave-flags.conf",
+    ".config/ksplashrc",
+    ".config/plasma-localerc",
+    ".config/dolphinrc",
+    ".local/share/applications/com.brave.Browser.desktop",
+];
+
+fn snapshot_relative_path(snapshot_file: &str) -> Option<&'static str> {
+    SNAPSHOT_PATHS
+        .iter()
+        .copied()
+        .find(|relative| relative.replace('/', "__") == snapshot_file)
+}
 
 /// Best-effort snapshot of every `~/.config` file this binary may rewrite,
 /// taken once per run before any write. Returns the snapshot directory.
 fn snapshot_config_dir(home: &Path) -> PathBuf {
     let stamp = kyth_shared::system::session_config::snapshot_stamp();
-    let snapshot_dir = home.join(format!(".local/share/kyth/config-snapshots/{stamp}"));
+    let run_id = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let snapshot_dir = home.join(format!(
+        ".local/share/kyth/config-snapshots/{stamp}-{}-{run_id}",
+        std::process::id()
+    ));
     let _ = fs::create_dir_all(&snapshot_dir);
-    for rel in [
-        ".config/Code/argv.json",
-        ".config/brave-flags.conf",
-        ".config/BraveSoftware/Brave-Browser/brave-flags.conf",
-        ".config/ksplashrc",
-        ".config/plasma-localerc",
-        ".config/dolphinrc",
-        ".local/share/applications/com.brave.Browser.desktop",
-    ] {
+    for rel in SNAPSHOT_PATHS {
         let source = home.join(rel);
         if source.is_file() {
             let target = snapshot_dir.join(rel.replace('/', "__"));
-            let _ = snapshot_before_write(&source)
-                .and(fs::copy(&source, &target).map(|_| PathBuf::new()));
+            let _ = fs::copy(&source, &target);
         }
     }
     snapshot_dir
@@ -57,21 +70,39 @@ fn force_restore(home: &Path, snapshot_dir: &Path) -> ExitCode {
         return ExitCode::from(1);
     };
     let mut restored = 0;
-    for entry in entries.flatten() {
+    let mut failed = false;
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                failed = true;
+                eprintln!("kyth-user-polish: could not read snapshot entry: {error}");
+                continue;
+            }
+        };
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(rel) = name
-            .split_once("__")
-            .map(|(head, tail)| format!("{head}/{tail}").replace("__", "/"))
-        else {
+        // Only restore paths this binary snapshots. Snapshot contents can be
+        // user supplied to --force-restore, so decoding arbitrary path names
+        // here would let a crafted directory overwrite unrelated home files.
+        let Some(rel) = snapshot_relative_path(&name) else {
+            failed = true;
+            eprintln!("kyth-user-polish: ignoring unrecognized snapshot entry {name}");
             continue;
         };
-        match restore_snapshot(&home.join(&rel), &entry.path()) {
+        match restore_snapshot(&home.join(rel), &entry.path()) {
             Ok(()) => restored += 1,
-            Err(error) => eprintln!("kyth-user-polish: restore {rel}: {error}"),
+            Err(error) => {
+                failed = true;
+                eprintln!("kyth-user-polish: restore {rel}: {error}");
+            }
         }
     }
     println!("kyth-user-polish: restored {restored} files from snapshot");
-    ExitCode::SUCCESS
+    if failed {
+        ExitCode::from(1)
+    } else {
+        ExitCode::SUCCESS
+    }
 }
 
 /// Plasma version gate for config migrations: unknown or pre-6 Plasma keeps
@@ -757,11 +788,6 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     }
     let home = home();
-    let snapshot_dir = snapshot_config_dir(&home);
-    eprintln!(
-        "kyth-user-polish: pre-write snapshot at {}",
-        snapshot_dir.display()
-    );
     let stamp_name = format!("user-polish-{}", desktop_polish::VERSION);
     let first_polish = !has_polish_stamp(&home);
     if already_run(&home, &stamp_name) && !force {
@@ -777,6 +803,12 @@ fn main() -> ExitCode {
         cleanup_autostart(&home);
         return ExitCode::SUCCESS;
     }
+
+    let snapshot_dir = snapshot_config_dir(&home);
+    eprintln!(
+        "kyth-user-polish: pre-write snapshot at {}",
+        snapshot_dir.display()
+    );
 
     run_optional("xdg-user-dirs-update", &[]);
     apply_foundation(&home);
@@ -861,6 +893,33 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn snapshot_restore_path_allowlist_rejects_crafted_home_traversal() {
+        assert_eq!(
+            snapshot_relative_path(".config__Code__argv.json"),
+            Some(".config/Code/argv.json")
+        );
+        assert_eq!(snapshot_relative_path("..____.ssh__authorized_keys"), None);
+        assert_eq!(snapshot_relative_path("unknown__file"), None);
+    }
+
+    #[test]
+    fn config_snapshots_are_unique_and_do_not_leave_adjacent_backup_files() {
+        let home = tempdir().unwrap();
+        let config = home.path().join(".config/dolphinrc");
+        fs::create_dir_all(config.parent().unwrap()).unwrap();
+        fs::write(&config, "[General]\n").unwrap();
+
+        let first = snapshot_config_dir(home.path());
+        let second = snapshot_config_dir(home.path());
+        assert_ne!(first, second);
+        assert_eq!(
+            fs::read_to_string(first.join(".config__dolphinrc")).unwrap(),
+            "[General]\n"
+        );
+        assert_eq!(fs::read_dir(config.parent().unwrap()).unwrap().count(), 1);
+    }
 
     #[test]
     fn places_are_idempotent_and_reject_doctype() {

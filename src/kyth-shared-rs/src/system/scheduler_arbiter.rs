@@ -257,7 +257,7 @@ pub fn sync_gamemode_pin(ini: &Path, pin: bool) -> bool {
     if updated == text {
         return false;
     }
-    std::fs::write(ini, updated).is_ok()
+    crate::atomic_io::atomic_write_text(ini, &updated, None).is_ok()
 }
 
 /// Regenerate the flag file and sync gamemode.ini, mirroring
@@ -270,9 +270,7 @@ pub fn generate_arbiter_to(flag: &Path, gamemode_ini: &Path) -> std::io::Result<
     let mut text = serde_json::to_string_pretty(&state.as_value())
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     text.push('\n');
-    let tmp = flag.with_extension("tmp");
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, flag)?;
+    crate::atomic_io::atomic_write_text(flag, &text, Some(0o644))?;
     sync_gamemode_pin(gamemode_ini, state.gamemode_pin);
     Ok(flag.to_path_buf())
 }

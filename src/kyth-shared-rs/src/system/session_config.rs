@@ -138,11 +138,10 @@ pub fn snapshot_stamp() -> String {
 /// Restore `path` from a snapshot created by [`snapshot_before_write`].
 /// `--force-restore` flows here: the snapshot wins wholesale, no merging.
 pub fn restore_snapshot(path: &Path, backup: &Path) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
     let bytes = std::fs::read(backup)?;
-    std::fs::write(path, bytes)
+    use std::os::unix::fs::PermissionsExt;
+    let mode = std::fs::metadata(backup)?.permissions().mode() & 0o777;
+    crate::atomic_io::atomic_write_bytes(path, &bytes, Some(mode))
 }
 
 /// Minimum Plasma release a config migration is written for. Older sessions
@@ -247,10 +246,16 @@ mod tests {
         assert!(merged.contains("kwallet5"));
         // Force restore brings back the exact pre-write bytes.
         std::fs::write(&path, "clobbered").unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
         restore_snapshot(&path, &backup).unwrap();
         assert_eq!(
             std::fs::read_to_string(&path).unwrap(),
             r#"{"theme":"dark"}"#
+        );
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
         );
     }
 

@@ -9,6 +9,7 @@ use std::env;
 use std::path::PathBuf;
 use std::time::Duration;
 
+use kyth_shared::atomic_io::atomic_write_text;
 use kyth_shared::system::desktop_plasma::{
     default_application_roots, default_launchers, evaluate_plasma_argv, filter_available_launchers,
     kreadconfig_argv, qdbus_candidates, render_pins_script, taskbar_pins_state_path, CONFIG_FILE,
@@ -68,10 +69,7 @@ fn refresh() -> i32 {
     if !applied {
         return 1;
     }
-    if let Some(parent) = state_file.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    let _ = std::fs::write(&state_file, format!("{csv}\n"));
+    let _ = atomic_write_text(&state_file, &format!("{csv}\n"), Some(0o644));
     0
 }
 

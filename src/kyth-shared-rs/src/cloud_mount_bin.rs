@@ -8,13 +8,13 @@
 use std::env;
 use std::path::PathBuf;
 
-use kyth_shared::system::network_services::{cloud_path, load_cloud};
+use kyth_shared::system::network_services::{cloud_path, is_safe_cloud_drive_name, load_cloud};
 
 fn main() -> std::process::ExitCode {
     let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let drives = load_cloud(cloud_path(None::<PathBuf>));
     for (name, remote) in &drives {
-        if remote.is_empty() {
+        if remote.is_empty() || !is_safe_cloud_drive_name(name) {
             continue;
         }
         let mount = home.join("Cloud").join(name);

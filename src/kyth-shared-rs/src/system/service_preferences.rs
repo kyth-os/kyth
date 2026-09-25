@@ -87,8 +87,27 @@ pub fn shader_cache_dir(
     glsl_text: &str,
     root: impl AsRef<Path>,
 ) -> PathBuf {
+    let app_component = if !appid.is_empty()
+        && appid != "."
+        && appid != ".."
+        && appid
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+    {
+        appid.to_string()
+    } else {
+        // Steam app IDs are normally numeric, but this helper is also used
+        // with externally discovered identifiers. Keep malformed values in
+        // a deterministic directory without allowing path traversal.
+        let digest = Sha256::digest(appid.as_bytes());
+        let encoded = digest
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
+        format!("invalid-{encoded}")
+    };
     root.as_ref()
-        .join(appid)
+        .join(app_component)
         .join(shader_content_hash(appid, driver_version, glsl_text))
 }
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -252,6 +271,14 @@ mod tests {
     #[test]
     fn shader_hash_matches_python_shape() {
         assert_eq!(shader_content_hash("game", "driver", "").len(), 12);
+    }
+
+    #[test]
+    fn shader_cache_identifier_cannot_escape_cache_root() {
+        let root = Path::new("/cache");
+        let path = shader_cache_dir("../../outside", "driver", "", root);
+        assert_eq!(path.parent().unwrap().parent().unwrap(), root);
+        assert!(path.starts_with(root));
     }
 
     #[test]

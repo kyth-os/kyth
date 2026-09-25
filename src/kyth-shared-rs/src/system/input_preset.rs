@@ -55,8 +55,12 @@ fn parse_entry(value: &toml::Value) -> InputPreset {
                 .and_then(toml::Value::as_integer)
                 .map(|v| v as f64)
                 .unwrap_or(0.0)
-        })
-        .clamp(-1.0, 1.0);
+        });
+    let accel_speed = if accel_speed.is_finite() {
+        accel_speed.clamp(-1.0, 1.0)
+    } else {
+        0.0
+    };
     InputPreset {
         accel_profile,
         accel_speed,
@@ -67,6 +71,7 @@ fn parse_entry(value: &toml::Value) -> InputPreset {
         scroll_method: table
             .and_then(|t| t.get("scroll_method"))
             .and_then(toml::Value::as_str)
+            .filter(|method| matches!(*method, "twofinger" | "edge" | "button"))
             .unwrap_or("twofinger")
             .to_string(),
     }
@@ -114,8 +119,20 @@ pub fn render_xorg_conf(devices: &BTreeMap<String, InputPreset>) -> String {
         " MatchIsPointer \"on\"".to_string(),
     ];
     for (name, preset) in devices {
+        // Device names come from a user-owned TOML file while this output is
+        // installed under /etc. Keep them on a single comment line so config
+        // text cannot be injected through a newline or control character.
+        let safe_name = name
+            .chars()
+            .map(|character| match character {
+                '\n' => String::from("\\n"),
+                '\r' => String::from("\\r"),
+                c if c.is_control() => format!("\\u{{{:x}}}", c as u32),
+                c => c.to_string(),
+            })
+            .collect::<String>();
         lines.push(format!(
-            " # {name} accel {} speed {}",
+            " # {safe_name} accel {} speed {}",
             preset.accel_profile,
             py_float(preset.accel_speed)
         ));
@@ -184,6 +201,32 @@ mod tests {
         );
         assert_eq!(render_xorg_conf(&BTreeMap::new()), "Section \"InputClass\"\n Identifier \"kyth-input\"\n MatchIsPointer \"on\"\nEndSection\n");
         assert_eq!(py_float(-1.0), "-1.0");
+    }
+
+    #[test]
+    fn renders_untrusted_device_names_as_single_line_comments() {
+        let mut devices = BTreeMap::new();
+        devices.insert(
+            "mouse\nOption \"CorePointer\" \"off\"".into(),
+            InputPreset::default(),
+        );
+        let rendered = render_xorg_conf(&devices);
+        assert!(rendered.contains("# mouse\\nOption \"CorePointer\" \"off\" accel"));
+        assert_eq!(rendered.matches("Section \"InputClass\"").count(), 1);
+    }
+
+    #[test]
+    fn rejects_unknown_scroll_methods_and_non_finite_speeds() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("input.toml");
+        std::fs::write(
+            &path,
+            "[devices.mouse]\naccel_speed = inf\nscroll_method = 'command'\n",
+        )
+        .unwrap();
+        let loaded = load(path);
+        assert_eq!(loaded["mouse"].accel_speed, 0.0);
+        assert_eq!(loaded["mouse"].scroll_method, "twofinger");
     }
 
     #[test]

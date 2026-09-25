@@ -49,6 +49,17 @@ pub fn load_cloud(path: impl AsRef<Path>) -> BTreeMap<String, String> {
         })
         .unwrap_or_default()
 }
+
+/// Names are used as both mount path components and systemd template
+/// instances by the cloud-mount launcher.
+pub fn is_safe_cloud_drive_name(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'))
+}
 pub fn cloud_path(path: Option<impl AsRef<Path>>) -> PathBuf {
     user_path("cloud.toml", path)
 }
@@ -119,6 +130,17 @@ mod tests {
         let drives = BTreeMap::from([("Work \"NAS\"".into(), "nas:home".into())]);
         save_cloud(&path, &drives).unwrap();
         assert_eq!(load_cloud(&path), drives);
+    }
+
+    #[test]
+    fn cloud_drive_name_validation_rejects_path_and_unit_injection() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("cloud.toml");
+        std::fs::write(&path, "[drives.good_name]\nremote='r:good'\n").unwrap();
+        assert!(is_safe_cloud_drive_name("good_name"));
+        assert!(!is_safe_cloud_drive_name("../outside"));
+        assert!(!is_safe_cloud_drive_name("space name"));
+        assert_eq!(load_cloud(path).len(), 1);
     }
 
     #[test]
