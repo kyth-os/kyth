@@ -68,6 +68,17 @@ class AiDevTests(unittest.TestCase):
     def test_antigravity_is_not_preinstalled_or_exported(self) -> None:
         self.assertNotIn("antigravity", PROVISION_SCRIPT.lower())
 
+    def test_export_clears_stale_destination_before_distrobox_export(self) -> None:
+        # Regression: distrobox-export's `touch` follows symlinks, so a
+        # stale/dangling symlink already at ~/.local/bin/<tool> (e.g. left
+        # behind by an uninstalled or upgraded VS Code extension pointing
+        # elsewhere) makes the export fail with "cannot create destination
+        # file" even though the tool installed correctly inside the box.
+        self.assertIn('rm -f ~/.local/bin/"$binary"', PROVISION_SCRIPT)
+        rm_pos = PROVISION_SCRIPT.index('rm -f ~/.local/bin/"$binary"')
+        export_pos = PROVISION_SCRIPT.index("distrobox-export --bin")
+        self.assertLess(rm_pos, export_pos, "rm -f must run before distrobox-export")
+
 
 if __name__ == "__main__":
     unittest.main()

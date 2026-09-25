@@ -39,7 +39,7 @@ if command -v uv >/dev/null 2>&1; then uv tool install --python 3.13 --upgrade '
 distrobox-export --app code || true
 for binary in code az node npm npx hx zellij shellcheck shfmt gh flatpak-builder rclone duperemove trivy zizmor bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux pipx uv starship direnv delta gum 7z 7za cabextract readpst claude codex; do
   path="$(command -v "$binary" 2>/dev/null || true)"
-  test -z "$path" || distrobox-export --bin "$path" --export-path "$HOME/.local/bin" || true
+  test -z "$path" || { rm -f "$HOME/.local/bin/$binary"; distrobox-export --bin "$path" --export-path "$HOME/.local/bin"; } || true
 done
 "#;
 
@@ -309,10 +309,11 @@ pub fn provision_script_for_selection(selected: &[&DevTool]) -> Option<String> {
         script.push_str(&format!("sudo npm install -g {}\n", npm_packages.join(" ")));
     }
     if !export_bins.is_empty() {
-        script.push_str(&format!(
-            "for binary in {}; do\n  path=\"$(command -v \"$binary\" 2>/dev/null)\" || {{ echo \"ERROR: selected tool did not install binary: $binary\" >&2; exit 1; }}\n  distrobox-export --bin \"$path\" --export-path \"$HOME/.local/bin\"\ndone\n",
-            export_bins.join(" ")
-        ));
+        script.push_str(&format!("for binary in {}; do\n", export_bins.join(" ")));
+        script.push_str("  path=\"$(command -v \"$binary\" 2>/dev/null)\" || { echo \"ERROR: selected tool did not install binary: $binary\" >&2; exit 1; }\n");
+        script.push_str("  rm -f \"$HOME/.local/bin/$binary\"\n");
+        script.push_str("  distrobox-export --bin \"$path\" --export-path \"$HOME/.local/bin\"\n");
+        script.push_str("done\n");
     }
     Some(script)
 }
@@ -508,6 +509,18 @@ mod tests {
         assert!(!script.contains("--skip-unavailable"));
         assert!(!script.contains("npm install -g @anthropic-ai/claude-code || true"));
         assert!(script.contains("did not install binary"));
+        // Regression: distrobox-export's `touch` follows symlinks, so a
+        // stale/dangling symlink already at the destination (e.g. left
+        // behind by a removed VS Code extension) makes the export fail
+        // with "cannot create destination file" even though the real
+        // binary installed fine. Clear whatever is at that path first.
+        assert!(script.contains("rm -f \"$HOME/.local/bin/$binary\""));
+        let rm_pos = script.find("rm -f \"$HOME/.local/bin/$binary\"").unwrap();
+        let export_pos = script.find("distrobox-export --bin").unwrap();
+        assert!(
+            rm_pos < export_pos,
+            "rm -f must run before distrobox-export"
+        );
     }
 
     #[test]

@@ -61,11 +61,11 @@ echo "Exporting applications and CLI wrappers to host..."
 distrobox-export --app code || true
 for binary in code az node npm npx hx zellij shellcheck shfmt gh flatpak-builder rclone duperemove trivy zizmor bat eza fastfetch zoxide evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux pipx uv starship direnv delta gum 7z 7za cabextract readpst; do
   path="$(command -v "$binary" 2>/dev/null || true)"
-  [[ -n "$path" ]] && distrobox-export --bin "$path" --export-path ~/.local/bin || true
+  [[ -n "$path" ]] && { rm -f ~/.local/bin/"$binary"; distrobox-export --bin "$path" --export-path ~/.local/bin; } || true
 done
 for binary in claude codex; do
   path="$(command -v "$binary" 2>/dev/null || true)"
-  [[ -n "$path" ]] && distrobox-export --bin "$path" --export-path ~/.local/bin || true
+  [[ -n "$path" ]] && { rm -f ~/.local/bin/"$binary"; distrobox-export --bin "$path" --export-path ~/.local/bin; } || true
 done
 """
 
