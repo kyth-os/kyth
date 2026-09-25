@@ -26,7 +26,12 @@ fn run(argv: &[String], timeout_secs: u64) -> Option<(i32, String)> {
         .map(|output| {
             (
                 output.status.code().unwrap_or(1),
-                String::from_utf8_lossy(&output.stdout).into_owned(),
+                String::from_utf8_lossy(if output.status.success() {
+                    &output.stdout
+                } else {
+                    &output.stderr
+                })
+                .into_owned(),
             )
         })
 }
@@ -113,7 +118,12 @@ fn main() -> std::process::ExitCode {
     ];
     for (url, dest, name) in downloads {
         println!("Downloading {name}...");
-        if let Err(error) = download_file(&run, url, dest, &headers, 120) {
+        let limit = if dest == &tarball_dest {
+            kyth_shared::system::release_fetch::MAX_ARCHIVE_BYTES
+        } else {
+            kyth_shared::system::release_fetch::MAX_CHECKSUM_BYTES
+        };
+        if let Err(error) = download_file(&run, url, dest, &headers, 120, limit) {
             fail(format!("Failed to download assets: {error}"));
         }
     }

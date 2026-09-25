@@ -25,7 +25,12 @@ fn run(argv: &[String], timeout_secs: u64) -> Option<(i32, String)> {
         .map(|output| {
             (
                 output.status.code().unwrap_or(1),
-                String::from_utf8_lossy(&output.stdout).into_owned(),
+                String::from_utf8_lossy(if output.status.success() {
+                    &output.stdout
+                } else {
+                    &output.stderr
+                })
+                .into_owned(),
             )
         })
 }
@@ -36,13 +41,15 @@ fn fail(message: String) -> ! {
 }
 
 #[cfg(unix)]
-fn set_executable(path: &Path) {
+fn set_executable(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755));
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755))
 }
 
 #[cfg(not(unix))]
-fn set_executable(_path: &Path) {}
+fn set_executable(_path: &Path) -> std::io::Result<()> {
+    Ok(())
+}
 
 fn installed_version() -> Option<String> {
     if !Path::new(RCLONE_BIN).is_file() {
@@ -58,6 +65,10 @@ fn installed_version() -> Option<String> {
         return None;
     }
     Some(tagged.trim_start_matches('v').to_string())
+}
+
+fn version_line_matches(first_line: &str, target: &str) -> bool {
+    first_line.split_whitespace().nth(1) == Some(target)
 }
 
 fn main() -> std::process::ExitCode {
@@ -108,8 +119,19 @@ fn main() -> std::process::ExitCode {
     let sums_name = "SHA256SUMS".to_string();
     for (file, dest) in [(&zip_name, &zip_dest), (&sums_name, &sums_dest)] {
         println!("rclone: downloading {file}...");
-        if let Err(error) = download_file(&run, &format!("{base_url}/{file}"), dest, &headers, 120)
-        {
+        let limit = if file == &zip_name {
+            kyth_shared::system::release_fetch::MAX_ARCHIVE_BYTES
+        } else {
+            kyth_shared::system::release_fetch::MAX_CHECKSUM_BYTES
+        };
+        if let Err(error) = download_file(
+            &run,
+            &format!("{base_url}/{file}"),
+            dest,
+            &headers,
+            120,
+            limit,
+        ) {
             fail(format!("ERROR: Failed to download rclone assets: {error}"));
         }
     }
@@ -127,7 +149,12 @@ fn main() -> std::process::ExitCode {
     }
     let target = PathBuf::from(RCLONE_BIN);
     if let Some(parent) = target.parent() {
-        let _ = std::fs::create_dir_all(parent);
+        if let Err(error) = std::fs::create_dir_all(parent) {
+            fail(format!(
+                "ERROR: Failed to create {}: {error}",
+                parent.display()
+            ));
+        }
     }
     // Same-dir temp + fsync + atomic rename: copying directly over the live
     // binary truncates it in place — a concurrent exec runs partial bytes
@@ -136,7 +163,24 @@ fn main() -> std::process::ExitCode {
     if let Err(error) = (|| -> Result<(), String> {
         std::fs::copy(&extracted, &staging)
             .map_err(|error| format!("copy to staging failed: {error}"))?;
-        set_executable(&staging);
+        set_executable(&staging).map_err(|error| format!("set executable mode failed: {error}"))?;
+        match run(
+            &[
+                staging.to_string_lossy().into_owned(),
+                "--version".to_string(),
+            ],
+            30,
+        ) {
+            Some((0, stdout))
+                if stdout
+                    .lines()
+                    .next()
+                    .is_some_and(|line| version_line_matches(line, &rclone_ver)) => {}
+            Some((code, _)) => {
+                return Err(format!("staged rclone version check failed (exit {code})"));
+            }
+            None => return Err("staged rclone could not be executed".to_string()),
+        }
         {
             let file = std::fs::OpenOptions::new()
                 .read(true)
@@ -161,7 +205,7 @@ fn main() -> std::process::ExitCode {
         Some((0, stdout)) => {
             let first = stdout.lines().next().unwrap_or("");
             println!("rclone installed: {first}");
-            if !first.contains(rclone_ver.as_str()) {
+            if !version_line_matches(first, &rclone_ver) {
                 fail(format!(
                     "ERROR: installed rclone version mismatch (expected {rclone_ver}, got {first})"
                 ));
@@ -181,16 +225,15 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(test)]
 mod tests {
+    use super::version_line_matches;
+
     /// The installed binary must report the target version: first line of
     /// `rclone --version` contains the version string.
-    fn version_line_matches(first_line: &str, target: &str) -> bool {
-        first_line.contains(target)
-    }
-
     #[test]
     fn version_gate_accepts_match_and_rejects_mismatch() {
         assert!(version_line_matches("rclone v1.66.0", "v1.66.0"));
         assert!(!version_line_matches("rclone v1.65.0", "v1.66.0"));
         assert!(!version_line_matches("", "v1.66.0"));
+        assert!(!version_line_matches("rclone v1.66.01", "v1.66.0"));
     }
 }

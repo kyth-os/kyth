@@ -17,6 +17,9 @@ use std::time::{Duration, Instant};
 
 pub const ARCHIVE_VERSION: u64 = 1;
 pub const ARCHIVE_PREFIX: &str = "kyth-setup";
+pub const MAX_ARCHIVE_MEMBERS: usize = 100_000;
+pub const MAX_ARCHIVE_BYTES: u64 = 16 * 1024 * 1024 * 1024;
+const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 
 pub const CONFIG_PATHS: &[&str] = &[
     ".config/kdeglobals",
@@ -115,6 +118,14 @@ pub fn validate_manifest(value: &Value) -> Result<SetupManifest, String> {
         .all(|path| path.as_str().is_some_and(is_allowed_restore_path))
     {
         return Err("The setup archive contains an unsupported settings path.".to_string());
+    }
+    let mut unique_paths = std::collections::HashSet::new();
+    if !copied
+        .iter()
+        .filter_map(Value::as_str)
+        .all(|path| unique_paths.insert(path))
+    {
+        return Err("The setup archive manifest contains duplicate settings paths.".to_string());
     }
     serde_json::from_value(value.clone())
         .map_err(|_| "The setup archive manifest is malformed.".to_string())
@@ -290,6 +301,9 @@ fn copy_file_nofollow(source: &Path, target: &Path) -> std::io::Result<()> {
             format!("refusing to restore symlink {}", source.display()),
         ));
     }
+    if std::fs::symlink_metadata(target).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        std::fs::remove_file(target)?;
+    }
     std::fs::copy(source, target)?;
     #[cfg(unix)]
     {
@@ -302,6 +316,9 @@ fn copy_file_nofollow(source: &Path, target: &Path) -> std::io::Result<()> {
 }
 
 fn copy_dir_recursive(source: &Path, target: &Path, merge: bool) -> std::io::Result<()> {
+    if std::fs::symlink_metadata(target).is_ok_and(|meta| meta.file_type().is_symlink()) {
+        std::fs::remove_file(target)?;
+    }
     if target.exists() {
         if !merge {
             std::fs::remove_dir_all(target)?;
@@ -323,6 +340,35 @@ fn copy_dir_recursive(source: &Path, target: &Path, merge: bool) -> std::io::Res
         }
     }
     Ok(())
+}
+
+fn safe_directory_chain(root: &Path, relative: &str) -> bool {
+    let Ok(root_meta) = std::fs::symlink_metadata(root) else {
+        return false;
+    };
+    if root_meta.file_type().is_symlink() || !root_meta.is_dir() {
+        return false;
+    }
+    let mut current = root.to_path_buf();
+    let path = Path::new(relative);
+    let Some(parent) = path.parent() else {
+        return true;
+    };
+    for component in parent.components() {
+        if component == Component::CurDir {
+            continue;
+        }
+        current.push(component.as_os_str());
+        match std::fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() || !metadata.is_dir() => {
+                return false;
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return true,
+            Err(_) => return false,
+        }
+    }
+    true
 }
 
 /// Copy one allowlisted relative path into `payload/files/`,
@@ -423,7 +469,19 @@ impl TempDir {
             let id = TEMP_COUNTER.fetch_add(1, Ordering::Relaxed);
             let path = std::env::temp_dir().join(format!("{prefix}-{}-{id}", std::process::id()));
             match std::fs::create_dir(&path) {
-                Ok(()) => return Ok(Self { path }),
+                Ok(()) => {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        if let Err(error) =
+                            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o700))
+                        {
+                            let _ = std::fs::remove_dir(&path);
+                            return Err(format!("Cannot secure temporary directory: {error}"));
+                        }
+                    }
+                    return Ok(Self { path });
+                }
                 Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
                 Err(error) => return Err(format!("Cannot create temporary directory: {error}")),
             }
@@ -539,7 +597,16 @@ pub fn tar_members(ctx: &SetupCtx, archive: &Path) -> Result<Vec<String>, String
 /// Extract after rejecting absolute and parent-traversing member names.
 /// Returns the payload directory.
 pub fn safe_extract(ctx: &SetupCtx, archive: &Path, dest: &Path) -> Result<PathBuf, String> {
-    for name in tar_members(ctx, archive)? {
+    let members = tar_members(ctx, archive)?;
+    if members.len() > MAX_ARCHIVE_MEMBERS {
+        return Err(format!(
+            "Unsafe archive: more than {MAX_ARCHIVE_MEMBERS} members."
+        ));
+    }
+    for name in members {
+        if name.bytes().any(|byte| byte.is_ascii_control()) {
+            return Err("Unsafe archive path: member contains control characters.".to_string());
+        }
         let path = Path::new(&name);
         if path.is_absolute()
             || path
@@ -560,7 +627,9 @@ pub fn safe_extract(ctx: &SetupCtx, archive: &Path, dest: &Path) -> Result<PathB
         120,
     )?;
     let payload = dest.join(ARCHIVE_PREFIX);
-    if !payload.is_dir() {
+    if !std::fs::symlink_metadata(&payload)
+        .is_ok_and(|metadata| !metadata.file_type().is_symlink() && metadata.is_dir())
+    {
         return Err("This is not a KythOS setup archive.".to_string());
     }
     // Symlink sweep: tar plants `files/.config/x -> /etc`-style links at
@@ -568,23 +637,44 @@ pub fn safe_extract(ctx: &SetupCtx, archive: &Path, dest: &Path) -> Result<PathB
     // Our own exporter never writes symlinks, so any is hostile — refuse
     // the whole archive rather than restoring around it.
     let mut links = Vec::new();
-    let mut stack = vec![payload.join("files")];
+    let mut total_bytes = 0u64;
+    let mut entries_seen = 0usize;
+    let mut stack = vec![payload.clone()];
     while let Some(directory) = stack.pop() {
-        let Ok(entries) = std::fs::read_dir(&directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
+        let entries = std::fs::read_dir(&directory)
+            .map_err(|error| format!("Could not inspect setup archive: {error}"))?;
+        for entry in entries {
+            let entry =
+                entry.map_err(|error| format!("Could not inspect setup archive: {error}"))?;
             let path = entry.path();
-            if path.is_symlink() {
+            entries_seen = entries_seen.saturating_add(1);
+            if entries_seen > MAX_ARCHIVE_MEMBERS {
+                return Err(format!(
+                    "Unsafe archive: more than {MAX_ARCHIVE_MEMBERS} extracted entries."
+                ));
+            }
+            let metadata = std::fs::symlink_metadata(&path)
+                .map_err(|error| format!("Could not inspect setup archive: {error}"))?;
+            if metadata.file_type().is_symlink() {
                 links.push(path);
-            } else if path.is_dir() {
+            } else if metadata.is_dir() {
                 stack.push(path);
+            } else if metadata.is_file() {
+                total_bytes = total_bytes.saturating_add(metadata.len());
+                if total_bytes > MAX_ARCHIVE_BYTES {
+                    return Err(format!(
+                        "Unsafe archive: expanded size exceeds {} GiB.",
+                        MAX_ARCHIVE_BYTES / 1024 / 1024 / 1024
+                    ));
+                }
+            } else {
+                return Err("Unsafe archive: special file in setup payload.".to_string());
             }
         }
     }
     if !links.is_empty() {
         return Err(format!(
-            "Unsafe archive: {} symlink(s) under files/ (first: {}). Only archives exported by KythOS itself are safe to restore.",
+            "Unsafe archive: {} symlink(s) in payload (first: {}). Only archives exported by KythOS itself are safe to restore.",
             links.len(),
             links[0].display()
         ));
@@ -595,7 +685,13 @@ pub fn safe_extract(ctx: &SetupCtx, archive: &Path, dest: &Path) -> Result<PathB
 /// Read and validate the payload manifest, preserving the Python error
 /// contract for missing versus malformed manifests.
 pub fn load_manifest_from_payload(payload: &Path) -> Result<SetupManifest, String> {
-    let text = std::fs::read_to_string(payload.join("manifest.json"))
+    let path = payload.join("manifest.json");
+    let metadata = std::fs::symlink_metadata(&path)
+        .map_err(|_| "The setup archive manifest is missing or invalid.".to_string())?;
+    if !metadata.is_file() || metadata.len() > MAX_MANIFEST_BYTES {
+        return Err("The setup archive manifest is missing or invalid.".to_string());
+    }
+    let text = std::fs::read_to_string(path)
         .map_err(|_| "The setup archive manifest is missing or invalid.".to_string())?;
     let value: Value = serde_json::from_str(&text)
         .map_err(|_| "The setup archive manifest is missing or invalid.".to_string())?;
@@ -626,11 +722,20 @@ pub fn archive_summary(ctx: &SetupCtx, archive: &Path) -> Result<String, String>
 pub fn restore_files(payload: &Path, home: &Path, paths: &[String]) -> usize {
     let mut restored = 0;
     for rel in paths {
+        if !is_allowed_restore_path(rel) || !safe_directory_chain(&payload.join("files"), rel) {
+            continue;
+        }
+        let Ok(home_root) = home.canonicalize() else {
+            continue;
+        };
+        if !safe_directory_chain(&home_root, rel) {
+            continue;
+        }
         let source = payload.join("files").join(rel);
         if std::fs::symlink_metadata(&source).is_err() {
             continue;
         }
-        let target = home.join(rel);
+        let target = home_root.join(rel);
         if target
             .parent()
             .is_some_and(|parent| std::fs::create_dir_all(parent).is_err())
@@ -1010,6 +1115,11 @@ mod tests {
             ".local/share/applications/kyth-demo.desktop/extra"
         ));
         assert!(validate_manifest(&manifest(&[".config/unknown"])).is_err());
+        assert!(
+            validate_manifest(&manifest(&[".config/kdeglobals", ".config/kdeglobals"]))
+                .unwrap_err()
+                .contains("duplicate")
+        );
     }
 
     #[test]
@@ -1035,6 +1145,84 @@ mod tests {
             hostname: &|| "kyth-test".to_string(),
             flatpak_present,
         }
+    }
+
+    #[test]
+    fn setup_transfer_temporary_directories_are_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = TempDir::create("kyth-setup-test").unwrap();
+        assert_eq!(
+            std::fs::metadata(&dir.path).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+    }
+
+    #[test]
+    fn safe_extract_rejects_too_many_members_before_unpacking() {
+        use std::cell::RefCell;
+        let calls = RefCell::new(0);
+        let listing = "x\n".repeat(MAX_ARCHIVE_MEMBERS + 1);
+        let run = |args: &[String], _timeout: u64| {
+            *calls.borrow_mut() += 1;
+            assert_eq!(args[0], "tar");
+            Some((0, listing.clone()))
+        };
+        let ctx = stub_ctx(Path::new("/nonexistent-home"), &run, true);
+        assert!(
+            safe_extract(&ctx, Path::new("archive.tar.gz"), Path::new("/tmp/out"))
+                .unwrap_err()
+                .contains("members")
+        );
+        assert_eq!(*calls.borrow(), 1);
+    }
+
+    #[test]
+    fn safe_extract_rejects_oversized_payload_and_manifest_links() {
+        use std::cell::Cell;
+        let home = Path::new("/nonexistent-home");
+        let stage_large = Cell::new(true);
+        let run = |args: &[String], _timeout: u64| {
+            if args.get(1).map(String::as_str) == Some("-tzf") {
+                return Some((0, "kyth-setup/files/.config/kdeglobals\n".to_string()));
+            }
+            let destination = PathBuf::from(args[4].clone());
+            let payload = destination.join(ARCHIVE_PREFIX);
+            if stage_large.get() {
+                let path = payload.join("files/.config/kdeglobals");
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                let file = std::fs::File::create(path).unwrap();
+                file.set_len(MAX_ARCHIVE_BYTES + 1).unwrap();
+            } else {
+                std::fs::create_dir_all(&payload).unwrap();
+                std::os::unix::fs::symlink("/etc/passwd", payload.join("manifest.json")).unwrap();
+            }
+            stage_large.set(!stage_large.get());
+            Some((0, String::new()))
+        };
+        let ctx = stub_ctx(home, &run, true);
+        let oversized = TempDir::create("kyth-setup-large").unwrap();
+        assert!(
+            safe_extract(&ctx, Path::new("archive.tar.gz"), &oversized.path)
+                .unwrap_err()
+                .contains("expanded size")
+        );
+        let linked = TempDir::create("kyth-setup-linked").unwrap();
+        assert!(
+            safe_extract(&ctx, Path::new("archive.tar.gz"), &linked.path)
+                .unwrap_err()
+                .contains("symlink")
+        );
+    }
+
+    #[test]
+    fn oversized_manifests_are_rejected_before_reading() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = dir.path().join("payload");
+        std::fs::create_dir(&payload).unwrap();
+        let manifest_path = payload.join("manifest.json");
+        let file = std::fs::File::create(&manifest_path).unwrap();
+        file.set_len(MAX_MANIFEST_BYTES + 1).unwrap();
+        assert!(load_manifest_from_payload(&payload).is_err());
     }
 
     #[test]
@@ -1070,14 +1258,59 @@ mod tests {
     fn restore_refuses_symlinks_instead_of_planting_them() {
         let dir = tempfile::tempdir().unwrap();
         let payload = dir.path().join("payload");
-        std::fs::create_dir_all(payload.join("files")).unwrap();
-        std::fs::write(payload.join("files/real.txt"), "data").unwrap();
-        std::os::unix::fs::symlink("real.txt", payload.join("files/link.txt")).unwrap();
+        std::fs::create_dir_all(payload.join("files/.config")).unwrap();
+        std::os::unix::fs::symlink("real", payload.join("files/.config/kdeglobals")).unwrap();
         let home = dir.path().join("home");
         std::fs::create_dir_all(&home).unwrap();
-        let restored = restore_files(&payload, &home, &["link.txt".to_string()]);
+        let restored = restore_files(&payload, &home, &[".config/kdeglobals".to_string()]);
         assert_eq!(restored, 0, "a symlink must never be recreated in $HOME");
-        assert!(!home.join("link.txt").exists());
+        assert!(!home.join(".config/kdeglobals").exists());
+    }
+
+    #[test]
+    fn restore_rejects_unlisted_paths_and_symlinked_parent_directories() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = dir.path().join("payload");
+        std::fs::create_dir_all(payload.join("files/.config")).unwrap();
+        std::fs::write(payload.join("files/.config/kdeglobals"), "safe").unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, home.join(".config")).unwrap();
+
+        assert_eq!(
+            restore_files(&payload, &home, &["../escape".to_string()]),
+            0
+        );
+        assert_eq!(
+            restore_files(&payload, &home, &[".config/kdeglobals".to_string()]),
+            0
+        );
+        assert!(!outside.join("kdeglobals").exists());
+    }
+
+    #[test]
+    fn restore_replaces_a_leaf_symlink_without_writing_through_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let payload = dir.path().join("payload");
+        std::fs::create_dir_all(payload.join("files/.config")).unwrap();
+        std::fs::write(payload.join("files/.config/kdeglobals"), "restored").unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(home.join(".config")).unwrap();
+        let outside = dir.path().join("outside");
+        std::fs::write(&outside, "untouched").unwrap();
+        std::os::unix::fs::symlink(&outside, home.join(".config/kdeglobals")).unwrap();
+
+        assert_eq!(
+            restore_files(&payload, &home, &[".config/kdeglobals".to_string()]),
+            1
+        );
+        assert_eq!(
+            std::fs::read_to_string(home.join(".config/kdeglobals")).unwrap(),
+            "restored"
+        );
+        assert_eq!(std::fs::read_to_string(outside).unwrap(), "untouched");
     }
 
     #[test]
