@@ -59,6 +59,192 @@ pub(crate) struct StageProgressSnapshot {
 
 static STAGE_PROGRESS: OnceLock<std::sync::Mutex<StageProgressSnapshot>> = OnceLock::new();
 const STAGE_PROGRESS_HEARTBEAT: Duration = Duration::from_secs(5);
+const IMAGE_RELEASES_API: &str =
+    "https://api.github.com/repos/kyth-os/kyth/releases?per_page=100";
+const IMAGE_RELEASES_MAX_BYTES: &str = "4000000";
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct UpdateReleaseSummary {
+    pub(crate) version: String,
+    pub(crate) release_url: String,
+    pub(crate) highlights_title: String,
+    pub(crate) highlights: Vec<String>,
+}
+
+fn valid_image_digest(digest: &str) -> bool {
+    digest
+        .strip_prefix("sha256:")
+        .is_some_and(|hex| hex.len() == 64 && hex.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
+}
+
+fn image_release_version(channel: &str, tag: &str) -> Option<String> {
+    if !matches!(channel, "latest" | "testing") {
+        return None;
+    }
+    let suffix = tag.strip_prefix(&format!("image-{channel}-"))?;
+    let parts: Vec<&str> = suffix.split('-').collect();
+    if parts.len() != 4
+        || parts[0].len() != 8
+        || !parts[0].bytes().all(|byte| byte.is_ascii_digit())
+        || !parts[1..3]
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+        || parts[3].len() != 8
+        || !parts[3]
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return None;
+    }
+    Some(format!("{channel}.{}.{}.{}.{}", parts[0], parts[1], parts[2], parts[3]))
+}
+
+fn release_cell(value: &str) -> Option<String> {
+    let value = value.trim().trim_matches('`');
+    if value.is_empty()
+        || value.len() > 100
+        || !value.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric()
+                || matches!(byte, b'.' | b'_' | b'-' | b'+' | b'^' | b':' | b'~')
+        })
+    {
+        return None;
+    }
+    Some(value.to_string())
+}
+
+fn release_highlights(body: &str) -> (String, Vec<String>) {
+    let mut section = "";
+    let mut package_changes = Vec::new();
+    let mut key_packages = Vec::new();
+    let mut security_fixes = Vec::new();
+    for line in body.lines() {
+        if let Some(heading) = line.strip_prefix("### ") {
+            section = heading.trim();
+            continue;
+        }
+        let cells: Vec<&str> = line.split('|').map(str::trim).collect();
+        if section == "Major Package Changes" && cells.len() >= 6 {
+            let (Some(marker), Some(name)) = (release_cell(cells[1]), release_cell(cells[2])) else {
+                continue;
+            };
+            let previous = release_cell(cells[3]);
+            let next = release_cell(cells[4]);
+            let change = match (marker.as_str(), previous, next) {
+                ("+", None, Some(next)) => format!("Added {name} {next}"),
+                ("-", Some(previous), None) => format!("Removed {name} {previous}"),
+                ("~", Some(previous), Some(next)) => {
+                    format!("Updated {name} from {previous} to {next}")
+                }
+                _ => continue,
+            };
+            package_changes.push(change);
+        } else if section == "Major Packages" && cells.len() >= 4 {
+            let (Some(name), Some(version)) = (release_cell(cells[1]), release_cell(cells[2])) else {
+                continue;
+            };
+            key_packages.push(format!("{name} {version}"));
+        } else if section == "Security fixes" {
+            for word in line.split(|character: char| !character.is_ascii_alphanumeric() && character != '-') {
+                if word.starts_with("CVE-")
+                    && word.len() <= 24
+                    && word[4..].bytes().all(|byte| byte.is_ascii_digit() || byte == b'-')
+                {
+                    security_fixes.push(format!("Security fix: {word}"));
+                }
+            }
+        }
+    }
+    package_changes.truncate(5);
+    key_packages.truncate(5);
+    security_fixes.sort();
+    security_fixes.dedup();
+    security_fixes.truncate(3);
+    if !package_changes.is_empty() {
+        package_changes.extend(security_fixes);
+        ("Major package changes".to_string(), package_changes)
+    } else if !key_packages.is_empty() {
+        key_packages.extend(security_fixes);
+        ("Key packages in this build".to_string(), key_packages)
+    } else if !security_fixes.is_empty() {
+        ("Security fixes".to_string(), security_fixes)
+    } else {
+        ("Release highlights".to_string(), Vec::new())
+    }
+}
+
+fn update_release_summary_from_api(
+    payload: &str,
+    channel: &str,
+    digest: &str,
+) -> Option<UpdateReleaseSummary> {
+    if !valid_image_digest(digest) || !matches!(channel, "latest" | "testing") {
+        return None;
+    }
+    let releases: serde_json::Value = serde_json::from_str(payload).ok()?;
+    let releases = releases.as_array()?;
+    let expected_digest_line = format!("Image: `ghcr.io/kyth-os/kyth@{digest}`");
+    for release in releases {
+        if release.get("draft").and_then(serde_json::Value::as_bool) != Some(false)
+            || release.get("prerelease").and_then(serde_json::Value::as_bool)
+                != Some(channel == "testing")
+        {
+            continue;
+        }
+        let tag = release.get("tag_name").and_then(serde_json::Value::as_str)?;
+        let Some(version) = image_release_version(channel, tag) else {
+            continue;
+        };
+        let body = release.get("body").and_then(serde_json::Value::as_str).unwrap_or_default();
+        if !body.lines().any(|line| line.trim() == expected_digest_line) {
+            continue;
+        }
+        let (highlights_title, highlights) = release_highlights(body);
+        return Some(UpdateReleaseSummary {
+            version,
+            release_url: format!("https://github.com/kyth-os/kyth/releases/tag/{tag}"),
+            highlights_title,
+            highlights,
+        });
+    }
+    None
+}
+
+fn fetch_update_release_summary(digest: &str) -> Option<UpdateReleaseSummary> {
+    if !valid_image_digest(digest) {
+        return None;
+    }
+    let channel = kyth_shared::system::bootc::current_branch()?;
+    if !matches!(channel.as_str(), "latest" | "testing") {
+        return None;
+    }
+    let argv = vec![
+        "curl".to_string(),
+        "-fsSL".to_string(),
+        "--max-time".to_string(),
+        "12".to_string(),
+        "--max-filesize".to_string(),
+        IMAGE_RELEASES_MAX_BYTES.to_string(),
+        "-H".to_string(),
+        "Accept: application/vnd.github+json".to_string(),
+        "-H".to_string(),
+        "User-Agent: Kyth-Hub".to_string(),
+        IMAGE_RELEASES_API.to_string(),
+    ];
+    let output = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(15)).ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    update_release_summary_from_api(&String::from_utf8_lossy(&output.stdout), &channel, digest)
+}
+
+#[tauri::command]
+pub(crate) async fn update_release_summary(digest: String) -> Option<UpdateReleaseSummary> {
+    tauri::async_runtime::spawn_blocking(move || fetch_update_release_summary(&digest))
+        .await
+        .ok()
+        .flatten()
+}
 
 fn stage_progress_cell() -> &'static std::sync::Mutex<StageProgressSnapshot> {
     STAGE_PROGRESS.get_or_init(|| {
@@ -1178,6 +1364,59 @@ mod tests {
             .expect("marker parses");
         assert_eq!(snapshot.pct, 99);
         assert_eq!(snapshot.detail, "Installing the staged image…");
+    }
+
+    #[test]
+    fn update_release_summary_matches_channel_and_exact_image_digest() {
+        let digest = format!("sha256:{}", "a".repeat(64));
+        let body = format!(
+            "# Kyth image\n\nImage: `ghcr.io/kyth-os/kyth@{digest}`\n\n### Major Package Changes\n| | Name | Previous | New |\n| --- | --- | --- | --- |\n| ~ | `gamescope` | 3.16.28-1 | 3.16.29-1 |\n| + | `mesa-extra` |  | 1.0-1 |\n\n### Security fixes\n| CVE | Package |\n| --- | --- |\n| [CVE-2026-12345](https://nvd.nist.gov/vuln/detail/CVE-2026-12345) | `kernel` |\n"
+        );
+        let payload = serde_json::json!([{
+            "tag_name": "image-testing-20260925-2481-1-8b81dca7",
+            "draft": false,
+            "prerelease": true,
+            "body": body,
+        }]);
+        let summary = super::update_release_summary_from_api(
+            &payload.to_string(),
+            "testing",
+            &digest,
+        )
+        .expect("matching published image release");
+        assert_eq!(summary.version, "testing.20260925.2481.1.8b81dca7");
+        assert_eq!(
+            summary.release_url,
+            "https://github.com/kyth-os/kyth/releases/tag/image-testing-20260925-2481-1-8b81dca7"
+        );
+        assert_eq!(summary.highlights_title, "Major package changes");
+        assert!(summary.highlights.contains(&
+            "Updated gamescope from 3.16.28-1 to 3.16.29-1".to_string()
+        ));
+        assert!(summary.highlights.contains(&"Added mesa-extra 1.0-1".to_string()));
+        assert!(summary.highlights.contains(&"Security fix: CVE-2026-12345".to_string()));
+    }
+
+    #[test]
+    fn update_release_summary_ignores_wrong_digest_channel_and_untrusted_tags() {
+        let digest = format!("sha256:{}", "b".repeat(64));
+        let payload = serde_json::json!([{
+            "tag_name": "image-testing-20260925-2481-1-8b81dca7",
+            "draft": false,
+            "prerelease": true,
+            "body": format!("Image: `ghcr.io/kyth-os/kyth@{}`", "sha256:".to_string() + &"a".repeat(64)),
+        }]);
+        assert!(super::update_release_summary_from_api(&payload.to_string(), "testing", &digest).is_none());
+        assert!(super::update_release_summary_from_api(&payload.to_string(), "other", &digest).is_none());
+        assert!(super::image_release_version("testing", "image-testing-../../evil").is_none());
+    }
+
+    #[test]
+    fn release_highlights_label_baseline_packages_without_claiming_a_diff() {
+        let body = "### Major Packages\n| Name | Version |\n| --- | --- |\n| `mesa-dri-drivers` | 26.2.3-1 |\n";
+        let (title, highlights) = super::release_highlights(body);
+        assert_eq!(title, "Key packages in this build");
+        assert_eq!(highlights, ["mesa-dri-drivers 26.2.3-1"]);
     }
 
     #[test]

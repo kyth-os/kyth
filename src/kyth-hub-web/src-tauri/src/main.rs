@@ -2206,6 +2206,7 @@ fn main() {
             deployment_history,
             commands::dashboard::recovery_status,
             commands::updates::update_status,
+            commands::updates::update_release_summary,
             is_live_session,
             strip_ansi,
             disk_write_bytes,

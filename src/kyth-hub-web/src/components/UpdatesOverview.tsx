@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   cancelUpdateJob,
   checkForUpdates,
+  fetchUpdateReleaseSummary,
   fetchStageProgress,
   fetchUpdatesSnapshot,
   getInFlightJob,
@@ -10,6 +11,7 @@ import {
   invokeBootcRollback,
   invokeBootcUpgrade,
   type StageProgress,
+  type UpdateReleaseSummary,
   type UpdatesSnapshot,
 } from "../services/liveData";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
@@ -93,6 +95,10 @@ export function UpdatesOverview() {
   // rollback/apply changes the state again).
   const [stagedLatch, setStagedLatch] = useState(false);
   const [stageProgress, setStageProgress] = useState<StageProgress | null>(null);
+  const [releaseSummary, setReleaseSummary] = useState<UpdateReleaseSummary | null>(null);
+  const [releaseSummaryLoading, setReleaseSummaryLoading] = useState(false);
+  const [releaseSummaryUnavailable, setReleaseSummaryUnavailable] = useState(false);
+  const releaseSummaryRequest = useRef(0);
 
   // While a stage runs, poll the live byte/layer progress for the
   // determinate bar. The backend-tracked job survives a frontend reload
@@ -302,6 +308,36 @@ export function UpdatesOverview() {
   // fall back to "Check for updates" on a lagging probe.
   const stagedEffective = staged || stagedLatch;
   const systemUpdateAvailable = updateStatus?.check_state === "available" && !stagedEffective;
+  const updateDigest = updateStatus?.remote_digest ?? null;
+  useEffect(() => {
+    if (!systemUpdateAvailable || !updateDigest) {
+      if (systemUpdateAvailable && !updateDigest) {
+        setReleaseSummaryLoading(false);
+        setReleaseSummaryUnavailable(true);
+      }
+      // Keep the matched notes visible through staging and restart preparation.
+      // Clear them after the operation settles or the staged update is applied.
+      if (!systemUpdateAvailable && !stagedEffective && busy !== "stage" && !updateTracked) {
+        releaseSummaryRequest.current += 1;
+        setReleaseSummary(null);
+        setReleaseSummaryLoading(false);
+        setReleaseSummaryUnavailable(false);
+      }
+      return;
+    }
+    const requestId = ++releaseSummaryRequest.current;
+    setReleaseSummary(null);
+    setReleaseSummaryLoading(true);
+    setReleaseSummaryUnavailable(false);
+    void fetchUpdateReleaseSummary(updateDigest).then((summary) => {
+      if (releaseSummaryRequest.current === requestId) {
+        setReleaseSummary(summary);
+        setReleaseSummaryLoading(false);
+        setReleaseSummaryUnavailable(summary === null);
+      }
+    });
+    return undefined;
+  }, [systemUpdateAvailable, updateDigest, stagedEffective, busy, updateTracked]);
   // "blocked" (e.g. a quarantined update held back for safety) and "busy"
   // (a mutating operation in flight) are backend states, not read failures:
   // neither may render as up-to-date nor as a connection error.
@@ -617,6 +653,31 @@ export function UpdatesOverview() {
           <p>{systemStatusDetail}</p>
         </section>
       </div>
+
+      {(releaseSummary || releaseSummaryLoading || releaseSummaryUnavailable) && (
+        <section className="updates-release-card" aria-labelledby="updates-release-heading">
+          <div className="updates-release-header">
+            <div>
+              <span className="updates-eyebrow">Verified image release</span>
+              <h2 id="updates-release-heading">What’s in this update?</h2>
+            </div>
+            {releaseSummary && <span className="updates-release-version">{releaseSummary.version}</span>}
+          </div>
+          {releaseSummary
+            ? <>
+              <h3>{releaseSummary.highlights_title}</h3>
+              {releaseSummary.highlights.length > 0
+            ? <ul>{releaseSummary.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
+            : <p className="updates-release-empty">A package comparison was not published for this image. Open the full release notes for available build details.</p>}
+              <a href={releaseSummary.release_url} target="_blank" rel="noreferrer">Read full release notes <span aria-hidden="true">↗</span></a>
+            </>
+            : <p className="updates-release-empty">
+              {releaseSummaryLoading
+                ? "Checking official release notes for this image…"
+                : "Release notes aren’t available for this image yet."}
+            </p>}
+        </section>
+      )}
 
       <div className="updates-actions-card updates-primary-actions">
         <div>

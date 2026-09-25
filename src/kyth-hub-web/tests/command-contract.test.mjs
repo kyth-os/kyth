@@ -55,6 +55,7 @@ const updateWrappers = [
   "invokeBootcRollback",
   "invokeApplyStaged",
   "fetchStageProgress",
+  "fetchUpdateReleaseSummary",
 ];
 
 const rustCommands = [
@@ -66,6 +67,7 @@ const rustCommands = [
   "boot_runtime_checks",
   "recovery_status",
   "update_status",
+  "update_release_summary",
   "pending_updates_summary",
   "collect_availability",
   "current_update_channel",
@@ -200,7 +202,7 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(hubTheme, /\.updates-meta > span[\s\S]*text-overflow: ellipsis/);
   assert.match(hubTheme, /@keyframes updates-phase-complete/);
   assert.match(hubTheme, /@keyframes updates-status-pulse/);
-  assert.match(hubTheme, /\.updates-guidance-title, \.updates-chip-active > span/);
+  assert.match(hubTheme, /\.updates-guidance-title, \.updates-release-card, \.updates-chip-active > span/);
   assert.match(hubTheme, /\.updates-phase-current \.updates-phase-marker[^\n]*animation:/);
   assert.match(updateMessages, /We couldn't reach the update service/);
   assert.match(updateMessages, /couldn't reach the update registry/);
@@ -212,6 +214,16 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updateMessages, /Your current system is still safe to use/);
   assert.match(updateMessages, /The update is downloaded and ready/);
   assert.match(updateMessages, /No changes were made/);
+});
+
+test("release summary is tied to the checked image and explains unavailable notes", () => {
+  assert.match(service, /update-release-summary:\$\{digest\}/);
+  assert.match(service, /"update_release_summary", \{ digest \}/);
+  assert.match(updatesOverview, /What’s in this update\?/);
+  assert.match(updatesOverview, /Checking official release notes for this image/);
+  assert.match(updatesOverview, /Release notes aren’t available for this image yet/);
+  assert.match(updatesOverview, /releaseSummary\.release_url/);
+  assert.match(updatesRust, /body\.lines\(\)\.any\(\|line\| line\.trim\(\) == expected_digest_line\)/);
 });
 
 test("Privileged-helper outage is not reported as a network problem", () => {

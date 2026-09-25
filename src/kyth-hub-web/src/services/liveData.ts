@@ -1352,6 +1352,22 @@ export async function fetchUpdateStatus(): Promise<UpdateStatusLive | null> {
   });
 }
 
+export interface UpdateReleaseSummary {
+  version: string;
+  release_url: string;
+  highlights_title: string;
+  highlights: string[];
+}
+
+/** Optional release detail is matched natively to the checked image digest;
+ * the UI never guesses a target release from the channel name alone. */
+export async function fetchUpdateReleaseSummary(digest: string): Promise<UpdateReleaseSummary | null> {
+  if (!inTauriShell() || !/^sha256:[a-f0-9]{64}$/.test(digest)) return null;
+  return sharedRead(`update-release-summary:${digest}`, 5 * 60_000, async () => {
+    try { return await invoke<UpdateReleaseSummary | null>("update_release_summary", { digest }); } catch { return null; }
+  });
+}
+
 export interface UpdateHealthLive { status: string; pending_digest: string; last_healthy_digest: string; failures: number; quarantined: number; detail: string; }
 export async function fetchUpdateHealth(): Promise<UpdateHealthLive | null> {
   if (!inTauriShell()) return null;

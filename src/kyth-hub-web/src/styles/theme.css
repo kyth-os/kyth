@@ -1534,6 +1534,17 @@ body {
 .updates-status-label { color: var(--text-faint); font-size: 10px; font-weight: 750; letter-spacing: .65px; text-transform: uppercase; }
 .updates-status-card strong { color: var(--text); font-size: 14px; letter-spacing: -.15px; }
 .updates-status-card p { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.updates-release-card { display: flex; flex-direction: column; gap: 9px; padding: 16px 18px; border: 1px solid rgba(120, 183, 255, .2); border-radius: 12px; background: linear-gradient(125deg, rgba(42, 58, 82, .72), rgba(28, 31, 38, .78) 62%); animation: updates-guidance-enter .28s ease-out both; }
+.updates-release-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.updates-release-header h2 { margin: 3px 0 0; color: var(--text); font-size: 16px; letter-spacing: -.25px; }
+.updates-release-version { max-width: 50%; overflow: hidden; padding: 6px 9px; border: 1px solid rgba(255, 255, 255, .12); border-radius: 8px; color: #c9dcff; background: rgba(9, 14, 24, .28); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.updates-release-card h3 { margin: 2px 0 0; color: var(--text); font-size: 12px; }
+.updates-release-card ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.updates-release-card li { display: flex; align-items: flex-start; gap: 8px; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.updates-release-card li::before { width: 5px; height: 5px; flex: 0 0 5px; margin-top: 5px; border-radius: 50%; background: #8abaff; content: ""; }
+.updates-release-empty { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
+.updates-release-card a { align-self: flex-start; color: #a9ccff; font-size: 11px; font-weight: 700; text-decoration: none; }
+.updates-release-card a:hover { color: #d3e5ff; text-decoration: underline; }
 .updates-actions-card h2 { margin: 3px 0 0; color: var(--text); font-size: 16px; letter-spacing: -.25px; }
 .updates-actions-card p { margin: 4px 0 0; color: var(--text-muted); font-size: 11px; }
 .updates-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
@@ -1554,6 +1565,8 @@ body {
 
 @media (max-width: 760px) {
   .updates-hero, .updates-actions-card { align-items: flex-start; flex-direction: column; }
+  .updates-release-header { flex-direction: column; }
+  .updates-release-version { max-width: 100%; }
   .updates-status-grid { grid-template-columns: 1fr; }
   .updates-actions { justify-content: flex-start; }
   .work-card-grid { grid-template-columns: 1fr; }
@@ -1562,7 +1575,7 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .updates-guidance, .updates-guidance-icon, .updates-guidance-progress i,
-  .updates-guidance-title, .updates-chip-active > span,
+  .updates-guidance-title, .updates-release-card, .updates-chip-active > span,
   .updates-phase-complete .updates-phase-marker,
   .updates-phase-track li::before, .updates-phase-marker,
   .updates-progress-ring svg, .updates-progress-ring-value {
