@@ -1160,7 +1160,7 @@ mod tests {
             super::read_stage_line(&mut reader, &mut line, 32).unwrap(),
             Some(false)
         );
-        assert_eq!(String::from_utf8(line).unwrap(), "next\n");
+        assert_eq!(String::from_utf8_lossy(&line), "next\n");
         assert_eq!(
             super::read_stage_line(&mut reader, &mut line, 32).unwrap(),
             None
