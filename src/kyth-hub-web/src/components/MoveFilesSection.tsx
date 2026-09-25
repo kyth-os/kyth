@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { fetchMigrationReadiness, fetchNtfsDevices, fetchNtfsDrives, openMoveFilesApp, runPrivilegedAction, type MigrationReadiness, type NtfsDevice, type NtfsDrive } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, ProgressRing, RecipeButton, useSectionAction } from "./SectionActions";
 
 /** Flattens lsblk's nested blockdevices to the rows this section shows.
  * The live read returns whole disks with partitions underneath; only the
@@ -129,7 +129,10 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
             <ActionButton label="Cancel" disabled={busy !== null} onClick={() => setUnlockDevice(null)} />
           </div>
         </div>}
-        <ActionStatus status={status} />
+        <div className="hub-progress-inline">
+          {busy !== null && <ProgressRing size={20} />}
+          <ActionStatus status={status} />
+        </div>
       </div>
     </LiveSectionCard>
   );

@@ -32,7 +32,7 @@ import {
   type ScxStatus,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionStatus, ProgressRing, RecipeButton, useSectionAction } from "./SectionActions";
 
 type SectionRun = (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
 const gamingBtnStyle = { padding: "6px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 } as const;
@@ -286,7 +286,10 @@ function SchedExtCard({ busy, run }: { busy: string | null; run: SectionRun }) {
           {busy === "scx-stop" ? "Stopping…" : "Stop scx"}
         </button>
         {(busy?.startsWith("scx-") ?? false) && (
-          <button onClick={() => run("cancel-scx", "Cancelling…", cancelGamingJob)} style={gamingBtnStyle}>Cancel</button>
+          <span className="hub-progress-inline">
+            <ProgressRing size={22} />
+            <button onClick={() => run("cancel-scx", "Cancelling…", cancelGamingJob)} style={gamingBtnStyle}>Cancel</button>
+          </span>
         )}
       </div>
     </div>

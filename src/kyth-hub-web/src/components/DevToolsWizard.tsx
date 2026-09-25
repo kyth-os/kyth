@@ -8,7 +8,7 @@ import {
   type AiDevBoxStatus,
   type DevTool,
 } from "../services/liveData";
-import { useSectionAction, ActionButton, ActionStatus } from "./SectionActions";
+import { useSectionAction, ActionButton, ActionStatus, ProgressRing } from "./SectionActions";
 
 type WizardStep = "welcome" | "select" | "review" | "install" | "done";
 
@@ -149,7 +149,7 @@ export function DevToolsWizard({ onClose, catalog }: { onClose: () => void; cata
 
         {step === "install" && (
           <div className="dev-tools-wizard-body">
-            <div className="app-loading-state"><span className="app-spinner" /> {status ?? "Working…"}</div>
+            <div className="app-loading-state hub-progress-inline"><ProgressRing size={30} /> {status ?? "Working…"}</div>
           </div>
         )}
 

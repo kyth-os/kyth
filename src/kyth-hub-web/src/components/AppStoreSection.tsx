@@ -12,7 +12,7 @@ import {
   type AppStreamApp, type StarterPack, type InstalledFlatpak, type SecHostTool,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionStatus, ProgressRing, RecipeButton, useSectionAction } from "./SectionActions";
 import { friendlyActionError, friendlyActionNextStep, friendlyActionResult } from "./updateMessages";
 
 type SectionRun = (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
@@ -53,7 +53,7 @@ function AppCard({ app, installed, busy, onInstall, onUninstall, onCancelInstall
     <p className="app-catalog-summary">{app.summary || "A trusted application for KythOS."}</p>
     <div className="app-catalog-card-footer"><span className="app-catalog-id">{app.id}</span>
       {busy === actionId
-        ? <button className="app-action-button app-action-secondary" onClick={onCancelInstall}>Cancel</button>
+        ? <span className="hub-progress-inline"><ProgressRing size={22} /><button className="app-action-button app-action-secondary" onClick={onCancelInstall}>Cancel</button></span>
         : installed ? <button className="app-action-button app-action-secondary" disabled={busy !== null} onClick={() => onUninstall(app)}>Remove</button>
         : <button className="app-action-button app-action-primary" disabled={busy !== null} onClick={() => onInstall(app)}>Install</button>}
     </div>
@@ -142,7 +142,8 @@ function AppUpdatesCard({ busy, run, status }: { busy: string | null; run: Secti
     </div>
     <p className="app-updates-detail">{detail}</p>
     {actionFailed && <p className="app-updates-next-step">{friendlyActionNextStep((status ?? "").replace(/^Failed:\s*/, ""), "apps")}</p>}
-    <div className="app-updates-actions">
+    <div className="app-updates-actions hub-progress-inline">
+      {busyHere && <ProgressRing size={30} />}
       {(available || incomplete) && (
         <button
           className="app-action-button app-action-primary"

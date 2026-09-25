@@ -85,9 +85,38 @@ export function ActionButton({
 export function ActionStatus({ status }: { status: string | null }) {
   if (!status) return null;
   return (
-    <p className="card-copy action-status" role="status" style={{ fontSize: 12, marginTop: 12 }}>
+    <p className="card-copy action-status" role="status" key={status} style={{ fontSize: 12, marginTop: 12 }}>
       {status}
     </p>
+  );
+}
+
+/** Shared progress ring for any tracked job that reports a 0-100 percent
+ * (or none, for an indeterminate spin) — the same visual language Updates
+ * uses for staging, generalized so installs/migrations/dev-tools setup
+ * don't each reinvent the SVG math. `pct === undefined` renders spinning
+ * and indeterminate; a number renders a determinate sweep with a label. */
+export function ProgressRing({ pct, size = 40 }: { pct?: number; size?: number }) {
+  const indeterminate = pct === undefined;
+  return (
+    <div
+      className={`hub-progress-ring${indeterminate ? " hub-progress-ring-indeterminate" : ""}`}
+      style={{ width: size, height: size, flexBasis: size }}
+      aria-hidden="true"
+    >
+      <svg viewBox="0 0 48 48" focusable="false">
+        <circle className="hub-progress-ring-track" cx="24" cy="24" r="19" pathLength="100" />
+        <circle
+          className="hub-progress-ring-value"
+          cx="24"
+          cy="24"
+          r="19"
+          pathLength="100"
+          style={indeterminate ? undefined : { strokeDashoffset: 100 - pct }}
+        />
+      </svg>
+      {!indeterminate && <span>{pct}%</span>}
+    </div>
   );
 }
 
@@ -131,10 +160,13 @@ export function RecipeButton({
 }) {
   if (busy === recipe) {
     return (
-      <ActionButton
-        label="Cancel"
-        onClick={() => run(`cancel-${recipe}`, "Cancelling…", CANCEL_FOR_DOMAIN[domain])}
-      />
+      <span className="hub-progress-inline">
+        <ProgressRing size={22} />
+        <ActionButton
+          label="Cancel"
+          onClick={() => run(`cancel-${recipe}`, "Cancelling…", CANCEL_FOR_DOMAIN[domain])}
+        />
+      </span>
     );
   }
   return (

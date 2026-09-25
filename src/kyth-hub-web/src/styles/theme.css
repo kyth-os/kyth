@@ -594,6 +594,27 @@ a:focus-visible {
   border-left: 3px solid var(--accent-end);
   border-radius: 0 9px 9px 0;
   background: rgba(85, 229, 193, 0.07);
+  animation: hub-status-enter .22s ease-out both;
+}
+@keyframes hub-status-enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+
+/* Shared determinate/indeterminate progress ring — extracted from the
+   Updates page's staging UI so any long-running job elsewhere in the Hub
+   (installs, migrations, dev-tools setup) can show real motion instead of
+   a static spinner, without re-deriving the SVG math per section. */
+.hub-progress-ring { position: relative; display: grid; width: 40px; height: 40px; flex: 0 0 40px; place-items: center; color: var(--text); }
+.hub-progress-ring svg { position: absolute; inset: 0; width: 100%; height: 100%; transform: rotate(-90deg); }
+.hub-progress-ring circle { fill: none; stroke-width: 3; }
+.hub-progress-ring-track { stroke: rgba(255, 255, 255, .12); }
+.hub-progress-ring-value { stroke: var(--status-ok); stroke-dasharray: 100; stroke-dashoffset: 100; stroke-linecap: round; transition: stroke-dashoffset .5s cubic-bezier(.2, .7, .2, 1); }
+.hub-progress-ring > span { font-size: 9px; font-variant-numeric: tabular-nums; font-weight: 750; letter-spacing: -.2px; }
+.hub-progress-ring-indeterminate svg { animation: hub-ring-spin 1.8s linear infinite; }
+.hub-progress-ring-indeterminate .hub-progress-ring-value { stroke-dasharray: 22 78; stroke-dashoffset: 0; }
+@keyframes hub-ring-spin { to { transform: rotate(270deg); } }
+.hub-progress-inline { display: flex; align-items: center; gap: 10px; }
+@media (prefers-reduced-motion: reduce) {
+  .action-status { animation: none; }
+  .hub-progress-ring-indeterminate svg { animation: none; }
 }
 
 @media (max-width: 1100px) {
