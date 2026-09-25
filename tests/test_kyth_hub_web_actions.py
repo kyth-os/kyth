@@ -41,7 +41,6 @@ MUTATING_WRAPPERS = {
     "invokeGuardianExecute": "GuardianSection.tsx",
     "invokeOpenFeedbackIssue": "FeedbackSection.tsx",
 }
-
 # Bridge commands with no liveData.ts wrapper on purpose. Each needs a
 # reason, because "no wrapper" is exactly what the orphan check below is
 # meant to catch — an entry here is a deliberate exception, not a TODO.
@@ -337,22 +336,31 @@ class HubWebUpdateActionTests(unittest.TestCase):
         overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
         messages = (HUB_WEB / "components" / "updateMessages.ts").read_text(encoding="utf-8")
 
-        stage = overview.split("  async function stage()", 1)[1].split("  async function updateApps()", 1)[0]
+        stage = overview.split("  async function stage()", 1)[1].split("  async function apply()", 1)[0]
         self.assertIn("const next = await fetchUpdatesSnapshot()", stage)
         self.assertIn("if (next.status?.staged)", stage)
         self.assertIn("setStagedLatch(true)", stage)
         self.assertIn("Details:", messages)
         self.assertNotIn("Your current system has not changed.", messages)
 
-    def test_updates_overview_can_apply_only_the_pending_flatpak_updates(self):
+    def test_updates_overview_no_longer_owns_app_updates(self):
+        # App (Flatpak) updates moved to the Apps page's App Store section;
+        # the Updates page owns only the system (bootc) workflow now, so it
+        # must not still be reading/mutating the app-update state.
         overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
+        self.assertNotIn("updateFlatpaks", overview)
+        self.assertNotIn("appUpdatesAvailable", overview)
+        self.assertNotIn("pending?.flatpak", overview)
+
+    def test_app_store_can_apply_only_the_pending_flatpak_updates(self):
+        app_store = (HUB_WEB / "components" / "AppStoreSection.tsx").read_text(encoding="utf-8")
         live_data = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
         privilege = (TAURI_SRC / "commands" / "privilege.rs").read_text(encoding="utf-8")
         shared_privilege = (ROOT / "src" / "kyth-shared-rs" / "src" / "privileged.rs").read_text(encoding="utf-8")
 
-        self.assertIn("pending?.flatpak ?? 0", overview)
-        self.assertIn("updateFlatpaks", overview)
-        self.assertIn('startAction("apps", "Updating your apps…", updateApps)', overview)
+        self.assertIn("pending?.flatpak ?? 0", app_store)
+        self.assertIn("updateFlatpaks", app_store)
+        self.assertIn('run("apps-update", "Updating your apps…", updateApps)', app_store)
         self.assertIn('"update_flatpaks"', live_data)
         self.assertIn('args(["update", "--user", "-y"])', MAIN_RS)
         self.assertIn('"flatpak_update" => Ok(json!({ "operation": "flatpak_update" }))', privilege)
@@ -370,9 +378,9 @@ class HubWebUpdateActionTests(unittest.TestCase):
         self.assertNotIn("Your apps are up to date.", update)
 
     def test_app_update_refreshes_pending_state_after_failure(self):
-        overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
-        update = overview.split("async function updateApps()", 1)[1].split(
-            "async function apply()", 1
+        app_store = (HUB_WEB / "components" / "AppStoreSection.tsx").read_text(encoding="utf-8")
+        update = app_store.split("async function updateApps()", 1)[1].split(
+            "const count = numericAppPending", 1
         )[0]
         self.assertIn("finally", update)
         self.assertIn("await refresh().catch(() => undefined)", update)
@@ -403,23 +411,37 @@ class HubWebUpdateActionTests(unittest.TestCase):
         self.assertIn("if errors.is_empty()", source)
         self.assertIn("Flatpak update status could not be checked for every installation.", source)
 
-    def test_updates_page_surfaces_separate_system_and_app_statuses(self):
+    def test_updates_page_is_system_only_with_one_status_card(self):
+        # The Updates page was refactored to own only the system (bootc)
+        # update workflow; it renders exactly one status card now, not the
+        # old two-column system/app grid.
         overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
         label = overview.split("const overallLabel", 1)[1].split("const overallTone", 1)[0]
-        tone = overview.split("const overallTone", 1)[1].split("const guidance", 1)[0]
+        tone = overview.split("const overallTone", 1)[1].split("const systemStatusLabel", 1)[0]
         self.assertIn(": stagedEffective", label)
         self.assertIn("stagedEffective", tone)
-        self.assertIn('className="updates-status-grid"', overview)
+        self.assertIn('className="updates-status-grid updates-status-grid-single"', overview)
         self.assertIn("updates-status-card-${systemStatusTone}", overview)
-        self.assertIn("updates-status-card-${appStatusTone}", overview)
-        self.assertIn("pendingCount > 0", overview)
+        self.assertNotIn("appStatusTone", overview)
 
-    def test_app_update_failure_next_step_retries_remaining_updates(self):
-        overview = (HUB_WEB / "components" / "UpdatesOverview.tsx").read_text(encoding="utf-8")
-        next_step = overview.split("function actionErrorNextStep", 1)[1].split("export function UpdatesOverview", 1)[0]
+    def test_app_store_update_failure_next_step_retries_remaining_updates(self):
+        app_store = (HUB_WEB / "components" / "AppStoreSection.tsx").read_text(encoding="utf-8")
+        messages = (HUB_WEB / "components" / "updateMessages.ts").read_text(encoding="utf-8")
+        self.assertIn("friendlyActionNextStep", app_store)
+        next_step = messages.split("function friendlyActionNextStep", 1)[1]
         self.assertIn("updates remain", next_step.lower())
         self.assertIn("update remains", next_step.lower())
         self.assertIn("Check for updates", next_step)
+
+    def test_apps_page_opens_directly_on_the_app_store_section(self):
+        apps_page = (HUB_WEB / "pages" / "Apps.tsx").read_text(encoding="utf-8")
+        self.assertIn("defaultToFirstSection", apps_page)
+        # App Store must stay the first section in the route manifest, since
+        # defaultToFirstSection lands on whichever section is listed first.
+        apps_destination = next(
+            destination for destination in HUB_ROUTES["destinations"] if destination["key"] == "Apps"
+        )
+        self.assertEqual("App Store", apps_destination["sections"][0]["key"])
 
 
 if __name__ == "__main__":

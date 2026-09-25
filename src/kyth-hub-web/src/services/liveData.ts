@@ -225,7 +225,7 @@ function resolveTerminalJob(state: InstallStatus): string {
  * concurrent jobs in one domain is a misuse bug, not a supported state:
  * the second launch is rejected with an already-running error while the
  * first keeps the slot. */
-export type JobDomain = "guardian" | "privileged" | "hub-action" | "update" | "job" | "install" | "security" | "gaming" | "vpn";
+export type JobDomain = "guardian" | "privileged" | "hub-action" | "update" | "job" | "install" | "security" | "gaming" | "vpn" | "dev-tools";
 
 const inFlightJobs = new Map<JobDomain, string>();
 
@@ -260,6 +260,7 @@ const JOB_DOMAINS: readonly JobDomain[] = [
   "security",
   "gaming",
   "vpn",
+  "dev-tools",
 ];
 const JOB_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$/;
 
@@ -340,6 +341,7 @@ const DOMAIN_STATUS_COMMAND: Record<JobDomain, string> = {
   security: "security_job_status",
   gaming: "gaming_job_status",
   vpn: "vpn_status",
+  "dev-tools": "dev_tools_job_status",
 };
 
 /** Validate each reattached id with a single status probe before it is
@@ -1831,6 +1833,64 @@ export async function openGameFolder(key: "compatdata" | "shadercache"): Promise
   if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
   return await invoke<string>("open_game_folder", { key });
 }
+
+// ---------------------------------------------------------------------
+// Dev Tools page: AI dev-box status and the vibe-coder setup wizard.
+// Selection-driven install — the user picks editors, agent CLIs/desktop
+// apps, languages, and utilities from the catalog, then this runs one
+// tracked job that creates the box (if missing) and installs everything
+// picked. Mirrors the gaming tool-grid job wrapper shape above.
+// ---------------------------------------------------------------------
+
+export interface DevTool {
+  id: string;
+  name: string;
+  category: string;
+  category_label: string;
+  description: string;
+  unofficial: boolean;
+  default_selected: boolean;
+  installed: boolean;
+}
+export async function fetchDevToolsCatalog(): Promise<DevTool[] | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<DevTool[]>("dev_tools_catalog_list"); } catch { return null; }
+}
+
+export interface AiDevBoxStatus { exists: boolean; box_name: string; gpu: string }
+export async function fetchAiDevBoxStatus(): Promise<AiDevBoxStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<AiDevBoxStatus>("ai_dev_box_status"); } catch { return null; }
+}
+
+interface DevToolsActionLaunch { job: string; state: "running"; detail: string; }
+function devToolsJob(launch: DevToolsActionLaunch): string {
+  if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Dev Tools install did not start.");
+  return launch.job;
+}
+
+/** Launch the wizard's install job for exactly the tools the user picked.
+ * Up to 20 minutes: box creation plus package/npm installs for a full
+ * catalog selection can legitimately take a while on a fresh box. */
+export async function installSelectedDevTools(selectedIds: string[]): Promise<string> {
+  if (!inTauriShell()) throw new Error("Dev Tools setup is available from the installed Kyth Hub.");
+  const job = devToolsJob(await invoke<DevToolsActionLaunch>("dev_tools_install_selection", { selectedIds }));
+  trackJob("dev-tools", job);
+  try {
+    const state = await pollJobUntilSettled("dev-tools", job, {
+      statusCommand: "dev_tools_job_status",
+      limit: 400,
+      baseIntervalMs: 3000,
+      maxNulls: 10,
+      lostContactMessage: "Lost contact with the dev tools install; check back in a moment.",
+      timeoutMessage: "Still installing; check back in a moment.",
+    });
+    return resolveTerminalJob(state);
+  } finally {
+    untrackJob("dev-tools", job);
+  }
+}
+export const cancelDevToolsJob = (): Promise<string> => cancelTracked("dev-tools", "dev_tools_job_cancel");
 
 // ---------------------------------------------------------------------
 // Overlays / sched-ext / per-game profile builder — page_gaming_tools_perf.py.

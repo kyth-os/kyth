@@ -21,6 +21,7 @@ export function Apps() {
           "App Store": AppStoreSection,
           "Work Setup": WorkSetupSection,
         }}
+        defaultToFirstSection
       />
     </div>
   );

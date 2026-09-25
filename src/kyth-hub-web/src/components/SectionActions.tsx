@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import {
+  cancelDevToolsJob,
   cancelGamingJob,
   cancelGuardianCheck,
   cancelHubAction,
@@ -105,6 +106,7 @@ export const CANCEL_FOR_DOMAIN: Record<JobDomain, () => Promise<string>> = {
   security: cancelSecurityJob,
   gaming: cancelGamingJob,
   vpn: cancelVpnConnection,
+  "dev-tools": cancelDevToolsJob,
 };
 
 export function cancelForDomain(domain: JobDomain): () => Promise<string> {

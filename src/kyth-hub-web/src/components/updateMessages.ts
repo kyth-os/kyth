@@ -106,3 +106,42 @@ export function friendlyActionResult(action: string, detail: string): string {
   }
   return detail;
 }
+
+// Shared "what to do next" copy for a failed update-domain action. System
+// actions (check/stage/apply/rollback) live in UpdatesOverview; the app
+// update action lives in AppStoreSection — both call this so the wording
+// (and the fix when it needs one) stays in exactly one place.
+export function friendlyActionNextStep(failure: string, action: string | null): string {
+  const lower = failure.toLowerCase();
+  if (lower.includes("helper service isn't running") || lower.includes("system update helper isn't running")) {
+    return "Update KythOS and restart, then choose “Try again”. Your current system is still safe to use.";
+  }
+  if (action === "check") {
+    return "Check your connection, then choose “Try again”. Your current system is still safe to use.";
+  }
+  if (action === "apps") {
+    if (lower.includes("updates remain") || lower.includes("update remains")) {
+      return "Choose “Update apps” again to retry the remaining updates. Installed updates are already applied.";
+    }
+    if (lower.includes("could not be verified")) {
+      return "Choose “Check for updates” to refresh app status before retrying the update.";
+    }
+    return "Check your connection, then choose “Update apps” to try again.";
+  }
+  if (action === "apply") {
+    return "Save your work, then restart from the system menu to finish applying the update.";
+  }
+  if (action === "rollback") {
+    return "Choose “Roll back” again when you’re ready. Your current system is still safe to use.";
+  }
+  if (lower.includes("registry") || lower.includes("timed out") || lower.includes("network")) {
+    return "Check that you are online, then choose “Try again”. Your current system is still safe to use.";
+  }
+  if (lower.includes("free disk space") || lower.includes("no space left")) {
+    return "Free up some disk space, then choose “Download and stage” again.";
+  }
+  if (lower.includes("already in progress") || lower.includes("in progress") || lower.includes("locked")) {
+    return "Wait for the other update to finish, then choose “Try again”.";
+  }
+  return "Choose “Download and stage” to try again. Your current system is still safe to use.";
+}

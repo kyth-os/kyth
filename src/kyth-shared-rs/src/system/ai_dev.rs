@@ -14,6 +14,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Duration;
 
+use super::dev_tools_catalog::{DevTool, InstallMethod};
+
 pub const DEFAULT_BOX: &str = "kyth-ai-dev";
 pub const DEFAULT_IMAGE: &str = "registry.fedoraproject.org/fedora-toolbox:44";
 pub const DEFAULT_MODEL: &str = "qwen2.5-coder";
@@ -245,6 +247,115 @@ pub fn provision_command(config: &Config) -> Vec<String> {
     )
 }
 
+/// Build the in-box provisioning script for exactly the caller-selected
+/// tools instead of the fixed, all-of-everything [`PROVISION_SCRIPT`].
+/// Only `InBoxDnf`/`InBoxNpmGlobal` entries run here; `HostScript`,
+/// `HostRpmUrl`, and `Manual` entries install on the host and are handled
+/// by [`host_install_command`] instead, since a distrobox has no access to
+/// the host's package manager or app menu.
+///
+/// Returns `None` when the selection has nothing to run inside the box
+/// (e.g. the user picked only host-level agent desktop apps), so callers
+/// can skip launching a job with an empty, always-succeeding script.
+pub fn provision_script_for_selection(selected: &[&DevTool]) -> Option<String> {
+    let mut dnf_packages: Vec<&str> = Vec::new();
+    let mut npm_packages: Vec<&str> = Vec::new();
+    let mut export_bins: Vec<&str> = Vec::new();
+
+    for tool in selected {
+        match tool.install {
+            InstallMethod::InBoxDnf(packages) => dnf_packages.extend(packages),
+            InstallMethod::InBoxNpmGlobal(packages) => npm_packages.extend(packages),
+            InstallMethod::HostScript(_)
+            | InstallMethod::HostRpmUrl(_)
+            | InstallMethod::Manual(_) => {
+                continue;
+            }
+        }
+        if tool.exported_to_host {
+            export_bins.extend(tool.probe_commands);
+        }
+    }
+
+    if dnf_packages.is_empty() && npm_packages.is_empty() {
+        return None;
+    }
+
+    let mut script = String::from("set -euo pipefail\n");
+    script.push_str("if command -v dnf5 >/dev/null 2>&1; then pm=dnf5; else pm=dnf; fi\n");
+    if !dnf_packages.is_empty() {
+        script.push_str(&format!(
+            "sudo \"$pm\" install -y --skip-unavailable {}\n",
+            dnf_packages.join(" ")
+        ));
+    }
+    if !npm_packages.is_empty() {
+        script.push_str(&format!(
+            "sudo npm install -g {} || true\n",
+            npm_packages.join(" ")
+        ));
+    }
+    if !export_bins.is_empty() {
+        script.push_str(&format!(
+            "for binary in {}; do\n  path=\"$(command -v \"$binary\" 2>/dev/null || true)\"\n  test -z \"$path\" || distrobox-export --bin \"$path\" --export-path \"$HOME/.local/bin\" || true\ndone\n",
+            export_bins.join(" ")
+        ));
+    }
+    Some(script)
+}
+
+pub fn provision_command_for_selection(
+    config: &Config,
+    selected: &[&DevTool],
+) -> Option<Vec<String>> {
+    let script = provision_script_for_selection(selected)?;
+    Some(inside_command(
+        config,
+        &["bash".into(), "-lc".into(), script],
+    ))
+}
+
+/// Build the host-side install command for one host-level tool (agent
+/// desktop apps, host-native agent CLIs). Distinct from box provisioning:
+/// these run directly on the caller's system, never inside distrobox.
+pub fn host_install_command(tool: &DevTool) -> Option<Vec<String>> {
+    match tool.install {
+        InstallMethod::HostScript(url) => Some(vec![
+            "bash".into(),
+            "-lc".into(),
+            format!("curl -fsSL {} | bash", shell_quote(url)),
+        ]),
+        InstallMethod::HostRpmUrl(url) => {
+            // dnf5 aliases dnf on Fedora; either resolves the same package.
+            Some(vec![
+                "bash".into(),
+                "-lc".into(),
+                format!(
+                    "tmp=$(mktemp --suffix=.rpm) && curl -fsSL {} -o \"$tmp\" && sudo dnf install -y \"$tmp\"; rm -f \"$tmp\"",
+                    shell_quote(url),
+                ),
+            ])
+        }
+        InstallMethod::Manual(_)
+        | InstallMethod::InBoxDnf(_)
+        | InstallMethod::InBoxNpmGlobal(_) => None,
+    }
+}
+
+/// True when a tool's `probe_commands` are all found on `$PATH` — used by
+/// the Dev Tools status view to report per-tool installed/not-installed
+/// without assuming success just because a job once ran. Tools with no
+/// probe commands (host GUI apps we cannot cheaply detect) always report
+/// `false`; the wizard is expected to let users re-run those installs
+/// idempotently instead of trusting a guessed status.
+pub fn dev_tool_is_installed(tool: &DevTool) -> bool {
+    !tool.probe_commands.is_empty()
+        && tool
+            .probe_commands
+            .iter()
+            .all(|command| host_command_exists(command))
+}
+
 pub fn ollama_start_command(config: &Config) -> Vec<String> {
     let model_dir = shell_quote(&config.model_dir.to_string_lossy());
     inside_command(config, &["bash".into(), "-lc".into(), format!(
@@ -370,5 +481,49 @@ mod tests {
         assert!(ollama_pull_command(&config, "qwen2.5-coder")
             .iter()
             .any(|arg| arg.contains("ollama pull")));
+    }
+
+    #[test]
+    fn selection_script_only_includes_in_box_methods() {
+        use super::super::dev_tools_catalog::find_dev_tool;
+        let vscode = find_dev_tool("vscode").unwrap();
+        let claude_code = find_dev_tool("claude-code").unwrap();
+        let script = provision_script_for_selection(&[vscode, claude_code]).unwrap();
+        assert!(script.contains("code"));
+        assert!(script.contains("@anthropic-ai/claude-code"));
+        assert!(script.contains("distrobox-export --bin"));
+    }
+
+    #[test]
+    fn selection_script_is_none_for_host_only_selection() {
+        use super::super::dev_tools_catalog::find_dev_tool;
+        let hermes = find_dev_tool("hermes-desktop").unwrap();
+        assert!(provision_script_for_selection(&[hermes]).is_none());
+    }
+
+    #[test]
+    fn host_install_command_covers_script_and_rpm_but_not_manual() {
+        use super::super::dev_tools_catalog::find_dev_tool;
+        let hermes = find_dev_tool("hermes-desktop").unwrap();
+        let codex_desktop = find_dev_tool("codex-desktop").unwrap();
+        let claude_desktop = find_dev_tool("claude-desktop").unwrap();
+        assert!(host_install_command(hermes)
+            .unwrap()
+            .iter()
+            .any(|arg| arg.contains("curl -fsSL")));
+        assert!(host_install_command(codex_desktop)
+            .unwrap()
+            .iter()
+            .any(|arg| arg.contains("dnf install -y")));
+        assert!(host_install_command(claude_desktop).is_none());
+    }
+
+    #[test]
+    fn dev_tool_is_installed_is_false_without_probe_commands() {
+        use super::super::dev_tools_catalog::find_dev_tool;
+        // Manual/host-GUI entries with no probe commands must never report
+        // "installed" just because they have no way to check.
+        let claude_desktop = find_dev_tool("claude-desktop").unwrap();
+        assert!(!dev_tool_is_installed(claude_desktop));
     }
 }

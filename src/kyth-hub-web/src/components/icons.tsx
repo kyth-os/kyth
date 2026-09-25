@@ -120,3 +120,10 @@ export const IconWrench = (p: SVGProps<SVGSVGElement>) => (
     <path d="M14.5 6.5a3.8 3.8 0 0 0-5 4.2L4.5 15.7a1.7 1.7 0 0 0 2.4 2.4l5-5a3.8 3.8 0 0 0 4.2-5l-2.3 2.3-2-2 2.7-1.9Z" />
   </svg>
 );
+
+export const IconTerminal = (p: SVGProps<SVGSVGElement>) => (
+  <svg {...base(p)}>
+    <rect x="3" y="4" width="18" height="16" rx="1.8" />
+    <path d="m7 9 4 3-4 3M13 15h4" />
+  </svg>
+);

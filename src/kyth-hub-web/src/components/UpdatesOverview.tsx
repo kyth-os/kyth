@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import {
-  cancelInstall,
   cancelUpdateJob,
   checkForUpdates,
   fetchStageProgress,
@@ -10,12 +9,11 @@ import {
   invokeApplyStaged,
   invokeBootcRollback,
   invokeBootcUpgrade,
-  updateFlatpaks,
   type StageProgress,
   type UpdatesSnapshot,
 } from "../services/liveData";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
-import { friendlyActionError, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityResult } from "./updateMessages";
+import { friendlyActionError, friendlyActionNextStep, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityResult } from "./updateMessages";
 
 type GuidanceTone = "ok" | "warn" | "muted";
 
@@ -36,46 +34,11 @@ const emptyReadings: UpdatesSnapshot = {
   health: null,
 };
 
-function numericPending(pending: Record<string, string> | null): number {
-  const parsed = Number(pending?.flatpak ?? 0);
-  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
-}
-
-function actionErrorNextStep(failure: string, action: string | null): string {
-  const lower = failure.toLowerCase();
-  if (lower.includes("helper service isn't running") || lower.includes("system update helper isn't running")) {
-    return "Update KythOS and restart, then choose “Try again”. Your current system is still safe to use.";
-  }
-  if (action === "check") {
-    return "Check your connection, then choose “Try again”. Your current system is still safe to use.";
-  }
-  if (action === "apps") {
-    if (lower.includes("updates remain") || lower.includes("update remains")) {
-      return "Choose “Update apps” again to retry the remaining updates. Installed updates are already applied.";
-    }
-    if (lower.includes("could not be verified")) {
-      return "Choose “Check for updates” to refresh app status before retrying the update.";
-    }
-    return "Check your connection, then choose “Update apps” to try again.";
-  }
-  if (action === "apply") {
-    return "Save your work, then restart from the system menu to finish applying the update.";
-  }
-  if (action === "rollback") {
-    return "Choose “Roll back” again when you’re ready. Your current system is still safe to use.";
-  }
-  if (lower.includes("registry") || lower.includes("timed out") || lower.includes("network")) {
-    return "Check that you are online, then choose “Try again”. Your current system is still safe to use.";
-  }
-  if (lower.includes("free disk space") || lower.includes("no space left")) {
-    return "Free up some disk space, then choose “Download and stage” again.";
-  }
-  if (lower.includes("already in progress") || lower.includes("in progress") || lower.includes("locked")) {
-    return "Wait for the other update to finish, then choose “Try again”.";
-  }
-  return "Choose “Download and stage” to try again. Your current system is still safe to use.";
-}
-
+// UpdatesOverview owns the system (bootc) update workflow only — check,
+// download/stage, restart to apply, and rollback. App (Flatpak) updates
+// moved to the Apps page's App Store section, which owns its own pending
+// count, action, and error messaging so the two workflows cannot bleed
+// into each other's status or busy state.
 export function UpdatesOverview() {
   const [readings, setReadings] = useState<UpdatesSnapshot>(emptyReadings);
   const [loaded, setLoaded] = useState(false);
@@ -132,12 +95,12 @@ export function UpdatesOverview() {
 
   // Cancel never routes through `run`: the buttons above stay disabled while
   // `busy`, and Cancel must stay enabled exactly then.
-  async function cancelRunning(kind: "update" | "apps"): Promise<void> {
+  async function cancelRunning(): Promise<void> {
     const localRunActive = busy !== null;
     setCancelling(true);
     setCancelNote("Cancelling…");
     try {
-      const result = kind === "update" ? await cancelUpdateJob() : await cancelInstall();
+      const result = await cancelUpdateJob();
       if (result === "Nothing to cancel.") {
         setCancelNote("There is no running update to cancel.");
       } else if (localRunActive) {
@@ -176,12 +139,10 @@ export function UpdatesOverview() {
     invalidateSharedReads(
       "updates-snapshot",
       "bootc-snapshot",
-      "pending-updates",
       "update-status",
       "update-health",
       "probe:bootc-status-data",
       "probe:bootc-branch",
-      "probe:flatpak-updates",
     );
     const next = await fetchUpdatesSnapshot();
     setReadings(next);
@@ -197,16 +158,14 @@ export function UpdatesOverview() {
       const availability = await checkForUpdates();
       // The explicit check bypasses the normal read cache. Re-read the
       // inexpensive status fields so the page cannot show a stale staged
-      // state or app count after a successful check.
+      // state after a successful check.
       invalidateSharedReads(
         "updates-snapshot",
         "bootc-snapshot",
-        "pending-updates",
         "update-status",
         "update-health",
         "probe:bootc-status-data",
         "probe:bootc-branch",
-        "probe:flatpak-updates",
       );
       const next = await fetchUpdatesSnapshot();
       const currentStatus = next.status ?? {
@@ -228,13 +187,13 @@ export function UpdatesOverview() {
           blocked_reason: availability.blocked_reason || null,
           detail: availability.detail,
         },
-        pending: {
-          ...(next.pending ?? {}),
-          flatpak: String(availability.flatpak_count),
-          flatpak_detail: availability.flatpak_detail,
-        },
       });
       setLoaded(true);
+      // The same backend check also refreshes the app update count as a
+      // side effect (collect_availability fans out to both); the App Store
+      // section reads its own pending-updates cache independently and picks
+      // that up on its next poll rather than depending on this page.
+      invalidateSharedReads("pending-updates", "probe:flatpak-updates");
       return friendlyAvailabilityResult(availability.state, availability.staged, availability.detail);
     } catch (error) {
       throw new Error(friendlyActionError("check", error));
@@ -252,12 +211,10 @@ export function UpdatesOverview() {
         invalidateSharedReads(
           "updates-snapshot",
           "bootc-snapshot",
-          "pending-updates",
           "update-status",
           "update-health",
           "probe:bootc-status-data",
           "probe:bootc-branch",
-          "probe:flatpak-updates",
         );
         const next = await fetchUpdatesSnapshot();
         setReadings(next);
@@ -277,19 +234,6 @@ export function UpdatesOverview() {
     setStageProgress(null);
     await refresh().catch(() => undefined);
     return friendlyActionResult("stage", detail);
-  }
-
-  async function updateApps(): Promise<string> {
-    try {
-      return await updateFlatpaks();
-    } catch (error) {
-      throw new Error(friendlyActionError("apps", error));
-    } finally {
-      // Even a partially failed multi-scope update may have changed one
-      // installation. Always refresh the authoritative count before offering
-      // another action, so the page never keeps an obsolete badge.
-      await refresh().catch(() => undefined);
-    }
   }
 
   async function apply(): Promise<string> {
@@ -314,13 +258,12 @@ export function UpdatesOverview() {
     }
   }
 
-  const { snapshot, status: updateStatus, pending, health } = readings;
+  const { snapshot, status: updateStatus, health } = readings;
   const staged = updateStatus?.staged ?? false;
   // Latched staged state wins until the backend confirms it: right after a
   // successful stage the primary button must read "Restart to apply", not
   // fall back to "Check for updates" on a lagging probe.
   const stagedEffective = staged || stagedLatch;
-  const pendingCount = numericPending(pending);
   const systemUpdateAvailable = updateStatus?.check_state === "available" && !stagedEffective;
   // "blocked" (e.g. a quarantined update held back for safety) and "busy"
   // (a mutating operation in flight) are backend states, not read failures:
@@ -328,9 +271,7 @@ export function UpdatesOverview() {
   const isBlocked = updateStatus?.check_state === "blocked";
   const backendBusy = updateStatus?.check_state === "busy";
   const checkFailed = updateStatus?.check_state === "error" || (Boolean(updateStatus?.blocked_reason) && !isBlocked);
-  const appUpdatesAvailable = pendingCount > 0;
-  const appStatusIncomplete = Boolean(pending?.flatpak_detail);
-  const hasReadings = snapshot !== null || updateStatus !== null || pending !== null || health !== null;
+  const hasReadings = snapshot !== null || updateStatus !== null || health !== null;
   const actionFailed = status?.startsWith("Failed:") ?? false;
   const canStage = !stagedEffective && !isBlocked && (
     systemUpdateAvailable
@@ -351,18 +292,14 @@ export function UpdatesOverview() {
             ? "Check unavailable"
             : systemUpdateAvailable
               ? "Update available"
-              : appUpdatesAvailable
-                ? "App updates available"
-                : appStatusIncomplete
-                  ? "App status incomplete"
-                  : updateStatus?.check_state === "uptodate"
-                  ? "Up to date"
-                  : hasReadings
-                    ? "Ready to check"
-                    : "Status unavailable";
+              : updateStatus?.check_state === "uptodate"
+                ? "Up to date"
+                : hasReadings
+                  ? "Ready to check"
+                  : "Status unavailable";
   const overallTone: GuidanceTone = !loaded || !hasReadings || backendBusy
     ? "muted"
-    : stagedEffective || systemUpdateAvailable || appUpdatesAvailable || appStatusIncomplete || checkFailed || isBlocked
+    : stagedEffective || systemUpdateAvailable || checkFailed || isBlocked
       ? "warn"
       : "ok";
   const systemStatusLabel = !loaded
@@ -391,25 +328,9 @@ export function UpdatesOverview() {
           : updateStatus?.check_state === "uptodate"
             ? "No system restart is needed."
             : "Check to see whether a system update is available.";
-  const appStatusLabel = !loaded || pending === null
-    ? "Not checked"
-    : pendingCount > 0
-      ? `${pendingCount} available`
-      : pending?.flatpak_detail
-        ? "Status incomplete"
-        : "Up to date";
-  const appStatusDetail = pending?.flatpak_detail
-    || (pendingCount > 0
-      ? "Available across your Flatpak installations."
-      : pending === null
-        ? "Check to see whether app updates are available."
-        : "No app updates are pending.");
   const systemStatusTone: GuidanceTone = stagedEffective || systemUpdateAvailable || isBlocked || checkFailed
     ? "warn"
     : updateStatus?.check_state === "uptodate" ? "ok" : "muted";
-  const appStatusTone: GuidanceTone = pendingCount > 0 || Boolean(pending?.flatpak_detail)
-    ? "warn"
-    : pending !== null ? "ok" : "muted";
 
   const guidance: UpdateGuidance = (() => {
     if (busy === "check") {
@@ -434,16 +355,6 @@ export function UpdatesOverview() {
         next: live ? `${live.pct}% complete. Keep the Hub open until staging finishes.` : "Keep the Hub open until staging finishes.",
         progress: true,
         progressPct: live?.pct,
-      };
-    }
-    if (busy === "apps") {
-      return {
-        tone: "muted",
-        icon: "↓",
-        title: "Updating your apps",
-        message: "Your app updates are downloading and installing now.",
-        next: "Keep the Hub open until the app update finishes.",
-        progress: true,
       };
     }
     if (busy === "apply") {
@@ -494,7 +405,7 @@ export function UpdatesOverview() {
         icon: "!",
         title: "The update could not be completed",
         message: failure,
-        next: actionErrorNextStep(failure, lastAction),
+        next: friendlyActionNextStep(failure, lastAction),
       };
     }
     if (stagedEffective) {
@@ -533,24 +444,6 @@ export function UpdatesOverview() {
         next: "Choose “Download and stage”. We’ll tell you when a restart is needed.",
       };
     }
-    if (appUpdatesAvailable) {
-      return {
-        tone: "warn",
-        icon: "↓",
-        title: "App updates are available",
-        message: `${pendingCount} app update${pendingCount === 1 ? " is" : "s are"} waiting. KythOS itself is current.`,
-        next: "Choose “Update apps” to install them.",
-      };
-    }
-    if (appStatusIncomplete) {
-      return {
-        tone: "warn",
-        icon: "!",
-        title: "App update status is incomplete",
-        message: pending?.flatpak_detail || "The Hub could not check every Flatpak installation.",
-        next: "Choose “Check for updates” to retry the app check.",
-      };
-    }
     if (!loaded) {
       return {
         tone: "muted",
@@ -573,7 +466,7 @@ export function UpdatesOverview() {
       tone: "muted",
       icon: "↓",
       title: "Ready to check for updates",
-      message: "We’ll look for a newer KythOS version and any app updates.",
+      message: "We’ll look for a newer KythOS version.",
       next: "Choose “Check for updates” to begin.",
     };
   })();
@@ -584,24 +477,18 @@ export function UpdatesOverview() {
       ? { id: "check", label: busy === "check" ? "Checking…" : "Check for updates", pending: "Checking for updates…", action: check }
       : systemUpdateAvailable
       ? { id: "stage", label: busy === "stage" ? "Downloading…" : actionFailed && lastAction === "stage" ? "Try again" : "Download and stage", pending: "Downloading and staging…", action: stage }
-      : checkFailed
-        ? { id: "check", label: busy === "check" ? "Checking…" : "Try again", pending: "Checking for updates…", action: check }
-        : appStatusIncomplete
+        : checkFailed
           ? { id: "check", label: busy === "check" ? "Checking…" : "Try again", pending: "Checking for updates…", action: check }
-        : appUpdatesAvailable
-          ? { id: "apps", label: busy === "apps" ? "Updating apps…" : actionFailed && lastAction === "apps" ? "Try again" : "Update apps", pending: "Updating your apps…", action: updateApps }
           : lastAction === "stage" && actionFailed
             ? { id: "stage", label: "Try again", pending: "Downloading and staging…", action: stage }
-            : lastAction === "apps" && actionFailed
-              ? { id: "apps", label: "Try again", pending: "Updating your apps…", action: updateApps }
-              : { id: "check", label: busy === "check" ? "Checking…" : "Check for updates", pending: "Checking for updates…", action: check };
+            : { id: "check", label: busy === "check" ? "Checking…" : "Check for updates", pending: "Checking for updates…", action: check };
 
   const channel = snapshot?.channel ?? "Not identified";
   const version = snapshot?.booted?.version ?? snapshot?.booted?.image ?? "Not identified";
   const lastCheck = updateStatus?.detail && !checkFailed ? updateStatus.detail : "The latest check result will appear here.";
   // Update-domain jobs (stage/apply/rollback/switch) are cancellable while
   // running — including a job reattached after a reload, which has no local
-  // `busy` anymore. App updates run in the install domain instead.
+  // `busy` anymore.
   const showUpdateCancel = busy === "stage" || busy === "apply" || busy === "rollback" || (busy === null && updateTracked);
 
   return (
@@ -610,7 +497,7 @@ export function UpdatesOverview() {
         <div>
           <span className="updates-eyebrow">System updates</span>
           <h1>Keep KythOS current</h1>
-          <p>One place to check, stage, and finish system updates.</p>
+          <p>One place to check, stage, and finish system updates. App updates now live on the Apps page.</p>
           <div className="updates-meta" aria-label="Current system">
             <span>Channel <strong>{channel}</strong></span>
             <span>Version <strong>{version}</strong></span>
@@ -631,23 +518,18 @@ export function UpdatesOverview() {
         </div>
       </div>
 
-      <div className="updates-status-grid" aria-label="System and app update status">
+      <div className="updates-status-grid updates-status-grid-single" aria-label="System update status">
         <section className={`updates-status-card updates-status-card-${systemStatusTone}`} aria-label="KythOS system updates">
           <span className="updates-status-label">System</span>
           <strong>{systemStatusLabel}</strong>
           <p>{systemStatusDetail}</p>
-        </section>
-        <section className={`updates-status-card updates-status-card-${appStatusTone}`} aria-label="Flatpak app updates">
-          <span className="updates-status-label">Apps</span>
-          <strong>{appStatusLabel}</strong>
-          <p>{appStatusDetail}</p>
         </section>
       </div>
 
       <div className="updates-actions-card updates-primary-actions">
         <div>
           <span className="updates-eyebrow">Next step</span>
-          <h2>{stagedEffective ? "Finish the staged update" : systemUpdateAvailable ? "Install the available update" : appUpdatesAvailable ? "Update your apps" : "Update KythOS"}</h2>
+          <h2>{stagedEffective ? "Finish the staged update" : systemUpdateAvailable ? "Install the available update" : "Update KythOS"}</h2>
           <p>{lastCheck}</p>
         </div>
         <div className="updates-actions">
@@ -664,13 +546,6 @@ export function UpdatesOverview() {
               onClick={() => startAction("stage", "Downloading and staging…", stage)}
             />
           )}
-          {appUpdatesAvailable && primaryAction.id !== "apps" && (
-            <ActionButton
-              label={busy === "apps" ? "Updating apps…" : "Update apps"}
-              disabled={busy !== null || !loaded}
-              onClick={() => startAction("apps", "Updating your apps…", updateApps)}
-            />
-          )}
           {canRollback && (
             <ActionButton
               label={busy === "rollback" ? "Rolling back…" : "Roll back"}
@@ -682,14 +557,7 @@ export function UpdatesOverview() {
             <ActionButton
               label={cancelling ? "Cancelling…" : "Cancel update"}
               disabled={cancelling || !loaded}
-              onClick={() => void cancelRunning("update")}
-            />
-          )}
-          {busy === "apps" && (
-            <ActionButton
-              label={cancelling ? "Cancelling…" : "Cancel"}
-              disabled={cancelling || !loaded}
-              onClick={() => void cancelRunning("apps")}
+              onClick={() => void cancelRunning()}
             />
           )}
         </div>
@@ -701,7 +569,6 @@ export function UpdatesOverview() {
         <div className="updates-details-grid">
           <div><span>Update health</span><strong>{health?.status ?? "Not checked"}</strong></div>
           <div><span>Rollback</span><strong>{canRollback ? "Available" : "Not available"}</strong></div>
-          <div><span>App updates</span><strong>{pendingCount > 0 ? `${pendingCount} available` : "None found"}</strong></div>
           <div><span>Last result</span><strong>{friendlyAvailabilityDetail(lastCheck, "Not checked yet.")}</strong></div>
         </div>
       </details>

@@ -8,6 +8,7 @@ import { ExeHandlerDialog } from "./components/ExeHandlerDialog";
 const Dashboard = lazy(() => import("./pages/Dashboard").then(({ Dashboard: page }) => ({ default: page })));
 const Play = lazy(() => import("./pages/Play").then(({ Play: page }) => ({ default: page })));
 const Apps = lazy(() => import("./pages/Apps").then(({ Apps: page }) => ({ default: page })));
+const DevTools = lazy(() => import("./pages/DevTools").then(({ DevTools: page }) => ({ default: page })));
 const ThisPc = lazy(() => import("./pages/ThisPc").then(({ ThisPc: page }) => ({ default: page })));
 const MoveIn = lazy(() => import("./pages/MoveIn").then(({ MoveIn: page }) => ({ default: page })));
 const Vpn = lazy(() => import("./pages/Vpn").then(({ Vpn: page }) => ({ default: page })));
@@ -39,6 +40,7 @@ const crumbFor: Record<string, string> = {
   "/": "Home",
   "/play": "Play",
   "/apps": "Apps",
+  "/dev-tools": "Dev Tools",
   "/this-pc": "This PC",
   "/move-in": "Move In",
   "/vpn": "VPN",
@@ -65,6 +67,7 @@ export function App() {
               <Route path="/" element={<Dashboard />} />
               <Route path="/play" element={<Play />} />
               <Route path="/apps" element={<Apps />} />
+              <Route path="/dev-tools" element={<DevTools />} />
               <Route path="/this-pc" element={<ThisPc />} />
               <Route path="/move-in" element={<MoveIn />} />
               <Route path="/vpn" element={<Vpn />} />

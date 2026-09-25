@@ -32,6 +32,7 @@ pub mod desktop_plasma;
 pub mod desktop_preferences;
 pub mod desktop_shortcuts;
 pub mod desktop_stack;
+pub mod dev_tools_catalog;
 pub mod devcontainers;
 pub mod disk_utils;
 pub mod display;

@@ -7,11 +7,13 @@ import {
   uninstallFlatpak, makeAppImageExecutable, importAppImage, fetchStarterPacks,
   fetchKaliStatus, fetchSecHostTools, createKaliBox, exportKaliApps,
   removeKaliBox, enterKaliTerminal, installSecHostTool, uninstallSecHostTool,
-  launchSecHostTool, invalidateSharedReads, type AppStoreSnapshot, type FamiliarApp, type AppImageEntry,
+  launchSecHostTool, invalidateSharedReads, fetchPendingUpdatesSummary, updateFlatpaks,
+  type AppStoreSnapshot, type FamiliarApp, type AppImageEntry,
   type AppStreamApp, type StarterPack, type InstalledFlatpak, type SecHostTool,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { friendlyActionError, friendlyActionNextStep, friendlyActionResult } from "./updateMessages";
 
 type SectionRun = (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
 const secBtnStyle = { padding: "6px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600, fontSize: 12 } as const;
@@ -78,6 +80,88 @@ function HostToolsGrid({ busy, run }: { busy: string | null; run: SectionRun }) 
   return <div className="app-special-list"><p className="app-subsection-label">Host-side security tools</p><p className="app-subsection-copy">Native Flatpak tools with first-class Wayland integration.</p><div className="app-tool-grid">{tools.map((tool) => <div key={tool.flatpak} className="app-tool-card"><AppIcon name={tool.name} id={tool.flatpak} /><div className="app-tool-copy"><strong>{tool.name}</strong><span>{tool.desc}</span></div>{tool.installed ? <div className="app-tool-actions"><button disabled={busy !== null} onClick={() => run(`sec-launch-${tool.flatpak}`, `Launching ${tool.name}…`, () => launchSecHostTool(tool.flatpak))} style={secBtnStyle}>Launch</button><button disabled={busy !== null} onClick={() => run(`sec-uninstall-${tool.flatpak}`, `Uninstalling ${tool.name}…`, async () => { const result = await uninstallSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Remove</button></div> : <button disabled={busy !== null} onClick={() => run(`sec-install-${tool.flatpak}`, `Installing ${tool.name}…`, async () => { const result = await installSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Install</button>}</div>)}</div></div>;
 }
 
+function numericAppPending(pending: Record<string, string> | null): number {
+  const parsed = Number(pending?.flatpak ?? 0);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+}
+
+// App updates live here, not on the Updates page: that page owns only the
+// system (bootc) update workflow now. This card owns its own pending count,
+// action, and error messaging using the same shared copy the system update
+// page uses, so the two workflows read consistently without sharing state.
+function AppUpdatesCard({ busy, run, status }: { busy: string | null; run: SectionRun; status: string | null }) {
+  const [pending, setPending] = useState<Record<string, string> | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const [lastFailed, setLastFailed] = useState(false);
+
+  async function refresh(): Promise<void> {
+    invalidateSharedReads("pending-updates", "probe:flatpak-updates");
+    const next = await fetchPendingUpdatesSummary();
+    setPending(next);
+    setLoaded(true);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPendingUpdatesSummary().then((next) => {
+      if (!cancelled) { setPending(next); setLoaded(true); }
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  async function updateApps(): Promise<string> {
+    try {
+      const result = await updateFlatpaks();
+      setLastFailed(false);
+      return friendlyActionResult("apps", result);
+    } catch (error) {
+      setLastFailed(true);
+      throw new Error(friendlyActionError("apps", error));
+    } finally {
+      // Even a partially failed multi-scope update may have changed one
+      // installation. Always refresh the authoritative count before
+      // offering another action, so the card never keeps a stale badge.
+      await refresh().catch(() => undefined);
+    }
+  }
+
+  const count = numericAppPending(pending);
+  const incomplete = Boolean(pending?.flatpak_detail);
+  const available = count > 0;
+  const label = !loaded ? "Checking…" : available ? `${count} update${count === 1 ? "" : "s"} ready` : incomplete ? "Status incomplete" : "Up to date";
+  const detail = pending?.flatpak_detail
+    || (available ? "Ready to install across your Flatpak installations." : loaded ? "No app updates are pending." : "Checking Flatpak app updates…");
+  const tone = available || incomplete ? "warn" : loaded ? "ok" : "muted";
+  const actionFailed = lastFailed && (status?.startsWith("Failed:") ?? false);
+  const busyHere = busy === "apps-update";
+
+  return <div className={`app-updates-card app-updates-card-${tone}`}>
+    <div className="app-updates-card-top">
+      <span className="app-updates-label">App updates</span>
+      <strong>{label}</strong>
+    </div>
+    <p className="app-updates-detail">{detail}</p>
+    {actionFailed && <p className="app-updates-next-step">{friendlyActionNextStep((status ?? "").replace(/^Failed:\s*/, ""), "apps")}</p>}
+    <div className="app-updates-actions">
+      {(available || incomplete) && (
+        <button
+          className="app-action-button app-action-primary"
+          disabled={busy !== null && !busyHere}
+          onClick={() => void run("apps-update", "Updating your apps…", updateApps)}
+        >
+          {busyHere ? "Updating apps…" : incomplete && !available ? "Try again" : "Update apps"}
+        </button>
+      )}
+      {busyHere && (
+        <button className="app-action-button app-action-secondary" onClick={() => void run("cancel-apps-update", "Cancelling…", cancelInstall)}>Cancel</button>
+      )}
+      {!available && !incomplete && loaded && (
+        <button className="app-action-button app-action-secondary" disabled={busy !== null} onClick={() => void run("apps-refresh", "Checking for app updates…", async () => { await refresh(); return "App update status refreshed."; })}>Check for updates</button>
+      )}
+    </div>
+  </div>;
+}
+
 // Apps is the KythOS software center: discovery and lifecycle actions stay
 // behind typed Tauri commands, while this component only owns presentation.
 export function AppStoreSection({ section }: { section: HubSection }) {
@@ -136,6 +220,7 @@ export function AppStoreSection({ section }: { section: HubSection }) {
       <div className="app-store-hero"><div><span className="app-eyebrow">Kyth software center</span><h2>Find your next app</h2><p>Discover trusted Flatpaks, install them in one click, and keep your desktop organized from one place.</p></div><div className="app-store-hero-art"><span>✦</span><i /><i /><i /></div></div>
       <div className="app-store-search-wrap"><label htmlFor="app-store-search" className="app-search-label">Search applications</label><div className="app-store-search"><span aria-hidden="true">⌕</span><input id="app-store-search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Search apps, tools, and games…" autoComplete="off" />{catalogQuery && <button className="app-search-clear" onClick={() => setCatalogQuery("")} aria-label="Clear app search">×</button>}</div><p className="app-search-hint">Searches the Flathub catalog through the native Kyth bridge.</p></div>
       <div className="app-stat-row"><div><span>Installed apps</span><strong>{snapshot?.installedCount ?? installed?.length ?? "—"}</strong></div><div><span>Updates ready</span><strong>{snapshot?.updatesAvailable ?? "—"}</strong></div><div><span>App source</span><strong>Flathub</strong></div></div>
+      <AppUpdatesCard busy={busy} run={run} status={status} />
       {catalogQuery.trim().length >= 2 ? <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Discover</span><h2>Search results</h2></div>{catalog && <span className="app-result-count">{catalog.length} matches</span>}</div>{catalogSearching && <div className="app-loading-state"><span className="app-spinner" /> Searching Flathub…</div>}{!catalogSearching && catalog && <div className="app-card-grid">{catalog.map((app) => <AppCard key={app.id} app={app} installed={installedIds.has(app.id)} busy={busy} onInstall={onInstall} onUninstall={onUninstall} onCancelInstall={onCancelInstall} />)}</div>}{!catalogSearching && catalog?.length === 0 && <div className="app-empty-state"><strong>No apps found</strong><span>Try a broader search, or check the spelling.</span></div>}{familiarMatches.length > 0 && <div className="app-alternative-note"><strong>Looking for {familiarMatches[0].windows_name}?</strong><span>{familiarMatches[0].description}</span><button className="app-link-button" onClick={() => setCatalogQuery(familiarMatches[0].flatpak_id)}>View alternative</button></div>}</section> : <>
         <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Curated for KythOS</span><h2>Popular apps</h2></div><span className="app-result-count">One-click install</span></div><div className="app-card-grid">{featured.map((app) => <AppCard key={app.id} app={app} installed={installedIds.has(app.id)} busy={busy} onInstall={onInstall} onUninstall={onUninstall} onCancelInstall={onCancelInstall} />)}</div></section>
         {packs && packs.length > 0 && <section className="app-catalog-section app-packs-section"><div className="app-section-heading"><div><span className="app-eyebrow">Get set up faster</span><h2>Starter collections</h2></div></div><div className="app-pack-grid">{packs.map((pack) => <article key={pack.name} className="app-pack-card"><div className="app-pack-art"><span>{pack.name.slice(0, 1)}</span><b /><b /><b /></div><div className="app-pack-body"><h3>{pack.name}</h3><p>{pack.desc}</p><div className="app-pack-apps">{pack.apps.map((app) => <span key={app.id} className={installedIds.has(app.id) ? "app-pack-app-installed" : ""}>{app.label}</span>)}</div><button className="app-action-button app-action-primary" disabled={busy !== null} onClick={() => void run(`pack-${pack.name}`, `Installing ${pack.name}…`, () => installPack(pack))}>{busy === `pack-${pack.name}` ? "Installing…" : "Install collection"}</button></div></article>)}</div></section>}

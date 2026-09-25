@@ -134,7 +134,10 @@ test("Updates page reconciles the explicit check into the read model", () => {
   assert.match(updatesOverview, /checkForUpdates\(\)/);
   assert.match(updatesOverview, /check_state: availability\.state/);
   assert.match(updatesOverview, /blocked_reason: availability\.blocked_reason \|\| null/);
-  assert.match(updatesOverview, /flatpak: String\(availability\.flatpak_count\)/);
+  // The same backend check also refreshes the app update count as a side
+  // effect; the Updates page invalidates that cache for the App Store
+  // section to pick up rather than tracking the count itself.
+  assert.match(updatesOverview, /invalidateSharedReads\("pending-updates", "probe:flatpak-updates"\)/);
 });
 
 test("Updates page has one action owner and no duplicate legacy section", async () => {
@@ -150,7 +153,7 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updatesOverview, /updates-guidance/);
   assert.match(updatesOverview, /const \[lastAction, setLastAction\]/);
   assert.match(updatesOverview, /lastAction === "stage"/);
-  assert.match(updatesOverview, /lastAction === "apps"/);
+  assert.match(updatesOverview, /friendlyActionNextStep/);
   assert.match(updatesOverview, /Downloading and preparing your update/);
   assert.match(updatesOverview, /Update ready — restart to finish/);
   assert.match(updatesOverview, /Choose “Restart to apply”/);
@@ -160,8 +163,9 @@ test("Updates page gives plain-language next steps", () => {
   assert.doesNotMatch(updateMessages, /current system has not changed/);
   assert.match(updateMessages, /confirm that the update is staged/);
   assert.match(updateMessages, /Details:/);
-  assert.match(updatesOverview, /Free up some disk space/);
-  assert.match(updatesOverview, /Your current system is still safe to use/);
+  assert.match(updateMessages, /action === "apps"/, "app-update next steps moved into the shared friendlyActionNextStep helper");
+  assert.match(updateMessages, /Free up some disk space/);
+  assert.match(updateMessages, /Your current system is still safe to use/);
   assert.match(updateMessages, /The update is downloaded and ready/);
   assert.match(updateMessages, /No changes were made/);
 });
@@ -198,8 +202,6 @@ test("Privileged-helper outage is not reported as a network problem", () => {
   }
   assert.match(updateMessages, /helper service isn't running/);
   assert.match(updateMessages, /system update helper isn't running/);
-  assert.match(updatesOverview, /helper service isn't running/);
-  assert.match(updatesOverview, /system update helper isn't running/);
 });
 
 test("cancel commands pair every job status command and resolve in the pollers", () => {
@@ -378,7 +380,7 @@ test("Updates page renders a working Cancel wired to the update job", () => {
   assert.match(updatesOverview, /cancelUpdateJob/, "the page must import the update cancel path");
   assert.match(updatesOverview, /getInFlightJob\("update"\)/, "Cancel must cover jobs reattached after a reload");
   assert.match(updatesOverview, /Cancel update/, "a running update needs a visible Cancel");
-  assert.match(updatesOverview, /cancelRunning\("update"\)/, "Cancel must invoke the update cancel path");
+  assert.match(updatesOverview, /await cancelUpdateJob\(\)/, "Cancel must invoke the update cancel path");
   // Cancel must stay enabled exactly when the mutating buttons disable.
   assert.match(updatesOverview, /disabled=\{cancelling \|\| !loaded\}/, "Cancel must not share the busy-disabled gate");
   assert.match(updatesOverview, /<ActionStatus status=\{cancelNote \?\? status\}/, "cancel progress must surface in the status row");

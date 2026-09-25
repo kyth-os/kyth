@@ -71,6 +71,7 @@ frontend/Rust invocation tests.
 | Hardware and desktop | firmware, PipeWire, Plasma preset, controllers, display/hardware reads | read / check / mutate | Expensive scans stay on demand; mutating presets require confirmation and bounded argv. |
 | Security | Kali lifecycle and host-tool install/uninstall/launch plus job status | read / mutate | Fixed Kali templates and two-tool catalog; no caller-supplied container or Flatpak identifiers. |
 | Gaming | tool catalog actions, Discord/OBS fixes, folder open, SCX controls, per-game profile save | read / mutate | Fixed 14-tool catalog and fixed folder/scheduler/profile value sets; no arbitrary path or command bridge. |
+| Dev Tools | `dev_tools_catalog_list`, `ai_dev_box_status`, `dev_tools_install_selection`, job status/cancel | read / mutate | Fixed catalog of editors/agents/languages/utilities; selection is validated against the catalog before any install runs; host vs. `kyth-ai-dev` distrobox target is fixed per tool, never caller-chosen. |
 
 ### Ledger maintenance rule
 
