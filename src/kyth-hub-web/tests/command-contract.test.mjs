@@ -191,6 +191,11 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(hubTheme, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(hubTheme, /\.updates-progress-ring-indeterminate svg \{ animation: updates-ring-spin/);
   assert.match(hubTheme, /\.updates-progress-ring svg, \.updates-progress-ring-value \{/);
+  assert.match(updatesOverview, /const availableDigest = systemUpdateAvailable \? updateStatus\?\.remote_digest : null/);
+  assert.match(updatesOverview, /Installed image digest/);
+  assert.match(updatesOverview, /Available image digest/);
+  assert.match(updatesOverview, /normalized\.slice\(0, 19\)/, "long image digests should be compact visually");
+  assert.match(hubTheme, /\.updates-meta > span[\s\S]*text-overflow: ellipsis/);
   assert.match(hubTheme, /\.updates-phase-current \.updates-phase-marker[^\n]*animation:/);
   assert.match(updateMessages, /We couldn't reach the update service/);
   assert.match(updateMessages, /couldn't reach the update registry/);

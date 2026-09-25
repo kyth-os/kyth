@@ -46,6 +46,12 @@ function updatePhaseTitle(phase: string | undefined): string {
   }
 }
 
+function displayDigest(digest: string | null | undefined): string {
+  if (!digest) return "Not reported";
+  const normalized = digest.trim();
+  return normalized.length > 24 ? `${normalized.slice(0, 19)}…` : normalized;
+}
+
 type UpdateGuidance = {
   tone: GuidanceTone;
   icon: string;
@@ -533,6 +539,8 @@ export function UpdatesOverview() {
 
   const channel = snapshot?.channel ?? "Not identified";
   const version = snapshot?.booted?.version ?? snapshot?.booted?.image ?? "Not identified";
+  const bootedDigest = snapshot?.booted?.imageDigest;
+  const availableDigest = systemUpdateAvailable ? updateStatus?.remote_digest : null;
   const lastCheck = updateStatus?.detail && !checkFailed ? updateStatus.detail : "The latest check result will appear here.";
   // Update-domain jobs (stage/apply/rollback/switch) are cancellable while
   // running — including a job reattached after a reload, which has no local
@@ -548,7 +556,7 @@ export function UpdatesOverview() {
           <p>One place to check, stage, and finish system updates. App updates now live on the Apps page.</p>
           <div className="updates-meta" aria-label="Current system">
             <span>Channel <strong>{channel}</strong></span>
-            <span>Version <strong>{version}</strong></span>
+            <span>Installed <strong title={version}>{version}</strong></span>
           </div>
         </div>
         <div className={`updates-ready-chip updates-chip-${overallTone}`}><span />{overallLabel}</div>
@@ -654,6 +662,8 @@ export function UpdatesOverview() {
           <div><span>Update health</span><strong>{health?.status ?? "Not checked"}</strong></div>
           <div><span>Rollback</span><strong>{canRollback ? "Available" : "Not available"}</strong></div>
           <div><span>Last result</span><strong>{friendlyAvailabilityDetail(lastCheck, "Not checked yet.")}</strong></div>
+          <div><span>Installed image digest</span><strong title={bootedDigest ?? undefined} aria-label={bootedDigest ? `Installed image digest ${bootedDigest}` : "Installed image digest not reported"}>{displayDigest(bootedDigest)}</strong></div>
+          {availableDigest && <div><span>Available image digest</span><strong title={availableDigest} aria-label={`Available image digest ${availableDigest}`}>{displayDigest(availableDigest)}</strong></div>}
         </div>
       </details>
     </section>

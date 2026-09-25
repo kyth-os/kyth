@@ -1707,6 +1707,14 @@ input {
   font-size: 11px;
 }
 
+.updates-meta > span {
+  min-width: 0;
+  max-width: min(100%, 380px);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .updates-meta strong {
   margin-left: 4px;
   color: #fff;
