@@ -259,21 +259,36 @@ pub fn apply_preset(preset: &NetworkPreset, root: &Path) -> std::io::Result<Vec<
     if let Some(parent) = dest.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let backup = std::fs::read(&dest).ok();
+    let backup = match std::fs::read(&dest) {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error),
+    };
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let tmp = dest.with_extension(format!("tmp.{}.{}", std::process::id(), nonce));
     let write = (|| -> std::io::Result<()> {
-        let tmp = dest.with_extension("tmp");
         std::fs::write(&tmp, render_resolved_conf(preset))?;
         std::fs::rename(&tmp, &dest)?;
         Ok(())
     })();
     if let Err(error) = write {
-        match backup {
-            None => {
-                let _ = std::fs::remove_file(&dest);
-            }
-            Some(bytes) => {
-                let _ = std::fs::write(&dest, bytes);
-            }
+        let rollback = match backup {
+            None => match std::fs::remove_file(&dest) {
+                Err(remove_error) if remove_error.kind() != std::io::ErrorKind::NotFound => {
+                    Err(remove_error)
+                }
+                _ => Ok(()),
+            },
+            Some(bytes) => std::fs::write(&dest, bytes),
+        };
+        let _ = std::fs::remove_file(&tmp);
+        if let Err(rollback_error) = rollback {
+            return Err(std::io::Error::other(format!(
+                "write failed ({error}); rollback failed ({rollback_error})"
+            )));
         }
         return Err(error);
     }

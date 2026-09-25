@@ -31,10 +31,37 @@ fn latency_ledger_path() -> PathBuf {
 fn load_latency_map() -> std::collections::HashMap<i64, (f64, f64)> {
     let mut m = std::collections::HashMap::new();
     let p = latency_ledger_path();
-    let Ok(text) = std::fs::read_to_string(&p) else {
+    let Ok(mut file) = std::fs::File::open(&p) else {
         return m;
     };
-    for line in text.lines() {
+    const MAX_LEDGER_BYTES: u64 = 4 * 1024 * 1024;
+    let Ok(size) = file.metadata().map(|metadata| metadata.len()) else {
+        return m;
+    };
+    if size > MAX_LEDGER_BYTES
+        && std::io::Seek::seek(
+            &mut file,
+            std::io::SeekFrom::End(-(MAX_LEDGER_BYTES as i64)),
+        )
+        .is_err()
+    {
+        return m;
+    }
+    let mut bytes = Vec::with_capacity(size.min(MAX_LEDGER_BYTES) as usize);
+    if std::io::Read::read_to_end(&mut file, &mut bytes).is_err() {
+        return m;
+    }
+    if size > MAX_LEDGER_BYTES {
+        if let Some(newline) = bytes.iter().position(|byte| *byte == b'\n') {
+            bytes.drain(..=newline);
+        } else {
+            return m;
+        }
+    }
+    let text = String::from_utf8_lossy(&bytes);
+    // A compact ledger can still contain many tiny records; cap the map's
+    // entry count independently of the byte limit.
+    for line in text.lines().rev().take(20_000) {
         let line = line.trim();
         if line.is_empty() {
             continue;
@@ -50,7 +77,7 @@ fn load_latency_map() -> std::collections::HashMap<i64, (f64, f64)> {
         }
         let avg = obj.get("avg_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
         let p99 = obj.get("p99_ms").and_then(|v| v.as_f64()).unwrap_or(0.0);
-        m.insert(sa as i64, (avg, p99));
+        m.entry(sa as i64).or_insert((avg, p99));
     }
     m
 }

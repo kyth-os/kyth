@@ -59,7 +59,8 @@ pub struct KaliContainerInfo {
 
 impl KaliContainerInfo {
     pub fn socket_capable(&self) -> bool {
-        self.image.contains("kali")
+        (self.image == DEFAULT_KALI_IMAGE
+            || self.image.starts_with("docker.io/kalilinux/kali-rolling:"))
             && self.privileged
             && self
                 .security_options
@@ -225,10 +226,12 @@ distrobox enter --root {box_name} -- bash -c "export DEBIAN_FRONTEND=noninteract
 pub fn build_kali_export_command(box_name: &str) -> Result<Vec<String>, String> {
     validate_box_name(box_name)?;
     let script = format!(
-        r#"distrobox enter --root {box_name} -- bash -c 'shopt -s nullglob; files=(/usr/share/applications/*.desktop); if [ ${{#files[@]}} -eq 0 ]; then exit 2; fi; n=0; for f in ${{files[@]}}; do app=$(basename $f .desktop); distrobox-export --app $app 2>&1 && n=$((n+1)) || echo skip: $app; done; echo EXPORTED:$n'
-_rc=$?; [ "$_rc" -eq 2 ] && exit 2
+        r#"distrobox enter --root {box_name} -- bash -c 'shopt -s nullglob; files=(/usr/share/applications/*.desktop); if [ ${{#files[@]}} -eq 0 ]; then exit 2; fi; n=0; failed=0; for f in ${{files[@]}}; do app=$(basename $f .desktop); if distrobox-export --app $app 2>&1; then n=$((n+1)); else failed=$((failed+1)); echo skip: $app; fi; done; echo EXPORTED:$n FAILED:$failed'
+_rc=$?; [ "$_rc" -eq 2 ] && exit 2; [ "$_rc" -ne 0 ] && exit "$_rc"
 distrobox enter --root {box_name} -- bash -c "echo '${{USER}} ALL=(root) NOPASSWD: ALL' | sudo tee /etc/sudoers.d/kali-user-nopasswd > /dev/null; sudo chmod 0440 /etc/sudoers.d/kali-user-nopasswd"
-{DESKTOP_FILE_REWRITE_SCRIPT}"#
+_rc=$?; [ "$_rc" -ne 0 ] && exit "$_rc"
+{DESKTOP_FILE_REWRITE_SCRIPT}
+"#
     );
     Ok(vec!["bash".to_string(), "-c".to_string(), script])
 }
@@ -239,6 +242,17 @@ pub fn parse_kali_export_count(stdout: &str) -> Option<u32> {
         .lines()
         .rev()
         .find_map(|line| line.trim().strip_prefix("EXPORTED:")?.trim().parse().ok())
+}
+
+pub fn parse_kali_export_result(stdout: &str) -> Option<(u32, u32)> {
+    let line = stdout
+        .lines()
+        .rev()
+        .find(|line| line.trim().starts_with("EXPORTED:"))?;
+    let mut fields = line.split_whitespace();
+    let exported = fields.next()?.strip_prefix("EXPORTED:")?.parse().ok()?;
+    let failed = fields.next()?.strip_prefix("FAILED:")?.parse().ok()?;
+    Some((exported, failed))
 }
 
 /// Stop and remove both a rootless and rootful box by this name, forcing
@@ -382,6 +396,9 @@ mod tests {
     fn non_kali_image_is_not_socket_capable() {
         let info = parse_kali_inspect_output("docker.io/library/ubuntu\ntrue\nlabel=disable\n");
         assert!(!info.socket_capable());
+        let deceptive =
+            parse_kali_inspect_output("registry.example/not-kali/evil\ntrue\nlabel=disable\n");
+        assert!(!deceptive.socket_capable());
     }
 
     #[test]
@@ -476,6 +493,19 @@ mod tests {
         assert_eq!(parse_kali_export_count("skip: foo\nEXPORTED:5\n"), Some(5));
         assert_eq!(parse_kali_export_count("no marker here"), None);
         assert_eq!(parse_kali_export_count("EXPORTED:0"), Some(0));
+    }
+
+    #[test]
+    fn parses_success_and_failure_export_counts() {
+        assert_eq!(
+            parse_kali_export_result("skip: foo\nEXPORTED:3 FAILED:1\n"),
+            Some((3, 1))
+        );
+        assert_eq!(
+            parse_kali_export_result("EXPORTED:0 FAILED:4"),
+            Some((0, 4))
+        );
+        assert_eq!(parse_kali_export_result("EXPORTED:3"), None);
     }
 
     #[test]

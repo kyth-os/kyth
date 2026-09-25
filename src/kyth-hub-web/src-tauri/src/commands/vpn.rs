@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{BufRead, BufReader, Write};
+use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
@@ -63,6 +63,29 @@ fn reap_saml_cookies() {
 /// this cap is generous headroom, not a tight budget: it only stops an
 /// unbounded accumulate-across-the-process-lifetime leak.
 const MAX_VPN_JOBS: usize = 16;
+const REAPABLE_VPN_STATES: &[&str] = &[
+    "failed",
+    "disconnected",
+    "complete",
+    "failed_lockdown",
+    "failed_lockdown_open",
+    "complete_firewall_open",
+];
+
+fn vpn_runtime_reapable(state: &str) -> bool {
+    REAPABLE_VPN_STATES.contains(&state)
+}
+
+fn gateway_has_live_job(store: &HashMap<String, Arc<VpnRuntime>>, gateway: &str) -> bool {
+    store.values().any(|runtime| {
+        runtime.gateway == gateway
+            && runtime
+                .status
+                .lock()
+                .map(|guard| !vpn_runtime_reapable(&guard.0))
+                .unwrap_or(true)
+    })
+}
 
 fn jobs() -> &'static Mutex<HashMap<String, Arc<VpnRuntime>>> {
     JOBS.get_or_init(|| Mutex::new(HashMap::new()))
@@ -339,8 +362,41 @@ fn take_child_for_generation(runtime: &VpnRuntime, generation: u64) -> Option<Ch
 }
 
 fn reader<R: std::io::Read + Send + 'static>(stream: R, tx: mpsc::Sender<String>) {
-    for line in BufReader::new(stream).lines().map_while(Result::ok) {
-        let _ = tx.send(line);
+    const MAX_LINE_BYTES: usize = 64 * 1024;
+    let mut reader = stream;
+    let mut buffer = [0u8; 4096];
+    let mut line = Vec::with_capacity(4096);
+    let mut truncated = false;
+    loop {
+        let count = match std::io::Read::read(&mut reader, &mut buffer) {
+            Ok(0) | Err(_) => break,
+            Ok(count) => count,
+        };
+        for byte in &buffer[..count] {
+            if *byte == b'\n' {
+                if truncated {
+                    line.extend_from_slice(b" [line truncated]");
+                }
+                if tx
+                    .send(String::from_utf8_lossy(&line).into_owned())
+                    .is_err()
+                {
+                    return;
+                }
+                line.clear();
+                truncated = false;
+            } else if line.len() < MAX_LINE_BYTES {
+                line.push(*byte);
+            } else {
+                truncated = true;
+            }
+        }
+    }
+    if !line.is_empty() || truncated {
+        if truncated {
+            line.extend_from_slice(b" [line truncated]");
+        }
+        let _ = tx.send(String::from_utf8_lossy(&line).into_owned());
     }
 }
 
@@ -381,10 +437,10 @@ fn start_process(
                 return;
             }
         };
-        if let Some(mut stdin) = child.stdin.take() {
-            if let Some(input) = command.stdin {
+        if let (Some(mut stdin), Some(input)) = (child.stdin.take(), command.stdin) {
+            thread::spawn(move || {
                 let _ = stdin.write_all(input.as_bytes());
-            }
+            });
         }
         let stdout = child.stdout.take();
         let stderr = child.stderr.take();
@@ -813,25 +869,13 @@ pub(crate) fn vpn_connect(
     // "connected"), and so is "connected" itself — which sits in
     // VPN_TERMINAL_STATES only because the frontend stops polling it.
     // The UI disconnects or reuses the live job instead.
-    const RETRYABLE_VPN_STATES: &[&str] = &[
-        "failed",
-        "disconnected",
-        "complete",
-        "failed_lockdown",
-        "failed_lockdown_open",
-        "complete_firewall_open",
-    ];
-    let already_live = jobs().lock().map(|store| {
-        store.values().any(|runtime| {
-            runtime.gateway == gateway
-                && runtime
-                    .status
-                    .lock()
-                    .ok()
-                    .is_some_and(|guard| !RETRYABLE_VPN_STATES.contains(&guard.0.as_str()))
-        })
-    });
-    if already_live.unwrap_or(false) {
+    let already_live = {
+        let store = jobs()
+            .lock()
+            .map_err(|_| "VPN job store is unavailable".to_string())?;
+        gateway_has_live_job(&store, &gateway)
+    };
+    if already_live {
         return Err(format!(
             "Already connecting or connected to {gateway}; disconnect first."
         ));
@@ -862,28 +906,40 @@ pub(crate) fn vpn_connect(
         username,
         interface: Mutex::new("portal".into()),
     });
-    let unique_job = {
+    let (unique_job, reaped_jobs) = {
         let mut store = jobs()
             .lock()
             .map_err(|_| "VPN job store is unavailable".to_string())?;
         // Disconnect keeps its final status for the UI poller, so entries
         // are only reaped here: past this cap, drop runtimes that already
         // reached a terminal state. Live connections are never evicted.
+        let mut reaped = Vec::new();
         if store.len() >= MAX_VPN_JOBS {
-            let reaped: Vec<String> = store
+            reaped = store
                 .iter()
                 .filter_map(|(id, runtime)| {
                     runtime
                         .status
                         .lock()
                         .ok()
-                        .filter(|guard| VPN_TERMINAL_STATES.contains(&guard.0.as_str()))
+                        .filter(|guard| vpn_runtime_reapable(&guard.0))
                         .map(|_| id.clone())
                 })
                 .collect();
-            for id in reaped {
-                store.remove(&id);
+            for id in &reaped {
+                store.remove(id);
             }
+        }
+        if gateway_has_live_job(&store, &runtime.gateway) {
+            return Err(format!(
+                "Already connecting or connected to {}; disconnect first.",
+                runtime.gateway
+            ));
+        }
+        if store.len() >= MAX_VPN_JOBS {
+            return Err(
+                "VPN job limit reached; disconnect or close an existing VPN job first.".into(),
+            );
         }
         // Same-tick double connects share a nanos id: suffix until free so
         // the second runtime never silently replaces the first (same
@@ -898,8 +954,12 @@ pub(crate) fn vpn_connect(
             unique = vpn_collision_id(&job, round);
         }
         store.insert(unique.clone(), runtime.clone());
-        unique
+        (unique, reaped)
     };
+    for reaped_job in reaped_jobs {
+        release_saml_cookie(&reaped_job);
+    }
+    reap_saml_cookies();
     start_process(runtime, app, unique_job.clone(), command);
     Ok(unique_job)
 }
@@ -1110,6 +1170,33 @@ fn vpn_collision_id(job: &str, round: u32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn runtime_reaping_excludes_live_and_authentication_states() {
+        for state in [
+            "connected",
+            "connected_firewall_open",
+            "connecting",
+            "authentication_required",
+        ] {
+            assert!(!vpn_runtime_reapable(state), "{state} must remain tracked");
+        }
+        for state in ["failed", "disconnected", "complete", "failed_lockdown"] {
+            assert!(vpn_runtime_reapable(state), "{state} can be reaped");
+        }
+    }
+
+    #[test]
+    fn reader_bounds_unterminated_child_output_and_keeps_following_lines() {
+        let (tx, rx) = mpsc::channel();
+        let mut input = vec![b'x'; 70 * 1024];
+        input.extend_from_slice(b"\nnext\n");
+        reader(std::io::Cursor::new(input), tx);
+        let first = rx.recv().unwrap();
+        assert!(first.len() < 65 * 1024);
+        assert!(first.ends_with("[line truncated]"));
+        assert_eq!(rx.recv().unwrap(), "next");
+    }
 
     #[test]
     fn collision_ids_match_the_frontend_job_id_pattern() {

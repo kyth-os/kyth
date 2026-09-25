@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::fs;
 use std::io;
-use std::os::unix::fs::FileTypeExt;
+use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::time::Duration;
@@ -160,7 +160,12 @@ pub fn shell_quote(value: &str) -> String {
 
 pub fn host_command_exists(command: &str) -> bool {
     env::var_os("PATH").is_some_and(|path| {
-        env::split_paths(&path).any(|directory| directory.join(command).is_file())
+        env::split_paths(&path).any(|directory| {
+            let candidate = directory.join(command);
+            fs::metadata(candidate).is_ok_and(|metadata| {
+                metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+            })
+        })
     })
 }
 

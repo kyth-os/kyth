@@ -86,15 +86,27 @@ pub(crate) fn kali_export() -> Result<SecurityActionLaunch, String> {
                 .to_string(),
         ),
         Ok(output) if output.status.success() => {
-            let count = security_container::parse_kali_export_count(&String::from_utf8_lossy(&output.stdout)).unwrap_or(0);
-            let detail = if count == 0 {
-                "No GUI apps exported. kali-linux-headless contains CLI tools only — remove this \
-                 box and re-create it with 'Default' or 'Everything' to get exportable GUI apps."
-                    .to_string()
-            } else {
-                format!("Exported {count} app(s) — they should appear in your application menu shortly.")
+            let export = security_container::parse_kali_export_result(&String::from_utf8_lossy(&output.stdout));
+            let Some((count, failed)) = export else {
+                return ("failed".to_string(), "Kali export command finished without a valid result; inspect the container and try again.".to_string());
             };
-            ("complete".to_string(), detail)
+            if count == 0 && failed > 0 {
+                ("failed".to_string(), format!("Could not export any GUI apps ({failed} failed). Check distrobox-export output and retry."))
+            } else if count == 0 {
+                (
+                    "complete".to_string(),
+                    "No GUI apps exported. kali-linux-headless contains CLI tools only — remove this \
+                     box and re-create it with 'Default' or 'Everything' to get exportable GUI apps."
+                        .to_string(),
+                )
+            } else {
+                let detail = if failed > 0 {
+                    format!("Exported {count} app(s); {failed} failed. Check the container output for skipped apps.")
+                } else {
+                    format!("Exported {count} app(s) — they should appear in your application menu shortly.")
+                };
+                ("complete".to_string(), detail)
+            }
         }
         Ok(output) => ("failed".to_string(), failure_detail("Export", &output)),
         Err(err) => ("failed".to_string(), format!("Could not start export: {err}")),

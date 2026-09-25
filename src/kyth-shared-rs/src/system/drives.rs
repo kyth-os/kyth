@@ -185,16 +185,26 @@ pub fn find_steam_dirs(mount: &Path) -> Vec<PathBuf> {
 
 fn link_compatdata(steam_dir: &Path, native: &Path) {
     let target = steam_dir.join("compatdata");
-    let target_link = target.to_string_lossy().into_owned();
     if target.is_symlink() {
         match std::fs::read_link(&target) {
-            Ok(resolved) => println!(
-                "  Compatdata is already symlinked to native storage: {}",
-                resolved.display()
-            ),
-            Err(_) => {
-                println!("  Compatdata is already symlinked to native storage: {target_link}")
+            Ok(resolved) => {
+                let resolved = if resolved.is_absolute() {
+                    resolved
+                } else {
+                    steam_dir.join(resolved)
+                };
+                if resolved.canonicalize().ok() == native.canonicalize().ok()
+                    && native.canonicalize().is_ok()
+                {
+                    println!(
+                        "  Compatdata is already symlinked to native storage: {}",
+                        resolved.display()
+                    );
+                } else {
+                    println!("  WARNING: compatdata symlink does not point to native storage; preserving it: {}", resolved.display());
+                }
             }
+            Err(error) => println!("  WARNING: could not inspect compatdata symlink: {error}"),
         }
         return;
     }
@@ -213,6 +223,7 @@ fn link_compatdata(steam_dir: &Path, native: &Path) {
             Ok(()) => backup = Some(backup_path),
             Err(error) => {
                 println!("  Failed to backup existing compatdata: {error}");
+                return;
             }
         }
     }
@@ -233,7 +244,7 @@ fn link_compatdata(steam_dir: &Path, native: &Path) {
     let tmp_link = steam_dir.join(format!(".compatdata.tmp.{}", std::process::id()));
     let linked = (|| -> std::io::Result<()> {
         if target.exists() || target.is_symlink() {
-            let _ = std::fs::remove_file(&target);
+            std::fs::remove_file(&target)?;
         }
         std::os::unix::fs::symlink(native, &tmp_link)?;
         std::fs::rename(&tmp_link, &target)?;

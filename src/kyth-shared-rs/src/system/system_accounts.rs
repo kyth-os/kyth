@@ -31,10 +31,20 @@ pub fn append_missing_names(src: &Path, dest: &Path) -> std::io::Result<usize> {
         return Ok(0);
     }
     let content = std::fs::read_to_string(src)?;
-    if !dest.exists() {
-        std::fs::write(dest, "")?;
-    }
-    let existing = std::fs::read_to_string(dest).unwrap_or_default();
+    let existing = match std::fs::read_to_string(dest) {
+        Ok(existing) => existing,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::write(dest, "")?;
+            String::new()
+        }
+        Err(error) => return Err(error),
+    };
+    let mut known: std::collections::HashSet<String> = existing
+        .lines()
+        .filter_map(|line| line.split(':').next())
+        .filter(|name| !name.is_empty())
+        .map(str::to_string)
+        .collect();
     let mut appended = 0;
     let mut out = std::fs::OpenOptions::new().append(true).open(dest)?;
     use std::io::Write;
@@ -46,10 +56,7 @@ pub fn append_missing_names(src: &Path, dest: &Path) -> std::io::Result<usize> {
         if name.is_empty() {
             continue;
         }
-        let present = existing
-            .lines()
-            .any(|known| known.split(':').next() == Some(name));
-        if !present {
+        if known.insert(name.to_string()) {
             writeln!(out, "{line}")?;
             appended += 1;
         }
@@ -190,6 +197,26 @@ mod tests {
             0
         );
         assert!(!dir.path().join("dest").exists());
+    }
+
+    #[test]
+    fn duplicate_source_names_are_appended_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        let dest = dir.path().join("dest");
+        std::fs::write(&src, "wheel:x:10:alice\nwheel:x:11:bob\n").unwrap();
+        assert_eq!(append_missing_names(&src, &dest).unwrap(), 1);
+        assert_eq!(std::fs::read_to_string(dest).unwrap().lines().count(), 1);
+    }
+
+    #[test]
+    fn unreadable_destination_is_not_treated_as_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        let dest = dir.path().join("dest");
+        std::fs::write(&src, "wheel:x:10:alice\n").unwrap();
+        std::fs::create_dir(&dest).unwrap();
+        assert!(append_missing_names(&src, &dest).is_err());
     }
 
     #[test]

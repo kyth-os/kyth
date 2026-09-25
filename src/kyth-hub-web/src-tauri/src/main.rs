@@ -976,11 +976,13 @@ fn focus_start(minutes: u32) -> Result<String, String> {
     // Reap sessions whose `sleep` already exited without a focus_stop call:
     // otherwise every unstopped session leaks a map entry (and an unwaited
     // child) for the life of the Hub process.
-    sessions.retain(|_, existing| {
-        existing
-            .try_wait()
-            .map(|status| status.is_none())
-            .unwrap_or(false)
+    sessions.retain(|_, existing| match existing.try_wait() {
+        Ok(None) => true,
+        Ok(Some(_)) => false,
+        Err(error) => {
+            eprintln!("focus: could not inspect inhibitor process: {error}");
+            true
+        }
     });
     // Kill inhibitors orphaned by a previous Hub process (crash/restart
     // reparents the `sleep` child, which then holds idle:sleep with no UI
@@ -1506,10 +1508,14 @@ fn install_cancel(job: String) -> InstallStatus {
 }
 
 #[tauri::command]
-fn protondb_lookup_many(
+async fn protondb_lookup_many(
     app_ids: Vec<String>,
 ) -> Vec<kyth_shared::system::gaming_compat::ProtonDbResult> {
-    kyth_shared::system::gaming_compat::protondb_lookup_many(&app_ids)
+    tauri::async_runtime::spawn_blocking(move || {
+        kyth_shared::system::gaming_compat::protondb_lookup_many(&app_ids)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
