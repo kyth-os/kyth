@@ -25,13 +25,14 @@ class HubWebPerformanceTests(unittest.TestCase):
         self.assertIn("const active = sections.find", HUB_PAGE)
         self.assertIn("defaultToFirstSection ? sections[0] : null", HUB_PAGE)
 
-        for page in ("Apps.tsx", "MoveIn.tsx", "Play.tsx", "ThisPc.tsx"):
+        for page in ("MoveIn.tsx", "Play.tsx", "ThisPc.tsx"):
             source = (WEB_SRC / "pages" / page).read_text(encoding="utf-8")
             self.assertNotIn("defaultToFirstSection", source, page)
         # Updates is a single page-level workflow and no longer mounts a
-        # HubPage workspace, so only the dedicated VPN page opts into a
-        # default section.
-        for page in ("Vpn.tsx",):
+        # HubPage workspace. VPN is single-section. Apps opts in too: the
+        # sidebar's Apps entry should land directly on the App Store
+        # section rather than an intermediate overview click-through.
+        for page in ("Vpn.tsx", "Apps.tsx"):
             source = (WEB_SRC / "pages" / page).read_text(encoding="utf-8")
             self.assertIn("defaultToFirstSection", source, page)
 
