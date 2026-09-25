@@ -185,7 +185,12 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updatesOverview, /className="sr-only" role="status" aria-live="polite" aria-atomic="true">\{guidance\.title\}/);
   assert.doesNotMatch(updatesOverview, /updates-guidance[^\n]*role="status"/, "frequent progress detail changes must not be announced as a live status");
   assert.match(updatesOverview, /aria-valuetext=\{`\$\{guidance\.phase \? updatePhases\.find/);
+  assert.match(updatesOverview, /className=\{`updates-progress-ring\$\{/);
+  assert.match(updatesOverview, /aria-hidden="true">\s*<svg viewBox="0 0 48 48"/);
+  assert.match(updatesOverview, /strokeDashoffset: 100 - guidance\.progressPct/);
   assert.match(hubTheme, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(hubTheme, /\.updates-progress-ring-indeterminate svg \{ animation: updates-ring-spin/);
+  assert.match(hubTheme, /\.updates-progress-ring svg, \.updates-progress-ring-value \{/);
   assert.match(hubTheme, /\.updates-phase-current \.updates-phase-marker[^\n]*animation:/);
   assert.match(updateMessages, /We couldn't reach the update service/);
   assert.match(updateMessages, /couldn't reach the update registry/);

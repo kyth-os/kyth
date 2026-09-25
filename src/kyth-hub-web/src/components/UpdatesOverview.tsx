@@ -583,6 +583,22 @@ export function UpdatesOverview() {
             </ol>
           )}
         </div>
+        {guidance.progress && (
+          <div className={`updates-progress-ring${guidance.progressPct === undefined ? " updates-progress-ring-indeterminate" : ""}`} aria-hidden="true">
+            <svg viewBox="0 0 48 48" focusable="false">
+              <circle className="updates-progress-ring-track" cx="24" cy="24" r="19" pathLength="100" />
+              <circle
+                className="updates-progress-ring-value"
+                cx="24"
+                cy="24"
+                r="19"
+                pathLength="100"
+                style={guidance.progressPct === undefined ? undefined : { strokeDashoffset: 100 - guidance.progressPct }}
+              />
+            </svg>
+            {guidance.progressPct !== undefined && <span>{guidance.progressPct}%</span>}
+          </div>
+        )}
       </div>
       <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{guidance.title}</span>
 
