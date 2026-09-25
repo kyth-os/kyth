@@ -92,6 +92,21 @@ test("Dashboard wrappers are present and used by the page", () => {
   }
 });
 
+test("native bridge calls have a default deadline and polling uses a shorter probe deadline", () => {
+  assert.match(service, /import \{ invoke as tauriInvoke \} from "@tauri-apps\/api\/core"/);
+  assert.equal((service.match(/\btauriInvoke</g) ?? []).length, 1, "raw Tauri invoke should only exist inside the bounded bridge wrapper");
+  assert.match(service, /return withTimeout\(tauriInvoke<T>\(command, args\), command, ms\)/);
+  assert.match(service, /function invoke<T>\(command: string, args\?: Record<string, unknown>\): Promise<T> \{\s*return invokeBounded<T>\(command, args\);/);
+  assert.match(service, /invokeBounded<InstallStatus>\(options\.statusCommand, \{ job \}, 10_000\)/);
+  assert.match(service, /invokeBounded<InstallStatus>\(command, \{ job \}, 30_000\)/);
+});
+
+test("invalidated reads cannot repopulate stale cache and persisted jobs reject future timestamps", () => {
+  assert.match(service, /sharedReads\.get\(key\)\?\.pending === pending[\s\S]*?sharedReads\.set\(key, \{ value, expiresAt:/);
+  assert.match(service, /const age = Date\.now\(\) - ts;\s*if \(age < 0 \|\| age > REATTACHED_JOB_TTL_MS\) return null;/);
+  assert.match(service, /if \(!Number\.isFinite\(unixSeconds\)\) return "unknown time"/);
+});
+
 test("Updates wrappers are present and used by the page", () => {
   for (const wrapper of updateWrappers) {
     assert.match(service, new RegExp(`export async function ${wrapper}\\b`), wrapper);

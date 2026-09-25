@@ -212,20 +212,24 @@ class MountRegistryTests(unittest.TestCase):
         self.assertEqual(registry.snapshot(), [])
 
     @mock.patch("kyth_installer.system._safe_umount", side_effect=OSError("busy"))
-    def test_hold_logs_unmount_failure_and_releases(self, _unmount):
+    def test_hold_logs_unmount_failure_and_keeps_path_for_cleanup_retry(self, unmount):
         registry = MountRegistry()
         log = mock.Mock()
+        run = mock.Mock()
         with registry.hold("/target", run=mock.Mock(), log=log):
             pass
-        self.assertEqual(registry.snapshot(), [])
+        self.assertEqual(registry.snapshot(), ["/target"])
         self.assertIn("could not unmount /target", log.call_args.args[0])
+        unmount.side_effect = None
+        registry.cleanup(run=run, log=log)
+        self.assertEqual(registry.snapshot(), [])
 
     @mock.patch("kyth_installer.system._safe_umount")
     def test_cleanup_is_lifo_and_continues_after_failure(self, unmount):
         registry = MountRegistry()
         for path in ("/target", "/target/boot", "/target/boot/efi"):
             registry.register(path)
-        unmount.side_effect = [None, OSError("busy"), None]
+        unmount.side_effect = [None, OSError("busy"), None, None]
         log = mock.Mock()
         run = mock.Mock()
 
@@ -235,8 +239,11 @@ class MountRegistryTests(unittest.TestCase):
             [call.args[1] for call in unmount.call_args_list],
             ["/target/boot/efi", "/target/boot", "/target"],
         )
-        self.assertEqual(registry.snapshot(), [])
+        self.assertEqual(registry.snapshot(), ["/target/boot"])
         self.assertIn("could not unmount /target/boot", log.call_args.args[0])
+        registry.cleanup(run=run, log=log)
+        self.assertEqual(registry.snapshot(), [])
+        self.assertEqual(unmount.call_args_list[-1].args[1], "/target/boot")
 
 
 if __name__ == "__main__":

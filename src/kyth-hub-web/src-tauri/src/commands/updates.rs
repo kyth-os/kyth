@@ -114,6 +114,67 @@ fn merge_stage_snapshot(
     }
 }
 
+/// Read one process-output line without letting an unterminated line allocate
+/// without bound. Oversized lines are drained, capped, and never interpreted
+/// as progress markers.
+fn read_stage_line(
+    reader: &mut impl std::io::BufRead,
+    line: &mut Vec<u8>,
+    limit: usize,
+) -> std::io::Result<Option<bool>> {
+    line.clear();
+    let mut truncated = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(if line.is_empty() && !truncated {
+                None
+            } else {
+                Some(truncated)
+            });
+        }
+        let consumed = available
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .map_or(available.len(), |index| index + 1);
+        let remaining = limit.saturating_sub(line.len());
+        let copied = consumed.min(remaining);
+        line.extend_from_slice(&available[..copied]);
+        truncated |= copied < consumed;
+        let ended = available[consumed - 1] == b'\n';
+        reader.consume(consumed);
+        if ended {
+            return Ok(Some(truncated));
+        }
+    }
+}
+
+/// Capture only a bounded prefix while continuing to drain the child pipe.
+/// Closing a pipe at the capture limit can make a verbose helper fail with
+/// EPIPE before it reaches its real result.
+fn collect_bounded_output(
+    reader: &mut impl std::io::Read,
+    limit: usize,
+) -> std::io::Result<Vec<u8>> {
+    let mut collected = Vec::with_capacity(limit);
+    let mut buffer = [0u8; 8192];
+    let mut truncated = false;
+    loop {
+        let count = reader.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        let room = limit.saturating_sub(collected.len());
+        let copied = count.min(room);
+        collected.extend_from_slice(&buffer[..copied]);
+        truncated |= copied < count;
+    }
+    if truncated {
+        collected.extend_from_slice(b"\n...[truncated]");
+    }
+    Ok(collected)
+}
+
 #[tauri::command]
 pub(crate) fn stage_progress() -> StageProgressSnapshot {
     stage_progress_cell()
@@ -162,7 +223,6 @@ fn start_stage_job(
         // Held to the end of the job: the second mutating launch fails at
         // take_mutating_slot instead of racing this one.
         let _slot = slot;
-        use std::io::BufRead;
         use std::os::unix::process::CommandExt;
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
@@ -186,45 +246,44 @@ fn start_stage_job(
                 // chatty helper (>64 KiB on either pipe) must never wedge
                 // the child, and cancel/timeout must preempt mid-download
                 // instead of waiting for EOF. Captures are capped at 1 MiB
-                // each (overflow is truncated and marked): uncapped
-                // read_to_end/extend lets a chatty helper OOM the Hub.
+                // each (overflow is truncated and marked). A bounded line
+                // reader also prevents a newline-free child write from
+                // forcing `read_line` to allocate the entire pipe payload.
                 const MAX_STAGE_CAPTURE_BYTES: usize = 1024 * 1024;
+                const MAX_STAGE_LINE_BYTES: usize = 64 * 1024;
                 let stderr_handle = child.stderr.take().map(|stderr| {
                     std::thread::spawn(move || {
-                        use std::io::Read;
-                        let mut collected = Vec::new();
                         let mut reader = std::io::BufReader::new(stderr);
-                        let mut limited = reader.take(MAX_STAGE_CAPTURE_BYTES as u64 + 1);
-                        let _ = limited.read_to_end(&mut collected);
-                        if collected.len() > MAX_STAGE_CAPTURE_BYTES {
-                            collected.truncate(MAX_STAGE_CAPTURE_BYTES);
-                            collected.extend_from_slice(b"\n...[truncated]");
-                        }
-                        collected
+                        collect_bounded_output(&mut reader, MAX_STAGE_CAPTURE_BYTES)
+                            .unwrap_or_default()
                     })
                 });
                 let stdout_handle = child.stdout.take().map(|stdout| {
                     std::thread::spawn(move || {
                         let mut collected_out = Vec::new();
                         let mut reader = std::io::BufReader::new(stdout);
-                        let mut line = String::new();
+                        let mut line = Vec::new();
                         let mut truncated = false;
                         loop {
-                            line.clear();
-                            match reader.read_line(&mut line) {
-                                Ok(0) => break,
-                                Ok(_) => {}
-                                Err(_) => break,
-                            }
-                            if let Some(snapshot) = parse_stage_marker(line.trim()) {
-                                if let Ok(mut cell) = stage_progress_cell().lock() {
-                                    let merged = merge_stage_snapshot(&cell, snapshot);
-                                    *cell = merged;
+                            let line_truncated =
+                                match read_stage_line(&mut reader, &mut line, MAX_STAGE_LINE_BYTES)
+                                {
+                                    Ok(Some(truncated)) => truncated,
+                                    Ok(None) | Err(_) => break,
+                                };
+                            let line_text = String::from_utf8_lossy(&line);
+                            if !line_truncated {
+                                if let Some(snapshot) = parse_stage_marker(line_text.trim()) {
+                                    if let Ok(mut cell) = stage_progress_cell().lock() {
+                                        let merged = merge_stage_snapshot(&cell, snapshot);
+                                        *cell = merged;
+                                    }
+                                    continue;
                                 }
-                            } else if collected_out.len() < MAX_STAGE_CAPTURE_BYTES {
+                            }
+                            if collected_out.len() < MAX_STAGE_CAPTURE_BYTES {
                                 let room = MAX_STAGE_CAPTURE_BYTES - collected_out.len();
-                                let bytes = line.as_bytes();
-                                collected_out.extend_from_slice(&bytes[..bytes.len().min(room)]);
+                                collected_out.extend_from_slice(&line[..line.len().min(room)]);
                             } else if !truncated {
                                 collected_out.extend_from_slice(b"\n...[truncated]");
                                 truncated = true;
@@ -1085,6 +1144,37 @@ mod tests {
             .expect("marker parses");
         assert_eq!(snapshot.pct, 99);
         assert_eq!(snapshot.detail, "Installing the staged image…");
+    }
+
+    #[test]
+    fn stage_line_reader_caps_unterminated_lines_and_continues() {
+        let input = format!("{}\nnext\n", "x".repeat(1024));
+        let mut reader = std::io::Cursor::new(input.into_bytes());
+        let mut line = Vec::new();
+        assert_eq!(
+            super::read_stage_line(&mut reader, &mut line, 32).unwrap(),
+            Some(true)
+        );
+        assert_eq!(line.len(), 32);
+        assert_eq!(
+            super::read_stage_line(&mut reader, &mut line, 32).unwrap(),
+            Some(false)
+        );
+        assert_eq!(String::from_utf8(line).unwrap(), "next\n");
+        assert_eq!(
+            super::read_stage_line(&mut reader, &mut line, 32).unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn bounded_stderr_capture_drains_past_its_memory_limit() {
+        let input = vec![b'x'; 128];
+        let mut reader = std::io::Cursor::new(input.clone());
+        let captured = super::collect_bounded_output(&mut reader, 16).unwrap();
+        assert_eq!(reader.position(), input.len() as u64);
+        assert_eq!(&captured[..16], &input[..16]);
+        assert!(captured.ends_with(b"\n...[truncated]"));
     }
 
     #[test]

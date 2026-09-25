@@ -47,7 +47,10 @@ class MountRegistry:
                 except (OSError, RuntimeError, ValueError) as exc:  # noqa: BLE001 -- narrow: umount failures
                     if log:
                         log(f"Warning: could not unmount {path}: {exc}")
-            self.release(path)
+                else:
+                    self.release(path)
+            else:
+                self.release(path)
 
     def cleanup(self, *, run, log=None) -> None:
         """Unmount all in LIFO order."""
@@ -59,4 +62,5 @@ class MountRegistry:
             except (OSError, RuntimeError, ValueError) as exc:  # noqa: BLE001 -- narrow: umount failures
                 if log:
                     log(f"Warning: could not unmount {path}: {exc}")
-            self.release(path)
+            else:
+                self.release(path)

@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { inTauriShell } from "./tauriEnv";
 
 // Several surfaces present the same fact (for example, an overview card and
@@ -23,7 +23,11 @@ async function sharedRead<T>(key: string, ttlMs: number, load: () => Promise<T>)
 
   const pending = load().then(
     (value) => {
-      sharedReads.set(key, { value, expiresAt: Date.now() + ttlMs });
+      // Invalidation or a newer request may replace this entry while the
+      // request is in flight. Do not let an older completion repopulate it.
+      if (sharedReads.get(key)?.pending === pending) {
+        sharedReads.set(key, { value, expiresAt: Date.now() + ttlMs });
+      }
       return value;
     },
     (error) => {
@@ -79,7 +83,14 @@ async function invokeBounded<T>(
   args?: Record<string, unknown>,
   ms = 30_000,
 ): Promise<T> {
-  return withTimeout(invoke<T>(command, args), command, ms);
+  return withTimeout(tauriInvoke<T>(command, args), command, ms);
+}
+
+/** Bound every bridge call by default. Commands with a longer explicit
+ * contract use invokeBounded directly; a wedged native helper must not leave
+ * a Hub action or snapshot promise pending forever. */
+function invoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  return invokeBounded<T>(command, args);
 }
 
 /** Race any promise against a cleared-on-settle timer. Backs invokeBounded
@@ -299,7 +310,8 @@ function normalizePersistedSlot(domain: string, entry: unknown): string | null {
   const { job, ts } = entry as { job?: unknown; ts?: unknown };
   if (!isValidPersistedJob(domain, job)) return null;
   if (typeof ts !== "number" || !Number.isFinite(ts)) return null;
-  if (Date.now() - ts > REATTACHED_JOB_TTL_MS) return null;
+  const age = Date.now() - ts;
+  if (age < 0 || age > REATTACHED_JOB_TTL_MS) return null;
   return job;
 }
 
@@ -461,7 +473,7 @@ function pollJobUntilSettled(
       if (inFlightJobs.get(domain) !== job) {
         throw new Error("This action is no longer tracked here; it may have been cancelled in another tab.");
       }
-      const state = await invoke<InstallStatus>(options.statusCommand, { job }).catch(() => null);
+      const state = await invokeBounded<InstallStatus>(options.statusCommand, { job }, 10_000).catch(() => null);
       if (!state) {
         nulls += 1;
         if (nulls >= maxNulls) throw new Error(options.lostContactMessage);
@@ -486,7 +498,7 @@ function pollJobUntilSettled(
  * (socket-I/O jobs are marked and their late finish is dropped instead). */
 async function cancelBackendJob(command: string, job: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Cancelling is available from the installed Kyth Hub.");
-  const state = await invoke<InstallStatus>(command, { job });
+  const state = await invokeBounded<InstallStatus>(command, { job }, 30_000);
   // Never present backend prose as a success: a job that is still running
   // after the cancel call (non-preemptable privileged work) must say so.
   if (state.state === "cancelled") return "Cancelled.";
@@ -889,7 +901,9 @@ export interface GuardianPendingItem {
 /** "3h ago" / "2d ago" style relative time — Guardian history stores raw
  * unix-seconds timestamps, formatting is a frontend presentation concern. */
 export function relativeTime(unixSeconds: number): string {
+  if (!Number.isFinite(unixSeconds)) return "unknown time";
   const diffMs = Date.now() - unixSeconds * 1000;
+  if (diffMs <= 60_000) return "just now";
   const minutes = Math.round(diffMs / 60_000);
   if (minutes < 1) return "just now";
   if (minutes < 60) return `${minutes}m ago`;
