@@ -169,7 +169,12 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updatesOverview, /const \[lastAction, setLastAction\]/);
   assert.match(updatesOverview, /lastAction === "stage"/);
   assert.match(updatesOverview, /friendlyActionNextStep/);
-  assert.match(updatesOverview, /Downloading and preparing your update/);
+  assert.match(updatesOverview, /Preparing your update/);
+  assert.match(updatesOverview, /Verifying your update/);
+  assert.match(updatesOverview, /Finalizing your update/);
+  assert.match(updatesOverview, /progress will appear as soon as the system reports download activity/);
+  assert.match(updatesOverview, /aria-valuetext=\{guidance\.message\}/);
+  assert.match(updatesOverview, /role="progressbar" aria-valuetext=\{guidance\.message\} aria-label="Update operation in progress"/);
   assert.match(updatesOverview, /Update ready — restart to finish/);
   assert.match(updatesOverview, /Choose “Restart to apply”/);
   assert.match(updatesOverview, /<ActionStatus/);
@@ -615,7 +620,8 @@ test("bug-hunt round 2 closes races and verifier gaps", async () => {
   // never clobber, net stats stay on one clock, proc skips bad lines,
   // storage.maint verifies, and ~ expands only leading.
   const vpnRust = await readFile(resolve(root, "src-tauri/src/commands/vpn.rs"), "utf8");
-  assert.match(vpnRust, /RETRYABLE_VPN_STATES/, "reconnect must be gated on an explicit retryable set");
+  assert.match(vpnRust, /REAPABLE_VPN_STATES/, "only finished jobs are eligible for reaping");
+  assert.match(vpnRust, /gateway_has_live_job\(&store, &runtime\.gateway\)/, "connect must recheck the gateway while inserting under the store lock");
   assert.match(rust, /\/\.kyth-cloud-backup\/\*\*/, "backup dir must be excluded from the transfer");
   assert.match(rust, /nearest existing ancestor/, "HOME check must resolve parent symlinks");
   assert.match(rust, /reap_stale_focus_inhibits/, "focus must reap orphaned inhibitors");

@@ -103,12 +103,68 @@ fn arm_sigterm_forwarder() {
     });
 }
 
+const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
+
 fn drain_pipe(pipe: &mut Option<impl Read + Send + 'static>) -> Vec<u8> {
     let mut buf = Vec::new();
     if let Some(pipe) = pipe.as_mut() {
-        let _ = pipe.read_to_end(&mut buf);
+        let mut chunk = [0u8; 8192];
+        let mut truncated = false;
+        loop {
+            let count = match pipe.read(&mut chunk) {
+                Ok(0) | Err(_) => break,
+                Ok(count) => count,
+            };
+            let room = MAX_CAPTURE_BYTES.saturating_sub(buf.len());
+            let copied = count.min(room);
+            buf.extend_from_slice(&chunk[..copied]);
+            truncated |= copied < count;
+        }
+        if truncated {
+            buf.extend_from_slice(b"\n...[truncated]");
+        }
     }
     buf
+}
+
+/// Read a bounded stderr fragment, returning on either progress delimiter.
+/// `bootc` uses carriage returns for terminal progress bars, so waiting only
+/// for `\n` can hide all updates until the next log line or process exit.
+fn read_progress_fragment(
+    reader: &mut impl std::io::BufRead,
+    fragment: &mut Vec<u8>,
+    limit: usize,
+) -> std::io::Result<Option<bool>> {
+    fragment.clear();
+    let mut truncated = false;
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return Ok(if fragment.is_empty() && !truncated {
+                None
+            } else {
+                Some(truncated)
+            });
+        }
+        let delimiter = available
+            .iter()
+            .position(|byte| matches!(byte, b'\n' | b'\r'));
+        let consumed = delimiter.map_or(available.len(), |index| index + 1);
+        let room = limit.saturating_sub(fragment.len());
+        let copied = consumed.min(room);
+        fragment.extend_from_slice(&available[..copied]);
+        truncated |= copied < consumed;
+        let ended = delimiter.is_some();
+        reader.consume(consumed);
+        if ended {
+            return Ok(Some(truncated));
+        }
+        if fragment.len() == limit {
+            // Keep draining an oversized record to its delimiter without
+            // retaining more bytes or interpreting a truncated marker.
+            truncated = true;
+        }
+    }
 }
 
 /// Drain bootc's stderr while translating progress fragments into
@@ -116,7 +172,6 @@ fn drain_pipe(pipe: &mut Option<impl Read + Send + 'static>) -> Vec<u8> {
 /// them into the Updates page. The full stderr is still returned for the
 /// terminal job detail on failure.
 fn drain_stderr_with_progress(pipe: &mut Option<impl Read + Send + 'static>) -> Vec<u8> {
-    use std::io::BufRead;
     let mut collected = Vec::new();
     let Some(pipe) = pipe.as_mut() else {
         return collected;
@@ -124,23 +179,27 @@ fn drain_stderr_with_progress(pipe: &mut Option<impl Read + Send + 'static>) -> 
     let mut reader = std::io::BufReader::new(pipe);
     let mut chunk = Vec::new();
     let mut progress = StageProgress::default();
+    let mut capture_truncated = false;
     loop {
-        chunk.clear();
-        // One read delivers whatever the pipe currently holds — possibly
-        // several lines, possibly a partial indicatif re-render.
-        match reader.read_until(b'\n', &mut chunk) {
-            Ok(0) => break,
-            Ok(_) => {}
-            Err(_) => break,
-        }
-        collected.extend_from_slice(&chunk);
-        let text = String::from_utf8_lossy(&chunk);
-        for fragment in text.split(['\n', '\r']) {
+        let truncated = match read_progress_fragment(&mut reader, &mut chunk, 64 * 1024) {
+            Ok(Some(truncated)) => truncated,
+            Ok(None) | Err(_) => break,
+        };
+        let room = MAX_CAPTURE_BYTES.saturating_sub(collected.len());
+        let copied = chunk.len().min(room);
+        collected.extend_from_slice(&chunk[..copied]);
+        capture_truncated |= copied < chunk.len();
+        if !truncated {
+            let text = String::from_utf8_lossy(&chunk);
+            let fragment = text.trim_matches(['\n', '\r']);
             if let Some(marker) = classify_bootc_fragment(fragment, &mut progress) {
                 println!("{marker}");
                 let _ = std::io::Write::flush(&mut std::io::stdout());
             }
         }
+    }
+    if capture_truncated {
+        collected.extend_from_slice(b"\n...[truncated]");
     }
     collected
 }
@@ -160,6 +219,7 @@ struct StageProgress {
     deploy_steps: u64,
     last_pct: u8,
     last_detail: String,
+    last_emit: Option<std::time::Instant>,
 }
 
 impl StageProgress {
@@ -355,6 +415,16 @@ fn classify_bootc_fragment(fragment: &str, state: &mut StageProgress) -> Option<
     }
     let detail = if phase == "install" {
         "Installing the staged image".to_string()
+    } else if state.blobs_needed > 0 && state.total_bytes() > 0 {
+        let done = state.blobs_done.min(state.blobs_needed);
+        let (downloaded, total) = (state.downloaded_bytes(), state.total_bytes());
+        format!(
+            "Downloading layer {} of {} · {:.0} MiB of {:.0} MiB",
+            done + 1,
+            state.blobs_needed,
+            downloaded as f64 / 1024.0 / 1024.0,
+            total as f64 / 1024.0 / 1024.0
+        )
     } else if state.blobs_needed > 0 {
         let done = state.blobs_done.min(state.blobs_needed);
         format!("Downloading layer {} of {}", done + 1, state.blobs_needed)
@@ -370,14 +440,25 @@ fn classify_bootc_fragment(fragment: &str, state: &mut StageProgress) -> Option<
             "Downloading the update".to_string()
         }
     };
-    if pct == state.last_pct && detail == state.last_detail {
+    if pct == state.last_pct
+        && detail == state.last_detail
+        && state
+            .last_emit
+            .is_some_and(|last| last.elapsed() < Duration::from_secs(1))
+    {
         return None;
     }
     state.last_pct = pct;
     state.last_detail = detail.clone();
+    state.last_emit = Some(std::time::Instant::now());
     Some(format!(
         "KYTH_STAGE_PROGRESS pct={pct} phase={phase} detail={detail}"
     ))
+}
+
+fn emit_stage_phase(pct: u8, phase: &str, detail: &str) {
+    println!("KYTH_STAGE_PROGRESS pct={pct} phase={phase} detail={detail}");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
 }
 
 /// Run `bootc upgrade` as its own process group so termination reaches
@@ -551,6 +632,11 @@ fn upgrade() -> Result<String, String> {
             detail
         });
     };
+    emit_stage_phase(
+        99,
+        "verify",
+        "Verifying the staged image and checking its safety policy",
+    );
     // Refuse a staged image older than the recorded booted release unless an
     // explicit downgrade opt-in is present.
     let allow_downgrade = std::fs::read_to_string(DEFAULT_CONFIG)
@@ -581,6 +667,11 @@ fn upgrade() -> Result<String, String> {
         )
         .map_err(|error| format!("Could not persist staged update state: {error}"))?;
     check_free("/var/cache", VAR_CACHE_FREE_MIN_BYTES)?;
+    emit_stage_phase(
+        99,
+        "finalize",
+        "Preparing the staged deployment for the next boot",
+    );
     let finalized = kyth_shared::system::boot_finalize::finalize_staged(false)?;
     Ok(if finalized.is_empty() {
         if detail.is_empty() {
@@ -635,6 +726,52 @@ mod tests {
             .filter_map(|line| classify_bootc_fragment(line, &mut state))
             .collect();
         (state, markers)
+    }
+
+    #[test]
+    fn progress_reader_emits_carriage_return_updates_without_waiting_for_newline() {
+        let input = b"download 10%\rdownload 20%\r\ninstall\n";
+        let mut reader = std::io::BufReader::new(std::io::Cursor::new(input));
+        let mut fragment = Vec::new();
+        let mut fragments = Vec::new();
+        loop {
+            match read_progress_fragment(&mut reader, &mut fragment, 128).unwrap() {
+                Some(_) => fragments.push(String::from_utf8_lossy(&fragment).to_string()),
+                None => break,
+            }
+        }
+        assert_eq!(
+            fragments,
+            ["download 10%\r", "download 20%\r", "\n", "install\n"]
+        );
+    }
+
+    #[test]
+    fn progress_reader_caps_oversized_fragments_and_drains_them() {
+        let input = format!("{}\rnext\n", "x".repeat(1024));
+        let mut reader = std::io::BufReader::new(std::io::Cursor::new(input.into_bytes()));
+        let mut fragment = Vec::new();
+        assert_eq!(
+            read_progress_fragment(&mut reader, &mut fragment, 32).unwrap(),
+            Some(true)
+        );
+        assert_eq!(fragment.len(), 32);
+        assert_eq!(
+            read_progress_fragment(&mut reader, &mut fragment, 32).unwrap(),
+            Some(false)
+        );
+        assert_eq!(String::from_utf8_lossy(&fragment), "next\n");
+    }
+
+    #[test]
+    fn stdout_drain_caps_capture_but_reads_the_entire_pipe() {
+        let input = vec![b'x'; MAX_CAPTURE_BYTES + 128];
+        let cursor = std::io::Cursor::new(input.clone());
+        let mut pipe = Some(cursor);
+        let captured = drain_pipe(&mut pipe);
+        assert_eq!(pipe.as_ref().unwrap().position(), input.len() as u64);
+        assert_eq!(&captured[..MAX_CAPTURE_BYTES], &input[..MAX_CAPTURE_BYTES]);
+        assert!(captured.ends_with(b"\n...[truncated]"));
     }
 
     #[test]

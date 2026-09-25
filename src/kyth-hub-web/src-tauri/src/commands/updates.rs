@@ -58,6 +58,7 @@ pub(crate) struct StageProgressSnapshot {
 }
 
 static STAGE_PROGRESS: OnceLock<std::sync::Mutex<StageProgressSnapshot>> = OnceLock::new();
+const STAGE_PROGRESS_HEARTBEAT: Duration = Duration::from_secs(5);
 
 fn stage_progress_cell() -> &'static std::sync::Mutex<StageProgressSnapshot> {
     STAGE_PROGRESS.get_or_init(|| {
@@ -212,8 +213,8 @@ fn start_stage_job(
     if let Ok(mut snapshot) = stage_progress_cell().lock() {
         *snapshot = StageProgressSnapshot {
             pct: 0,
-            phase: "download".into(),
-            detail: "Starting the download…".into(),
+            phase: "prepare".into(),
+            detail: "Starting the secure update helper and checking system readiness…".into(),
             active: true,
         };
     }
@@ -223,6 +224,8 @@ fn start_stage_job(
         // Held to the end of the job: the second mutating launch fails at
         // take_mutating_slot instead of racing this one.
         let _slot = slot;
+        let progress_activity =
+            std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
         use std::os::unix::process::CommandExt;
         let mut command = Command::new(&argv[0]);
         command.args(&argv[1..]);
@@ -259,6 +262,7 @@ fn start_stage_job(
                     })
                 });
                 let stdout_handle = child.stdout.take().map(|stdout| {
+                    let progress_activity = progress_activity.clone();
                     std::thread::spawn(move || {
                         let mut collected_out = Vec::new();
                         let mut reader = std::io::BufReader::new(stdout);
@@ -278,6 +282,9 @@ fn start_stage_job(
                                         let merged = merge_stage_snapshot(&cell, snapshot);
                                         *cell = merged;
                                     }
+                                    if let Ok(mut last_activity) = progress_activity.lock() {
+                                        *last_activity = std::time::Instant::now();
+                                    }
                                     continue;
                                 }
                             }
@@ -295,10 +302,35 @@ fn start_stage_job(
                 // Mirror run_bounded_command_cancel: poll for exit, kill the
                 // whole process group on cancel or timeout.
                 let started = std::time::Instant::now();
+                let mut last_heartbeat = started;
                 let outcome = loop {
                     match child.try_wait() {
                         Ok(Some(status)) => break Ok(status),
-                        Ok(None) => {}
+                        Ok(None) => {
+                            let quiet_for = progress_activity
+                                .lock()
+                                .map(|last| last.elapsed())
+                                .unwrap_or_default();
+                            if quiet_for >= STAGE_PROGRESS_HEARTBEAT
+                                && last_heartbeat.elapsed() >= STAGE_PROGRESS_HEARTBEAT
+                            {
+                                if let Ok(mut snapshot) = stage_progress_cell().lock() {
+                                    if snapshot.active {
+                                        snapshot.detail = match snapshot.phase.as_str() {
+                                            "install" => "Installing the staged image. This can take several minutes…".into(),
+                                            "verify" => "Verifying the staged image and checking its safety policy…".into(),
+                                            "finalize" => "Preparing the staged deployment for the next boot…".into(),
+                                            "download" => "The image download is still running. Waiting for the next layer update…".into(),
+                                            _ => "Preparing the update and checking system readiness…".into(),
+                                        };
+                                    }
+                                }
+                                if let Ok(mut last_activity) = progress_activity.lock() {
+                                    *last_activity = std::time::Instant::now();
+                                }
+                                last_heartbeat = std::time::Instant::now();
+                            }
+                        }
                         Err(error) => break Err(error),
                     }
                     if cancel.load(std::sync::atomic::Ordering::Relaxed) {
@@ -1110,7 +1142,9 @@ pub(crate) async fn update_health() -> UpdateHealthResponse {
 
 #[cfg(test)]
 mod tests {
-    use super::HubAction;
+    use super::{HubAction, *};
+
+    static SLOT_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn hub_action_deserializes_allowlisted_recipe() {
@@ -1144,6 +1178,82 @@ mod tests {
             .expect("marker parses");
         assert_eq!(snapshot.pct, 99);
         assert_eq!(snapshot.detail, "Installing the staged image…");
+    }
+
+    #[test]
+    fn staged_update_progress_runs_end_to_end_through_the_job_store() {
+        let _serial = SLOT_TEST_LOCK.lock().unwrap();
+        let slot = take_mutating_slot().expect("take update slot");
+        let launch = start_stage_job(
+            "stage-test",
+            "Test stage",
+            vec![
+                "/bin/sh".into(),
+                "-c".into(),
+                "sleep 0.2; printf '%s\\n' 'KYTH_STAGE_PROGRESS pct=15 phase=download detail=Downloading layer 1 of 4'; sleep 5.25; printf '%s\\n' 'KYTH_STAGE_PROGRESS pct=72 phase=install detail=Installing image'; sleep 0.15; printf '%s\\n' 'KYTH_STAGE_PROGRESS pct=90 phase=verify detail=Verifying image'; sleep 0.15; printf '%s\\n' 'KYTH_STAGE_PROGRESS pct=99 phase=finalize detail=Finalizing image'".into(),
+            ],
+            std::time::Duration::from_secs(10),
+            slot,
+        )
+        .expect("start fake update helper");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut observed = Vec::new();
+        let mut heartbeat_seen = false;
+        let mut preparation_seen = false;
+        loop {
+            let snapshot = stage_progress();
+            preparation_seen |= snapshot.phase == "prepare"
+                && snapshot.detail.contains("checking system readiness");
+            assert!(
+                !snapshot.detail.contains('?'),
+                "progress must be stated directly"
+            );
+            heartbeat_seen |= snapshot.detail.contains("download is still running");
+            if observed.last().copied() != Some(snapshot.pct) {
+                observed.push(snapshot.pct);
+            }
+            let status = update_jobs()
+                .status(&launch.job)
+                .expect("update job stays tracked");
+            if status.0 != "running" {
+                assert_eq!(status.0, "complete");
+                assert_eq!(status.1, "Test stage complete.");
+                assert!(!snapshot.active);
+                assert_eq!(snapshot.phase, "finalize");
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "staging did not finish"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(
+            observed.contains(&15),
+            "download progress was shown: {observed:?}"
+        );
+        assert!(
+            observed.contains(&72),
+            "install progress was shown: {observed:?}"
+        );
+        assert!(
+            observed.contains(&90),
+            "verification was shown: {observed:?}"
+        );
+        assert!(
+            observed.contains(&99),
+            "finalization was shown: {observed:?}"
+        );
+        assert!(
+            preparation_seen,
+            "preparation status must appear before download markers"
+        );
+        assert!(
+            heartbeat_seen,
+            "quiet downloads must still publish a heartbeat"
+        );
+        assert!(observed.windows(2).all(|pair| pair[0] <= pair[1]));
     }
 
     #[test]
@@ -1201,6 +1311,7 @@ mod tests {
 
     #[test]
     fn mutating_slot_rejects_a_second_launch_until_released() {
+        let _serial = SLOT_TEST_LOCK.lock().unwrap();
         let slot = super::take_mutating_slot().expect("first launch takes the slot");
         assert!(
             super::take_mutating_slot().is_err(),

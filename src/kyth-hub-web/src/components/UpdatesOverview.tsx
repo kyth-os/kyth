@@ -269,7 +269,8 @@ export function UpdatesOverview() {
   // (a mutating operation in flight) are backend states, not read failures:
   // neither may render as up-to-date nor as a connection error.
   const isBlocked = updateStatus?.check_state === "blocked";
-  const backendBusy = updateStatus?.check_state === "busy";
+  const stagingInProgress = updateTracked && stageProgress?.active === true;
+  const backendBusy = updateStatus?.check_state === "busy" || stagingInProgress;
   const checkFailed = updateStatus?.check_state === "error" || (Boolean(updateStatus?.blocked_reason) && !isBlocked);
   const hasReadings = snapshot !== null || updateStatus !== null || health !== null;
   const actionFailed = status?.startsWith("Failed:") ?? false;
@@ -319,6 +320,10 @@ export function UpdatesOverview() {
                 : "Ready to check";
   const systemStatusDetail = stagedEffective
     ? "The system update is prepared for your next boot."
+    : backendBusy
+      ? stageProgress?.active
+        ? stageProgress.detail
+        : "A system update operation is in progress. Your current system remains usable."
     : systemUpdateAvailable
       ? "A newer KythOS version is ready to stage."
       : isBlocked
@@ -328,7 +333,9 @@ export function UpdatesOverview() {
           : updateStatus?.check_state === "uptodate"
             ? "No system restart is needed."
             : "Check to see whether a system update is available.";
-  const systemStatusTone: GuidanceTone = stagedEffective || systemUpdateAvailable || isBlocked || checkFailed
+  const systemStatusTone: GuidanceTone = backendBusy
+    ? "muted"
+    : stagedEffective || systemUpdateAvailable || isBlocked || checkFailed
     ? "warn"
     : updateStatus?.check_state === "uptodate" ? "ok" : "muted";
 
@@ -344,17 +351,28 @@ export function UpdatesOverview() {
       };
     }
     if (busy === "stage") {
-      // Determinate while markers stream; indeterminate before the first
-      // one lands (sudo prompt, preflight) or on an older helper.
-      const live = stageProgress?.active === true && stageProgress.pct > 0 ? stageProgress : null;
+      // Keep the preparing state visible before the first layer arrives;
+      // switch to a determinate bar as soon as the helper reports a percent.
+      const live = stageProgress?.active === true ? stageProgress : null;
+      const hasPercent = live !== null && live.pct > 0;
       return {
         tone: "muted",
         icon: "↓",
-        title: live?.phase === "install" ? "Installing your update" : "Downloading and preparing your update",
+        title: live?.phase === "install"
+          ? "Installing your update"
+          : live?.phase === "verify"
+            ? "Verifying your update"
+            : live?.phase === "finalize"
+              ? "Finalizing your update"
+              : live?.phase === "prepare"
+            ? "Preparing your update"
+            : "Downloading your update",
         message: live?.detail ?? "KythOS is downloading the update and preparing it for your next restart. Your current system remains usable.",
-        next: live ? `${live.pct}% complete. Keep the Hub open until staging finishes.` : "Keep the Hub open until staging finishes.",
+        next: hasPercent
+          ? `${live.pct}% complete. Keep the Hub open until staging finishes.`
+          : "The update is running; progress will appear as soon as the system reports download activity.",
         progress: true,
-        progressPct: live?.pct,
+        progressPct: hasPercent ? live.pct : undefined,
       };
     }
     if (busy === "apply") {
@@ -388,14 +406,27 @@ export function UpdatesOverview() {
       };
     }
     if (busy === null && updateTracked && !stagedEffective) {
+      const live = stageProgress?.active === true ? stageProgress : null;
       return {
         tone: "muted",
         icon: "↓",
-        title: "An update is still running",
-        message: "A previous update action is still running in the background. Its progress resumes here.",
-        next: "You can wait for it to finish or choose “Cancel update” below to stop it.",
+        title: live?.phase === "install"
+          ? "Installing your update"
+          : live?.phase === "verify"
+            ? "Verifying your update"
+            : live?.phase === "finalize"
+              ? "Finalizing your update"
+              : live?.phase === "prepare"
+            ? "Preparing your update"
+            : live
+              ? "Downloading your update"
+              : "An update is still running",
+        message: live?.detail ?? "A previous update action is still running in the background. Its progress resumes here.",
+        next: live?.pct
+          ? `${live.pct}% complete. You can wait or choose “Cancel update” below.`
+          : "You can wait for it to finish or choose “Cancel update” below to stop it.",
         progress: true,
-        progressPct: stageProgress?.active ? stageProgress.pct : undefined,
+        progressPct: live?.pct ? live.pct : undefined,
       };
     }
     if (actionFailed) {
@@ -506,15 +537,15 @@ export function UpdatesOverview() {
         <div className={`updates-ready-chip updates-chip-${overallTone}`}><span />{overallLabel}</div>
       </div>
 
-      <div className={`updates-guidance updates-guidance-${guidance.tone}`} role="status" aria-live="polite" aria-busy={busy !== null}>
+      <div className={`updates-guidance updates-guidance-${guidance.tone}`} role="status" aria-live="polite" aria-busy={busy !== null || backendBusy}>
         <div className="updates-guidance-icon" aria-hidden="true">{guidance.icon}</div>
         <div className="updates-guidance-copy">
           <strong>{guidance.title}</strong>
           <p>{guidance.message}</p>
           <span>{guidance.next}</span>
           {guidance.progress && (guidance.progressPct !== undefined
-            ? <div className="updates-guidance-progress updates-guidance-progress-determinate" role="progressbar" aria-valuenow={guidance.progressPct} aria-valuemin={0} aria-valuemax={100} aria-label="Update download and staging progress"><i style={{ width: `${guidance.progressPct}%` }} /></div>
-            : <div className="updates-guidance-progress" aria-label="Update operation in progress"><i /></div>)}
+            ? <div className="updates-guidance-progress updates-guidance-progress-determinate" role="progressbar" aria-valuenow={guidance.progressPct} aria-valuemin={0} aria-valuemax={100} aria-valuetext={guidance.message} aria-label="Update download and staging progress"><i style={{ width: `${guidance.progressPct}%` }} /></div>
+            : <div className="updates-guidance-progress" role="progressbar" aria-valuetext={guidance.message} aria-label="Update operation in progress"><i /></div>)}
         </div>
       </div>
 
