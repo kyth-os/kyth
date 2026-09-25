@@ -35,6 +35,17 @@ function recognizedUpdatePhase(phase: string | undefined): UpdatePhase | undefin
   return updatePhases.find((item) => item.id === phase)?.id;
 }
 
+function updatePhaseTitle(phase: string | undefined): string {
+  switch (phase) {
+    case "prepare": return "Preparing your update";
+    case "download": return "Downloading your update";
+    case "install": return "Installing your update";
+    case "verify": return "Verifying your update";
+    case "finalize": return "Finalizing your update";
+    default: return "Updating your system";
+  }
+}
+
 type UpdateGuidance = {
   tone: GuidanceTone;
   icon: string;
@@ -378,15 +389,7 @@ export function UpdatesOverview() {
       return {
         tone: "muted",
         icon: "↓",
-        title: live?.phase === "install"
-          ? "Installing your update"
-          : live?.phase === "verify"
-            ? "Verifying your update"
-            : live?.phase === "finalize"
-              ? "Finalizing your update"
-              : live?.phase === "prepare"
-            ? "Preparing your update"
-            : "Downloading your update",
+        title: updatePhaseTitle(live?.phase),
         message: live?.detail ?? "KythOS is downloading the update and preparing it for your next restart. Your current system remains usable.",
         next: hasPercent
           ? `${live.pct}% complete. Keep the Hub open until staging finishes.`
@@ -432,17 +435,7 @@ export function UpdatesOverview() {
       return {
         tone: "muted",
         icon: "↓",
-        title: live?.phase === "install"
-          ? "Installing your update"
-          : live?.phase === "verify"
-            ? "Verifying your update"
-            : live?.phase === "finalize"
-              ? "Finalizing your update"
-              : live?.phase === "prepare"
-            ? "Preparing your update"
-            : live
-              ? "Downloading your update"
-              : "An update is still running",
+        title: live ? updatePhaseTitle(live.phase) : "An update is still running",
         message: live?.detail ?? "A previous update action is still running in the background. Its progress resumes here.",
         next: live?.pct
           ? `${live.pct}% complete. You can wait or choose “Cancel update” below.`
@@ -561,14 +554,14 @@ export function UpdatesOverview() {
         <div className={`updates-ready-chip updates-chip-${overallTone}`}><span />{overallLabel}</div>
       </div>
 
-      <div className={`updates-guidance updates-guidance-${guidance.tone}`} role="status" aria-live="polite" aria-busy={busy !== null || backendBusy}>
+      <div className={`updates-guidance updates-guidance-${guidance.tone}`} aria-busy={busy !== null || backendBusy}>
         <div className="updates-guidance-icon" aria-hidden="true">{guidance.icon}</div>
         <div className="updates-guidance-copy">
           <strong>{guidance.title}</strong>
           <p>{guidance.message}</p>
           <span>{guidance.next}</span>
           {guidance.progress && (guidance.progressPct !== undefined
-            ? <div className="updates-guidance-progress updates-guidance-progress-determinate" role="progressbar" aria-valuenow={guidance.progressPct} aria-valuemin={0} aria-valuemax={100} aria-valuetext={guidance.message} aria-label="Update download and staging progress"><i style={{ width: `${guidance.progressPct}%` }} /></div>
+            ? <div className="updates-guidance-progress updates-guidance-progress-determinate" role="progressbar" aria-valuenow={guidance.progressPct} aria-valuemin={0} aria-valuemax={100} aria-valuetext={`${guidance.phase ? updatePhases.find((phase) => phase.id === guidance.phase)?.label : "Update"} ${guidance.progressPct}% complete`} aria-label="Update download and staging progress"><i style={{ width: `${guidance.progressPct}%` }} /></div>
             : <div className="updates-guidance-progress" role="progressbar" aria-valuetext={guidance.message} aria-label="Update operation in progress"><i /></div>)}
           {(guidance.phase || guidance.phaseComplete) && (
             <ol className={`updates-phase-track${guidance.phaseComplete ? " updates-phase-track-complete" : ""}`} aria-label="System update stages">
@@ -591,6 +584,7 @@ export function UpdatesOverview() {
           )}
         </div>
       </div>
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">{guidance.title}</span>
 
       <div className="updates-status-grid updates-status-grid-single" aria-label="System update status">
         <section className={`updates-status-card updates-status-card-${systemStatusTone}`} aria-label="KythOS system updates">

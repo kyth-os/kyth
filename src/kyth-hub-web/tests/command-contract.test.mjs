@@ -181,6 +181,10 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updatesOverview, /<ActionStatus/);
   assert.match(updatesOverview, /aria-label="System update stages"/);
   assert.match(updatesOverview, /aria-current=\{current \? "step" : undefined\}/);
+  assert.match(updatesOverview, /default: return "Updating your system"/);
+  assert.match(updatesOverview, /className="sr-only" role="status" aria-live="polite" aria-atomic="true">\{guidance\.title\}/);
+  assert.doesNotMatch(updatesOverview, /updates-guidance[^\n]*role="status"/, "frequent progress detail changes must not be announced as a live status");
+  assert.match(updatesOverview, /aria-valuetext=\{`\$\{guidance\.phase \? updatePhases\.find/);
   assert.match(hubTheme, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(hubTheme, /\.updates-phase-current \.updates-phase-marker[^\n]*animation:/);
   assert.match(updateMessages, /We couldn't reach the update service/);
