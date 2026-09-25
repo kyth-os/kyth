@@ -10,6 +10,7 @@ const service = await readFile(resolve(root, "src/services/liveData.ts"), "utf8"
 const dashboard = await readFile(resolve(root, "src/pages/Dashboard.tsx"), "utf8");
 const guardianHistory = await readFile(resolve(root, "src/components/GuardianHistoryCard.tsx"), "utf8");
 const updatesOverview = await readFile(resolve(root, "src/components/UpdatesOverview.tsx"), "utf8");
+const hubTheme = await readFile(resolve(root, "src/styles/theme.css"), "utf8");
 const updateMessages = await readFile(resolve(root, "src/components/updateMessages.ts"), "utf8");
 const guardian = await readFile(resolve(root, "src/components/GuardianSection.tsx"), "utf8");
 const hardware = await readFile(resolve(root, "src/components/HardwareSection.tsx"), "utf8");
@@ -178,6 +179,10 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updatesOverview, /Update ready — restart to finish/);
   assert.match(updatesOverview, /Choose “Restart to apply”/);
   assert.match(updatesOverview, /<ActionStatus/);
+  assert.match(updatesOverview, /aria-label="System update stages"/);
+  assert.match(updatesOverview, /aria-current=\{current \? "step" : undefined\}/);
+  assert.match(hubTheme, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(hubTheme, /\.updates-phase-current \.updates-phase-marker[^\n]*animation:/);
   assert.match(updateMessages, /We couldn't reach the update service/);
   assert.match(updateMessages, /couldn't reach the update registry/);
   assert.doesNotMatch(updateMessages, /current system has not changed/);

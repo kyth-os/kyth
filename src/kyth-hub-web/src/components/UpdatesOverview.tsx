@@ -16,6 +16,24 @@ import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 import { friendlyActionError, friendlyActionNextStep, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityResult } from "./updateMessages";
 
 type GuidanceTone = "ok" | "warn" | "muted";
+type UpdatePhase = "prepare" | "download" | "install" | "verify" | "finalize";
+
+const updatePhases: { id: UpdatePhase; label: string }[] = [
+  { id: "prepare", label: "Prepare" },
+  { id: "download", label: "Download" },
+  { id: "install", label: "Install" },
+  { id: "verify", label: "Verify" },
+  { id: "finalize", label: "Ready" },
+];
+
+function updatePhaseIndex(phase: string | undefined): number {
+  const index = updatePhases.findIndex((item) => item.id === phase);
+  return index < 0 ? 1 : index;
+}
+
+function recognizedUpdatePhase(phase: string | undefined): UpdatePhase | undefined {
+  return updatePhases.find((item) => item.id === phase)?.id;
+}
 
 type UpdateGuidance = {
   tone: GuidanceTone;
@@ -25,6 +43,8 @@ type UpdateGuidance = {
   next: string;
   progress?: boolean;
   progressPct?: number;
+  phase?: UpdatePhase;
+  phaseComplete?: boolean;
 };
 
 const emptyReadings: UpdatesSnapshot = {
@@ -372,6 +392,7 @@ export function UpdatesOverview() {
           ? `${live.pct}% complete. Keep the Hub open until staging finishes.`
           : "The update is running; progress will appear as soon as the system reports download activity.",
         progress: true,
+        phase: recognizedUpdatePhase(live?.phase),
         progressPct: hasPercent ? live.pct : undefined,
       };
     }
@@ -403,6 +424,7 @@ export function UpdatesOverview() {
           ? "It will finish on its own; you can also choose “Cancel update” below to stop it."
           : "It will finish on its own. Your current system stays usable meanwhile.",
         progress: true,
+        phase: stageProgress?.active ? recognizedUpdatePhase(stageProgress.phase) : undefined,
       };
     }
     if (busy === null && updateTracked && !stagedEffective) {
@@ -426,6 +448,7 @@ export function UpdatesOverview() {
           ? `${live.pct}% complete. You can wait or choose “Cancel update” below.`
           : "You can wait for it to finish or choose “Cancel update” below to stop it.",
         progress: true,
+        phase: recognizedUpdatePhase(live?.phase),
         progressPct: live?.pct ? live.pct : undefined,
       };
     }
@@ -446,6 +469,7 @@ export function UpdatesOverview() {
         title: "Update ready — restart to finish",
         message: "The update has been downloaded and safely prepared for the next startup.",
         next: "Choose “Restart to apply” when you’re ready. Save open work first.",
+        phaseComplete: true,
       };
     }
     if (isBlocked) {
@@ -546,6 +570,25 @@ export function UpdatesOverview() {
           {guidance.progress && (guidance.progressPct !== undefined
             ? <div className="updates-guidance-progress updates-guidance-progress-determinate" role="progressbar" aria-valuenow={guidance.progressPct} aria-valuemin={0} aria-valuemax={100} aria-valuetext={guidance.message} aria-label="Update download and staging progress"><i style={{ width: `${guidance.progressPct}%` }} /></div>
             : <div className="updates-guidance-progress" role="progressbar" aria-valuetext={guidance.message} aria-label="Update operation in progress"><i /></div>)}
+          {(guidance.phase || guidance.phaseComplete) && (
+            <ol className={`updates-phase-track${guidance.phaseComplete ? " updates-phase-track-complete" : ""}`} aria-label="System update stages">
+              {updatePhases.map((phase, index) => {
+                const currentIndex = guidance.phaseComplete ? updatePhases.length : updatePhaseIndex(guidance.phase);
+                const complete = guidance.phaseComplete || index < currentIndex;
+                const current = !guidance.phaseComplete && index === currentIndex;
+                return (
+                  <li
+                    className={complete ? "updates-phase-complete" : current ? "updates-phase-current" : ""}
+                    key={phase.id}
+                    aria-current={current ? "step" : undefined}
+                  >
+                    <span className="updates-phase-marker" aria-hidden="true">{complete ? "✓" : index + 1}</span>
+                    <span className="updates-phase-label">{phase.label}</span>
+                  </li>
+                );
+              })}
+            </ol>
+          )}
         </div>
       </div>
 
