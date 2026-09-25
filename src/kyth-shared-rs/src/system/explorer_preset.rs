@@ -6,7 +6,8 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use crate::system::process::run_bounded;
+use crate::system::plasma_drift::kwriteconfig_candidates;
+use crate::system::process::{find_executable, run_bounded_success};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExplorerConfig {
@@ -76,36 +77,15 @@ pub fn save_explorer(path: impl AsRef<Path>, config: &ExplorerConfig) -> std::io
     crate::atomic_io::atomic_write_text(path, &content, None)
 }
 
-/// Apply `config` via `kwriteconfig5`, reproducing
-/// `kyth_shared.explorer_preset.apply_explorer` byte for byte, including two
-/// quirks that look incidental but are pinned Python behavior, not bugs to
-/// fix here:
-/// - The binary is hardcoded to `kwriteconfig5`, not the `kwriteconfig6`
-///   fallback chain used elsewhere in this crate (`plasma_hdr`, `vrr`,
-///   `window_snap`). On the shipped Kinoite 44 (Plasma 6) image
-///   `kwriteconfig5` is not installed, so both writes below fail to spawn
-///   and are silently swallowed — this apply step is a no-op on every
-///   currently shipped image. Fixing that is a separate, deliberate change,
-///   not part of this port.
-/// - Only the `SingleClick` write is recorded into the returned list, even
-///   when both writes spawn successfully; the `ShowPreview` write's result
-///   is discarded the same way Python's second `try` block never appends to
-///   `applied`.
-///
-/// The TTL marker write is unconditional, independent of whether either
-/// `kwriteconfig5` call above it succeeded, matching Python's separate
-/// `try` block for `/run/kyth-explorer-ttl`.
-/// Project `config`'s `SingleClick` write to the fixed `kwriteconfig5` argv.
-/// Kept separate from `apply_explorer` so the projection is testable without
-/// depending on whether `kwriteconfig5` is actually installed.
-pub fn single_click_argv(config: &ExplorerConfig) -> Vec<String> {
+/// Project the click preference to a `kwriteconfig` argv.
+pub fn single_click_argv(binary: &str, config: &ExplorerConfig) -> Vec<String> {
     let single = if config.click == "single" {
         "true"
     } else {
         "false"
     };
     [
-        "kwriteconfig5",
+        binary,
         "--file",
         "kdeglobals",
         "--group",
@@ -118,11 +98,11 @@ pub fn single_click_argv(config: &ExplorerConfig) -> Vec<String> {
     .to_vec()
 }
 
-/// Project `config`'s `ShowPreview` write to the fixed `kwriteconfig5` argv.
-pub fn show_preview_argv(config: &ExplorerConfig) -> Vec<String> {
+/// Project `config`'s `ShowPreview` write to a `kwriteconfig` argv.
+pub fn show_preview_argv(binary: &str, config: &ExplorerConfig) -> Vec<String> {
     let preview = if config.preview { "true" } else { "false" };
     [
-        "kwriteconfig5",
+        binary,
         "--file",
         "dolphinrc",
         "--group",
@@ -135,9 +115,31 @@ pub fn show_preview_argv(config: &ExplorerConfig) -> Vec<String> {
     .to_vec()
 }
 
-pub fn apply_explorer(config: &ExplorerConfig) -> Vec<String> {
+fn apply_with_candidates(
+    binaries: &[String],
+    mut make_argv: impl FnMut(&str) -> Vec<String>,
+    mut run: impl FnMut(&[String]) -> bool,
+) -> bool {
+    for binary in binaries {
+        let argv = make_argv(binary);
+        if run(&argv) {
+            return true;
+        }
+    }
+    false
+}
+
+fn apply_explorer_settings(
+    config: &ExplorerConfig,
+    binaries: &[String],
+    run: &mut impl FnMut(&[String]) -> bool,
+) -> Vec<String> {
     let mut applied = Vec::new();
-    if run_bounded(&single_click_argv(config), Duration::from_secs(5)).is_ok() {
+    if apply_with_candidates(
+        binaries,
+        |binary| single_click_argv(binary, config),
+        |argv| run(argv),
+    ) {
         let single = if config.click == "single" {
             "true"
         } else {
@@ -145,7 +147,24 @@ pub fn apply_explorer(config: &ExplorerConfig) -> Vec<String> {
         };
         applied.push(format!("SingleClick={single}"));
     }
-    let _ = run_bounded(&show_preview_argv(config), Duration::from_secs(5));
+    if apply_with_candidates(
+        binaries,
+        |binary| show_preview_argv(binary, config),
+        |argv| run(argv),
+    ) {
+        applied.push(format!("ShowPreview={}", config.preview));
+    }
+    applied
+}
+
+pub fn apply_explorer(config: &ExplorerConfig) -> Vec<String> {
+    let binaries = kwriteconfig_candidates()
+        .iter()
+        .filter_map(|name| find_executable(name))
+        .map(|path| path.to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    let mut run = |argv: &[String]| run_bounded_success(argv, Duration::from_secs(5));
+    let applied = apply_explorer_settings(config, &binaries, &mut run);
 
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -212,9 +231,9 @@ mod tests {
             ..ExplorerConfig::default()
         };
         assert_eq!(
-            single_click_argv(&single),
+            single_click_argv("kwriteconfig6", &single),
             vec![
-                "kwriteconfig5",
+                "kwriteconfig6",
                 "--file",
                 "kdeglobals",
                 "--group",
@@ -228,7 +247,10 @@ mod tests {
             click: "double".into(),
             ..ExplorerConfig::default()
         };
-        assert_eq!(single_click_argv(&double).last().unwrap(), "false");
+        assert_eq!(
+            single_click_argv("kwriteconfig6", &double).last().unwrap(),
+            "false"
+        );
     }
 
     #[test]
@@ -238,9 +260,9 @@ mod tests {
             ..ExplorerConfig::default()
         };
         assert_eq!(
-            show_preview_argv(&off),
+            show_preview_argv("kwriteconfig6", &off),
             vec![
-                "kwriteconfig5",
+                "kwriteconfig6",
                 "--file",
                 "dolphinrc",
                 "--group",
@@ -253,16 +275,33 @@ mod tests {
     }
 
     #[test]
-    fn apply_explorer_swallows_a_missing_binary_without_panicking() {
-        // kwriteconfig5 is absent from this sandbox (and from the shipped
-        // Kinoite 44 image — see apply_explorer's doc comment), so this
-        // exercises the same dead-path Python's try/except swallows: no
-        // panic, and SingleClick is only recorded when the spawn succeeds.
+    fn apply_explorer_uses_fallback_and_reports_both_successful_settings() {
         let config = ExplorerConfig {
             click: "single".into(),
+            preview: false,
             ..ExplorerConfig::default()
         };
-        let applied = apply_explorer(&config);
-        assert!(applied.is_empty() || applied == vec!["SingleClick=true"]);
+        let binaries = vec!["kwriteconfig6".into(), "kwriteconfig5".into()];
+        let mut calls = Vec::new();
+        let mut run = |argv: &[String]| {
+            calls.push(argv.to_vec());
+            argv[0] == "kwriteconfig5"
+        };
+        let applied = apply_explorer_settings(&config, &binaries, &mut run);
+        assert_eq!(applied, ["SingleClick=true", "ShowPreview=false"]);
+        assert_eq!(calls.len(), 4);
+        assert_eq!(calls[0][0], "kwriteconfig6");
+        assert_eq!(calls[1][0], "kwriteconfig5");
+    }
+
+    #[test]
+    fn apply_explorer_does_not_report_nonzero_commands_as_success() {
+        let mut run = |_argv: &[String]| -> bool { false };
+        let applied = apply_explorer_settings(
+            &ExplorerConfig::default(),
+            &["kwriteconfig6".into()],
+            &mut run,
+        );
+        assert!(applied.is_empty());
     }
 }

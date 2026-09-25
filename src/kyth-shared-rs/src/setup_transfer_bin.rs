@@ -13,13 +13,11 @@ use kyth_shared::setup_transfer::{
     archive_summary, export_setup, restore_setup, stream_command, SetupCtx,
 };
 use kyth_shared::system::issue_draft::local_timestamp;
-use kyth_shared::system::process::run_bounded;
+use kyth_shared::system::process::{find_executable, run_bounded};
 use kyth_shared::system::session_snapshot::current_host;
 
 fn find_binary(name: &str) -> bool {
-    env::var_os("PATH")
-        .map(|paths| env::split_paths(&paths).any(|dir| dir.join(name).is_file()))
-        .unwrap_or(false)
+    find_executable(name).is_some()
 }
 
 fn expand_user(value: &str, home: &Path) -> PathBuf {

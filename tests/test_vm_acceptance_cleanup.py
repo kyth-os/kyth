@@ -41,6 +41,7 @@ class VmAcceptanceCleanupTests(unittest.TestCase):
                 "KYTH_CLEANUP_VAR_TMP_ROOT": str(root / "var-tmp"),
                 "KYTH_CLEANUP_SKIP_PODMAN": "1",
             }
+            env.pop("USER", None)
             result = subprocess.run(
                 ["bash", str(SCRIPT), "--dry-run"],
                 env=env,
@@ -78,6 +79,7 @@ class VmAcceptanceCleanupTests(unittest.TestCase):
                 "KYTH_CLEANUP_VAR_TMP_ROOT": str(root / "var-tmp"),
                 "KYTH_CLEANUP_SKIP_PODMAN": "1",
             }
+            env.pop("USER", None)
             result = subprocess.run(
                 ["bash", str(SCRIPT)],
                 env=env,

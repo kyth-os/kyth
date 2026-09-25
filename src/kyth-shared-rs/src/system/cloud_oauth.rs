@@ -49,14 +49,7 @@ pub fn cloud_oauth_status() -> (bool, String) {
         ),
         None => {
             // FileNotFound vs timeout: probe existence
-            let exists = super::process::run_bounded(
-                &["rclone", "version"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect::<Vec<_>>(),
-                Duration::from_secs(5),
-            )
-            .is_ok();
+            let exists = super::process::find_executable("rclone").is_some();
             if !exists {
                 (false, "rclone not installed".to_string())
             } else {

@@ -52,6 +52,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${KYTH_CLEANUP_REPO_ROOT:-$(cd -- "${SCRIPT_DIR}/../.." && pwd)}"
 TMP_ROOT="${KYTH_CLEANUP_TMP_ROOT:-/tmp}"
 VAR_TMP_ROOT="${KYTH_CLEANUP_VAR_TMP_ROOT:-/var/tmp}"
+cleanup_user="${USER:-$(id -un)}"
 SKIP_PODMAN="${KYTH_CLEANUP_SKIP_PODMAN:-0}"
 ROOTFUL_PODMAN="${REPO_ROOT}/build_files/scripts/rootful-podman.sh"
 
@@ -64,9 +65,9 @@ TARGETS=(
 	"${REPO_ROOT}/tmp/kyth-podman-test-root"
 	"${REPO_ROOT}/tmp/kyth-podman-test-run"
 	"${REPO_ROOT}/tmp/kyth-container-tmp"
-	"${VAR_TMP_ROOT}/kyth-vm-disks-${USER}"
-	"${VAR_TMP_ROOT}/kyth-vm-share-${USER}"
-	"${VAR_TMP_ROOT}/kyth-remote-viewer-${USER}"
+	"${VAR_TMP_ROOT}/kyth-vm-disks-${cleanup_user}"
+	"${VAR_TMP_ROOT}/kyth-vm-share-${cleanup_user}"
+	"${VAR_TMP_ROOT}/kyth-remote-viewer-${cleanup_user}"
 )
 
 shopt -s nullglob

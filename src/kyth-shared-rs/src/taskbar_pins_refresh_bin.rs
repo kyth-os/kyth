@@ -13,15 +13,10 @@ use kyth_shared::system::desktop_plasma::{
     default_application_roots, default_launchers, evaluate_plasma_argv, filter_available_launchers,
     kreadconfig_argv, qdbus_candidates, render_pins_script, taskbar_pins_state_path, CONFIG_FILE,
 };
-use kyth_shared::system::process::run_bounded;
+use kyth_shared::system::process::{find_executable, run_bounded};
 
 fn find_binary(name: &str) -> Option<String> {
-    env::var_os("PATH").and_then(|paths| {
-        env::split_paths(&paths)
-            .map(|dir| dir.join(name))
-            .find(|path| path.is_file())
-            .map(|path| path.to_string_lossy().into_owned())
-    })
+    find_executable(name).map(|path| path.to_string_lossy().into_owned())
 }
 
 fn kread(file: &str, group: &str, key: &str) -> Option<String> {

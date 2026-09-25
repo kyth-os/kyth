@@ -141,10 +141,10 @@ mod tests {
         coordinator
             .record_staged("sha256:new", "testing", 1)
             .unwrap();
-        let state = coordinator
+        coordinator
             .record_failure("sha256:new", "boot-1", "display", 3, 2)
             .unwrap();
-        let state = coordinator
+        coordinator
             .record_failure("sha256:new", "boot-2", "display", 3, 3)
             .unwrap();
         let state = coordinator

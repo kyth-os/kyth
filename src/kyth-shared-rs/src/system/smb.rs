@@ -85,8 +85,7 @@ pub fn smb_browse_dry_run(host: Option<&str>) -> (bool, String) {
         Some((_, _, _)) => (false, format!("{} failed", cmd.join(" "))),
         None => {
             // distinguish not-installed
-            let help = vec![cmd[0].clone(), "--help".into()];
-            let exists = super::process::run_bounded(&help, Duration::from_secs(3)).is_ok();
+            let exists = super::process::find_executable(&cmd[0]).is_some();
             if !exists {
                 (false, format!("{} not installed", cmd[0]))
             } else {

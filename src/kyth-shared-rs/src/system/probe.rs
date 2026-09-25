@@ -826,6 +826,7 @@ mod tests {
             let lock_file = std::fs::OpenOptions::new()
                 .write(true)
                 .create(true)
+                .truncate(false)
                 .open(&lock)
                 .expect("child failed to open lock file");
             rustix::fs::flock(&lock_file, rustix::fs::FlockOperation::LockExclusive)

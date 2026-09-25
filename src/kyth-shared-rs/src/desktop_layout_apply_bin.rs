@@ -18,16 +18,10 @@ use kyth_shared::system::desktop_plasma::{
     render_layout_script, LayoutDecision, CONFIG_FILE, HIDDEN_TRAY_ITEMS, LAYOUT_VERSION,
     TRAY_ITEMS,
 };
-use kyth_shared::system::process::run_bounded;
+use kyth_shared::system::process::{find_executable, run_bounded};
 
 fn find_binary(name: &str) -> Option<PathBuf> {
-    env::var_os("PATH")
-        .map(|paths| {
-            env::split_paths(&paths)
-                .map(|dir| dir.join(name))
-                .find(|path| path.is_file())
-        })
-        .flatten()
+    find_executable(name)
 }
 
 fn first_binary(names: &[&str]) -> Option<PathBuf> {

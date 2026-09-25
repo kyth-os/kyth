@@ -29,20 +29,7 @@ pub fn mok_status() -> MokStatus {
     let sb_result = run_with_timeout("mokutil", &["--sb-state"], Duration::from_secs(5));
     let (sb_state, enrolled) = match sb_result {
         None => {
-            // Check if mokutil missing vs timeout — try to detect FileNotFound
-            // `run_with_timeout` returns None on spawn failure or timeout. Distinguish
-            // by probing existence via `which`-like check: attempt spawn and see error kind.
-            // A bounded help probe distinguishes a missing binary from a timed-out probe.
-            // as unknown / mokutil not installed mirrors Python's FileNotFound branch.
-            // A non-zero help exit still counts as an installed binary.
-            let exists = super::process::run_bounded(
-                &["mokutil", "--help"]
-                    .into_iter()
-                    .map(String::from)
-                    .collect::<Vec<_>>(),
-                Duration::from_secs(2),
-            )
-            .is_ok();
+            let exists = super::process::find_executable("mokutil").is_some();
             if !exists {
                 return MokStatus {
                     sb_state: "unknown".to_string(),

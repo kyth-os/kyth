@@ -11,6 +11,7 @@
 # failing the build over it would be wrong: a missing i686 capture layer only means
 # OBS can't game-capture 32-bit titles — a degraded feature, not a crash.
 # Revisit and re-add once ublue-os/obs-vkcapture's i386 chroot builds again.
+# shellcheck disable=SC2034 # consumed by scripts that source this library
 KYTH_MULTILIB_PAIRS=(
 	mangohud vkBasalt libFAudio
 	gamemode libXScrnSaver libatomic nss

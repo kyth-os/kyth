@@ -5,6 +5,7 @@
 
 use std::fs;
 use std::io::{self, Read, Write};
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, ExitStatus, Output, Stdio};
 use std::sync::atomic::AtomicBool;
@@ -175,6 +176,36 @@ pub fn run_bounded(argv: &[String], timeout: Duration) -> io::Result<Output> {
     let mut command = Command::new(program);
     command.args(args);
     run_bounded_command(command, timeout)
+}
+
+/// Resolve an executable through PATH, skipping non-executable files so an
+/// earlier directory cannot shadow a working binary later in the search path.
+pub fn find_executable(name: &str) -> Option<std::path::PathBuf> {
+    find_executable_in_path(name, &std::env::var_os("PATH").unwrap_or_default())
+}
+
+fn find_executable_in_path(name: &str, paths: &std::ffi::OsStr) -> Option<std::path::PathBuf> {
+    let candidate = std::path::Path::new(name);
+    let is_executable = |path: &std::path::Path| {
+        std::fs::metadata(path)
+            .map(|metadata| metadata.is_file() && metadata.permissions().mode() & 0o111 != 0)
+            .unwrap_or(false)
+    };
+    if candidate.components().count() > 1 {
+        return is_executable(candidate).then(|| candidate.to_path_buf());
+    }
+    std::env::split_paths(paths)
+        .map(|directory| directory.join(name))
+        .find(|path| is_executable(path))
+}
+
+/// Run a bounded argv and require a successful child exit, not just a
+/// successful spawn. This is the common predicate for apply helpers whose
+/// result is reported as an applied operation.
+pub fn run_bounded_success(argv: &[String], timeout: Duration) -> bool {
+    run_bounded(argv, timeout)
+        .map(|output| output.status.success())
+        .unwrap_or(false)
 }
 
 /// Run a fixed argv while supplying bounded sensitive input through stdin.
@@ -512,6 +543,33 @@ fn human_bytes(n: u64) -> String {
 mod tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn executable_lookup_skips_non_executable_shadow() {
+        use std::os::unix::fs::PermissionsExt;
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        let shadow = first.path().join("tool");
+        let executable = second.path().join("tool");
+        std::fs::write(&shadow, "not executable").unwrap();
+        std::fs::write(&executable, "#!/bin/sh\nexit 0\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let path = std::env::join_paths([first.path(), second.path()]).unwrap();
+        assert_eq!(find_executable_in_path("tool", &path), Some(executable));
+    }
+
+    #[test]
+    fn bounded_success_requires_zero_exit_status() {
+        assert!(run_bounded_success(
+            &["sh".into(), "-c".into(), "exit 0".into()],
+            Duration::from_secs(2)
+        ));
+        assert!(!run_bounded_success(
+            &["sh".into(), "-c".into(), "exit 17".into()],
+            Duration::from_secs(2)
+        ));
+    }
+
     #[test]
     fn stale_focus_reaper_kills_only_marked_inhibits() {
         // Skip-paths use fake PIDs (never signalled — only entries

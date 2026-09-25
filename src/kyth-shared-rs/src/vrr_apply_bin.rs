@@ -7,25 +7,19 @@
 //! `NightColor.Active` *note* uses `True`/`False` while the written value
 //! is lowercase. `vrr.py` stays as the Phase 3 fixture.
 
-use std::env;
 use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use kyth_shared::atomic_io::atomic_write_text;
 use kyth_shared::system::display::parse_kscreen_outputs;
-use kyth_shared::system::process::run_bounded;
+use kyth_shared::system::process::{find_executable, run_bounded, run_bounded_success};
 use kyth_shared::system::vrr::{
     config_path, doctor_mode, global_policy, is_output_name_valid, kwin_argv, load,
     mode_for_policy, per_output_argv, TTL_PATH, TTL_SECS,
 };
 
 fn find_binary(name: &str) -> Option<String> {
-    env::var_os("PATH").and_then(|paths| {
-        env::split_paths(&paths)
-            .map(|dir| dir.join(name))
-            .find(|path| path.is_file())
-            .map(|path| path.to_string_lossy().into_owned())
-    })
+    find_executable(name).map(|path| path.to_string_lossy().into_owned())
 }
 
 fn first_binary(names: &[&str]) -> Option<String> {
@@ -85,7 +79,7 @@ fn reconfigure_kwin() {
         let Some(qdbus) = find_binary(name) else {
             continue;
         };
-        if run_bounded(
+        if run_bounded_success(
             &[
                 qdbus,
                 "org.kde.KWin".to_string(),
@@ -93,9 +87,7 @@ fn reconfigure_kwin() {
                 "reconfigure".to_string(),
             ],
             Duration::from_secs(5),
-        )
-        .is_ok()
-        {
+        ) {
             return;
         }
     }

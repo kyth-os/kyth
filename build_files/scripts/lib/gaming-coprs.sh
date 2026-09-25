@@ -6,6 +6,7 @@
 # disable-time lists can't drift out of sync with each other — a COPR added
 # to one list but not the other would either fail to provide packages it's
 # needed for, or stay enabled as an active repo source in the shipped image.
+# shellcheck disable=SC2034 # consumed by scripts that source this library
 KYTH_GAMING_COPRS=(
 	ublue-os/bazzite
 	ublue-os/bazzite-multilib

@@ -113,9 +113,9 @@ pub fn save_selinux(cfg: &SelinuxPreset, path: Option<impl AsRef<Path>>) -> io::
     Ok(path)
 }
 
-/// Apply the preset with best-effort per-command semantics matching Python:
-/// skip everything when SELinux is unavailable or disabled, never fail on a
-/// single `semanage`/`setsebool` error, and report what was attempted.
+/// Apply the preset with best-effort per-command semantics: skip everything
+/// when SELinux is unavailable or disabled, continue after individual
+/// failures, and report only commands that exited successfully.
 pub fn apply_selinux(cfg: &SelinuxPreset) -> Vec<String> {
     if !Path::new("/usr/sbin/selinuxenabled").exists()
         && !Path::new("/usr/bin/selinuxenabled").exists()
@@ -133,7 +133,7 @@ pub fn apply_selinux(cfg: &SelinuxPreset) -> Vec<String> {
     }
     let mut applied = Vec::new();
     for domain in &cfg.permissive {
-        let result = crate::system::process::run_bounded(
+        let succeeded = crate::system::process::run_bounded_success(
             &[
                 "semanage".to_string(),
                 "permissive".to_string(),
@@ -142,12 +142,12 @@ pub fn apply_selinux(cfg: &SelinuxPreset) -> Vec<String> {
             ],
             Duration::from_secs(5),
         );
-        if result.is_ok() {
+        if succeeded {
             applied.push(format!("permissive:{domain}"));
         }
     }
     for (key, flag) in &cfg.booleans {
-        let result = crate::system::process::run_bounded(
+        let succeeded = crate::system::process::run_bounded_success(
             &[
                 "setsebool".to_string(),
                 "-P".to_string(),
@@ -156,7 +156,7 @@ pub fn apply_selinux(cfg: &SelinuxPreset) -> Vec<String> {
             ],
             Duration::from_secs(5),
         );
-        if result.is_ok() {
+        if succeeded {
             applied.push(format!("boolean:{key}={flag}"));
         }
     }

@@ -1,20 +1,12 @@
 //! Exec kwin_wayland with the bounded Kyth software-composition policy.
 
 use std::os::unix::process::CommandExt;
-use std::{env, path::PathBuf, process::Command};
-
-fn find_binary(name: &str) -> Option<PathBuf> {
-    env::var_os("PATH")?
-        .to_string_lossy()
-        .split(':')
-        .map(|dir| PathBuf::from(dir).join(name))
-        .find(|path| path.is_file())
-}
+use std::{env, process::Command};
 
 fn main() {
     let args: Vec<String> = env::args().skip(1).collect();
     let binary_name = "kwin_wayland";
-    let Some(binary) = find_binary(binary_name) else {
+    let Some(binary) = kyth_shared::system::process::find_executable(binary_name) else {
         eprintln!("kyth-greeter-compositor: {binary_name} not found");
         std::process::exit(127);
     };

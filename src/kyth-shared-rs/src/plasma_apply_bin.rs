@@ -6,7 +6,6 @@
 //! a missing `kwriteconfig` skips silently with `0 keys`.
 //! `plasma_drift.py` stays as the Phase 3 fixture.
 
-use std::env;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -15,29 +14,21 @@ use kyth_shared::system::plasma_drift::{
     apply_sections, config_path, kwriteconfig_candidates, load, qdbus_candidates, reconfigure_argv,
     run_timeout, TTL_PATH, TTL_SECS,
 };
-use kyth_shared::system::process::run_bounded;
-
-fn find_binary(name: &str) -> Option<String> {
-    env::var_os("PATH").and_then(|paths| {
-        env::split_paths(&paths)
-            .map(|dir| dir.join(name))
-            .find(|path| path.is_file())
-            .map(|path| path.to_string_lossy().into_owned())
-    })
-}
+use kyth_shared::system::process::{find_executable, run_bounded_success};
 
 fn first_binary(names: &[&str]) -> Option<String> {
-    names.iter().find_map(|name| find_binary(name))
+    names
+        .iter()
+        .find_map(|name| find_executable(name).map(|path| path.to_string_lossy().into_owned()))
 }
 
 fn reconfigure_kwin() {
     for name in qdbus_candidates() {
-        let Some(qdbus) = find_binary(name) else {
+        let Some(qdbus) = find_executable(name).map(|path| path.to_string_lossy().into_owned())
+        else {
             continue;
         };
-        // Mirror Python: return after the first spawn attempt regardless of
-        // its exit status; only a spawn failure tries the next binary.
-        if run_bounded(&reconfigure_argv(&qdbus), run_timeout()).is_ok() {
+        if run_bounded_success(&reconfigure_argv(&qdbus), run_timeout()) {
             return;
         }
     }
@@ -48,9 +39,7 @@ fn main() -> std::process::ExitCode {
     let mut applied = Vec::new();
     if let Some(binary) = first_binary(&kwriteconfig_candidates()) {
         applied = apply_sections(&sections, &binary, &|argv| {
-            run_bounded(argv, run_timeout())
-                .map(|output| output.status.success())
-                .unwrap_or(false)
+            run_bounded_success(argv, run_timeout())
         });
         reconfigure_kwin();
         if let Ok(now) = SystemTime::now().duration_since(UNIX_EPOCH) {

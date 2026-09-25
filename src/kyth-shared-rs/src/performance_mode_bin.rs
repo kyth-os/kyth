@@ -15,18 +15,13 @@ use kyth_shared::system::performance_mode::{
     get_current_epp, get_power_profile, mode_settings, read_state_key, render_state, set_epp,
     set_power_profile, state_path,
 };
-use kyth_shared::system::process::run_bounded;
+use kyth_shared::system::process::{find_executable, run_bounded};
 
 const USAGE: &str =
     "Usage: kyth-performance-mode [save|restore|status|max|gaming|performance|balanced|powersave]";
 
 fn find_binary(name: &str) -> Option<String> {
-    env::var_os("PATH").and_then(|paths| {
-        env::split_paths(&paths)
-            .map(|dir| dir.join(name))
-            .find(|path| path.is_file())
-            .map(|path| path.to_string_lossy().into_owned())
-    })
+    find_executable(name).map(|path| path.to_string_lossy().into_owned())
 }
 
 fn kread(file: &str, group: &str, key: &str) -> Option<String> {

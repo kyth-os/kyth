@@ -41,12 +41,10 @@ fn normalize_tiles(value: Option<&toml::Value>) -> Vec<String> {
 pub const TTL_PATH: &str = "/run/kyth-qs-ttl";
 pub const TTL_SECS: u64 = 30;
 
-/// PowerDevil brightness argv, exactly as the Python launcher ordered it.
-/// The `brightness` note is recorded on spawn success regardless of exit
-/// status (`run` defaults to `check=False` upstream).
-pub fn brightness_argv(brightness: i64) -> Vec<String> {
+/// PowerDevil brightness argv using the first available qdbus candidate.
+pub fn brightness_argv(binary: &str, brightness: i64) -> Vec<String> {
     vec![
-        "qdbus".to_string(),
+        binary.to_string(),
         "org.kde.Solid.PowerManagement".to_string(),
         "/org/kde/Solid/PowerManagement/Actions/BrightnessControl".to_string(),
         "setBrightness".to_string(),
@@ -131,9 +129,9 @@ mod tests {
     #[test]
     fn projects_brightness_argv() {
         assert_eq!(
-            brightness_argv(80),
+            brightness_argv("qdbus6", 80),
             vec![
-                "qdbus",
+                "qdbus6",
                 "org.kde.Solid.PowerManagement",
                 "/org/kde/Solid/PowerManagement/Actions/BrightnessControl",
                 "setBrightness",

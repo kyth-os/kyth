@@ -19,7 +19,7 @@ use kyth_shared::system::desktop_plasma::{
     normalize_role_arg, profile_stamp_path, qdbus_candidates, render_role_script, role_launchers,
     role_layout_target, LauncherChoice, HIDDEN_TRAY_ITEMS, TRAY_ITEMS,
 };
-use kyth_shared::system::process::run_bounded;
+use kyth_shared::system::process::{find_executable, run_bounded, run_bounded_success};
 use kyth_shared::system::role_preset::{
     config_path as preset_config_path, defaults_for, distrobox_create_argv, extension_install_argv,
     flatpak_install_argv, parse_distrobox_list, parse_extension_list, parse_flatpak_list,
@@ -29,12 +29,7 @@ use kyth_shared::system::role_preset::{
 const USAGE: &str = "Usage: kyth-apply-role-preset [everyday|gaming|dev|creator]";
 
 fn find_binary(name: &str) -> Option<String> {
-    env::var_os("PATH").and_then(|paths| {
-        env::split_paths(&paths)
-            .map(|dir| dir.join(name))
-            .find(|path| path.is_file())
-            .map(|path| path.to_string_lossy().into_owned())
-    })
+    find_executable(name).map(|path| path.to_string_lossy().into_owned())
 }
 
 fn first_binary(names: &[&str]) -> Option<String> {
@@ -113,10 +108,18 @@ fn apply_layout(profile: &str) -> i32 {
 }
 
 /// Preset half, mirroring `apply_preset` (install-only-missing).
-fn apply_preset(profile: Role) {
+fn install_extension_with<F>(extension: &str, binaries: &[&str], mut run: F) -> bool
+where
+    F: FnMut(&str, &str) -> bool,
+{
+    binaries.iter().any(|binary| run(binary, extension))
+}
+
+fn apply_preset(profile: Role) -> Vec<String> {
     let preset = defaults_for(profile);
+    let mut warnings = Vec::new();
     if let Err(error) = save(preset_config_path(None::<&Path>), &preset) {
-        eprintln!("preset apply warning: {error}");
+        warnings.push(format!("could not save preset: {error}"));
     }
     let have_flatpaks = probe(
         &[
@@ -150,29 +153,36 @@ fn apply_preset(profile: Role) {
         plan_installs(&preset, &have_flatpaks, &have_boxes, &have_extensions);
     for app in &preset.flatpaks {
         if installed.contains(app) {
-            let _ = run_bounded(&flatpak_install_argv(app), Duration::from_secs(300));
+            if !run_bounded_success(&flatpak_install_argv(app), Duration::from_secs(300)) {
+                warnings.push(format!("Flatpak install failed: {app}"));
+            }
         }
     }
     for name in &preset.distroboxes {
         if installed.contains(name) {
-            let _ = run_bounded(&distrobox_create_argv(name), Duration::from_secs(300));
+            if !run_bounded_success(&distrobox_create_argv(name), Duration::from_secs(300)) {
+                warnings.push(format!("Distrobox creation failed: {name}"));
+            }
         }
     }
     for extension in &preset.vscode_extensions {
         if installed.contains(extension) {
-            for binary in VSCODE_INSTALL_BINARIES {
-                // First binary that spawns wins, regardless of exit status.
-                if run_bounded(
-                    &extension_install_argv(binary, extension),
-                    Duration::from_secs(60),
-                )
-                .is_ok()
-                {
-                    break;
-                }
+            let succeeded =
+                install_extension_with(extension, &VSCODE_INSTALL_BINARIES, |binary, extension| {
+                    let Some(path) = find_binary(binary) else {
+                        return false;
+                    };
+                    run_bounded_success(
+                        &extension_install_argv(&path, extension),
+                        Duration::from_secs(60),
+                    )
+                });
+            if !succeeded {
+                warnings.push(format!("VS Code extension install failed: {extension}"));
             }
         }
     }
+    warnings
 }
 
 fn main() -> ExitCode {
@@ -182,6 +192,37 @@ fn main() -> ExitCode {
         return ExitCode::from(64);
     };
     let layout_rc = apply_layout(profile);
-    apply_preset(Role::parse(Some(profile)));
+    for warning in apply_preset(Role::parse(Some(profile))) {
+        eprintln!("preset apply warning: {warning}");
+    }
     ExitCode::from(layout_rc as u8)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::install_extension_with;
+
+    #[test]
+    fn extension_install_falls_back_after_nonzero_exit() {
+        let mut attempted = Vec::new();
+        let succeeded =
+            install_extension_with("publisher.extension", &["code", "codium"], |binary, _| {
+                attempted.push(binary.to_string());
+                binary == "codium"
+            });
+        assert!(succeeded);
+        assert_eq!(attempted, ["code", "codium"]);
+    }
+
+    #[test]
+    fn extension_install_reports_failure_when_all_candidates_fail() {
+        let mut attempted = 0;
+        let succeeded =
+            install_extension_with("publisher.extension", &["code", "codium"], |_, _| {
+                attempted += 1;
+                false
+            });
+        assert!(!succeeded);
+        assert_eq!(attempted, 2);
+    }
 }
