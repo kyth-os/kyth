@@ -559,13 +559,13 @@ export function UpdatesOverview() {
             <span>Installed <strong title={version}>{version}</strong></span>
           </div>
         </div>
-        <div className={`updates-ready-chip updates-chip-${overallTone}`}><span />{overallLabel}</div>
+        <div className={`updates-ready-chip updates-chip-${overallTone}${backendBusy ? " updates-chip-active" : ""}`}><span />{overallLabel}</div>
       </div>
 
       <div className={`updates-guidance updates-guidance-${guidance.tone}`} aria-busy={busy !== null || backendBusy}>
         <div className="updates-guidance-icon" aria-hidden="true">{guidance.icon}</div>
         <div className="updates-guidance-copy">
-          <strong>{guidance.title}</strong>
+          <strong className="updates-guidance-title" key={guidance.title}>{guidance.title}</strong>
           <p>{guidance.message}</p>
           <span>{guidance.next}</span>
           {guidance.progress && (guidance.progressPct !== undefined

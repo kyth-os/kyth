@@ -195,7 +195,12 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updatesOverview, /Installed image digest/);
   assert.match(updatesOverview, /Available image digest/);
   assert.match(updatesOverview, /normalized\.slice\(0, 19\)/, "long image digests should be compact visually");
+  assert.match(updatesOverview, /updates-chip-active/);
+  assert.match(updatesOverview, /className="updates-guidance-title" key=\{guidance\.title\}/);
   assert.match(hubTheme, /\.updates-meta > span[\s\S]*text-overflow: ellipsis/);
+  assert.match(hubTheme, /@keyframes updates-phase-complete/);
+  assert.match(hubTheme, /@keyframes updates-status-pulse/);
+  assert.match(hubTheme, /\.updates-guidance-title, \.updates-chip-active > span/);
   assert.match(hubTheme, /\.updates-phase-current \.updates-phase-marker[^\n]*animation:/);
   assert.match(updateMessages, /We couldn't reach the update service/);
   assert.match(updateMessages, /couldn't reach the update registry/);

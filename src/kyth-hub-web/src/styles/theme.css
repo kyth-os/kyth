@@ -1482,6 +1482,8 @@ body {
 .updates-ready-chip > span { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
 .updates-chip-ok > span { background: var(--status-ok); box-shadow: 0 0 0 3px rgba(91, 214, 158, .12); }
 .updates-chip-warn > span { background: var(--status-warn); box-shadow: 0 0 0 3px rgba(239, 182, 90, .12); }
+.updates-chip-active > span { background: #8abaff; animation: updates-status-pulse 1.8s ease-in-out infinite; }
+@keyframes updates-status-pulse { 50% { box-shadow: 0 0 0 6px rgba(120, 183, 255, .025); } }
 .updates-guidance { display: flex; align-items: flex-start; gap: 12px; padding: 15px 17px; border: 1px solid var(--hairline); border-radius: 11px; background: rgba(255, 255, 255, .025); transition: border-color .28s ease, background-color .28s ease, box-shadow .28s ease; }
 .updates-guidance-ok { border-color: rgba(91, 214, 158, .24); background: linear-gradient(105deg, rgba(31, 87, 86, .24), rgba(255, 255, 255, .025)); }
 .updates-guidance-warn { border-color: rgba(239, 182, 90, .32); background: linear-gradient(105deg, rgba(101, 64, 42, .25), rgba(255, 255, 255, .025)); }
@@ -1490,6 +1492,8 @@ body {
 .updates-guidance-warn .updates-guidance-icon { color: #ffe1bd; background: rgba(239, 182, 90, .17); }
 .updates-guidance-copy { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .updates-guidance-copy strong { color: var(--text); font-size: 14px; }
+.updates-guidance-title { animation: updates-guidance-enter .24s ease-out both; }
+@keyframes updates-guidance-enter { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
 .updates-guidance-copy p, .updates-guidance-copy span { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
 .updates-guidance-copy span { color: var(--text-faint); }
 .updates-guidance-progress { width: min(420px, 100%); height: 4px; margin-top: 7px; overflow: hidden; border-radius: 99px; background: rgba(255, 255, 255, .1); }
@@ -1514,7 +1518,8 @@ body {
 .updates-phase-complete { color: var(--text-muted) !important; }
 .updates-phase-complete::before { background: rgba(91, 214, 158, .65) !important; }
 .updates-phase-current::before { background: rgba(91, 214, 158, .65) !important; }
-.updates-phase-complete .updates-phase-marker { border-color: rgba(91, 214, 158, .55); color: #10271e; background: var(--status-ok); }
+.updates-phase-complete .updates-phase-marker { border-color: rgba(91, 214, 158, .55); color: #10271e; background: var(--status-ok); animation: updates-phase-complete .32s cubic-bezier(.2, .7, .2, 1) both; }
+@keyframes updates-phase-complete { 0% { opacity: .55; transform: scale(.72); } 70% { opacity: 1; transform: scale(1.12); } 100% { transform: scale(1); } }
 .updates-phase-current { color: var(--text) !important; }
 .updates-phase-current .updates-phase-marker { border-color: rgba(120, 183, 255, .75); color: #101b2c; background: #8abaff; box-shadow: 0 0 0 4px rgba(120, 183, 255, .12); animation: updates-phase-pulse 2.2s ease-in-out infinite; }
 .updates-phase-track-complete .updates-phase-marker { transform: scale(1.04); }
@@ -1557,6 +1562,8 @@ body {
 
 @media (prefers-reduced-motion: reduce) {
   .updates-guidance, .updates-guidance-icon, .updates-guidance-progress i,
+  .updates-guidance-title, .updates-chip-active > span,
+  .updates-phase-complete .updates-phase-marker,
   .updates-phase-track li::before, .updates-phase-marker,
   .updates-progress-ring svg, .updates-progress-ring-value {
     animation: none !important;
