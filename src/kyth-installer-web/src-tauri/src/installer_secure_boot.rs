@@ -166,12 +166,20 @@ fn contains_key(args: &[&str]) -> bool {
         .unwrap_or(false)
 }
 
-fn secure_boot_state() -> &'static str {
-    match command_text(&["--sb-state"]) {
-        Ok(output) if output.contains("SecureBoot enabled") => "enabled",
-        Ok(_) => "disabled",
-        Err(_) => "unknown",
+fn parse_secure_boot_state(output: &str) -> &'static str {
+    if output.contains("SecureBoot enabled") {
+        "enabled"
+    } else if output.contains("SecureBoot disabled") {
+        "disabled"
+    } else {
+        "unknown"
     }
+}
+
+fn secure_boot_state() -> &'static str {
+    command_text(&["--sb-state"])
+        .map(|output| parse_secure_boot_state(&output))
+        .unwrap_or("unknown")
 }
 
 fn stage_certificate(
@@ -300,6 +308,14 @@ pub(crate) fn stage_with_cancellation(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn secure_boot_probe_requires_an_explicit_state() {
+        assert_eq!(parse_secure_boot_state("SecureBoot enabled\n"), "enabled");
+        assert_eq!(parse_secure_boot_state("SecureBoot disabled\n"), "disabled");
+        assert_eq!(parse_secure_boot_state("Secure Boot: enabled\n"), "unknown");
+        assert_eq!(parse_secure_boot_state(""), "unknown");
+    }
 
     fn cachy() -> SecureBootInput {
         SecureBootInput {

@@ -122,11 +122,11 @@ would destroy its contents. Back up its data, or choose an empty partition, unal
 space, or the Windows-shrink option."
         ));
     }
-    if !fstype.is_empty() && fstype != "btrfs" && !label.is_empty() {
+    if !fstype.is_empty() && !(fstype == "btrfs" && label.eq_ignore_ascii_case("kythos")) {
         return Some(format!(
-            "The selected {role} is a labeled {fstype} volume ({label:?}) that appears to hold \
-data, and installing there would format it. Back up its contents, clear the partition \
-first, or choose a different target."
+            "The selected {role} contains a {fstype} filesystem{labeled} that may hold data, \
+and installing there would format it. Back up its contents, clear the partition first, or \
+choose a different target."
         ));
     }
     None
@@ -888,7 +888,7 @@ mod tests {
         assert_eq!(partitions.len(), 2);
         assert!(!partitions[0].alongside_candidate);
         assert!(partitions[0].ntfs_resize_candidate);
-        assert!(partitions[1].alongside_candidate);
+        assert!(!partitions[1].alongside_candidate);
         assert!(!partitions[1].ntfs_resize_candidate);
     }
 
@@ -1234,7 +1234,7 @@ mod tests {
             ("/dev/sda2", "exfat filesystem labeled \"Photos\""),
             ("/dev/sda3", "ntfs filesystem"),
             ("/dev/sda8", "apfs filesystem"),
-            ("/dev/sda4", "labeled ext4 volume (\"backups\")"),
+            ("/dev/sda4", "ext4 filesystem"),
         ] {
             let error = validate_replace_target(
                 REPLACE_SNAPSHOT,

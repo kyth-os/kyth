@@ -1164,14 +1164,11 @@ impl NativePhaseExecutor {
     /// callers learn what actually broke the disk operation.
     fn run_guarded<T, E>(
         body: impl FnOnce() -> Result<T, E>,
-        restore: impl FnOnce(),
-    ) -> Result<T, E> {
+        restore: impl FnOnce() -> Result<(), E>,
+    ) -> Result<T, (E, Option<E>)> {
         match body() {
             Ok(value) => Ok(value),
-            Err(error) => {
-                restore();
-                Err(error)
-            }
+            Err(error) => Err((error, restore().err())),
         }
     }
 
@@ -1213,9 +1210,9 @@ impl NativePhaseExecutor {
                 "backup_path": backup_path,
             }),
         )?;
-        Self::run_guarded(body, || {
+        match Self::run_guarded(body, || {
             let restore_cancellation = CancellationToken::default();
-            let _ = self.execute_disk_helper(
+            self.execute_disk_helper(
                 phase,
                 &restore_cancellation,
                 &serde_json::json!({
@@ -1223,8 +1220,17 @@ impl NativePhaseExecutor {
                     "disk": &self.storage_plan.disk,
                     "backup_path": backup_path,
                 }),
-            );
-        })
+            )
+        }) {
+            Ok(value) => Ok(value),
+            Err((operation_error, None)) => Err(operation_error),
+            Err((operation_error, Some(restore_error))) => Err(NativePhaseError::Execution {
+                phase,
+                message: format!(
+                    "{operation_error}; partition-table restore also failed: {restore_error}"
+                ),
+            }),
+        }
     }
 
     fn create_target_partition(
@@ -1914,8 +1920,13 @@ mod tests {
     #[test]
     fn run_guarded_skips_restore_on_success() {
         let mut restore_calls = 0;
-        let result: Result<i32, &str> =
-            NativePhaseExecutor::run_guarded(|| Ok(42), || restore_calls += 1);
+        let result: Result<i32, (&str, Option<&str>)> = NativePhaseExecutor::run_guarded(
+            || Ok(42),
+            || {
+                restore_calls += 1;
+                Ok(())
+            },
+        );
         assert_eq!(result, Ok(42));
         assert_eq!(restore_calls, 0, "restore must not run on success");
     }
@@ -1930,17 +1941,17 @@ mod tests {
         // actually broke the mutation.
         let mut restore_ran = false;
         let restore_outcome: Result<(), &str> = Err("restore also failed");
-        let result: Result<i32, &str> = NativePhaseExecutor::run_guarded(
+        let result: Result<i32, (&str, Option<&str>)> = NativePhaseExecutor::run_guarded(
             || Err("original failure"),
             || {
                 restore_ran = true;
-                let _ = restore_outcome;
+                restore_outcome
             },
         );
         assert_eq!(
             result,
-            Err("original failure"),
-            "the original error must survive even when restore itself fails"
+            Err(("original failure", Some("restore also failed"))),
+            "both the operation and restore failures must be reported"
         );
         assert!(restore_ran, "restore must run exactly once on failure");
     }

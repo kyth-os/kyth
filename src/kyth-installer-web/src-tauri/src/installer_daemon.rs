@@ -77,7 +77,9 @@ pub(super) fn ac_online_in(root: &Path) -> bool {
         }
     }
     if saw_battery {
-        !saw_ac || ac_online
+        // A battery-backed machine must positively report external power.
+        // Missing status/AC nodes are unknown, not proof that shrinking is safe.
+        saw_ac && ac_online
     } else {
         true
     }
@@ -797,6 +799,9 @@ fn header_end(request: &[u8]) -> Result<usize, String> {
 }
 
 fn read_request(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(15)))
+        .map_err(|error| format!("could not set installer request timeout: {error}"))?;
     let mut request = Vec::with_capacity(4096);
     let mut buffer = [0_u8; 4096];
     let header_end = loop {
@@ -1836,6 +1841,12 @@ pub fn run(args: &[String]) -> Result<(), String> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
+                if let Err(error) =
+                    stream.set_read_timeout(Some(std::time::Duration::from_secs(15)))
+                {
+                    eprintln!("could not set installer client timeout: {error}");
+                    continue;
+                }
                 let token = token.clone();
                 let expected_uid = options.peer_uid;
                 let runtime = Arc::clone(&runtime);
@@ -2173,6 +2184,16 @@ mod tests {
         fs::create_dir_all(&bat).unwrap();
         fs::write(bat.join("status"), "Discharging\n").unwrap();
         assert!(!ac_online_in(battery.path()));
+        fs::remove_file(bat.join("status")).unwrap();
+        assert!(
+            !ac_online_in(battery.path()),
+            "unknown battery state must fail closed"
+        );
+        let ac = battery.path().join("AC");
+        fs::create_dir_all(&ac).unwrap();
+        fs::write(ac.join("online"), "0\n").unwrap();
+        fs::write(bat.join("status"), "Not charging\n").unwrap();
+        assert!(!ac_online_in(battery.path()), "offline AC must fail closed");
 
         let mut journal = PartitionJournal::new("/dev/sda").unwrap();
         journal.add_op(

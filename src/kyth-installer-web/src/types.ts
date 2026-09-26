@@ -5,7 +5,7 @@ export type Lifecycle = "idle" | "validated" | "partitioning" | "installing" | "
 export interface Disk { name: string; size_bytes?: number; model?: string; removable?: boolean; current?: boolean; }
 export interface Partition { name: string; size_bytes?: number; fstype?: string; label?: string; mountpoint?: string; current?: boolean; in_use?: boolean; efi?: boolean; alongside_candidate?: boolean; ntfs_resize_candidate?: boolean; }
 export interface FreeRegion { start_bytes: number; end_bytes?: number; size_bytes: number; }
-export interface SourceStatus { available?: boolean; kind?: string; message?: string; }
+export interface SourceStatus { available?: boolean; kind?: string; message?: string; requires_network?: boolean; }
 export interface Config { source_image: string; is_live: boolean; source?: SourceStatus; }
 export interface PendingOperation { index?: number; kind: string; params?: Record<string, unknown>; }
 export interface TransactionReport { status?: string; phase?: Phase; lifecycle?: Lifecycle; message?: string; [key: string]: unknown; }

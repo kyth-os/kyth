@@ -136,7 +136,7 @@ export const installerApi = {
   timezones: () => request<string[]>("/api/timezones"),
   locales: () => request<string[]>("/api/locales"),
   keymaps: () => request<string[]>("/api/keymaps"),
-  pending: () => request<PendingOperation[]>("/api/disk/pending"),
+  pending: (disk: string) => request<PendingOperation[]>(`/api/disk/pending?disk=${encodeURIComponent(disk)}`),
   filesystems: () => request<Array<{ id: string; name?: string }>>("/api/disk/filesystems"),
   report: () => request<TransactionReport>("/api/report"),
   log: () => request<string>("/api/log"),
