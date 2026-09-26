@@ -111,17 +111,21 @@ case "${source_imgref}" in
 		;;
 esac
 if [ -n "${cosign_registry_ref}" ]; then
-	cosign_transient=""
-	if ! command -v cosign >/dev/null 2>&1; then
-		# Transient, distro-signed verification tool only: removed again
-		# below so it never lands in the live image.
-		if command -v dnf5 >/dev/null 2>&1; then
-			dnf5 install -y cosign
-		else
-			dnf install -y cosign
-		fi
-		cosign_transient="yes"
-	fi
+	# The signer (supply-chain.yml via setup-cosign) uses cosign v2.6.1,
+	# which stores signatures as .sig tags. The verifier must speak the
+	# same format: distro-packaged cosign is v3 (bundle/referrers only),
+	# which cannot see v2 .sig tags, so a distro install fails
+	# every build at this gate. Always install the pinned v2 binary to
+	# /usr/local/bin (ahead of /usr/bin in PATH) and remove it below so
+	# it never lands in the live image.
+	cosign_transient="yes"
+	cosign_version="2.6.1"
+	cosign_sha256="064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a"
+	curl -sfL "https://github.com/sigstore/cosign/releases/download/v${cosign_version}/cosign-linux-amd64" -o /tmp/kyth-cosign
+	echo "${cosign_sha256}  /tmp/kyth-cosign" | sha256sum -c -
+	install -m 0755 /tmp/kyth-cosign /usr/local/bin/cosign
+	rm -f /tmp/kyth-cosign
+	hash -r
 	cosign_identity="${KYTH_COSIGN_IDENTITY:-^https://github.com/.+/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$}"
 	cosign_issuer="https://token.actions.githubusercontent.com"
 	# cosign's TUF client bootstraps its cache with a plain mkdir of the
@@ -167,11 +171,8 @@ if [ -n "${cosign_registry_ref}" ]; then
 	signature_digest="sha256:$(sha256sum "${signature_bundle}" | awk '{print $1}')"
 	signature_state="verified"
 	if [ -n "${cosign_transient}" ]; then
-		if command -v dnf5 >/dev/null 2>&1; then
-			dnf5 remove -y cosign
-		else
-			dnf remove -y cosign
-		fi
+		rm -f /usr/local/bin/cosign
+		hash -r
 	fi
 fi
 printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\nKYTH_INSTALLER_SOCKET=/run/kyth-installer/api.sock\nKYTH_INSTALLER_SOCKET_GROUP=liveuser\nKYTH_INSTALLER_TOKEN_FILE=/run/kyth-installer/session-token\n' \
