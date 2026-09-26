@@ -129,7 +129,14 @@ impl PartitionJournal {
     /// Python compatibility journal. Removing an operation does not rewrite
     /// existing identities, so durable event references remain stable.
     pub(crate) fn add_op(&mut self, kind: impl Into<String>, params: Value) -> usize {
-        let index = self.ops.len();
+        // A removed entry leaves a gap. Reuse the list length here and we
+        // can assign an ID that is still held by a later operation.
+        let index = self
+            .ops
+            .iter()
+            .map(|operation| operation.index)
+            .max()
+            .map_or(0, |last| last.saturating_add(1));
         self.ops.push(PartitionOperation {
             kind: kind.into(),
             params,
@@ -287,30 +294,71 @@ pub(crate) fn manual_mounts(
         .iter()
         .map(|part| (part.name.as_str(), part))
         .collect();
-    let created: HashSet<String> = journal
-        .ops
-        .iter()
-        .filter(|operation| operation.kind == "create")
-        .map(|operation| value_string(&operation.params, "partition"))
-        .filter(|partition| !partition.is_empty())
-        .collect();
+    let mut created = HashSet::new();
+    let mut assignments = std::collections::BTreeMap::<String, String>::new();
+    let mut formats = HashMap::<String, String>::new();
+    for operation in &journal.ops {
+        if !operation.params.is_object()
+            && matches!(
+                operation.kind.as_str(),
+                "create" | "set_mountpoint" | "delete" | "format"
+            )
+        {
+            return Err("Committed partition journal contains malformed operations.".to_string());
+        }
+        let partition = value_string(&operation.params, "partition");
+        match operation.kind.as_str() {
+            "new_table" => {
+                assignments.clear();
+                formats.clear();
+                created.clear();
+            }
+            "create" => {
+                if partition.is_empty() {
+                    continue;
+                }
+                created.insert(partition.clone());
+                let mountpoint = value_string(&operation.params, "mountpoint");
+                if mountpoint.is_empty() {
+                    assignments.remove(&partition);
+                } else {
+                    assignments.insert(partition.clone(), mountpoint);
+                }
+                let fs = value_string(&operation.params, "fs_type");
+                if !fs.is_empty() {
+                    formats.insert(partition, fs);
+                }
+            }
+            "set_mountpoint" => {
+                if partition.is_empty() {
+                    continue;
+                }
+                let mountpoint = value_string(&operation.params, "mountpoint");
+                if mountpoint.is_empty() {
+                    assignments.remove(&partition);
+                } else {
+                    assignments.insert(partition, mountpoint);
+                }
+            }
+            "delete" => {
+                assignments.remove(&partition);
+                formats.remove(&partition);
+                created.remove(&partition);
+            }
+            "format" => {
+                let fs = value_string(&operation.params, "fs_type");
+                if !partition.is_empty() && !fs.is_empty() {
+                    formats.insert(partition, fs);
+                }
+            }
+            _ => {}
+        }
+    }
 
     let mut mounts = Vec::new();
     let mut assigned_mountpoints = HashSet::new();
-    let mut assigned_partitions = HashSet::new();
-    for operation in &journal.ops {
-        if !matches!(operation.kind.as_str(), "create" | "set_mountpoint") {
-            continue;
-        }
-        if !operation.params.is_object() {
-            return Err("Committed partition journal contains malformed operations.".to_string());
-        }
-        let mountpoint = value_string(&operation.params, "mountpoint");
-        let partition = value_string(&operation.params, "partition");
-        if mountpoint.is_empty()
-            || matches!(mountpoint.as_str(), "/" | "/boot/efi")
-            || partition.is_empty()
-        {
+    for (partition, mountpoint) in assignments {
+        if mountpoint.is_empty() || matches!(mountpoint.as_str(), "/" | "/boot/efi") {
             continue;
         }
         if !discovered.contains_key(partition.as_str()) && !created.contains(&partition) {
@@ -323,45 +371,20 @@ pub(crate) fn manual_mounts(
                 "Manual mount point {mountpoint} is assigned more than once."
             ));
         }
-        if !assigned_partitions.insert(partition.clone()) {
-            return Err(format!(
-                "Manual partition {partition} has multiple mount assignments."
-            ));
-        }
-
-        let mut fstype = if operation.kind == "create" {
-            value_string(&operation.params, "fs_type")
-        } else {
-            String::new()
-        };
-        for format_operation in &journal.ops {
-            if format_operation.kind != "format" {
-                continue;
-            }
-            if !format_operation.params.is_object() {
-                return Err(
-                    "Committed partition journal contains malformed operations.".to_string()
-                );
-            }
-            if value_string(&format_operation.params, "partition") == partition {
-                fstype = value_string(&format_operation.params, "fs_type");
-                break;
-            }
-        }
-        if fstype.is_empty() {
-            fstype = discovered
-                .get(partition.as_str())
-                .map(|part| part.fstype.clone())
-                .unwrap_or_default();
-        }
+        let fstype = formats
+            .get(&partition)
+            .cloned()
+            .or_else(|| {
+                discovered
+                    .get(partition.as_str())
+                    .map(|part| part.fstype.clone())
+            })
+            .filter(|fstype| !fstype.is_empty())
+            .unwrap_or_else(|| "btrfs".to_string());
         mounts.push(ManualMount {
             partition,
             mountpoint,
-            fstype: if fstype.is_empty() {
-                "btrfs".to_string()
-            } else {
-                fstype
-            },
+            fstype,
         });
     }
     Ok(mounts)
@@ -380,8 +403,7 @@ pub(crate) fn validate(
     }
 
     let mut errors = Vec::new();
-    let mut root_count = 0;
-    let mut mountpoints = HashSet::new();
+    let mut mount_assignments: HashMap<String, String> = HashMap::new();
     let mut allocated: HashMap<String, (i64, i64, String)> = current_parts
         .iter()
         .map(|part| {
@@ -396,6 +418,12 @@ pub(crate) fn validate(
         })
         .collect();
     let mut table = table_type.to_ascii_lowercase();
+    if table == "dos" {
+        table = "msdos".to_string();
+    }
+    if !matches!(table.as_str(), "gpt" | "msdos" | "dos") {
+        errors.push(format!("Unsupported partition table type: {table}."));
+    }
     let mut primary_count = if table == "msdos" {
         current_parts.len()
     } else {
@@ -415,8 +443,6 @@ pub(crate) fn validate(
         match operation.kind.as_str() {
             "new_table" => {
                 allocated.clear();
-                root_count = 0;
-                mountpoints.clear();
                 table = {
                     let value = value_string(params, "table_type");
                     if value.is_empty() {
@@ -425,7 +451,14 @@ pub(crate) fn validate(
                         value.to_ascii_lowercase()
                     }
                 };
+                if table == "dos" {
+                    table = "msdos".to_string();
+                }
+                if !matches!(table.as_str(), "gpt" | "msdos" | "dos") {
+                    errors.push(format!("Unsupported partition table type: {table}."));
+                }
                 primary_count = 0;
+                mount_assignments.clear();
                 if table == "gpt" {
                     allocated.insert(
                         "automatic BIOS boot partition".to_string(),
@@ -438,10 +471,24 @@ pub(crate) fn validate(
                 let size = value_i64(params, "size_bytes", -1);
                 let fs = value_string(params, "fs_type").to_ascii_lowercase();
                 let mount = value_string(params, "mountpoint").to_ascii_lowercase();
-                if start < 0 || size < 0 {
+                if start <= 0 || size <= 0 {
                     errors.push("Create partition: invalid start or size.".to_string());
                 }
                 let end = start.saturating_add(size);
+                if start > 0 && size > 0 {
+                    if start % 512 != 0 || size % 512 != 0 {
+                        errors.push(
+                            "Create partition: start and size must align to 512-byte sectors."
+                                .to_string(),
+                        );
+                    }
+                    if disk_size_bytes > 0 && end as u64 > disk_size_bytes {
+                        errors.push(format!(
+                            "Create partition: new partition extends past the end of {}.",
+                            journal.disk
+                        ));
+                    }
+                }
                 if start >= 0 && size >= 0 {
                     for (name, (other_start, other_end, _)) in &allocated {
                         if *other_start >= 0
@@ -467,18 +514,20 @@ pub(crate) fn validate(
                 if mount == "/boot/efi" && fs != "fat32" {
                     errors.push("EFI System Partition (/boot/efi) must use FAT32.".to_string());
                 }
-                if !mount.is_empty() && mountpoints.contains(&mount) {
+                if !mount.is_empty()
+                    && mount_assignments
+                        .values()
+                        .any(|assigned| assigned == &mount)
+                {
                     errors.push(format!("Mount point {mount} is assigned more than once."));
                 }
-                allocated.insert(format!("new:{}", operation.index), (start, end, fs));
+                let created_key = format!("new:{}", operation.index);
+                allocated.insert(created_key.clone(), (start, end, fs));
                 if table == "msdos" {
                     primary_count += 1;
                 }
-                if mount == "/" {
-                    root_count += 1;
-                }
                 if !mount.is_empty() {
-                    mountpoints.insert(mount);
+                    mount_assignments.insert(created_key, mount);
                 }
             }
             "delete" | "format" | "resize" | "set_mountpoint" => {
@@ -543,16 +592,21 @@ pub(crate) fn validate(
                         errors.push("EFI System Partition (/boot/efi) must use FAT32.".to_string());
                         valid = false;
                     }
-                    if !mount.is_empty() && mountpoints.contains(&mount) {
+                    if !mount.is_empty()
+                        && mount_assignments
+                            .iter()
+                            .any(|(assigned_partition, assigned)| {
+                                assigned_partition != &partition && assigned == &mount
+                            })
+                    {
                         errors.push(format!("Mount point {mount} is assigned more than once."));
                         valid = false;
                     }
                     if valid {
-                        if mount == "/" {
-                            root_count += 1;
-                        }
-                        if !mount.is_empty() {
-                            mountpoints.insert(mount);
+                        if mount.is_empty() {
+                            mount_assignments.remove(&partition);
+                        } else {
+                            mount_assignments.insert(partition.clone(), mount);
                         }
                     }
                 }
@@ -560,6 +614,7 @@ pub(crate) fn validate(
                     match operation.kind.as_str() {
                         "delete" => {
                             allocated.remove(&partition);
+                            mount_assignments.remove(&partition);
                             if table == "msdos" {
                                 primary_count = primary_count.saturating_sub(1);
                             }
@@ -583,10 +638,17 @@ pub(crate) fn validate(
                     }
                 }
             }
-            _ => {}
+            _ => errors.push(format!(
+                "Unsupported partition operation: {}.",
+                operation.kind
+            )),
         }
     }
 
+    let root_count = mount_assignments
+        .values()
+        .filter(|mount| mount.as_str() == "/")
+        .count();
     if root_count == 0 {
         errors.push(
             "No root partition (/) configured. Mount at least one partition as '/' with Btrfs."
@@ -795,12 +857,22 @@ fn runtime_partitions() -> Result<HashMap<String, u32>, String> {
 }
 
 fn find_new_partition(
+    disk: &str,
     before: &HashMap<String, u32>,
     start: u64,
     size: u64,
 ) -> Result<String, String> {
+    let disk =
+        normalize_device_path(disk).ok_or_else(|| "disk must be a safe device path".to_string())?;
     let output = Command::new("/usr/bin/lsblk")
-        .args(["--json", "--bytes", "--output", "NAME,TYPE,START,SIZE"])
+        .args([
+            "--json",
+            "--bytes",
+            "--paths",
+            "--output",
+            "NAME,TYPE,START,SIZE",
+            &disk,
+        ])
         .output()
         .map_err(|error| format!("could not inspect created partition: {error}"))?;
     if !output.status.success() {
@@ -965,7 +1037,8 @@ fn execute_operation(
                         sector_size: 512,
                     },
                 )?;
-                let bios = find_new_partition(&before_bios, 1024 * 1024, BIOS_BOOT_BYTES)?;
+                let bios =
+                    find_new_partition(&journal.disk, &before_bios, 1024 * 1024, BIOS_BOOT_BYTES)?;
                 let number = part_num(&bios, &runtime_partitions()?)?;
                 run_disk_operation(installer_disk::DiskOperationInput::SetPartitionFlag {
                     disk: journal.disk.clone(),
@@ -987,7 +1060,7 @@ fn execute_operation(
                 label: value_string(params, "label"),
                 sector_size: 512,
             })?;
-            let created = find_new_partition(&before, start, size)?;
+            let created = find_new_partition(&journal.disk, &before, start, size)?;
             params["partition"] = Value::String(created.clone());
             params["_created_this_journal"] = Value::Bool(true);
             let fs = value_string(params, "fs_type");
@@ -1067,27 +1140,37 @@ fn execute_operation(
 }
 
 fn root_partition(journal: &PartitionJournal) -> Option<String> {
+    let mut assignments = HashMap::<String, String>::new();
     for operation in &journal.ops {
-        if operation.kind == "create" && value_string(&operation.params, "mountpoint") == "/" {
-            if let Some(partition) =
-                normalize_device_path(&value_string(&operation.params, "partition"))
-            {
-                return Some(partition);
+        match operation.kind.as_str() {
+            "new_table" => assignments.clear(),
+            "create" | "set_mountpoint" => {
+                let partition =
+                    normalize_device_path(&value_string(&operation.params, "partition"));
+                let key = partition.unwrap_or_else(|| format!("new:{}", operation.index));
+                let mountpoint = value_string(&operation.params, "mountpoint");
+                if mountpoint.is_empty() {
+                    assignments.remove(&key);
+                } else {
+                    assignments.insert(key, mountpoint);
+                }
             }
+            "delete" => {
+                if let Some(partition) =
+                    normalize_device_path(&value_string(&operation.params, "partition"))
+                {
+                    assignments.remove(&partition);
+                }
+            }
+            _ => {}
         }
     }
-    let last = last_mountpoint_indices(journal);
-    journal.ops.iter().find_map(|operation| {
-        if operation.kind != "set_mountpoint"
-            || value_string(&operation.params, "mountpoint") != "/"
-        {
-            return None;
-        }
-        let partition = value_string(&operation.params, "partition");
-        (last.get(&partition) == Some(&operation.index))
-            .then(|| normalize_device_path(&partition))
-            .flatten()
-    })
+    let roots: Vec<String> = assignments
+        .into_iter()
+        .filter_map(|(partition, mountpoint)| (mountpoint == "/").then_some(partition))
+        .filter_map(|partition| normalize_device_path(&partition))
+        .collect();
+    (roots.len() == 1).then(|| roots[0].clone())
 }
 
 pub(crate) fn commit_request(mut input: JournalCommitInput) -> Result<Value, String> {
@@ -1133,10 +1216,21 @@ pub(crate) fn commit_request(mut input: JournalCommitInput) -> Result<Value, Str
             }
             Err(error) => {
                 if !irreversible {
-                    let _ = run_disk_operation(installer_disk::DiskOperationInput::RestoreTable {
-                        disk: input.journal.disk.clone(),
-                        backup_path: backup_path.clone(),
-                    });
+                    if let Err(restore_error) =
+                        run_disk_operation(installer_disk::DiskOperationInput::RestoreTable {
+                            disk: input.journal.disk.clone(),
+                            backup_path: backup_path.clone(),
+                        })
+                    {
+                        input.journal.irreversible_completed = true;
+                        return Ok(serde_json::json!({
+                            "ok": false,
+                            "irreversible": true,
+                            "recovery_required": true,
+                            "message": format!("{error}; partition-table rollback also failed: {restore_error}"),
+                            "journal": input.journal,
+                        }));
+                    }
                 }
                 input.journal.irreversible_completed = irreversible;
                 return Ok(serde_json::json!({
@@ -1303,8 +1397,22 @@ mod tests {
         );
         assert!(journal.remove_op(0));
         assert_eq!(journal.pending()[0].index, 1);
-        assert_eq!(journal.add_op("format", json!({"fs_type": "btrfs"})), 1);
+        assert_eq!(journal.add_op("format", json!({"fs_type": "btrfs"})), 2);
         assert!(!journal.remove_op(99));
+    }
+
+    #[test]
+    fn removed_operation_ids_are_not_reused() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("create", json!({}));
+        journal.add_op("format", json!({}));
+        assert!(journal.remove_op(0));
+        let next = journal.add_op("delete", json!({}));
+        assert_eq!(next, 2);
+        assert_eq!(
+            journal.ops.iter().map(|op| op.index).collect::<Vec<_>>(),
+            [1, 2]
+        );
     }
 
     #[test]
@@ -1462,6 +1570,37 @@ mod tests {
     }
 
     #[test]
+    fn manual_mount_projection_uses_last_assignment_and_ignores_deleted_partitions() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/old"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/home"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda3", "mountpoint": "/scratch"}),
+        );
+        journal.add_op("delete", json!({"partition": "/dev/sda3"}));
+        journal.mark_committed(None).expect("commit metadata");
+
+        let mounts = manual_mounts(
+            &journal,
+            &[
+                partition("/dev/sda2", "ext4", false),
+                partition("/dev/sda3", "xfs", false),
+            ],
+        )
+        .expect("final mount projection");
+        assert_eq!(mounts.len(), 1);
+        assert_eq!(mounts[0].mountpoint, "/home");
+        assert_eq!(mounts[0].partition, "/dev/sda2");
+    }
+
+    #[test]
     fn validates_a_single_btrfs_root_assignment() {
         let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
         journal.add_op(
@@ -1475,6 +1614,93 @@ mod tests {
             200 * 1024 * 1024 * 1024,
         );
         assert!(errors.is_empty(), "unexpected journal errors: {errors:?}");
+    }
+
+    #[test]
+    fn rejects_root_partition_deleted_later_in_the_same_journal() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/"}),
+        );
+        journal.add_op("delete", json!({"partition": "/dev/sda2"}));
+        let errors = validate(
+            &journal,
+            &[partition("/dev/sda2", "btrfs", false)],
+            "gpt",
+            128 * 1024 * 1024 * 1024,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("No root partition")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn committed_root_projection_does_not_return_a_deleted_root() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "create",
+            json!({"partition": "/dev/sda2", "mountpoint": "/", "fs_type": "btrfs"}),
+        );
+        journal.add_op("delete", json!({"partition": "/dev/sda2"}));
+        assert_eq!(root_partition(&journal), None);
+    }
+
+    #[test]
+    fn rejects_zero_sized_and_out_of_bounds_created_partitions() {
+        for (start, size, expected) in [
+            (2 * 1024 * 1024_i64, 0_i64, "invalid start or size"),
+            (
+                2 * 1024 * 1024_i64,
+                200 * 1024 * 1024 * 1024_i64,
+                "extends past the end",
+            ),
+            (
+                2 * 1024 * 1024_i64 + 1,
+                64 * 1024 * 1024 * 1024_i64,
+                "align to 512-byte",
+            ),
+        ] {
+            let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+            journal.add_op("create", json!({"start_bytes": start, "size_bytes": size, "fs_type": "btrfs", "mountpoint": "/"}));
+            let errors = validate(&journal, &[], "gpt", 128 * 1024 * 1024 * 1024);
+            assert!(
+                errors.iter().any(|error| error.contains(expected)),
+                "{expected}: {errors:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_journal_operations_during_validation() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("erase_magic", json!({}));
+        let errors = validate(&journal, &[], "gpt", 128 * 1024 * 1024 * 1024);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("Unsupported partition operation")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn recognizes_lsblk_dos_table_name_for_primary_partition_limit() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("create", json!({"start_bytes": 100 * 1024 * 1024_i64, "size_bytes": 1024 * 1024_i64, "fs_type": "btrfs", "mountpoint": "/"}));
+        let parts = (1..=4)
+            .map(|index| partition(&format!("/dev/sda{index}"), "ext4", false))
+            .collect::<Vec<_>>();
+        let errors = validate(&journal, &parts, "dos", 128 * 1024 * 1024 * 1024);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("at most 4 primary partitions")),
+            "{errors:?}"
+        );
     }
 
     #[test]

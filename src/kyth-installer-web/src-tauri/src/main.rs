@@ -469,7 +469,8 @@ mod transport_tests {
         // fail fast instead of wedging install Send/Cancel behind the
         // long read timeout.
         let source = include_str!("main.rs");
-        assert_eq!(source.matches("set_write_timeout").count(), 3);
+        let bounded_write = ["stream.set_write_timeout", "(Some"].concat();
+        assert_eq!(source.matches(&bounded_write).count(), 3);
     }
 
     #[test]

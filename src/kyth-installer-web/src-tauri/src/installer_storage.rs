@@ -184,7 +184,14 @@ fn normalize_device_path(raw: &str) -> Option<String> {
     } else {
         format!("/dev/{value}")
     };
+    let basename = value.strip_prefix("/dev/").unwrap_or("");
+    let valid_name = !basename.is_empty()
+        && (!basename.contains('/')
+            || basename
+                .strip_prefix("mapper/")
+                .is_some_and(|mapper_name| !mapper_name.is_empty() && !mapper_name.contains('/')));
     if !value.starts_with("/dev/")
+        || !valid_name
         || value.contains("..")
         || !value.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'+' | b':' | b'-')
@@ -334,7 +341,12 @@ pub(crate) fn free_regions(
             0
         };
     let mut spans = Vec::new();
-    for partition in partitions {
+    let selected_disk = normalize_device_path(disk)
+        .ok_or_else(|| "invalid disk path for storage query".to_string())?;
+    for partition in partitions
+        .into_iter()
+        .filter(|partition| on_selected_disk(&partition.name, &selected_disk))
+    {
         if partition.size_bytes == 0
             || partition.start_bytes > disk_size
             || partition.size_bytes > disk_size.saturating_sub(partition.start_bytes)
@@ -529,9 +541,11 @@ pub(crate) fn root_partition_from_snapshot(input: &str, disk: &str) -> Result<St
         }
     }
     collect(root, &mut candidates);
-    candidates.into_iter().next().ok_or_else(|| {
-        "target disk has no Btrfs root partition after bootc installation".to_string()
-    })
+    match candidates.as_slice() {
+        [partition] => Ok(partition.clone()),
+        [] => Err("target disk has no Btrfs root partition after bootc installation".to_string()),
+        _ => Err("target disk has multiple Btrfs partitions; refusing to guess which one contains the installed root".to_string()),
+    }
 }
 
 /// Find the EFI System Partition on the selected disk without trusting a
@@ -544,7 +558,7 @@ pub(crate) fn efi_partition_from_snapshot(
 ) -> Result<Option<EfiPartition>, String> {
     let disk = normalize_device_path(disk)
         .ok_or_else(|| "EFI partition query has an invalid disk".to_string())?;
-    let mut candidates = parse_partitions(input)?
+    let candidates = parse_partitions(input)?
         .into_iter()
         .filter(|part| {
             part.efi
@@ -562,8 +576,22 @@ pub(crate) fn efi_partition_from_snapshot(
             mounted_at: part.mountpoints.into_iter().find(|mount| {
                 mount.starts_with('/') && !mount.contains("..") && !mount.contains("//")
             }),
-        });
-    Ok(candidates.next())
+        })
+        .collect::<Vec<_>>();
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [efi] => Ok(Some(efi.clone())),
+        _ => {
+            let mounted = candidates
+                .iter()
+                .filter(|efi| efi.mounted_at.as_deref() == Some("/boot/efi"))
+                .collect::<Vec<_>>();
+            match mounted.as_slice() {
+                [efi] => Ok(Some((*efi).clone())),
+                _ => Err("target disk has multiple EFI system partitions; refusing to select one arbitrarily".to_string()),
+            }
+        }
+    }
 }
 
 /// Revalidate one partition as a member of the selected disk.
@@ -889,6 +917,17 @@ mod tests {
     }
 
     #[test]
+    fn device_paths_reject_nested_non_mapper_names_but_allow_mapper_nodes() {
+        assert!(normalize_device_path("/dev/").is_none());
+        assert!(normalize_device_path("/dev/foo/bar").is_none());
+        assert_eq!(
+            normalize_device_path("/dev/mapper/cryptroot").as_deref(),
+            Some("/dev/mapper/cryptroot")
+        );
+        assert!(normalize_device_path("/dev/mapper/a/b").is_none());
+    }
+
+    #[test]
     fn runtime_inventory_resolves_protected_and_current_disks() {
         let ancestry = r#"{"blockdevices":[
             {"name":"/dev/sda","type":"disk"},
@@ -926,6 +965,21 @@ mod tests {
         assert_eq!(regions[0].start_bytes % 512, 0);
         assert_eq!(regions[0].end_bytes, disk_size - GPT_RESERVE_BYTES);
         assert!(regions[0].size_bytes >= MIN_KYTHOS_BYTES + GPT_RESERVE_BYTES);
+    }
+
+    #[test]
+    fn free_regions_ignore_partitions_from_other_disks_in_wide_snapshots() {
+        let disk_size = 100 * 1024 * 1024 * 1024_u64;
+        let snapshot = format!(
+            r#"{{"blockdevices":[
+                {{"name":"/dev/sda","size":{disk_size},"type":"disk","pttype":"gpt","children":[]}},
+                {{"name":"/dev/sdb","size":{disk_size},"type":"disk","pttype":"gpt","children":[{{"name":"/dev/sdb1","size":{},"type":"part","start":2048}}]}}
+            ]}}"#,
+            40 * 1024 * 1024 * 1024_u64
+        );
+        let regions = free_regions(&snapshot, "/dev/sda", 512).expect("wide snapshot parses");
+        assert_eq!(regions.len(), 1);
+        assert_eq!(regions[0].start_bytes, GPT_RESERVE_BYTES);
     }
 
     #[test]
@@ -978,6 +1032,28 @@ mod tests {
         let error = root_partition_from_snapshot(unrelated, "/dev/sda")
             .expect_err("an absent selected disk must fail closed");
         assert!(error.contains("target disk was not present"), "{error}");
+    }
+
+    #[test]
+    fn refuses_to_guess_between_multiple_btrfs_partitions() {
+        let snapshot = r#"{"blockdevices":[{"name":"/dev/sda","type":"disk","children":[
+            {"name":"/dev/sda2","type":"part","fstype":"btrfs"},
+            {"name":"/dev/sda3","type":"part","fstype":"btrfs"}
+        ]}]}"#;
+        let error = root_partition_from_snapshot(snapshot, "/dev/sda")
+            .expect_err("ambiguous roots must not select the first filesystem");
+        assert!(error.contains("multiple Btrfs partitions"), "{error}");
+    }
+
+    #[test]
+    fn refuses_ambiguous_efi_partitions_without_active_mount() {
+        let snapshot = r#"{"blockdevices":[{"name":"/dev/sda","type":"disk","children":[
+            {"name":"/dev/sda1","type":"part","fstype":"vfat","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b","mountpoints":[]},
+            {"name":"/dev/sda2","type":"part","fstype":"vfat","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b","mountpoints":[]}
+        ]}]}"#;
+        let error = efi_partition_from_snapshot(snapshot, "/dev/sda")
+            .expect_err("multiple ESPs must not select arbitrarily");
+        assert!(error.contains("multiple EFI"), "{error}");
     }
 
     #[test]

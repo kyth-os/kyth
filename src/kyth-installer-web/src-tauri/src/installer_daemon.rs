@@ -25,6 +25,7 @@ use super::installer_runtime::RuntimeCoordinator;
 use super::installer_storage;
 
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+const MAX_LOG_RESPONSE_BYTES: u64 = 1024 * 1024;
 fn transaction_path() -> PathBuf {
     std::env::var_os("KYTH_INSTALLER_TRANSACTION")
         .map(PathBuf::from)
@@ -50,7 +51,7 @@ type NativeSupervisor = JobSupervisor<NativePhaseExecutor>;
 /// AC/ADP supply means on-AC; machines without a power-supply tree (desktops,
 /// VMs) read as on-AC because there is nothing to gate on. Pure over an
 /// explicit sysfs root so it is unit-testable.
-fn ac_online_in(root: &Path) -> bool {
+pub(super) fn ac_online_in(root: &Path) -> bool {
     let Ok(entries) = std::fs::read_dir(root) else {
         return true;
     };
@@ -120,9 +121,8 @@ fn resize_op_params(
     Ok(params)
 }
 
-/// Stamp `on_ac_power` from a live sysfs read onto every staged resize op
-/// that does not already carry an explicit attestation. Runs at commit time,
-/// when the journal's shrink gate actually evaluates power state.
+/// Replace every staged resize's client value with a live root-owned sysfs
+/// reading at commit time, when the shrink gate evaluates power state.
 fn stamp_shrink_power_attestation(journal: &mut super::installer_journal::PartitionJournal) {
     stamp_shrink_power_attestation_in(journal, Path::new("/sys/class/power_supply"));
 }
@@ -131,16 +131,12 @@ fn stamp_shrink_power_attestation_in(
     journal: &mut super::installer_journal::PartitionJournal,
     power_root: &Path,
 ) {
-    if journal
-        .ops
-        .iter()
-        .all(|op| op.kind != "resize" || op.params.get("on_ac_power").is_some())
-    {
-        return;
-    }
+    // The browser's value is advisory at best. Commit-time power state must
+    // come from this root-owned sysfs probe, even when a client supplied a
+    // forged `true` value while running on battery.
     let online = ac_online_in(power_root);
     for op in &mut journal.ops {
-        if op.kind == "resize" && op.params.get("on_ac_power").is_none() {
+        if op.kind == "resize" {
             op.params["on_ac_power"] = serde_json::Value::Bool(online);
         }
     }
@@ -434,8 +430,7 @@ impl NativeJournalRegistry {
                 // `on_ac_power`, and the daemon — root on the target machine —
                 // is the trustworthy party to confirm it. Stamp it live here
                 // (per the documented "confirmed online at commit time"
-                // contract) so a resize staged while on AC is not bricked,
-                // and an explicit client `false` is never overridden.
+                // contract), replacing any client-supplied value.
                 stamp_shrink_power_attestation(&mut journal);
                 match super::installer_journal::commit_request(
                     super::installer_journal::JournalCommitInput { journal },
@@ -871,6 +866,7 @@ fn json_status(status: u16) -> &'static str {
         404 => "404 Not Found",
         409 => "409 Conflict",
         500 => "500 Internal Server Error",
+        503 => "503 Service Unavailable",
         _ => "500 Internal Server Error",
     }
 }
@@ -1165,7 +1161,7 @@ fn read_only_storage_route(
             let Some(disk) = query_value(target, "disk") else {
                 return Ok(Some(serde_json::json!([])));
             };
-            let disk = super::installer_plan::normalize_device_path(disk)
+            let disk = super::installer_plan::normalize_device_path(&disk)
                 .ok_or_else(|| "invalid disk query path".to_string())?;
             let args = storage_lsblk_args(Some(&disk));
             let snapshot = command_output(
@@ -1182,7 +1178,7 @@ fn read_only_storage_route(
             let Some(disk) = query_value(target, "disk") else {
                 return Ok(Some(serde_json::json!([])));
             };
-            let disk = super::installer_plan::normalize_device_path(disk)
+            let disk = super::installer_plan::normalize_device_path(&disk)
                 .ok_or_else(|| "invalid disk query path".to_string())?;
             let args = storage_lsblk_args(Some(&disk));
             let snapshot = command_output(
@@ -1205,12 +1201,34 @@ fn read_only_storage_route(
     }
 }
 
-fn query_value<'a>(target: &'a str, name: &str) -> Option<&'a str> {
-    target
+fn query_value(target: &str, name: &str) -> Option<String> {
+    let encoded = target
         .split_once('?')?
         .1
         .split('&')
-        .find_map(|part| part.strip_prefix(&format!("{name}=")))
+        .find_map(|part| part.strip_prefix(&format!("{name}=")))?;
+    let bytes = encoded.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => {
+                decoded.push(b' ');
+                index += 1;
+            }
+            b'%' => {
+                let hex = bytes.get(index + 1..index + 3)?;
+                let digits = std::str::from_utf8(hex).ok()?;
+                decoded.push(u8::from_str_radix(digits, 16).ok()?);
+                index += 3;
+            }
+            byte => {
+                decoded.push(byte);
+                index += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).ok()
 }
 
 fn native_pending_request(target: &str) -> serde_json::Value {
@@ -1311,7 +1329,51 @@ fn native_request_from_start(request: &[u8]) -> Result<NativeInstallRequest, Str
     let end = header_end(request)?;
     let value: serde_json::Value = serde_json::from_slice(&request[end..])
         .map_err(|error| format!("Invalid installer request JSON: {error}"))?;
+    validate_start_acknowledgements(&value)?;
     NativeInstallRequest::from_http(value)
+}
+
+/// The React review page is not the safety boundary. Require its explicit
+/// backup, erase, and login credentials again at the privileged API before
+/// claiming the install slot or touching storage.
+fn validate_start_acknowledgements(value: &serde_json::Value) -> Result<(), String> {
+    let object = value
+        .as_object()
+        .ok_or_else(|| "Installer start request must be a JSON object.".to_string())?;
+    if object
+        .get("confirm_backup")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+    {
+        return Err(
+            "Confirm that you have backed up anything you want to keep before installing."
+                .to_string(),
+        );
+    }
+    if object
+        .get("confirm_erase")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+    {
+        return Err(
+            "Confirm that the selected target may be erased before installing.".to_string(),
+        );
+    }
+    if object
+        .get("username")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(|username| username.trim().is_empty())
+    {
+        return Err("A login username is required to install KythOS.".to_string());
+    }
+    if object
+        .get("password")
+        .and_then(serde_json::Value::as_str)
+        .is_none_or(str::is_empty)
+    {
+        return Err("A login password is required to install KythOS.".to_string());
+    }
+    Ok(())
 }
 
 fn native_report(snapshot: &JobSnapshot) -> Result<serde_json::Value, String> {
@@ -1341,40 +1403,28 @@ fn native_report(snapshot: &JobSnapshot) -> Result<serde_json::Value, String> {
 }
 
 fn native_log(mut client: UnixStream) -> Result<(), String> {
-    client
-        .write_all(
-            b"HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n",
-        )
-        .map_err(|error| format!("could not write native log headers: {error}"))?;
     let path = installer_log_path();
-    let mut file = match OpenOptions::new()
+    let body = match OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW)
         .open(&path)
     {
-        Ok(file) => file,
-        Err(error) => {
-            let message = format!("Could not read installer log: {error}\n");
-            client
-                .write_all(message.as_bytes())
-                .map_err(|write_error| {
-                    format!("could not write native log error: {write_error}")
-                })?;
-            return Ok(());
+        Ok(file) => {
+            let mut bytes = Vec::new();
+            file.take(MAX_LOG_RESPONSE_BYTES)
+                .read_to_end(&mut bytes)
+                .map_err(|error| format!("could not read native installer log: {error}"))?;
+            String::from_utf8_lossy(&bytes).into_owned()
         }
+        Err(error) => format!("Installer log is not available yet: {error}\n"),
     };
-    let mut buffer = [0_u8; 64 * 1024];
-    loop {
-        let count = file
-            .read(&mut buffer)
-            .map_err(|error| format!("could not read native installer log: {error}"))?;
-        if count == 0 {
-            return Ok(());
-        }
-        client
-            .write_all(&buffer[..count])
-            .map_err(|error| format!("could not stream native installer log: {error}"))?;
-    }
+    let response = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+        body.len(), body
+    );
+    client
+        .write_all(response.as_bytes())
+        .map_err(|error| format!("could not write native installer log: {error}"))
 }
 
 fn native_stream(
@@ -1799,8 +1849,9 @@ pub fn run(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        native_executor_from_start, native_request_from_start, normalize_start_request, options,
-        read_session_token, route_allowed, NativeJournalRegistry,
+        json_status, native_executor_from_start, native_request_from_start,
+        normalize_start_request, options, query_value, read_session_token, route_allowed,
+        NativeJournalRegistry,
     };
     use serde_json::Value;
     use std::fs;
@@ -1829,6 +1880,21 @@ mod tests {
         assert!(route_allowed("POST", "/api/start"));
         assert!(!route_allowed("POST", "/api/exec"));
         assert!(!route_allowed("GET", "http://127.0.0.1:7777/api/disks"));
+    }
+
+    #[test]
+    fn preserves_service_unavailable_status_for_storage_failures() {
+        assert_eq!(json_status(503), "503 Service Unavailable");
+    }
+
+    #[test]
+    fn query_value_decodes_encoded_device_paths_and_rejects_malformed_escapes() {
+        assert_eq!(
+            query_value("/api/partitions?disk=%2Fdev%2Fnvme0n1p2", "disk").as_deref(),
+            Some("/dev/nvme0n1p2")
+        );
+        assert_eq!(query_value("/api/partitions?disk=%ZZ", "disk"), None);
+        assert_eq!(query_value("/api/partitions?other=sda", "disk"), None);
     }
 
     #[test]
@@ -1900,11 +1966,29 @@ mod tests {
     #[test]
     fn native_start_boundary_keeps_start_route_native() {
         let request = start_request(
-            r#"{"disk":"sda","install_mode":"wipe","username":"alice","password_hash":"$6$hash","acknowledged-irreversible":true}"#,
+            r#"{"disk":"sda","install_mode":"wipe","username":"alice","password":"secret","password_hash":"$6$hash","confirm_backup":true,"confirm_erase":true,"acknowledged-irreversible":true}"#,
         );
         let native = native_request_from_start(&request).expect("native request should decode");
         assert_eq!(native.storage.disk, "sda");
         assert_eq!(native.execution.account.unwrap().username, "alice");
+    }
+
+    #[test]
+    fn native_start_requires_review_acknowledgements_and_a_login() {
+        for body in [
+            serde_json::json!({"disk":"sda", "username":"alice", "password":"secret"}),
+            serde_json::json!({"disk":"sda", "confirm_erase":true, "username":"alice", "password":"secret"}),
+            serde_json::json!({"disk":"sda", "confirm_backup":true, "confirm_erase":true, "password":"secret"}),
+            serde_json::json!({"disk":"sda", "confirm_backup":true, "confirm_erase":true, "username":"alice"}),
+        ] {
+            let request = start_request(&body.to_string());
+            assert!(native_request_from_start(&request).is_err());
+        }
+
+        let request = start_request(
+            r#"{"disk":"sda","username":"alice","password":"secret","confirm_backup":true,"confirm_erase":true,"acknowledged-irreversible":true}"#,
+        );
+        assert!(native_request_from_start(&request).is_ok());
     }
 
     #[test]
@@ -2082,7 +2166,7 @@ mod tests {
         stamp_shrink_power_attestation_in(&mut journal, battery.path());
         assert_eq!(journal.ops[0].params["on_ac_power"], false);
 
-        // An explicit client attestation is never overridden.
+        // The privileged commit probe overrides a client-supplied claim.
         let mut journal = PartitionJournal::new("/dev/sda").unwrap();
         journal.add_op(
             "resize",
@@ -2093,6 +2177,6 @@ mod tests {
             }),
         );
         stamp_shrink_power_attestation_in(&mut journal, battery.path());
-        assert_eq!(journal.ops[0].params["on_ac_power"], true);
+        assert_eq!(journal.ops[0].params["on_ac_power"], false);
     }
 }
