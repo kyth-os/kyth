@@ -124,15 +124,33 @@ if [ -n "${cosign_registry_ref}" ]; then
 	fi
 	cosign_identity="${KYTH_COSIGN_IDENTITY:-^https://github.com/.+/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$}"
 	cosign_issuer="https://token.actions.githubusercontent.com"
-	cosign verify \
-		--certificate-identity-regexp "${cosign_identity}" \
-		--certificate-oidc-issuer "${cosign_issuer}" \
-		"${cosign_registry_ref}@${embedded_digest}" \
-		|| { echo "ERROR: cosign verification failed for ${cosign_registry_ref}@${embedded_digest}" >&2; exit 1; }
-	signatures="$(cosign download signature "${cosign_registry_ref}@${embedded_digest}")" \
-		|| { echo "ERROR: could not download signature bundle for ${cosign_registry_ref}@${embedded_digest}" >&2; exit 1; }
+	# The TUF root refresh and registry reads flake on shared runners; retry a
+	# few times before failing. The gate itself stays hard — after retries it
+	# still exits 1, never records "verified" without a real verification.
+	cosign_verified=""
+	for cosign_attempt in 1 2 3; do
+		if cosign verify \
+			--certificate-identity-regexp "${cosign_identity}" \
+			--certificate-oidc-issuer "${cosign_issuer}" \
+			"${cosign_registry_ref}@${embedded_digest}"; then
+			cosign_verified="yes"
+			break
+		fi
+		echo "WARNING: cosign verification attempt ${cosign_attempt}/3 failed; retrying in 15s" >&2
+		sleep 15
+	done
+	[ -n "${cosign_verified}" ] \
+		|| { echo "ERROR: cosign verification failed for ${cosign_registry_ref}@${embedded_digest} after 3 attempts" >&2; exit 1; }
+	signatures=""
+	for cosign_attempt in 1 2 3; do
+		if signatures="$(cosign download signature "${cosign_registry_ref}@${embedded_digest}")" && [ -n "${signatures}" ]; then
+			break
+		fi
+		echo "WARNING: signature bundle download attempt ${cosign_attempt}/3 failed or empty; retrying in 15s" >&2
+		sleep 15
+	done
 	[ -n "${signatures}" ] \
-		|| { echo "ERROR: empty signature bundle for ${cosign_registry_ref}@${embedded_digest}" >&2; exit 1; }
+		|| { echo "ERROR: could not download signature bundle for ${cosign_registry_ref}@${embedded_digest} after 3 attempts" >&2; exit 1; }
 	signatures_json="$(printf '%s\n' "${signatures}" | sed -e 's/^/"/' -e 's/$/"/' | paste -sd, -)"
 	printf '{"schema_version":1,"digest":"%s","release_digest":"%s","source_image":"%s","identity":"%s","issuer":"%s","signatures":[%s]}\n' \
 		"${embedded_digest}" "${release_digest}" "${INSTALL_SOURCE_IMAGE}" \

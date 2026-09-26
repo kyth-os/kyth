@@ -90,6 +90,9 @@ RUN mkdir -p /etc/yum.repos.d.bak && \
 
 ARG CALAMARES=0
 ARG INSTALLER_BUILD_HASH=unset
+# build.sh must fail this layer when IT fails: a trailing `; if ...; fi`
+# used to mask its exit code, committing half-built payloads (missing
+# /boot/efi, iso.yaml) that died later in Titanoboa instead of here.
 RUN --mount=type=bind,source=installer/build.sh,target=/src/installer/build.sh \
     --mount=type=bind,source=installer/iso.yaml,target=/src/installer/iso.yaml \
     --mount=type=bind,source=installer/calamares,target=/src/installer/calamares \
@@ -100,5 +103,5 @@ RUN --mount=type=bind,source=installer/build.sh,target=/src/installer/build.sh \
     : "cache-bust:installer=${INSTALLER_BUILD_HASH}" && \
     env BASE_IMAGE="${BASE_IMAGE}" INSTALL_SOURCE_IMAGE="${INSTALL_SOURCE_IMAGE}" \
     SOURCE_TAG="${SOURCE_TAG}" CALAMARES="${CALAMARES}" \
-    bash /src/installer/build.sh; \
+    bash /src/installer/build.sh && \
     if [ "${CALAMARES}" = "1" ]; then mkdir -p /etc/calamares/modules && cp -r /src/installer/calamares/* /etc/calamares/ 2>/dev/null || true; fi

@@ -487,5 +487,28 @@ class BuildAssemblyContracts(unittest.TestCase):
                         self.fail(f"{script.relative_to(ROOT)} re-installs purged cups-browsed")
 
 
+    def test_payload_build_sh_failure_fails_the_image_layer(self):
+        # A trailing `; if ...; fi` once masked build.sh's exit code: the
+        # layer committed a half-built payload (cosign gate failed, so
+        # /boot/efi and iso.yaml were never written) that died later in
+        # Titanoboa. build.sh must fail the RUN when IT fails.
+        containerfile = (ROOT / "installer" / "Containerfile").read_text(encoding="utf-8")
+        self.assertIn("bash /src/installer/build.sh &&", containerfile)
+        self.assertNotIn("bash /src/installer/build.sh;", containerfile)
+
+    def test_cosign_gate_retries_transients_but_stays_hard(self):
+        # Shared-runner network flakes (TUF root refresh, registry reads)
+        # must not nuke a 25-minute payload build on one blip — but the
+        # signature gate must never soften to a warning either.
+        build = (ROOT / "installer" / "build.sh").read_text(encoding="utf-8")
+        self.assertIn("for cosign_attempt in 1 2 3", build)
+        self.assertIn("after 3 attempts", build)
+        self.assertIn('signature_state="verified"', build)
+        # No silent pass: every failure path in the cosign block exits 1.
+        gate = build.split("Registry signature gate", 1)[1].split("KYTH_SOURCE_IMAGE=oci", 1)[0]
+        self.assertNotIn("exit 0", gate)
+        self.assertIn("exit 1", gate)
+
+
 if __name__ == "__main__":
     unittest.main()
