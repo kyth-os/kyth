@@ -148,7 +148,11 @@ export function Dashboard() {
           <HomeCard icon="⌁" label="Boot health" value={healthLabel} detail={healthDetail} good={healthGood} pendingLabel="PENDING" pendingNote={bootChecks ? "Boot checks were reported." : "Boot checks are still pending."} />
           <HomeCard icon="↶" label="Recovery" value={recoveryLabel} detail={recoveryDetail} good={recoveryGood} pendingLabel="PENDING" meterValue={recoverySafeguards} />
           <HomeCard icon="◈" label="Update channel" value={!loaded ? "Checking…" : updateChannel ?? "Unavailable"} detail="The release stream this device follows." good={!loaded || updateChannel === null ? null : true} pendingLabel="PENDING" />
-          <HomeCard icon="▣" label="Storage & graphics" value={!loaded ? "Checking…" : storageFree ?? gpuName ?? "Unavailable"} detail={`${gpuName ?? (loaded ? "Hardware data unavailable" : "Graphics not identified")} · hardware summary`} good={!loaded || (storageFree === null && gpuName === null) ? null : true} />
+          {/* good must require BOTH readings, not just one: with the old
+              `||` check, a failed GPU read next to a successful storage
+              read still showed a green "good" dot alongside the detail
+              text's own "Hardware data unavailable". */}
+          <HomeCard icon="▣" label="Storage & graphics" value={!loaded ? "Checking…" : storageFree ?? gpuName ?? "Unavailable"} detail={`${gpuName ?? (loaded ? "Hardware data unavailable" : "Graphics not identified")} · hardware summary`} good={!loaded ? null : (storageFree === null || gpuName === null) ? false : true} />
         </div>
         <div className="home-actions-card"><div><span className="home-eyebrow">System actions</span><h2>Keep this device healthy</h2><p>Open the system tools you need without leaving the Home overview.</p></div><div className="home-actions"><ActionButton label="Run health check" onClick={() => navigate("/this-pc?section=Guardian")} /><ActionButton label="Check updates" onClick={() => navigate("/updates")} /><ActionButton label="Open Repair" onClick={() => navigate("/this-pc?section=Repair")} /><ActionButton label="Open Hardware" onClick={() => navigate("/this-pc?section=Hardware")} /></div></div>
       </section>

@@ -195,7 +195,12 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
       <div className="play-card-grid">
         <PlayCard icon="▶" label="Game libraries" value={launchersValue} detail={launchersDetail} status={installedLaunchers === null ? null : installedLaunchers.length > 0} />
         <PlayCard icon="◉" label="Controllers" value={controllerValue} detail={controllerDetail} status={controllerCount === null ? null : controllerCount > 0} />
-        <PlayCard icon="✦" label="Performance" value={performanceValue} detail={performanceDetail} status={readings.audit || readings.performance ? true : null} />
+        {/* Same signal the "Enable the gaming profile" setup step already
+            uses (gamingProfile) — the status dot used to go green as soon
+            as the audit/performance read merely succeeded, regardless of
+            whether the gaming profile was actually on, contradicting the
+            setup checklist right below it on the same page. */}
+        <PlayCard icon="✦" label="Performance" value={performanceValue} detail={performanceDetail} status={readings.audit || readings.performance ? gamingProfile : null} />
         <PlayCard icon="✓" label="Compatibility" value={compatibilityValue} detail={compatibilityDetail} status={supportedGames === null ? null : blockedGames === 0} />
         <PlayCard icon="◷" label="Recent play" value={sessionValue} detail={sessionDetail} status={readings.sessions === null ? null : true} />
       </div>

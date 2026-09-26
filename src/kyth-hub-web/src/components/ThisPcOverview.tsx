@@ -120,11 +120,17 @@ export function ThisPcOverview() {
 
     <div className="this-pc-info-grid">
       <InfoCard icon="✓" label="System health" value={overallHealthy === true ? "Healthy" : overallHealthy === false ? "Review needed" : "Checking…"} detail={healthDetail} status={overallHealthy} />
-      <InfoCard icon="▦" label="Graphics" value={gpu} detail={gpuDetail} status={readings.hardware ? true : null} />
+      {/* Status reflects whether a GPU was actually identified, not just
+          whether the hardware read completed — it used to show green "OK"
+          even when the card's own value said "Graphics not identified". */}
+      <InfoCard icon="▦" label="Graphics" value={gpu} detail={gpuDetail} status={readings.hardware ? Boolean(readings.hardware.gpuName || readings.hardware.hasNvidia) : null} />
       <InfoCard icon="◒" label="Storage available" value={readings.storageFree || "Not read"} detail={storageDetail} status={readings.btrfs ? readings.btrfs.status.toLowerCase() === "ok" : null} />
       <InfoCard icon="↶" label="Recovery" value={recoveryValue} detail={recoveryDetail} status={recovery ? !recovery.quarantined_digest : null} />
       <InfoCard icon="⌁" label="Desktop session" value={desktopValue} detail={readings.desktop ? `${desktopTotal === desktopPassed ? "Desktop checks passed" : "Some checks need attention"}` : "Wayland and desktop readings are not available yet."} status={desktopHealthy} />
-      <InfoCard icon="⌘" label="Kernel & drivers" value={readings.kernel || "Not identified"} detail={driverDetail} status={readings.kernel || readings.modules ? true : null} />
+      {/* Same fix as Graphics above: an unidentified kernel with no reading
+          for modules must not show the same green dot as a fully-identified
+          system — it used to as long as either field was merely present. */}
+      <InfoCard icon="⌘" label="Kernel & drivers" value={readings.kernel || "Not identified"} detail={driverDetail} status={readings.kernel === null && readings.modules === null ? null : Boolean(readings.kernel)} />
     </div>
 
     <div className="this-pc-actions-card"><div><span className="this-pc-eyebrow">Quick actions</span><h2>Keep your system in shape</h2><p>Run focused checks here; detailed controls are available below.</p></div><div className="this-pc-actions"><ActionButton label={busy === "pc-refresh" ? "Refreshing…" : "Refresh status"} disabled={busy !== null} onClick={() => void run("pc-refresh", "Refreshing This PC status…", refresh)} /><ActionButton label={busy === "pc-health" ? "Checking…" : "Run health check"} disabled={busy !== null} onClick={() => void run("pc-health", "Running Guardian health check…", guardianCheck)} /></div></div>
