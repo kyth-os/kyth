@@ -46,8 +46,17 @@ fn guardian_checks() -> &'static JobStore {
     GUARDIAN_CHECKS.get_or_init(JobStore::default)
 }
 
-static FOCUS_SESSIONS: OnceLock<Mutex<HashMap<String, Child>>> = OnceLock::new();
-fn focus_sessions() -> &'static Mutex<HashMap<String, Child>> {
+/// A running focus session's inhibitor process plus when it is due to end,
+/// so `focus_status` can answer "is one running, and how long is left"
+/// without the frontend having to remember it across a reload or a
+/// navigate-away — the same reattachment guarantee every tracked job gets.
+struct FocusSession {
+    child: Child,
+    ends_at: std::time::Instant,
+}
+
+static FOCUS_SESSIONS: OnceLock<Mutex<HashMap<String, FocusSession>>> = OnceLock::new();
+fn focus_sessions() -> &'static Mutex<HashMap<String, FocusSession>> {
     FOCUS_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
@@ -976,7 +985,7 @@ fn focus_start(minutes: u32) -> Result<String, String> {
     // Reap sessions whose `sleep` already exited without a focus_stop call:
     // otherwise every unstopped session leaks a map entry (and an unwaited
     // child) for the life of the Hub process.
-    sessions.retain(|_, existing| match existing.try_wait() {
+    sessions.retain(|_, existing| match existing.child.try_wait() {
         Ok(None) => true,
         Ok(Some(_)) => false,
         Err(error) => {
@@ -987,7 +996,7 @@ fn focus_start(minutes: u32) -> Result<String, String> {
     // Kill inhibitors orphaned by a previous Hub process (crash/restart
     // reparents the `sleep` child, which then holds idle:sleep with no UI
     // to cancel it). Live sessions in this process are spared.
-    let live_pids: Vec<u32> = sessions.values().map(|child| child.id()).collect();
+    let live_pids: Vec<u32> = sessions.values().map(|session| session.child.id()).collect();
     drop(sessions);
     let orphans = kyth_shared::system::process::reap_stale_focus_inhibits(&live_pids);
     if orphans > 0 {
@@ -1015,8 +1024,36 @@ fn focus_start(minutes: u32) -> Result<String, String> {
     let mut sessions = focus_sessions()
         .lock()
         .map_err(|_| "focus session store is unavailable".to_string())?;
-    sessions.insert(id.clone(), child);
+    let ends_at = std::time::Instant::now() + std::time::Duration::from_secs(minutes as u64 * 60);
+    sessions.insert(id.clone(), FocusSession { child, ends_at });
     Ok(id)
+}
+
+#[derive(serde::Serialize)]
+struct FocusStatus {
+    id: String,
+    remaining_secs: u64,
+}
+
+/// Lets the Hub reattach to a running focus session after a reload or a
+/// navigate-away-and-back, the same way every other tracked job does —
+/// without this, the UI forgot the session existed and offered to start a
+/// second one on top of it with no way to end the first from the Hub.
+#[tauri::command]
+fn focus_status() -> Result<Option<FocusStatus>, String> {
+    let mut sessions = focus_sessions()
+        .lock()
+        .map_err(|_| "focus session store is unavailable".to_string())?;
+    sessions.retain(|_, existing| match existing.child.try_wait() {
+        Ok(None) => true,
+        Ok(Some(_)) => false,
+        Err(_) => true,
+    });
+    let now = std::time::Instant::now();
+    Ok(sessions.iter().next().map(|(id, session)| FocusStatus {
+        id: id.clone(),
+        remaining_secs: session.ends_at.saturating_duration_since(now).as_secs(),
+    }))
 }
 
 #[tauri::command]
@@ -1024,24 +1061,24 @@ fn focus_stop(id: String) -> Result<String, String> {
     let mut sessions = focus_sessions()
         .lock()
         .map_err(|_| "focus session store is unavailable".to_string())?;
-    let Some(mut child) = sessions.remove(&id) else {
+    let Some(mut session) = sessions.remove(&id) else {
         return Ok("Focus session already ended.".to_string());
     };
     drop(sessions);
     // Never block the command on an unwaited child: TERM the process,
     // SIGKILL its group for good measure (harmless ESRCH when the child
     // is not a group leader), then give it 2s to exit before reaping.
-    kyth_shared::system::process::kill_process_group(&mut child);
+    kyth_shared::system::process::kill_process_group(&mut session.child);
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
     loop {
-        match child.try_wait() {
+        match session.child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) if std::time::Instant::now() < deadline => {
                 std::thread::sleep(std::time::Duration::from_millis(25));
             }
             _ => {
-                kyth_shared::system::process::kill_process_group(&mut child);
-                let _ = child.wait();
+                kyth_shared::system::process::kill_process_group(&mut session.child);
+                let _ = session.child.wait();
                 break;
             }
         }
@@ -2273,6 +2310,7 @@ fn main() {
             convert_pst,
             focus_start,
             focus_stop,
+            focus_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running the Kyth Hub shell");

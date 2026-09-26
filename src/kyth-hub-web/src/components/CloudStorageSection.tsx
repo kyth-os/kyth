@@ -75,7 +75,23 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
                 <div key={remote.name} className="card-copy" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 12 }}>
                   <span style={{ flex: 1, minWidth: 220 }}><strong>{remote.name}</strong> ({REMOTE_LABEL[remote.service] ?? remote.service}) → {remote.folder}
                     {remote.last_sync !== null && (<> · {remote.last_ok === false ? "last sync failed" : "last sync completed"}</>)}</span>
-                  <ActionButton label={busy === `sync-${remote.name}` ? "Syncing…" : "Sync now"} disabled={busy !== null} onClick={() => run(`sync-${remote.name}`, `Syncing ${remote.name}…`, () => runCloudSync(remote.name))} />
+                  <ActionButton
+                    label={busy === `sync-${remote.name}` ? "Syncing…" : "Sync now"}
+                    disabled={busy !== null}
+                    onClick={() =>
+                      run(`sync-${remote.name}`, `Syncing ${remote.name}…`, async () => {
+                        try {
+                          return await runCloudSync(remote.name);
+                        } finally {
+                          // The per-remote "last sync failed/completed" label
+                          // above otherwise stayed stuck on whatever it said
+                          // before this run, success or failure.
+                          const fresh = await fetchCloudSyncRemotes().catch(() => null);
+                          if (fresh) setSyncRemotes(fresh);
+                        }
+                      })
+                    }
+                  />
                   {(busy?.startsWith("sync-") ?? false) && (
                     <ActionButton label="Cancel" onClick={() => run("cancel-sync", "Cancelling…", cancelJob)} />
                   )}

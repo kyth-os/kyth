@@ -205,7 +205,18 @@ export function AppStoreSection({ section }: { section: HubSection }) {
   // 15 minutes (1800 * 500ms) in the UI. waitInstallJob keeps the job
   // tracked after this UI wait expires, so Cancel still reaches it.
   async function install(id: string): Promise<string> { return await waitInstallJob(await installFlatpak(id), 1800); }
-  async function installPack(pack: StarterPack): Promise<string> { for (const app of pack.apps) await install(app.id); await refreshInstalled(); return `${pack.name} apps installed.`; }
+  async function installPack(pack: StarterPack): Promise<string> {
+    // If one app in the pack fails partway through, the ones already
+    // installed before it must still show as installed — refresh always,
+    // not only on the all-succeeded path — and the failure itself must
+    // still surface instead of being swallowed.
+    try {
+      for (const app of pack.apps) await install(app.id);
+    } finally {
+      await refreshInstalled().catch(() => undefined);
+    }
+    return `${pack.name} apps installed.`;
+  }
   async function installAndRefresh(id: string): Promise<string> { const result = await install(id); await refreshInstalled(); return result; }
 
   const installedIds = useMemo(() => new Set((installed ?? []).map((app) => app.id)), [installed]);

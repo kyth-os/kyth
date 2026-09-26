@@ -78,6 +78,10 @@ export function VpnSection({ section }: { section: HubSection }) {
           // working — including after a reload.
           if (current.state !== "connected" && current.state !== "connected_firewall_open") {
             untrackVpnJob(job);
+            // Also clear the local job slot: leaving it set kept the
+            // Disconnect/Cancel buttons and the busy spinner rendered for a
+            // tunnel that no longer exists, until the user reloaded the Hub.
+            if (!cancelled) setJob(null);
           }
           return;
         }

@@ -15,6 +15,7 @@ import {
   convertPst,
   startFocusSession,
   stopFocusSession,
+  fetchFocusStatus,
   type NetworkSummary,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
@@ -45,13 +46,20 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
 
   useEffect(() => {
     let c = false;
-    Promise.all([fetchNetworkSummary(), fetchFontsReady(), fetchInstalledFlatpaks()]).then(
-      ([s, f, apps]) => {
+    Promise.all([fetchNetworkSummary(), fetchFontsReady(), fetchInstalledFlatpaks(), fetchFocusStatus()]).then(
+      ([s, f, apps, focus]) => {
         if (!c) {
           setSummary(s);
           setFonts(f);
           setLoaded(true);
           setInstalled((apps ?? []).map((app) => app.id));
+          // Reattach to a focus session already running in the background —
+          // otherwise returning to this section always showed "Start focus
+          // session" again, even mid-session, with no way to end it here.
+          if (focus) {
+            setFocusId(focus.id);
+            setFocusRemaining(focus.remaining_secs);
+          }
         }
       },
     );

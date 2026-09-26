@@ -23,6 +23,7 @@ import {
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { friendlyActionError } from "./updateMessages";
 
 function ago(timestamp: string | null | undefined): string | null {
   if (!timestamp) return null;
@@ -188,7 +189,19 @@ export function RepairSection({ section }: { section: HubSection }) {
           <ActionButton
             label={busy === "rollback" ? "Rolling back…" : "Roll back to previous"}
             disabled={busy !== null || !hasRollback}
-            onClick={() => run("rollback", "Rolling back…", invokeBootcRollback)}
+            onClick={() =>
+              run("rollback", "Rolling back…", async () => {
+                try {
+                  return await invokeBootcRollback();
+                } catch (error) {
+                  // Same translation UpdatesOverview's rollback button gets —
+                  // without it, this button could show the raw backend
+                  // string verbatim (e.g. claiming an automatic retry that
+                  // does not exist) instead of clear guidance.
+                  throw new Error(friendlyActionError("rollback", error));
+                }
+              })
+            }
           />
           {busy === "rollback" && (
             <ActionButton label="Cancel" onClick={() => run("cancel-rollback", "Cancelling…", cancelUpdateJob)} />

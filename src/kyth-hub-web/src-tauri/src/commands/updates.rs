@@ -43,7 +43,14 @@ fn take_mutating_slot() -> Result<MutatingSlot, String> {
             std::sync::atomic::Ordering::SeqCst,
         )
         .map(|_| MutatingSlot)
-        .map_err(|_| "Another bootc upgrade is in progress; will retry on the next run".to_string())
+        // Nothing retries this automatically — the old wording implied a
+        // background retry that doesn't exist. Every caller of this slot
+        // (stage/apply/rollback/switch) surfaces this string, and not all of
+        // them pass it through a translation layer, so the message itself
+        // has to be accurate rather than relying on the frontend to fix it.
+        .map_err(|_| {
+            "Another system update operation is already in progress. Wait for it to finish, or check its status, before trying again.".to_string()
+        })
 }
 
 /// Latest live staging progress, streamed from `kyth-safe-upgrade` marker

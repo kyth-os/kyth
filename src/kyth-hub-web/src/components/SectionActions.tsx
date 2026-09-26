@@ -33,18 +33,27 @@ export function useSectionAction(trackedDomain?: JobDomain) {
   // a job that settled elsewhere must clear the notice, and one started
   // elsewhere after mount must raise it (otherwise the next launch
   // errors "already running" with no explanation).
-  const [resumedDismissed, setResumedDismissed] = useState(false);
+  //
+  // Dismissal is keyed to the specific job id that was in flight when the
+  // user last acted here, not a one-shot flag: a flag stayed permanently
+  // dismissed for the rest of this component's life. Combined with gating
+  // on `status === null`, once this hook's own `status` held any completed
+  // result, it never went back to null, so a later job starting elsewhere
+  // in the same domain could never raise the notice again. Comparing job
+  // ids means a genuinely new job — one that isn't the one already
+  // accounted for — still gets surfaced.
+  const [dismissedJob, setDismissedJob] = useState<string | null>(null);
+  const trackedJob = trackedDomain !== undefined ? getInFlightJob(trackedDomain) : undefined;
   const resumedNote =
-    !resumedDismissed &&
     busy === null &&
-    status === null &&
     trackedDomain !== undefined &&
-    getInFlightJob(trackedDomain) !== undefined
+    getInFlightJob(trackedDomain) !== undefined &&
+    trackedJob !== dismissedJob
       ? "A previous action is still running; its progress resumes here."
       : null;
 
   async function run(id: string, pendingLabel: string, action: () => Promise<string>) {
-    setResumedDismissed(true);
+    setDismissedJob(trackedJob ?? null);
     setBusy(id);
     setStatus(pendingLabel);
     try {

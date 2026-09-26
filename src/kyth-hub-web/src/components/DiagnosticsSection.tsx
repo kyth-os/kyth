@@ -84,21 +84,34 @@ export function DiagnosticsSection({ section }: { section: HubSection }) {
               {audit.systemd_analyze && (
                 <p className="card-copy" style={{ fontSize: 12, marginBottom: 12 }}>{String(audit.systemd_analyze)}</p>
               )}
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {Object.entries(audit)
-                  .filter(([k]) => k !== "ts" && k !== "systemd_analyze" && k !== "telemetry")
-                  .slice(0, 12)
-                  .map(([k, v]) => (
-                    <span key={k} className={`pill ${isOk(v) ? "pill-ok" : "pill-dim"}`} title={`${k}: ${String(v)}`}>
-                      {k}: {String(v).slice(0, 24)}
-                    </span>
-                  ))}
-              </div>
-              {Object.keys(audit).length > 13 && (
-                <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>
-                  {Object.keys(audit).length - 1} checks total — full report below.
-                </p>
-              )}
+              {(() => {
+                // Same filtered set feeds both the pills and the "more"
+                // note below — the note used to count raw Object.keys(audit)
+                // (only ever subtracting 1, for "ts") even though three keys
+                // (ts, systemd_analyze, telemetry) are excluded from being a
+                // displayable check, so it could claim a wrong total and pop
+                // up even when every check was already shown.
+                const displayableChecks = Object.entries(audit).filter(
+                  ([k]) => k !== "ts" && k !== "systemd_analyze" && k !== "telemetry",
+                );
+                const shown = displayableChecks.slice(0, 12);
+                return (
+                  <>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                      {shown.map(([k, v]) => (
+                        <span key={k} className={`pill ${isOk(v) ? "pill-ok" : "pill-dim"}`} title={`${k}: ${String(v)}`}>
+                          {k}: {String(v).slice(0, 24)}
+                        </span>
+                      ))}
+                    </div>
+                    {displayableChecks.length > shown.length && (
+                      <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>
+                        {displayableChecks.length} checks total — full report below.
+                      </p>
+                    )}
+                  </>
+                );
+              })()}
             </>
           )}
         </div>

@@ -2021,6 +2021,14 @@ export async function stopFocusSession(id: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Focus sessions are available from the installed Kyth Hub.");
   return await invoke<string>("focus_stop", { id });
 }
+export type FocusStatus = { id: string; remaining_secs: number };
+// Lets Work Setup reattach to a session already running in the background —
+// otherwise leaving and returning to this section (or reloading the Hub)
+// forgot the session existed and offered to start a second one on top of it.
+export async function fetchFocusStatus(): Promise<FocusStatus | null> {
+  if (!inTauriShell()) return null;
+  try { return await invoke<FocusStatus | null>("focus_status"); } catch { return null; }
+}
 
 // Downloaded executable / RPM MIME-handler workflow.  The native launcher
 // supplies the path; these wrappers are deliberately narrow so the webview

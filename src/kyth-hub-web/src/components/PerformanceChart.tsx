@@ -13,7 +13,10 @@ export function PerformanceChart({ sessions }: { sessions: TelemetrySession[] })
     for (const s of sessions) {
       if (s.avg_fps == null || s.started_at == null) continue;
       const d = new Date(s.started_at * 1000);
-      const key = d.toISOString().slice(0, 10);
+      // Bucket by the same local calendar day the weekday label names —
+      // toISOString() reads the UTC date, which disagrees with the local
+      // weekday near midnight and can split or merge a day's sessions.
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const day = d.toLocaleDateString(undefined, { weekday: "short" });
       const cur = byDay.get(key) || { key, sum: 0, count: 0, day };
       cur.sum += s.avg_fps;

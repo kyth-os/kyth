@@ -113,7 +113,12 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
           />
           <RecipeButton recipe="fix-dualboot-clock" label="Fix dual-boot clock" busy={busy} run={run} />
           <RecipeButton recipe="setup-boot-windows-steam" label="Prepare Windows + Steam" busy={busy} run={run} />
-          <ActionButton label="Reclaim Windows space" disabled={busy !== null} onClick={() => { window.location.hash = "/this-pc"; }} />
+          {/* "This PC" with no ?section= renders no section content at all
+              (HubPage there is mounted without defaultToFirstSection), so a
+              bare "/this-pc" landed on a blank overview with nothing about
+              reclaiming space. Repair is the closest section that actually
+              covers disk space recovery. */}
+          <ActionButton label="Reclaim Windows space" disabled={busy !== null} onClick={() => { window.location.hash = "/this-pc?section=Repair"; }} />
           <RecipeButton recipe="install-ludusavi" label="Install save migration" busy={busy} run={run} />
           <RecipeButton recipe="install-ms-fonts" label="Install Microsoft fonts" busy={busy} run={run} />
         </div>
