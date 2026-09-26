@@ -83,10 +83,20 @@ fn normalized_fs(value: &str) -> Result<&'static str, String> {
     }
 }
 
-fn normalized_mountpoint(value: &str, fs: &str) -> Result<String, String> {
-    let mountpoint = if fs == "linux-swap" && value.trim() == "swap" {
+pub(crate) fn normalize_mountpoint(
+    value: &str,
+    fs: &str,
+    allow_reserved: bool,
+) -> Result<String, String> {
+    let mountpoint = if fs == "linux-swap" {
+        if value.trim() != "swap" {
+            return Err("swap filesystems must use the swap mount point".into());
+        }
         "swap".to_string()
     } else {
+        if value.trim() == "swap" {
+            return Err("the swap mount point requires a swap filesystem".into());
+        }
         safe_path(value, "manual mount point")?
     };
     let mountpoint = if mountpoint.len() > 1 {
@@ -94,10 +104,14 @@ fn normalized_mountpoint(value: &str, fs: &str) -> Result<String, String> {
     } else {
         mountpoint
     };
-    if fs != "linux-swap" && (mountpoint == "/" || mountpoint == "/boot/efi") {
+    if !allow_reserved && fs != "linux-swap" && (mountpoint == "/" || mountpoint == "/boot/efi") {
         return Err("manual mount point is reserved".into());
     }
     Ok(mountpoint)
+}
+
+fn normalized_mountpoint(value: &str, fs: &str) -> Result<String, String> {
+    normalize_mountpoint(value, fs, false)
 }
 
 fn claim_assignment(

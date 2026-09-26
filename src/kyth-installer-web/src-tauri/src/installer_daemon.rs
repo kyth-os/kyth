@@ -26,6 +26,8 @@ use super::installer_runtime::RuntimeCoordinator;
 use super::installer_storage;
 
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+const MAX_REQUEST_HEADER_BYTES: usize = 64 * 1024;
+const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_ACTIVE_CLIENTS: usize = 32;
 const MAX_LOG_RESPONSE_BYTES: u64 = 1024 * 1024;
 fn transaction_path() -> PathBuf {
@@ -183,10 +185,15 @@ impl NativeJournalRegistry {
     }
 
     fn pending(&self, value: &serde_json::Value) -> Result<serde_json::Value, String> {
-        let requested_disk = value
-            .get("disk")
-            .and_then(serde_json::Value::as_str)
-            .and_then(super::installer_plan::normalize_device_path);
+        let requested_disk = match value.get("disk") {
+            None => None,
+            Some(value) => Some(
+                value
+                    .as_str()
+                    .and_then(super::installer_plan::normalize_device_path)
+                    .ok_or_else(|| "requested disk path is invalid".to_string())?,
+            ),
+        };
         let active = self
             .active
             .lock()
@@ -772,6 +779,15 @@ fn header_value<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
+fn header_count(headers: &str, name: &str) -> usize {
+    headers
+        .lines()
+        .skip(1)
+        .filter_map(|line| line.split_once(':'))
+        .filter(|(key, _)| key.trim().eq_ignore_ascii_case(name))
+        .count()
+}
+
 fn request_parts(request: &[u8]) -> Result<(&str, &str, &str), String> {
     let header_end = header_end(request)?;
     let headers = std::str::from_utf8(&request[..header_end])
@@ -803,12 +819,18 @@ fn header_end(request: &[u8]) -> Result<usize, String> {
 }
 
 fn read_request(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
-    stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(15)))
-        .map_err(|error| format!("could not set installer request timeout: {error}"))?;
+    read_request_with_timeout(stream, REQUEST_READ_TIMEOUT)
+}
+
+fn read_request_with_timeout(
+    stream: &mut UnixStream,
+    timeout: Duration,
+) -> Result<Vec<u8>, String> {
+    let deadline = std::time::Instant::now() + timeout;
     let mut request = Vec::with_capacity(4096);
     let mut buffer = [0_u8; 4096];
     let header_end = loop {
+        set_request_read_deadline(stream, deadline)?;
         let count = stream
             .read(&mut buffer)
             .map_err(|error| format!("could not read installer request: {error}"))?;
@@ -816,15 +838,24 @@ fn read_request(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
             return Err("installer client closed before sending a request".to_string());
         }
         request.extend_from_slice(&buffer[..count]);
-        if request.len() > MAX_REQUEST_BYTES {
-            return Err("installer request is too large".to_string());
-        }
         if let Some(position) = request.windows(4).position(|window| window == b"\r\n\r\n") {
+            if position + 4 > MAX_REQUEST_HEADER_BYTES {
+                return Err("installer request headers are too large".to_string());
+            }
             break position + 4;
+        }
+        if request.len() > MAX_REQUEST_HEADER_BYTES {
+            return Err("installer request headers are too large".to_string());
         }
     };
     let header_text = std::str::from_utf8(&request[..header_end - 4])
         .map_err(|_| "installer request headers are not UTF-8".to_string())?;
+    if header_count(header_text, "Content-Length") > 1 {
+        return Err("installer request has ambiguous content length".to_string());
+    }
+    if header_count(header_text, "Transfer-Encoding") > 0 {
+        return Err("transfer-encoded installer requests are not supported".to_string());
+    }
     let content_length = header_value(header_text, "Content-Length")
         .unwrap_or("0")
         .parse::<usize>()
@@ -833,6 +864,7 @@ fn read_request(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
         return Err("installer request body is too large".to_string());
     }
     while request.len() < header_end + content_length {
+        set_request_read_deadline(stream, deadline)?;
         let count = stream
             .read(&mut buffer)
             .map_err(|error| format!("could not read installer request body: {error}"))?;
@@ -843,6 +875,19 @@ fn read_request(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
     }
     request.truncate(header_end + content_length);
     Ok(request)
+}
+
+fn set_request_read_deadline(
+    stream: &UnixStream,
+    deadline: std::time::Instant,
+) -> Result<(), String> {
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    if remaining.is_zero() {
+        return Err("installer request timed out".to_string());
+    }
+    stream
+        .set_read_timeout(Some(remaining))
+        .map_err(|error| format!("could not set installer request timeout: {error}"))
 }
 
 fn reserve_client_slot(active: &AtomicUsize) -> bool {
@@ -1345,10 +1390,37 @@ fn query_value(target: &str, name: &str) -> Option<String> {
     String::from_utf8(decoded).ok()
 }
 
-fn native_pending_request(target: &str) -> serde_json::Value {
-    query_value(target, "disk")
-        .map(|disk| serde_json::json!({"disk": disk}))
-        .unwrap_or_else(|| serde_json::json!({}))
+fn native_pending_request(target: &str) -> Result<serde_json::Value, String> {
+    let params = target.split_once('?').map(|(_, query)| query).unwrap_or("");
+    let disk_params = params
+        .split('&')
+        .filter(|part| part.starts_with("disk="))
+        .count();
+    if disk_params > 1 {
+        return Err("disk query parameter must appear at most once".to_string());
+    }
+    if disk_params == 0 {
+        return Ok(serde_json::json!({}));
+    }
+    let disk = query_value(target, "disk")
+        .and_then(|disk| super::installer_plan::normalize_device_path(&disk))
+        .ok_or_else(|| "disk query parameter is invalid".to_string())?;
+    Ok(serde_json::json!({"disk": disk}))
+}
+
+fn merge_report_state(
+    transaction: Option<serde_json::Value>,
+    live: serde_json::Value,
+) -> serde_json::Value {
+    let mut merged = transaction
+        .filter(serde_json::Value::is_object)
+        .unwrap_or_else(|| serde_json::json!({}));
+    if let (Some(existing), Some(live)) = (merged.as_object_mut(), live.as_object()) {
+        for (key, value) in live {
+            existing.insert(key.clone(), value.clone());
+        }
+    }
+    merged
 }
 
 fn rebuild_request(request: &[u8], body: &[u8]) -> Result<Vec<u8>, String> {
@@ -1491,7 +1563,7 @@ fn validate_start_acknowledgements(value: &serde_json::Value) -> Result<(), Stri
 }
 
 fn native_report(snapshot: &JobSnapshot) -> Result<serde_json::Value, String> {
-    let mut value = serde_json::json!({
+    let live = serde_json::json!({
         "job_id": snapshot.job_id,
         "lifecycle": snapshot.runtime.lifecycle,
         "phase": snapshot.runtime.phase,
@@ -1506,14 +1578,10 @@ fn native_report(snapshot: &JobSnapshot) -> Result<serde_json::Value, String> {
         },
         "message": "Native installer job state",
     });
-    if let Ok(contents) = fs::read_to_string(transaction_path()) {
-        if let Ok(transaction) = serde_json::from_str::<serde_json::Value>(&contents) {
-            if transaction.is_object() {
-                value = transaction;
-            }
-        }
-    }
-    Ok(value)
+    let transaction = fs::read_to_string(transaction_path())
+        .ok()
+        .and_then(|contents| serde_json::from_str::<serde_json::Value>(&contents).ok());
+    Ok(merge_report_state(transaction, live))
 }
 
 fn native_log(mut client: UnixStream) -> Result<(), String> {
@@ -1610,6 +1678,9 @@ fn handle(
     native_journal: Arc<NativeJournalRegistry>,
     storage_gate: Arc<Mutex<()>>,
 ) -> Result<(), String> {
+    client
+        .set_write_timeout(Some(Duration::from_secs(30)))
+        .map_err(|error| format!("could not set installer response timeout: {error}"))?;
     if let Some(expected_uid) = expected_uid {
         if peer_uid(&client)? != expected_uid {
             forbidden(&mut client);
@@ -1619,6 +1690,7 @@ fn handle(
     let request = read_request(&mut client)?;
     let (method, target, headers) = request_parts(&request)?;
     if !route_allowed(method, target)
+        || header_count(headers, "X-Kyth-Session-Token") != 1
         || header_value(headers, "X-Kyth-Session-Token") != Some(token)
     {
         forbidden(&mut client);
@@ -1667,7 +1739,18 @@ fn handle(
     };
     let route = target.split('?').next().unwrap_or(target);
     if method == "GET" && route == "/api/disk/pending" {
-        match native_journal.pending(&native_pending_request(target)) {
+        let request = match native_pending_request(target) {
+            Ok(request) => request,
+            Err(error) => {
+                json_response(
+                    &mut client,
+                    "400 Bad Request",
+                    &serde_json::json!({"ok": false, "message": error}),
+                );
+                return Ok(());
+            }
+        };
+        match native_journal.pending(&request) {
             Ok(value) => json_response(&mut client, "200 OK", &value),
             Err(error) => json_response(
                 &mut client,
@@ -2009,13 +2092,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        json_status, native_executor_from_start, native_request_from_start,
-        normalize_start_request, options, query_value, read_session_token, route_allowed,
+        header_count, json_status, merge_report_state, native_executor_from_start,
+        native_pending_request, native_request_from_start, normalize_start_request, options,
+        query_value, read_request_with_timeout, read_session_token, route_allowed,
         NativeJournalRegistry,
     };
     use serde_json::Value;
     use std::fs;
+    use std::io::Write;
     use std::os::unix::fs::PermissionsExt;
+    use std::os::unix::net::UnixStream;
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -2096,6 +2182,66 @@ mod tests {
     }
 
     #[test]
+    fn request_parser_rejects_ambiguous_lengths_and_transfer_encoding() {
+        for request in [
+            b"POST /api/start HTTP/1.1\r\nContent-Length: 0\r\nContent-Length: 1\r\n\r\n"
+                .as_slice(),
+            b"POST /api/start HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n",
+        ] {
+            let (mut server, mut client) = UnixStream::pair().unwrap();
+            client.write_all(request).unwrap();
+            let error = read_request_with_timeout(&mut server, std::time::Duration::from_secs(1))
+                .expect_err("ambiguous request framing must be rejected");
+            assert!(
+                error.contains("ambiguous content length") || error.contains("transfer-encoded"),
+                "{error}"
+            );
+        }
+    }
+
+    #[test]
+    fn request_header_limit_is_separate_from_body_limit() {
+        let (mut server, mut client) = UnixStream::pair().unwrap();
+        let writer = std::thread::spawn(move || {
+            client
+                .write_all(b"GET /api/log HTTP/1.1\r\nX-Fill: ")
+                .unwrap();
+            let _ = client.write_all(&vec![b'a'; super::MAX_REQUEST_HEADER_BYTES]);
+        });
+        let error = read_request_with_timeout(&mut server, std::time::Duration::from_secs(1))
+            .expect_err("oversized request headers must be rejected");
+        drop(server);
+        writer.join().unwrap();
+        assert!(error.contains("headers are too large"), "{error}");
+    }
+
+    #[test]
+    fn slow_trickled_request_cannot_extend_the_absolute_read_deadline() {
+        let (mut server, mut client) = UnixStream::pair().unwrap();
+        let writer = std::thread::spawn(move || {
+            for byte in b"GET /api/log HTTP/1.1\r\nHost: x\r\n\r\n" {
+                if client.write_all(&[*byte]).is_err() {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(20));
+            }
+        });
+        let started = std::time::Instant::now();
+        let error = read_request_with_timeout(&mut server, std::time::Duration::from_millis(60))
+            .expect_err("trickled request must hit the fixed deadline");
+        drop(server);
+        writer.join().unwrap();
+        assert!(error.contains("timed out"), "{error}");
+        assert!(started.elapsed() < std::time::Duration::from_millis(300));
+    }
+
+    #[test]
+    fn duplicate_session_tokens_are_detectable_and_rejected_by_the_route_gate() {
+        let headers = "POST /api/start HTTP/1.1\r\nX-Kyth-Session-Token: good\r\nX-Kyth-Session-Token: bad\r\n";
+        assert_eq!(header_count(headers, "X-Kyth-Session-Token"), 2);
+    }
+
+    #[test]
     fn preserves_service_unavailable_status_for_storage_failures() {
         assert_eq!(json_status(503), "503 Service Unavailable");
     }
@@ -2108,6 +2254,30 @@ mod tests {
         );
         assert_eq!(query_value("/api/partitions?disk=%ZZ", "disk"), None);
         assert_eq!(query_value("/api/partitions?other=sda", "disk"), None);
+    }
+
+    #[test]
+    fn pending_query_rejects_bad_or_ambiguous_disk_filters() {
+        assert_eq!(
+            native_pending_request("/api/disk/pending?disk=sda").unwrap(),
+            serde_json::json!({"disk": "/dev/sda"})
+        );
+        assert!(native_pending_request("/api/disk/pending?disk=%ZZ").is_err());
+        assert!(native_pending_request("/api/disk/pending?disk=sda&disk=sdb").is_err());
+    }
+
+    #[test]
+    fn live_report_state_overrides_a_stale_transaction_snapshot() {
+        let merged = merge_report_state(
+            Some(
+                serde_json::json!({"status": "complete", "lifecycle": "done", "username": "alice"}),
+            ),
+            serde_json::json!({"status": "installing", "lifecycle": "installing", "job_id": 9}),
+        );
+        assert_eq!(merged["status"], "installing");
+        assert_eq!(merged["lifecycle"], "installing");
+        assert_eq!(merged["username"], "alice");
+        assert_eq!(merged["job_id"], 9);
     }
 
     #[test]

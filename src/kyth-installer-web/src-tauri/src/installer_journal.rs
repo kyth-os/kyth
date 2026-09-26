@@ -200,6 +200,33 @@ fn value_i64(params: &Value, key: &str, default: i64) -> i64 {
     }
 }
 
+fn validated_mountpoint(raw: &str, filesystem: &str) -> Result<String, String> {
+    if raw.is_empty() {
+        return Ok(String::new());
+    }
+    let fs = filesystem.to_ascii_lowercase();
+    let fs = match fs.as_str() {
+        "swap" => "linux-swap",
+        "fat" | "vfat" => "fat32",
+        other => other,
+    };
+    let mountpoint = crate::installer_manual::normalize_mountpoint(raw, fs, true)?;
+    if is_efi_mountpoint(&mountpoint) {
+        if fs != "fat32" {
+            return Err("EFI mount point requires a FAT32 filesystem".into());
+        }
+    } else if !matches!(fs, "btrfs" | "ext4" | "xfs" | "linux-swap") {
+        return Err(format!(
+            "filesystem {fs} cannot be mounted by the Kyth installer"
+        ));
+    }
+    Ok(mountpoint)
+}
+
+fn is_efi_mountpoint(mountpoint: &str) -> bool {
+    mountpoint.trim().trim_end_matches('/') == "/boot/efi"
+}
+
 /// Surfaced on every destructive commit path. Shrinking, deleting, or
 /// reformatting a partition destroys data the installer cannot restore.
 pub(crate) const IRREVERSIBLE_WARNING: &str =
@@ -216,6 +243,143 @@ pub(crate) fn path_on_external_media(path: &str) -> bool {
         return false;
     }
     matches!(path, _ if path.starts_with("/run/media/") || path.starts_with("/mnt/"))
+}
+
+fn block_device_ancestry(device: &str) -> Result<HashSet<String>, String> {
+    let device = normalize_device_path(device)
+        .ok_or_else(|| "external GPT backup must resolve to a block device".to_string())?;
+    let output = Command::new("/usr/bin/lsblk")
+        .args([
+            "--json",
+            "--paths",
+            "--inverse",
+            "--output",
+            "NAME",
+            &device,
+        ])
+        .output()
+        .map_err(|error| format!("could not verify external backup device: {error}"))?;
+    if !output.status.success() {
+        return Err("could not verify external backup device".to_string());
+    }
+    let value: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "could not parse external backup device tree".to_string())?;
+    let devices = block_device_names(&value);
+    if devices.is_empty() {
+        return Err("could not identify external backup block device".to_string());
+    }
+    Ok(devices)
+}
+
+fn block_device_names(value: &Value) -> HashSet<String> {
+    fn collect(value: &Value, devices: &mut HashSet<String>) {
+        if let Some(entries) = value.get("blockdevices").and_then(Value::as_array) {
+            for entry in entries {
+                collect(entry, devices);
+            }
+        }
+        if let Some(name) = value.get("name").and_then(Value::as_str) {
+            if let Some(name) = normalize_device_path(name) {
+                devices.insert(name);
+            }
+        }
+        if let Some(children) = value.get("children").and_then(Value::as_array) {
+            for child in children {
+                collect(child, devices);
+            }
+        }
+    }
+    let mut devices = HashSet::new();
+    collect(&value, &mut devices);
+    devices
+}
+
+fn shares_block_device(source: &HashSet<String>, target: &HashSet<String>) -> bool {
+    source.iter().any(|device| target.contains(device))
+}
+
+fn external_backup_paths(journal: &PartitionJournal) -> Vec<String> {
+    let mut seen = HashSet::new();
+    journal
+        .ops
+        .iter()
+        .filter(|operation| operation.kind == "resize")
+        .filter_map(|operation| operation.params.get("gpt_backup_path")?.as_str())
+        .map(str::trim)
+        .filter(|path| !path.is_empty() && seen.insert((*path).to_string()))
+        .map(str::to_string)
+        .collect()
+}
+
+fn persist_external_backup(path: &str, disk: &str) -> Result<(), String> {
+    if !path_on_external_media(path) {
+        return Err("GPT backup path must be on external media (/run/media/… or /mnt/…)".into());
+    }
+    let target = std::path::Path::new(path);
+    let name = target
+        .file_name()
+        .ok_or_else(|| "GPT backup path must name a file".to_string())?;
+    let parent = target
+        .parent()
+        .ok_or_else(|| "GPT backup path has no parent directory".to_string())?;
+    let parent = std::fs::canonicalize(parent)
+        .map_err(|error| format!("GPT backup directory is unavailable: {error}"))?;
+    if !parent.is_dir() || !path_on_external_media(&parent.to_string_lossy()) {
+        return Err("GPT backup directory must be mounted external media".to_string());
+    }
+    let target = parent.join(name);
+
+    let output = Command::new("/usr/bin/findmnt")
+        .args(["--json", "--evaluate", "--target"])
+        .arg(&parent)
+        .args(["--output", "SOURCE"])
+        .output()
+        .map_err(|error| format!("could not inspect GPT backup mount: {error}"))?;
+    if !output.status.success() {
+        return Err("GPT backup directory is not on a mounted filesystem".to_string());
+    }
+    let mount: Value = serde_json::from_slice(&output.stdout)
+        .map_err(|_| "could not parse GPT backup mount information".to_string())?;
+    let source = mount
+        .get("filesystems")
+        .and_then(Value::as_array)
+        .and_then(|entries| entries.first())
+        .and_then(|entry| entry.get("source"))
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .split('[')
+        .next()
+        .unwrap_or_default();
+    if !source.starts_with("/dev/") {
+        return Err("GPT backup must be stored on an external block device".to_string());
+    }
+    let source_tree = block_device_ancestry(source)?;
+    let target_tree = block_device_ancestry(disk)?;
+    if shares_block_device(&source_tree, &target_tree) {
+        return Err(
+            "GPT backup media is on the disk being modified; choose a separate device".into(),
+        );
+    }
+
+    let directory = tempfile::Builder::new()
+        .prefix(".kyth-gpt-backup-")
+        .tempdir_in(&parent)
+        .map_err(|error| format!("could not create GPT backup staging directory: {error}"))?;
+    let staged = directory.path().join("partition-table.backup");
+    run_disk_operation(installer_disk::DiskOperationInput::BackupTable {
+        disk: disk.to_string(),
+        backup_path: staged.to_string_lossy().into_owned(),
+    })?;
+    publish_external_backup(&staged, &target)
+}
+
+fn publish_external_backup(
+    staged: &std::path::Path,
+    target: &std::path::Path,
+) -> Result<(), String> {
+    std::fs::rename(staged, target)
+        .map_err(|error| format!("could not publish external GPT backup: {error}"))?;
+    installer_disk::sync_backup(&target.to_string_lossy())
 }
 
 /// Shrink-commit preconditions for a `resize` op, attested by the daemon in
@@ -472,7 +636,14 @@ pub(crate) fn validate(
                 let start = value_i64(params, "start_bytes", -1);
                 let size = value_i64(params, "size_bytes", -1);
                 let fs = value_string(params, "fs_type").to_ascii_lowercase();
-                let mount = value_string(params, "mountpoint").to_ascii_lowercase();
+                let raw_mount = value_string(params, "mountpoint");
+                let mount = match validated_mountpoint(&raw_mount, &fs) {
+                    Ok(mount) => mount,
+                    Err(error) => {
+                        errors.push(format!("Create partition: {error}."));
+                        String::new()
+                    }
+                };
                 if start <= 0 || size <= 0 {
                     errors.push("Create partition: invalid start or size.".to_string());
                 }
@@ -565,6 +736,20 @@ pub(crate) fn validate(
                         errors.push("Resize partition: invalid new size.".to_string());
                         valid = false;
                     } else {
+                        if new_size % 512 != 0 {
+                            errors.push(
+                                "Resize partition: new size must align to 512-byte sectors."
+                                    .to_string(),
+                            );
+                            valid = false;
+                        }
+                        if current_size > 0 && new_size > current_size {
+                            errors.push(
+                                "Resize partition: growing filesystems is not supported by this operation."
+                                    .to_string(),
+                            );
+                            valid = false;
+                        }
                         let new_end = start.saturating_add(new_size);
                         if disk_size_bytes > 0 && new_end as u64 > disk_size_bytes {
                             errors.push(format!("Resize partition: new size for {partition} extends past the end of {}.", journal.disk));
@@ -584,7 +769,15 @@ pub(crate) fn validate(
                         }
                     }
                 } else if operation.kind == "set_mountpoint" {
-                    let mount = value_string(params, "mountpoint");
+                    let raw_mount = value_string(params, "mountpoint");
+                    let mount = match validated_mountpoint(&raw_mount, &fs) {
+                        Ok(mount) => mount,
+                        Err(error) => {
+                            errors.push(format!("Set mount point: {error}."));
+                            valid = false;
+                            String::new()
+                        }
+                    };
                     if mount == "/" && fs != "btrfs" {
                         errors
                             .push("Root partition (/) must use the Btrfs filesystem.".to_string());
@@ -1030,7 +1223,6 @@ fn shrink_filesystem(partition: &str, fs: &str, new_size: u64) -> Result<(), Str
 fn execute_operation(
     operation: &mut PartitionOperation,
     journal: &PartitionJournal,
-    current_parts: &[PartitionRecord],
     irreversible: &mut bool,
 ) -> Result<String, String> {
     let params = &mut operation.params;
@@ -1094,7 +1286,7 @@ fn execute_operation(
                     label: value_string(params, "label"),
                 })?;
             }
-            if value_string(params, "mountpoint") == "/boot/efi" {
+            if is_efi_mountpoint(&value_string(params, "mountpoint")) {
                 let number = part_num(&created, &runtime_partitions()?)?;
                 run_disk_operation(installer_disk::DiskOperationInput::SetPartitionFlag {
                     disk: journal.disk.clone(),
@@ -1116,7 +1308,16 @@ fn execute_operation(
         "resize" => {
             let number = part_num(&target, &before)?;
             let new_size = value_u64(params, "new_size_bytes", 0);
-            let fs = current_fs(&target, current_parts)?;
+            // Earlier journal operations may have reformatted this partition.
+            // Probe the live filesystem immediately before resizing instead
+            // of using the pre-commit snapshot's stale filesystem type.
+            let live_parts = runtime_partition_records(&journal.disk)?;
+            let fs = current_fs(&target, &live_parts)?;
+            let start = live_parts
+                .iter()
+                .find(|part| part.name == normalize_device_path(&target).unwrap_or_default())
+                .map(|part| part.start_bytes)
+                .ok_or_else(|| format!("partition geometry for {target} is unavailable"))?;
             // A successful filesystem shrink cannot be undone by restoring
             // the old partition table. Mark this before starting the shrink
             // so a later resizepart failure also skips a harmful restore.
@@ -1125,11 +1326,7 @@ fn execute_operation(
             run_disk_operation(installer_disk::DiskOperationInput::ResizePartition {
                 disk: journal.disk.clone(),
                 part_num: number,
-                start: current_parts
-                    .iter()
-                    .find(|part| part.name == normalize_device_path(&target).unwrap_or_default())
-                    .map(|part| part.start_bytes)
-                    .unwrap_or(0),
+                start,
                 new_size,
                 sector_size: 512,
             })?;
@@ -1157,9 +1354,37 @@ fn execute_operation(
             })?;
             Ok(target)
         }
-        "set_mountpoint" => Ok(target),
+        "set_mountpoint" => {
+            if let Some(esp_flag) = esp_flag_operation(
+                &value_string(params, "mountpoint"),
+                &target,
+                &journal.disk,
+                &before,
+            )? {
+                run_disk_operation(esp_flag)?;
+            }
+            Ok(target)
+        }
         _ => Err(format!("unsupported journal operation: {}", operation.kind)),
     }
+}
+
+fn esp_flag_operation(
+    mountpoint: &str,
+    target: &str,
+    disk: &str,
+    partitions: &HashMap<String, u32>,
+) -> Result<Option<installer_disk::DiskOperationInput>, String> {
+    if !is_efi_mountpoint(mountpoint) {
+        return Ok(None);
+    }
+    let part_num = part_num(target, partitions)?;
+    Ok(Some(installer_disk::DiskOperationInput::SetPartitionFlag {
+        disk: disk.to_string(),
+        part_num,
+        flag: "esp".to_string(),
+        enabled: true,
+    }))
 }
 
 fn root_partition(journal: &PartitionJournal) -> Option<String> {
@@ -1215,6 +1440,13 @@ fn commit_request_with_target_guard(
     if !errors.is_empty() {
         return Ok(serde_json::json!({"ok": false, "errors": errors}));
     }
+    // Shrink attestations promise a durable backup on external media. Write
+    // that backup before taking the temporary rollback snapshot or changing
+    // any partition, and verify the selected mount belongs to a different
+    // physical block-device tree than the target.
+    for path in external_backup_paths(&input.journal) {
+        persist_external_backup(&path, &input.journal.disk)?;
+    }
     let directory = tempfile::Builder::new()
         .prefix("kyth-partition-")
         .tempdir()
@@ -1228,9 +1460,6 @@ fn commit_request_with_target_guard(
 
     let mut irreversible = false;
     for index in 0..input.journal.ops.len() {
-        if input.journal.ops[index].kind == "set_mountpoint" {
-            continue;
-        }
         let kind = input.journal.ops[index].kind.clone();
         let target = value_string(&input.journal.ops[index].params, "partition");
         emit_event(
@@ -1240,7 +1469,6 @@ fn commit_request_with_target_guard(
         match execute_operation(
             &mut input.journal.ops[index],
             &journal_snapshot,
-            &current_parts,
             &mut irreversible,
         ) {
             Ok(completed_target) => {
@@ -1390,15 +1618,244 @@ mod tests {
         );
         let errors = validate(&journal, &ext4, "gpt", 128 * 1024 * 1024 * 1024);
         assert!(errors.is_empty(), "{errors:?}");
-        // A grow (new size above current) destroys nothing, so it skips the
-        // shrink attestations entirely: 64 GiB -> 80 GiB with no backup, no
-        // NTFS flag, no AC attestation must not raise the shrink gate.
+        // The partition editor exposes a shrink operation; growth must fail
+        // before the executor tries filesystem-first resize semantics.
         let journal = resize_journal(
             "/dev/sda2",
             json!({"new_size_bytes": 80_i64 * 1024 * 1024 * 1024}),
         );
         let errors = validate(&journal, &ext4, "gpt", 128 * 1024 * 1024 * 1024);
-        assert!(errors.is_empty(), "{errors:?}");
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("growing filesystems")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn external_backup_paths_are_deduplicated_for_a_transaction() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "resize",
+            json!({"gpt_backup_path": "/mnt/usb/gpt.bak", "new_size_bytes": 10}),
+        );
+        journal.add_op(
+            "resize",
+            json!({"gpt_backup_path": "/mnt/usb/gpt.bak", "new_size_bytes": 20}),
+        );
+        journal.add_op("format", json!({"gpt_backup_path": "/mnt/usb/ignored.bak"}));
+        assert_eq!(external_backup_paths(&journal), ["/mnt/usb/gpt.bak"]);
+    }
+
+    #[test]
+    fn external_backup_is_rejected_when_device_trees_overlap() {
+        let target = HashSet::from(["/dev/nvme0n1".to_string(), "/dev/nvme0n1p1".to_string()]);
+        let backup_same_disk = HashSet::from(["/dev/nvme0n1".to_string()]);
+        let backup_other_disk = HashSet::from(["/dev/sdb".to_string(), "/dev/sdb1".to_string()]);
+        assert!(shares_block_device(&backup_same_disk, &target));
+        assert!(!shares_block_device(&backup_other_disk, &target));
+    }
+
+    #[test]
+    fn block_device_tree_parser_includes_parent_disks() {
+        let devices = block_device_names(&json!({
+            "blockdevices": [{
+                "name": "/dev/sda",
+                "children": [{"name": "/dev/sda1"}]
+            }]
+        }));
+        assert!(devices.contains("/dev/sda"));
+        assert!(devices.contains("/dev/sda1"));
+    }
+
+    #[test]
+    fn external_backup_publish_replaces_a_symlink_without_following_it() {
+        let directory = tempfile::tempdir().unwrap();
+        let staged = directory.path().join("staged.backup");
+        let target = directory.path().join("gpt.backup");
+        let victim = directory.path().join("victim");
+        std::fs::write(&staged, b"backup").unwrap();
+        std::fs::write(&victim, b"leave me alone").unwrap();
+        std::os::unix::fs::symlink(&victim, &target).unwrap();
+
+        publish_external_backup(&staged, &target).expect("atomic publish should succeed");
+
+        assert_eq!(std::fs::read(&target).unwrap(), b"backup");
+        assert_eq!(std::fs::read(&victim).unwrap(), b"leave me alone");
+    }
+
+    #[test]
+    fn shrink_geometry_is_rejected_before_filesystem_mutation() {
+        let parts = [partition("/dev/sda2", "ext4", false)];
+        let journal = resize_journal(
+            "/dev/sda2",
+            json!({
+                "new_size_bytes": 32_i64 * 1024 * 1024 * 1024 + 1,
+                "gpt_backup_path": "/mnt/usb/gpt.bak",
+                "on_ac_power": true,
+            }),
+        );
+        let errors = validate(&journal, &parts, "gpt", 128 * 1024 * 1024 * 1024);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("align to 512-byte")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn journal_resize_does_not_accept_filesystem_growth() {
+        let parts = [partition("/dev/sda2", "ext4", false)];
+        let journal = resize_journal(
+            "/dev/sda2",
+            json!({"new_size_bytes": 65_i64 * 1024 * 1024 * 1024}),
+        );
+        let errors = validate(&journal, &parts, "gpt", 128 * 1024 * 1024 * 1024);
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("growing filesystems")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn mountpoint_traversal_is_rejected_before_partition_commit() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda3", "mountpoint": "/../escape"}),
+        );
+        let errors = validate(
+            &journal,
+            &[
+                partition("/dev/sda2", "btrfs", false),
+                partition("/dev/sda3", "ext4", false),
+            ],
+            "gpt",
+            128 * 1024 * 1024 * 1024,
+        );
+        assert!(
+            errors.iter().any(|error| error.contains("safe path")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn unsupported_mount_filesystem_is_rejected_before_partition_commit() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda3", "mountpoint": "/home"}),
+        );
+        let errors = validate(
+            &journal,
+            &[
+                partition("/dev/sda2", "btrfs", false),
+                partition("/dev/sda3", "ntfs", false),
+            ],
+            "gpt",
+            128 * 1024 * 1024 * 1024,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("cannot be mounted")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn normalized_mountpoints_cannot_be_assigned_twice() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda3", "mountpoint": "/home/"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda4", "mountpoint": "/home"}),
+        );
+        let errors = validate(
+            &journal,
+            &[
+                partition("/dev/sda2", "btrfs", false),
+                partition("/dev/sda3", "ext4", false),
+                partition("/dev/sda4", "xfs", false),
+            ],
+            "gpt",
+            128 * 1024 * 1024 * 1024,
+        );
+        assert!(
+            errors
+                .iter()
+                .any(|error| error.contains("assigned more than once")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn swap_mountpoint_requires_a_swap_filesystem() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda2", "mountpoint": "/"}),
+        );
+        journal.add_op(
+            "set_mountpoint",
+            json!({"partition": "/dev/sda3", "mountpoint": "swap"}),
+        );
+        let errors = validate(
+            &journal,
+            &[
+                partition("/dev/sda2", "btrfs", false),
+                partition("/dev/sda3", "ext4", false),
+            ],
+            "gpt",
+            128 * 1024 * 1024 * 1024,
+        );
+        assert!(
+            errors.iter().any(|error| error.contains("swap filesystem")),
+            "{errors:?}"
+        );
+    }
+
+    #[test]
+    fn assigning_existing_partition_to_efi_mountpoint_sets_esp_flag() {
+        let partitions = HashMap::from([("/dev/sda1".to_string(), 1)]);
+        let operation = esp_flag_operation("/boot/efi", "/dev/sda1", "/dev/sda", &partitions)
+            .expect("EFI flag plan should be valid")
+            .expect("EFI assignment must set the ESP flag");
+        let plan = installer_disk::build_plan(operation).expect("ESP flag plan should validate");
+        assert!(plan
+            .argv
+            .windows(2)
+            .any(|pair| pair == ["set".to_string(), "1".to_string()]));
+        assert!(plan.argv.iter().any(|argument| argument == "esp"));
+        assert!(
+            esp_flag_operation("/home", "/dev/sda1", "/dev/sda", &partitions)
+                .expect("non-ESP assignment is valid")
+                .is_none()
+        );
+        assert!(
+            esp_flag_operation("/boot/efi/", "/dev/sda1", "/dev/sda", &partitions)
+                .expect("normalized EFI assignment is valid")
+                .is_some()
+        );
     }
 
     #[test]
