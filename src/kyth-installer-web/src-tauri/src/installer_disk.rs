@@ -964,7 +964,7 @@ mod tests {
     #[test]
     fn projects_fixed_btrfs_subvolume_operations() {
         let create = build_plan(DiskOperationInput::BtrfsSubvolumeCreate {
-            mountpoint: "/var/tmp/kyth-btrfs-root".into(),
+            mountpoint: "/run/kyth-installer/btrfs-root".into(),
             name: "@home".into(),
         })
         .expect("subvolume create should validate");
@@ -974,12 +974,12 @@ mod tests {
                 "/usr/sbin/btrfs",
                 "subvolume",
                 "create",
-                "/var/tmp/kyth-btrfs-root/@home"
+                "/run/kyth-installer/btrfs-root/@home"
             ]
         );
 
         let default = build_plan(DiskOperationInput::BtrfsSubvolumeSetDefault {
-            mountpoint: "/var/tmp/kyth-btrfs-root".into(),
+            mountpoint: "/run/kyth-installer/btrfs-root".into(),
             name: "@".into(),
         })
         .expect("subvolume default should validate");
@@ -989,12 +989,12 @@ mod tests {
                 "/usr/sbin/btrfs",
                 "subvolume",
                 "set-default",
-                "/var/tmp/kyth-btrfs-root/@"
+                "/run/kyth-installer/btrfs-root/@"
             ]
         );
 
         let directory = build_plan(DiskOperationInput::EnsureDirectory {
-            path: "/var/tmp/kyth-alongside-target/boot/efi".into(),
+            path: "/run/kyth-installer/alongside-target/boot/efi".into(),
         })
         .expect("directory creation should validate");
         assert_eq!(
@@ -1002,7 +1002,7 @@ mod tests {
             [
                 "/usr/bin/mkdir",
                 "-p",
-                "/var/tmp/kyth-alongside-target/boot/efi"
+                "/run/kyth-installer/alongside-target/boot/efi"
             ]
         );
     }

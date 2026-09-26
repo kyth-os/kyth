@@ -14,6 +14,8 @@ use std::sync::Mutex;
 // A fixed staging path under /var/tmp could be pre-created as a symlink before
 // the privileged installer mounts the selected target there.
 const BTRFS_STAGING_MOUNTPOINT: &str = "/run/kyth-installer/btrfs-root";
+const WIPE_STAGING_MOUNTPOINT: &str = "/run/kyth-installer/install-root";
+const FILESYSTEM_STAGING_MOUNTPOINT: &str = "/run/kyth-installer/alongside-target";
 
 use super::installer_executor::{self, InstallerExecutionInput, InstallerExecutionPlan};
 use super::installer_job::{CancellationToken, JobSupervisor, PhaseExecutor};
@@ -137,9 +139,9 @@ impl NativeInstallRequest {
         // one. Filesystem installs never wipe the disk.
         let erase_disk = install_mode == "wipe";
         let target_root = if filesystem_install {
-            "/var/tmp/kyth-alongside-target".to_string()
+            FILESYSTEM_STAGING_MOUNTPOINT.to_string()
         } else {
-            "/var/tmp/kyth-install-root".to_string()
+            WIPE_STAGING_MOUNTPOINT.to_string()
         };
         let manual_mounts = if install_mode == "manual" {
             let mounts = object
@@ -192,7 +194,7 @@ impl NativeInstallRequest {
                             .unwrap_or_else(|_| "ghcr.io/kyth-os/kyth:latest".to_string()),
                     ),
                     target: if filesystem_install {
-                        "/var/tmp/kyth-alongside-target".to_string()
+                        FILESYSTEM_STAGING_MOUNTPOINT.to_string()
                     } else {
                         text("disk", "")
                     },
@@ -1066,17 +1068,17 @@ impl NativePhaseExecutor {
         for operation in [
             serde_json::json!({
                 "operation": "ensure_directory",
-                "path": "/var/tmp/kyth-install-root"
+                "path": WIPE_STAGING_MOUNTPOINT
             }),
             serde_json::json!({
                 "operation": "mount_filesystem",
                 "device": root,
-                "mountpoint": "/var/tmp/kyth-install-root"
+                "mountpoint": WIPE_STAGING_MOUNTPOINT
             }),
         ] {
             self.execute_disk_helper(phase, cancellation, &operation)?;
         }
-        self.register_mount("/var/tmp/kyth-install-root")?;
+        self.register_mount(WIPE_STAGING_MOUNTPOINT)?;
         Ok(())
     }
 
@@ -1524,7 +1526,7 @@ impl NativePhaseExecutor {
             cancellation,
             &serde_json::json!({
                 "operation": "ensure_directory",
-                "path": "/var/tmp/kyth-alongside-target"
+                "path": FILESYSTEM_STAGING_MOUNTPOINT
             }),
         )?;
         self.execute_disk_helper(
@@ -1533,11 +1535,11 @@ impl NativePhaseExecutor {
             &serde_json::json!({
                 "operation": "mount_filesystem",
                 "device": target,
-                "mountpoint": "/var/tmp/kyth-alongside-target",
+                "mountpoint": FILESYSTEM_STAGING_MOUNTPOINT,
                 "options": ["subvol=@"]
             }),
         )?;
-        self.register_mount("/var/tmp/kyth-alongside-target")?;
+        self.register_mount(FILESYSTEM_STAGING_MOUNTPOINT)?;
 
         self.mount_efi(phase, cancellation)?;
         Ok(())
@@ -1557,7 +1559,7 @@ impl NativePhaseExecutor {
         else {
             return Ok(());
         };
-        let mountpoint = "/var/tmp/kyth-alongside-target/boot/efi";
+        let mountpoint = format!("{FILESYSTEM_STAGING_MOUNTPOINT}/boot/efi");
         self.execute_disk_helper(
             phase,
             cancellation,
@@ -1566,8 +1568,8 @@ impl NativePhaseExecutor {
                 "path": mountpoint
             }),
         )?;
-        self.execute_disk_helper(phase, cancellation, &efi_mount_operation(&efi, mountpoint))?;
-        self.register_mount(mountpoint)?;
+        self.execute_disk_helper(phase, cancellation, &efi_mount_operation(&efi, &mountpoint))?;
+        self.register_mount(&mountpoint)?;
         Ok(())
     }
 
@@ -1834,6 +1836,14 @@ mod tests {
             }
             let request = NativeInstallRequest::from_http(body).expect(mode);
             assert!(request.execution.bootc.skip_finalize, "{mode}");
+            assert_eq!(
+                request.execution.bootc.target,
+                FILESYSTEM_STAGING_MOUNTPOINT
+            );
+            assert_eq!(
+                request.execution.configuration.target_root,
+                FILESYSTEM_STAGING_MOUNTPOINT
+            );
             let plan = crate::installer_bootc::build_plan(request.execution.bootc).expect(mode);
             assert!(
                 plan.argv.iter().any(|arg| arg == "--skip-finalize"),
@@ -1847,6 +1857,10 @@ mod tests {
             "acknowledged_irreversible": true,
         }))
         .expect("wipe request decodes");
+        assert_eq!(
+            wipe.execution.configuration.target_root,
+            WIPE_STAGING_MOUNTPOINT
+        );
         let plan = crate::installer_bootc::build_plan(wipe.execution.bootc).expect("wipe plan");
         assert!(!plan.argv.iter().any(|arg| arg == "--skip-finalize"));
     }
@@ -1870,10 +1884,10 @@ mod tests {
     fn efi_mount_requests_build_through_the_disk_helper() {
         use crate::installer_disk::{build_plan, DiskOperationInput};
         use crate::installer_storage::EfiPartition;
-        let mountpoint = "/var/tmp/kyth-alongside-target/boot/efi";
+        let mountpoint = format!("{FILESYSTEM_STAGING_MOUNTPOINT}/boot/efi");
         let plan = |efi: &EfiPartition| {
             let input: DiskOperationInput =
-                serde_json::from_value(efi_mount_operation(efi, mountpoint))
+                serde_json::from_value(efi_mount_operation(efi, &mountpoint))
                     .expect("request decodes");
             build_plan(input).map(|plan| plan.argv)
         };
@@ -1885,7 +1899,7 @@ mod tests {
         };
         assert_eq!(
             plan(&mounted).expect("bind mount validates"),
-            ["/usr/sbin/mount", "--bind", "/mnt/esp", mountpoint]
+            ["/usr/sbin/mount", "--bind", "/mnt/esp", &mountpoint]
         );
         let unmounted = EfiPartition {
             name: "/dev/sda1".into(),
@@ -1893,7 +1907,7 @@ mod tests {
         };
         assert_eq!(
             plan(&unmounted).expect("device mount validates"),
-            ["/usr/sbin/mount", "/dev/sda1", mountpoint]
+            ["/usr/sbin/mount", "/dev/sda1", &mountpoint]
         );
     }
 
