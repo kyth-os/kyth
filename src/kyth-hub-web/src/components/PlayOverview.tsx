@@ -202,7 +202,10 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
             setup checklist right below it on the same page. */}
         <PlayCard icon="✦" label="Performance" value={performanceValue} detail={performanceDetail} status={readings.audit || readings.performance ? gamingProfile : null} />
         <PlayCard icon="✓" label="Compatibility" value={compatibilityValue} detail={compatibilityDetail} status={supportedGames === null ? null : blockedGames === 0} />
-        <PlayCard icon="◷" label="Recent play" value={sessionValue} detail={sessionDetail} status={readings.sessions === null ? null : true} />
+        {/* Same defect class as Performance above: this showed a green dot
+            the instant the telemetry read completed, even with zero
+            sessions recorded — contradicting its own "No sessions yet" text. */}
+        <PlayCard icon="◷" label="Recent play" value={sessionValue} detail={sessionDetail} status={readings.sessions === null ? null : readings.sessions.length > 0} />
       </div>
 
       <div className="play-actions-card">

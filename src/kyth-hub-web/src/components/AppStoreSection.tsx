@@ -147,7 +147,16 @@ function AppUpdatesCard({ busy, run, status }: { busy: string | null; run: Secti
       {(available || incomplete) && (
         <button
           className="app-action-button app-action-primary"
-          disabled={busy !== null && !busyHere}
+          // Every other busy-gated button in this file (and the rest of the
+          // Hub) disables on `busy !== null` outright. This one stayed
+          // clickable while its own update was running (`busyHere` made the
+          // `&& !busyHere` short-circuit to false), so a second click here
+          // called updateFlatpaks() again — and update_flatpaks has no
+          // backend-side single-flight guard (unlike the system-update
+          // launchers' take_mutating_slot()), so it really did start a
+          // second concurrent `flatpak update` process, not just resend the
+          // same request.
+          disabled={busy !== null}
           onClick={() => void run("apps-update", "Updating your apps…", updateApps)}
         >
           {busyHere ? "Updating apps…" : incomplete && !available ? "Try again" : "Update apps"}
