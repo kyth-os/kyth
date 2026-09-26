@@ -611,6 +611,10 @@ mod tests {
     #[test]
     fn concurrent_start_has_exactly_one_worker() {
         let (supervisor, executor) = supervisor();
+        // Keep the accepted worker active until both competing start calls
+        // have returned. Otherwise the worker can finish before the second
+        // caller is scheduled, turning this concurrency assertion flaky.
+        executor.block_at(Phase::Prepare);
         let barrier = Arc::new(std::sync::Barrier::new(3));
         let (sender, receiver) = mpsc::channel();
         for _ in 0..2 {
