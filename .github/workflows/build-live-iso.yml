@@ -293,12 +293,34 @@ jobs:
         run: mkdir -p output/live-iso
 
       - name: Build ISO with Titanoboa
-        # This third-party action is pinned, but still runs only in the
-        # credential-free build job because it performs privileged operations.
-        uses: Zeglius/titanoboa@7737f4748458252ac827dca14b3d6dd09298472a
-        with:
-          image-ref: localhost/payload:latest
-          iso-dest: ${{ runner.temp }}/kyth-live-${{ steps.effective.outputs.tag }}.iso
+        # The upstream action (Zeglius/titanoboa) runs build_iso.sh inside
+        # its own container and accepts no volume mounts, so the KythOS
+        # iso.yaml fallback cannot be injected through it — and its
+        # hard-required /rootfs/usr/lib/bootc-image-builder/iso.yaml is
+        # invisible on type=image mounts of bootc payloads even though
+        # installer/build.sh bakes the file in (every testing ISO build
+        # died here). Run Titanoboa directly via podman with the same
+        # mounts as build_files/build-live-iso.sh: the wrapper over
+        # /src/build_iso.sh, the vendored pinned build_iso.sh beside it,
+        # and installer/iso.yaml as the /kyth/iso.yaml fallback.
+        env:
+          RUNNER_TEMP: ${{ runner.temp }}
+          SOURCE_TAG: ${{ steps.effective.outputs.tag }}
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/titanoboa-out"
+          mkdir -p "${OUT}"
+          sudo podman run --rm -i \
+            --cap-add sys_admin --security-opt label=disable \
+            -v "${GITHUB_WORKSPACE}/build_files/titanoboa/build_iso.sh:/src/titanoboa-build_iso.sh:ro" \
+            -v "${GITHUB_WORKSPACE}/build_files/scripts/titanoboa-iso-wrapper.sh:/src/build_iso.sh:ro" \
+            -v "${GITHUB_WORKSPACE}/installer/iso.yaml:/kyth/iso.yaml:ro" \
+            --mount type=image,source=localhost/payload:latest,dst=/rootfs \
+            -v "${OUT}:/output" \
+            quay.io/fedora/fedora:44 /src/build_iso.sh
+          sudo chown "$(id -u):$(id -g)" "${OUT}/"*.iso
+          mv "${OUT}/"*.iso "${RUNNER_TEMP}/kyth-live-${SOURCE_TAG}.iso"
+          test -s "${RUNNER_TEMP}/kyth-live-${SOURCE_TAG}.iso"
 
       - name: Report disk usage after ISO build
         run: |
