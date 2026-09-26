@@ -31,6 +31,9 @@ pub(crate) fn hash_password(password: &str) -> Result<String, String> {
     if password.contains('\0') {
         return Err("Password contains an unsupported character".into());
     }
+    if password.contains(['\n', '\r']) {
+        return Err("Password cannot contain a line break".into());
+    }
     let mut child = Command::new("/usr/bin/openssl")
         .args(["passwd", "-6", "-stdin"])
         .stdin(Stdio::piped())
@@ -234,6 +237,16 @@ mod tests {
         let hash = hash_password("native-password").expect("openssl should hash a password");
         assert!(hash.starts_with("$6$"));
         assert!(!hash.contains("native-password"));
+    }
+
+    #[test]
+    fn rejects_line_breaks_in_password_input() {
+        assert!(hash_password("first\nsecond")
+            .unwrap_err()
+            .contains("line break"));
+        assert!(hash_password("first\rsecond")
+            .unwrap_err()
+            .contains("line break"));
     }
 
     #[test]

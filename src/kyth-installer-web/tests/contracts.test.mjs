@@ -32,10 +32,13 @@ test("native clients expose and clear the optional MOK secret", () => {
   assert.match(slint, /kernel == "cachyos"/);
 });
 
-test("Rust/Slint remains the production installer client", () => {
+test("React/Tauri is the production installer client and streams native progress", () => {
   assert.match(native, /fn validated_install_plan/);
   assert.match(native, /stream_install_events/);
   assert.match(native, /confirm_current/);
+  assert.match(app, /installerApi\.log\(\)/);
+  assert.match(app, /milestones\[event\.phase\]/);
+  assert.match(api, /log: \(\) => request<string>\("\/api\/log"\)/);
 });
 
 test("resize attest guards survive UI refactors and daemon hangs surface", () => {

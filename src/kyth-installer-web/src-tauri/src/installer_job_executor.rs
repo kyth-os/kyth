@@ -113,7 +113,7 @@ impl NativeInstallRequest {
             return Err("installation cannot start until the irreversible step is acknowledged: once partitioning starts, erased or resized data cannot be restored."
                 .to_string());
         }
-        let username = text("username", "");
+        let username = text("username", "").trim().to_string();
         let password_hash = {
             let supplied_hash = text("password_hash", "");
             if supplied_hash.is_empty() && !username.is_empty() {
@@ -1335,6 +1335,12 @@ impl NativePhaseExecutor {
     ) -> Result<String, NativePhaseError> {
         const SECTOR_SIZE: u64 = 512;
         const MIN_WINDOWS_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+        if !super::installer_daemon::ac_online_in(std::path::Path::new("/sys/class/power_supply")) {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "Connect AC power before shrinking Windows. Power loss during a filesystem or partition resize can leave the disk unbootable.".to_string(),
+            });
+        }
         let partition = self
             .storage_plan
             .resize_partition

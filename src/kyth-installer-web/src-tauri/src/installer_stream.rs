@@ -6,7 +6,10 @@
 //! run installer commands.
 
 use std::collections::VecDeque;
+use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
 
@@ -14,6 +17,54 @@ const RECENT_OUTPUT_LINES: usize = 30;
 const FAILURE_OUTPUT_LINES: usize = 10;
 const STREAM_READ_CHUNK: usize = 64 * 1024;
 const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const MAX_INSTALLER_LOG_BYTES: u64 = 1024 * 1024;
+const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
+
+fn append_installer_log_at(path: &std::path::Path, line: &str) {
+    let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .mode(0o600)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+    else {
+        return;
+    };
+    if file
+        .set_permissions(std::fs::Permissions::from_mode(0o600))
+        .is_err()
+    {
+        return;
+    }
+    if line.len() as u64 >= MAX_INSTALLER_LOG_BYTES {
+        if file.set_len(0).is_err() {
+            return;
+        }
+        let suffix = &line.as_bytes()[line.len() - (MAX_INSTALLER_LOG_BYTES as usize - 1)..];
+        let _ = file.write_all(suffix);
+        let _ = file.write_all(b"\n");
+        return;
+    }
+    let line_bytes = line.len().saturating_add(1) as u64;
+    if file
+        .metadata()
+        .map(|metadata| metadata.len().saturating_add(line_bytes) > MAX_INSTALLER_LOG_BYTES)
+        .unwrap_or(false)
+    {
+        if file.set_len(0).is_err() {
+            return;
+        }
+    }
+    let _ = file.write_all(line.as_bytes());
+    let _ = file.write_all(b"\n");
+}
+
+fn append_installer_log(line: &str) {
+    let path = std::env::var_os("KYTH_INSTALLER_LOG")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/run/kyth-installer/log"));
+    append_installer_log_at(&path, line);
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum StreamEvent {
@@ -32,10 +83,30 @@ pub(crate) fn run_command(
 ) -> Result<ExitStatus, String> {
     let mut child = command
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        // Keep diagnostics flowing to the daemon's journal. Leaving a piped
+        // stderr unread can fill the pipe and deadlock a verbose disk tool.
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|error| format!("could not spawn streaming command: {error}"))?;
-    let result = run_child(&mut child, cancel_requested);
+    let result = run_child(&mut child, cancel_requested, DEFAULT_OPERATION_TIMEOUT);
+    if result.is_err() && child.try_wait().ok().flatten().is_none() {
+        let _ = child.kill();
+    }
+    let _ = child.wait();
+    result
+}
+
+pub(crate) fn run_command_timeout(
+    command: &mut Command,
+    cancel_requested: impl Fn() -> bool,
+    timeout: Duration,
+) -> Result<ExitStatus, String> {
+    let mut child = command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::inherit())
+        .spawn()
+        .map_err(|error| format!("could not spawn streaming command: {error}"))?;
+    let result = run_child(&mut child, cancel_requested, timeout);
     if result.is_err() && child.try_wait().ok().flatten().is_none() {
         let _ = child.kill();
     }
@@ -54,7 +125,7 @@ pub(crate) fn run_command_with_input(
     let mut child = command
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::inherit())
         .spawn()
         .map_err(|error| format!("could not spawn helper operation: {error}"))?;
     if let Some(mut stdin) = child.stdin.take() {
@@ -62,7 +133,7 @@ pub(crate) fn run_command_with_input(
             .write_all(input)
             .map_err(|error| format!("could not provide helper operation input: {error}"))?;
     }
-    let result = run_child(&mut child, cancel_requested);
+    let result = run_child(&mut child, cancel_requested, DEFAULT_OPERATION_TIMEOUT);
     if result.is_err() && child.try_wait().ok().flatten().is_none() {
         let _ = child.kill();
     }
@@ -70,7 +141,11 @@ pub(crate) fn run_command_with_input(
     result
 }
 
-fn run_child(child: &mut Child, cancel_requested: impl Fn() -> bool) -> Result<ExitStatus, String> {
+fn run_child(
+    child: &mut Child,
+    cancel_requested: impl Fn() -> bool,
+    timeout: Duration,
+) -> Result<ExitStatus, String> {
     let started = Instant::now();
     let mut model = StreamingCommandModel::new(0, 0);
     let mut output = child
@@ -86,6 +161,7 @@ fn run_child(child: &mut Child, cancel_requested: impl Fn() -> bool) -> Result<E
         ));
     }
     let mut buffer = [0u8; STREAM_READ_CHUNK];
+    let mut output_closed = false;
     loop {
         if cancel_requested() {
             let _ = child.kill();
@@ -94,17 +170,29 @@ fn run_child(child: &mut Child, cancel_requested: impl Fn() -> bool) -> Result<E
                     .to_string(),
             );
         }
-        match output.read(&mut buffer) {
-            Ok(0) => break,
-            Ok(size) => {
-                for event in model.feed(&buffer[..size], started.elapsed().as_secs()) {
-                    let StreamEvent::Log(line) = event;
-                    println!("{line}");
+        if started.elapsed() >= timeout {
+            let _ = child.kill();
+            return Err(format!(
+                "Command timed out after {} seconds",
+                timeout.as_secs()
+            ));
+        }
+        if !output_closed {
+            match output.read(&mut buffer) {
+                Ok(0) => output_closed = true,
+                Ok(size) => {
+                    for event in model.feed(&buffer[..size], started.elapsed().as_secs()) {
+                        let StreamEvent::Log(line) = event;
+                        append_installer_log(&line);
+                        println!("{line}");
+                    }
+                }
+                Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
+                Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+                Err(error) => {
+                    return Err(format!("could not read streaming command output: {error}"))
                 }
             }
-            Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
-            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
-            Err(error) => return Err(format!("could not read streaming command output: {error}")),
         }
         if let Some(status) = child
             .try_wait()
@@ -112,6 +200,7 @@ fn run_child(child: &mut Child, cancel_requested: impl Fn() -> bool) -> Result<E
         {
             for event in model.finish_output() {
                 let StreamEvent::Log(line) = event;
+                append_installer_log(&line);
                 println!("{line}");
             }
             return model
@@ -120,16 +209,6 @@ fn run_child(child: &mut Child, cancel_requested: impl Fn() -> bool) -> Result<E
         }
         std::thread::sleep(STREAM_POLL_INTERVAL);
     }
-    let status = child
-        .wait()
-        .map_err(|error| format!("could not wait for streaming command: {error}"))?;
-    for event in model.finish_output() {
-        let StreamEvent::Log(line) = event;
-        println!("{line}");
-    }
-    model
-        .finish_status(status.code().unwrap_or(1))
-        .map(|_| status)
 }
 
 #[derive(Debug)]
@@ -319,6 +398,41 @@ impl StreamingCommandModel {
 mod tests {
     use super::*;
     use serde_json::Value;
+
+    #[test]
+    fn timeout_still_applies_after_child_closes_stdout() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "exec 1>&-; exec sleep 2"]);
+        let started = Instant::now();
+        let error =
+            run_command_timeout(&mut command, || false, Duration::from_millis(150)).unwrap_err();
+        assert!(error.contains("timed out"));
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn installer_log_is_private_bounded_and_does_not_follow_symlinks() {
+        let directory = tempfile::tempdir().expect("temporary log directory");
+        let path = directory.path().join("installer.log");
+        append_installer_log_at(&path, "first line");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), "first line\n");
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        append_installer_log_at(&path, &"x".repeat(MAX_INSTALLER_LOG_BYTES as usize));
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().len(),
+            MAX_INSTALLER_LOG_BYTES
+        );
+
+        let target = directory.path().join("target");
+        std::fs::write(&target, "preserve").unwrap();
+        let link = directory.path().join("link");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        append_installer_log_at(&link, "do not follow");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "preserve");
+    }
 
     #[test]
     fn frames_lines_handles_crlf_and_suppresses_duplicates() {

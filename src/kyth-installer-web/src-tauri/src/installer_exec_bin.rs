@@ -109,13 +109,44 @@ fn exit_code(status: ExitStatus) -> ExitCode {
     )
 }
 
+fn run_timed_command(
+    mut command: Command,
+    operation: &str,
+    timeout_seconds: u64,
+) -> Result<ExitStatus, String> {
+    unsafe {
+        command.pre_exec(parent_death_signal);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("could not execute {operation}: {error}"))?;
+    let started = std::time::Instant::now();
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("could not poll {operation}: {error}"))?
+        {
+            return Ok(status);
+        }
+        if started.elapsed() >= std::time::Duration::from_secs(timeout_seconds) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "{operation} timed out after {timeout_seconds} seconds"
+            ));
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+}
+
 fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
     let operation = serde_json::from_slice::<StreamingOperationInput>(input)
         .map_err(|error| format!("invalid streaming operation JSON: {error}"))?;
-    let (argv, description) = match operation {
+    let (argv, description, timeout_seconds) = match operation {
         StreamingOperationInput::BootcInstall(input) => (
             installer_bootc::build_plan(input)?.argv,
             "bootc image installation",
+            4 * 60 * 60,
         ),
         StreamingOperationInput::Disk(input) => {
             if !matches!(
@@ -125,7 +156,7 @@ fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
                 return Err("streaming disk operation must be a filesystem resize".to_string());
             }
             let plan = installer_disk::build_plan(input)?;
-            (plan.argv, "filesystem resize")
+            (plan.argv, "filesystem resize", plan.timeout_seconds)
         }
     };
     let executable = argv
@@ -136,8 +167,12 @@ fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
     unsafe {
         command.pre_exec(parent_death_signal);
     }
-    let status = installer_stream::run_command(&mut command, || false)
-        .map_err(|error| format!("{description}: {error}"))?;
+    let status = installer_stream::run_command_timeout(
+        &mut command,
+        || false,
+        std::time::Duration::from_secs(timeout_seconds),
+    )
+    .map_err(|error| format!("{description}: {error}"))?;
     Ok(exit_code(status))
 }
 
@@ -290,12 +325,12 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         );
         return Ok(ExitCode::SUCCESS);
     }
-    let (argv, needs_confirmation, operation) = match args[1].as_str() {
+    let (argv, needs_confirmation, operation, timeout_seconds) = match args[1].as_str() {
         "bootc-install" => {
             let input = serde_json::from_slice::<installer_bootc::BootcInstallInput>(&input)
                 .map_err(|error| format!("invalid bootc install operation JSON: {error}"))?;
             let plan = installer_bootc::build_plan(input)?;
-            (plan.argv, false, "bootc install")
+            (plan.argv, false, "bootc install", 4 * 60 * 60)
         }
         "disk" => {
             let input = serde_json::from_slice::<installer_disk::DiskOperationInput>(&input)
@@ -305,9 +340,8 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
             if let Some(backup_path) = backup_path {
                 let mut command = Command::new(&plan.argv[0]);
                 command.args(&plan.argv[1..]);
-                let status = command
-                    .status()
-                    .map_err(|error| format!("could not execute disk operation: {error}"))?;
+                let status =
+                    run_timed_command(command, "disk backup operation", plan.timeout_seconds)?;
                 if status.success() {
                     installer_disk::sync_backup(&backup_path)?;
                 }
@@ -318,7 +352,12 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
                         .unwrap_or(1),
                 ));
             }
-            (plan.argv, plan.needs_confirmation, "disk operation")
+            (
+                plan.argv,
+                plan.needs_confirmation,
+                "disk operation",
+                plan.timeout_seconds,
+            )
         }
         _ => unreachable!("operation_args_valid checked the operation"),
     };
@@ -344,16 +383,27 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
                 return Err(format!("could not confirm {operation}: {error}"));
             }
         }
-        let status = child
-            .wait()
-            .map_err(|error| format!("could not wait for {operation}: {error}"))?;
+        let start = std::time::Instant::now();
+        let status = loop {
+            if let Some(status) = child
+                .try_wait()
+                .map_err(|error| format!("could not poll {operation}: {error}"))?
+            {
+                break status;
+            }
+            if start.elapsed() >= std::time::Duration::from_secs(timeout_seconds) {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(format!(
+                    "{operation} timed out after {timeout_seconds} seconds"
+                ));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        };
         return Ok(exit_code(status));
     }
-    // exec(2) keeps the historical scalar-operation behavior. Streaming
-    // operations use run_stream(), which owns a child and applies the same
-    // parent-death cancellation signal before waiting for it.
-    let error = unsafe { command.pre_exec(parent_death_signal).exec() };
-    Err(format!("could not execute {operation}: {error}"))
+    let status = run_timed_command(command, operation, timeout_seconds)?;
+    Ok(exit_code(status))
 }
 
 fn main() -> ExitCode {

@@ -139,6 +139,7 @@ export const installerApi = {
   pending: () => request<PendingOperation[]>("/api/disk/pending"),
   filesystems: () => request<Array<{ id: string; name?: string }>>("/api/disk/filesystems"),
   report: () => request<TransactionReport>("/api/report"),
+  log: () => request<string>("/api/log"),
   rescueProbe: async () => {
     const probe = await request<RescueProbe>("/api/rescue/probe");
     const status = probe.transaction?.status;

@@ -11,6 +11,7 @@ use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
 use crate::installer_disk;
 use crate::installer_plan::normalize_device_path;
@@ -720,9 +721,24 @@ fn run_disk_operation(operation: installer_disk::DiskOperationInput) -> Result<(
                 .map_err(|error| format!("could not confirm disk operation: {error}"))?;
         }
     }
-    let status = child
-        .wait()
-        .map_err(|error| format!("could not wait for disk operation: {error}"))?;
+    let started = Instant::now();
+    let status = loop {
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("could not poll disk operation: {error}"))?
+        {
+            break status;
+        }
+        if started.elapsed() >= Duration::from_secs(plan.timeout_seconds) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "disk operation timed out after {} seconds",
+                plan.timeout_seconds
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
     if !status.success() {
         return Err(format!(
             "disk operation exited with {}",
