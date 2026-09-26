@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { cancelVpnConnection, disconnectVpnConnection, fetchNetworkSummary, fetchNetworkSummaryLive, fetchVpnConnectionStatus, fetchVpnProtectionStatus, fetchVpnSavedProfile, getInFlightJob, onOnlineRefetch, openVpnApp, setVpnProtection, startVpnConnection, untrackVpnJob, type NetworkSummary, type VpnProtectionStatus, type VpnSavedProfile } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
+import { ActionButton, ActionStatus, ProgressRing, RecipeButton, useSectionAction } from "./SectionActions";
 
 const fieldStyle = { padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 13, minWidth: 180 } as const;
 
@@ -211,7 +211,10 @@ export function VpnSection({ section }: { section: HubSection }) {
           )}
         </div>
         {jobStatus && <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>{jobStatus}</p>}
-        <ActionStatus status={status} />
+        <div className="hub-progress-inline">
+          {(busy !== null || (job !== null && !summary?.vpnConnected)) && <ProgressRing size={20} />}
+          <ActionStatus status={status} />
+        </div>
       </div>
     </LiveSectionCard>
   );

@@ -216,6 +216,19 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(updateMessages, /No changes were made/);
 });
 
+test("long-running Hub actions share one progress ring instead of per-section spinners", () => {
+  // The Updates staging ring was extracted into SectionActions so every
+  // tracked job speaks the same motion language; per-section spinners
+  // must not creep back in.
+  assert.match(actions, /export function ProgressRing/);
+  assert.match(actions, /hub-progress-ring-indeterminate/);
+  for (const [source, label] of [[vpn, "VpnSection"], [apps, "AppStoreSection"], [gaming, "GamingSection"]]) {
+    assert.match(source, /ProgressRing/, `${label} must use the shared ring`);
+  }
+  assert.doesNotMatch(apps, /app-spinner/, "App Store must not keep its own spinner");
+  assert.match(hubTheme, /\.hub-progress-ring-indeterminate svg \{ animation: hub-ring-spin/);
+});
+
 test("release summary is tied to the checked image and explains unavailable notes", () => {
   assert.match(service, /update-release-summary:\$\{digest\}/);
   assert.match(service, /"update_release_summary", \{ digest \}/);

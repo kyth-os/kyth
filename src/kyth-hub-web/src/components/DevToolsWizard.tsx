@@ -198,7 +198,7 @@ export function DevToolsOverview() {
         <div className="app-store-hero-art"><span>✦</span><i /><i /><i /></div>
       </div>
 
-      {!loaded && <div className="app-loading-state"><span className="app-spinner" /> Loading Dev Tools status…</div>}
+      {!loaded && <div className="app-loading-state hub-progress-inline"><ProgressRing size={24} /> Loading Dev Tools status…</div>}
 
       {loaded && (
         <>

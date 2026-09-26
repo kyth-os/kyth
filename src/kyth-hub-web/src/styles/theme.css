@@ -1291,8 +1291,6 @@ body {
 .app-empty-state { flex-direction: column; gap: 3px; }
 .app-empty-state strong { color: var(--text); font-size: 13px; }
 .app-empty-state span { color: var(--text-faint); font-size: 11px; }
-.app-spinner { width: 14px; height: 14px; border: 2px solid rgba(145, 185, 255, .25); border-top-color: #91b9ff; border-radius: 50%; animation: app-spin .8s linear infinite; }
-@keyframes app-spin { to { transform: rotate(360deg); } }
 .app-alternative-note { display: flex; align-items: center; gap: 8px; margin-top: 11px; padding: 10px 12px; border: 1px solid rgba(91, 214, 158, .2); border-radius: 9px; background: rgba(91, 214, 158, .06); font-size: 11px; }
 .app-alternative-note span { flex: 1; color: var(--text-muted); }
 .app-link-button { border: 0; color: #91b9ff; background: transparent; cursor: pointer; font-size: 11px; font-weight: 700; white-space: nowrap; }
