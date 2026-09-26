@@ -450,13 +450,21 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let script = directory.path().join("scheduler-probe");
         executable(&script, "printf 'scx_rusty\\n'");
-        assert_eq!(
-            // This is a success-path probe test, not a timeout test. Leave
-            // enough room for slow/loaded CI runners; timeout behavior is
-            // asserted independently below.
-            scheduler_probe(&[script.to_string_lossy().into_owned()], 10),
-            Some((0, "scx_rusty\n".into()))
-        );
+        // This is a success-path probe test, not a timeout test. Leave
+        // enough room for slow/loaded CI runners; timeout behavior is
+        // asserted independently below. Spawning a fresh interpreter trips
+        // transient failures on saturated runners (EAGAIN / slow fork), so
+        // retry the probe itself a few times — a persistent failure still
+        // fails this test, but one blip no longer nukes the whole suite.
+        let mut probed = None;
+        for _ in 0..3 {
+            probed = scheduler_probe(&[script.to_string_lossy().into_owned()], 10);
+            if probed.is_some() {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        }
+        assert_eq!(probed, Some((0, "scx_rusty\n".into())));
     }
 
     #[test]

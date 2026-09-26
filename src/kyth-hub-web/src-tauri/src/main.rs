@@ -996,7 +996,10 @@ fn focus_start(minutes: u32) -> Result<String, String> {
     // Kill inhibitors orphaned by a previous Hub process (crash/restart
     // reparents the `sleep` child, which then holds idle:sleep with no UI
     // to cancel it). Live sessions in this process are spared.
-    let live_pids: Vec<u32> = sessions.values().map(|session| session.child.id()).collect();
+    let live_pids: Vec<u32> = sessions
+        .values()
+        .map(|session| session.child.id())
+        .collect();
     drop(sessions);
     let orphans = kyth_shared::system::process::reap_stale_focus_inhibits(&live_pids);
     if orphans > 0 {
