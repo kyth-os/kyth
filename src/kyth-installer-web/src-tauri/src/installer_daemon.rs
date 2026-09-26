@@ -1494,6 +1494,7 @@ fn handle(
     runtime: Arc<RuntimeCoordinator>,
     native_registry: Arc<NativeJobRegistry>,
     native_journal: Arc<NativeJournalRegistry>,
+    storage_gate: Arc<Mutex<()>>,
 ) -> Result<(), String> {
     if let Some(expected_uid) = expected_uid {
         if peer_uid(&client)? != expected_uid {
@@ -1580,6 +1581,12 @@ fn handle(
                 | "/api/disk/rollback"
         )
     {
+        // Serialize partition commits against install start. Checking the
+        // worker state without this shared gate leaves a check-then-act race:
+        // an install can begin after the check but before the journal writes.
+        let _storage_guard = storage_gate
+            .lock()
+            .map_err(|_| "installer storage operation gate is unavailable".to_string())?;
         if native_registry
             .snapshot()?
             .is_some_and(|snapshot| snapshot.worker_active)
@@ -1697,6 +1704,9 @@ fn handle(
         return Ok(());
     }
     if method == "POST" && route == "/api/reboot" {
+        let _storage_guard = storage_gate
+            .lock()
+            .map_err(|_| "installer storage operation gate is unavailable".to_string())?;
         if native_registry
             .snapshot()?
             .is_some_and(|snapshot| snapshot.worker_active)
@@ -1722,6 +1732,9 @@ fn handle(
         return Ok(());
     }
     if method == "POST" && route == "/api/start" {
+        let _storage_guard = storage_gate
+            .lock()
+            .map_err(|_| "installer storage operation gate is unavailable".to_string())?;
         let native_request = match native_request_from_start(&request) {
             Ok(request) => request,
             Err(error) => {
@@ -1819,6 +1832,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let runtime = Arc::new(RuntimeCoordinator::default());
     let native_registry = Arc::new(NativeJobRegistry::default());
     let native_journal = Arc::new(NativeJournalRegistry::default());
+    let storage_gate = Arc::new(Mutex::new(()));
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -1827,6 +1841,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 let runtime = Arc::clone(&runtime);
                 let native_registry = Arc::clone(&native_registry);
                 let native_journal = Arc::clone(&native_journal);
+                let storage_gate = Arc::clone(&storage_gate);
                 thread::spawn(move || {
                     if let Err(error) = handle(
                         stream,
@@ -1835,6 +1850,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                         runtime,
                         native_registry,
                         native_journal,
+                        storage_gate,
                     ) {
                         eprintln!("installer request failed: {error}");
                     }

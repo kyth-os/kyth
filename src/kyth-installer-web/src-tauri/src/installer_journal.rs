@@ -10,6 +10,7 @@ use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::os::fd::AsRawFd;
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -708,6 +709,7 @@ fn run_disk_operation(operation: installer_disk::DiskOperationInput) -> Result<(
     let plan = installer_disk::build_plan(operation)?;
     let mut command = Command::new(&plan.argv[0]);
     command.args(&plan.argv[1..]);
+    command.process_group(0);
     if plan.needs_confirmation {
         command.stdin(Stdio::piped());
     }
@@ -716,21 +718,26 @@ fn run_disk_operation(operation: installer_disk::DiskOperationInput) -> Result<(
         .map_err(|error| format!("could not execute disk operation: {error}"))?;
     if plan.needs_confirmation {
         if let Some(mut stdin) = child.stdin.take() {
-            stdin
-                .write_all(b"Yes\n")
-                .map_err(|error| format!("could not confirm disk operation: {error}"))?;
+            if let Err(error) = stdin.write_all(b"Yes\n") {
+                crate::installer_stream::kill_process_group(&mut child);
+                let _ = child.wait();
+                return Err(format!("could not confirm disk operation: {error}"));
+            }
         }
     }
     let started = Instant::now();
     let status = loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("could not poll disk operation: {error}"))?
-        {
-            break status;
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) => {}
+            Err(error) => {
+                crate::installer_stream::kill_process_group(&mut child);
+                let _ = child.wait();
+                return Err(format!("could not poll disk operation: {error}"));
+            }
         }
         if started.elapsed() >= Duration::from_secs(plan.timeout_seconds) {
-            let _ = child.kill();
+            crate::installer_stream::kill_process_group(&mut child);
             let _ = child.wait();
             return Err(format!(
                 "disk operation timed out after {} seconds",
@@ -1189,7 +1196,18 @@ fn root_partition(journal: &PartitionJournal) -> Option<String> {
     (roots.len() == 1).then(|| roots[0].clone())
 }
 
-pub(crate) fn commit_request(mut input: JournalCommitInput) -> Result<Value, String> {
+pub(crate) fn commit_request(input: JournalCommitInput) -> Result<Value, String> {
+    commit_request_with_target_guard(input, crate::installer_guard::validate_target_disk)
+}
+
+fn commit_request_with_target_guard(
+    mut input: JournalCommitInput,
+    validate_target: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<Value, String> {
+    // The partition editor has its own authenticated commit route, separate
+    // from the guided installer phases. Repeat the protected/current-disk
+    // check here, immediately before the first privileged disk probe or write.
+    validate_target(&input.journal.disk)?;
     let _lock = acquire_disk_lock(&input.journal.disk)?;
     let current_parts = runtime_partition_records(&input.journal.disk)?;
     let (table_type, disk_size_bytes) = runtime_disk_metadata(&input.journal.disk)?;
@@ -1401,6 +1419,19 @@ mod tests {
         assert_eq!(journal.disk, "/dev/sda");
         assert!(journal.ops.is_empty());
         assert!(!journal.committed);
+    }
+
+    #[test]
+    fn partition_commit_rejects_protected_target_before_disk_access() {
+        let journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        let mut journal = journal;
+        journal.add_op("new_table", json!({"table_type": "gpt"}));
+        let error = commit_request_with_target_guard(JournalCommitInput { journal }, |disk| {
+            assert_eq!(disk, "/dev/sda");
+            Err("selected disk is the current live-session disk".to_string())
+        })
+        .unwrap_err();
+        assert!(error.contains("current live-session disk"));
     }
 
     #[test]

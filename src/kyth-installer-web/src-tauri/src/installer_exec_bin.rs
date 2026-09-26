@@ -11,6 +11,7 @@ mod installer_alongside;
 mod installer_bootc;
 mod installer_configuration;
 mod installer_disk;
+mod installer_guard;
 #[allow(dead_code)]
 mod installer_journal;
 mod installer_manual;
@@ -114,6 +115,7 @@ fn run_timed_command(
     operation: &str,
     timeout_seconds: u64,
 ) -> Result<ExitStatus, String> {
+    command.process_group(0);
     unsafe {
         command.pre_exec(parent_death_signal);
     }
@@ -122,14 +124,17 @@ fn run_timed_command(
         .map_err(|error| format!("could not execute {operation}: {error}"))?;
     let started = std::time::Instant::now();
     loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| format!("could not poll {operation}: {error}"))?
-        {
-            return Ok(status);
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) => {}
+            Err(error) => {
+                installer_stream::kill_process_group(&mut child);
+                let _ = child.wait();
+                return Err(format!("could not poll {operation}: {error}"));
+            }
         }
         if started.elapsed() >= std::time::Duration::from_secs(timeout_seconds) {
-            let _ = child.kill();
+            installer_stream::kill_process_group(&mut child);
             let _ = child.wait();
             return Err(format!(
                 "{operation} timed out after {timeout_seconds} seconds"
@@ -372,27 +377,31 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     command.args(&argv[1..]);
     if needs_confirmation {
         command.stdin(Stdio::piped());
+        command.process_group(0);
         // Ensure a helper cancellation cannot leave an interactive child
         // running after the parent process has gone away.
         let mut child = unsafe { command.pre_exec(parent_death_signal).spawn() }
             .map_err(|error| format!("could not spawn {operation}: {error}"))?;
         if let Some(mut stdin) = child.stdin.take() {
             if let Err(error) = stdin.write_all(b"Yes\n") {
-                let _ = child.kill();
+                installer_stream::kill_process_group(&mut child);
                 let _ = child.wait();
                 return Err(format!("could not confirm {operation}: {error}"));
             }
         }
         let start = std::time::Instant::now();
         let status = loop {
-            if let Some(status) = child
-                .try_wait()
-                .map_err(|error| format!("could not poll {operation}: {error}"))?
-            {
-                break status;
+            match child.try_wait() {
+                Ok(Some(status)) => break status,
+                Ok(None) => {}
+                Err(error) => {
+                    installer_stream::kill_process_group(&mut child);
+                    let _ = child.wait();
+                    return Err(format!("could not poll {operation}: {error}"));
+                }
             }
             if start.elapsed() >= std::time::Duration::from_secs(timeout_seconds) {
-                let _ = child.kill();
+                installer_stream::kill_process_group(&mut child);
                 let _ = child.wait();
                 return Err(format!(
                     "{operation} timed out after {timeout_seconds} seconds"

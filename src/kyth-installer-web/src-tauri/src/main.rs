@@ -12,6 +12,7 @@ mod installer_configuration;
 #[allow(dead_code)]
 mod installer_disk;
 mod installer_executor;
+mod installer_guard;
 mod installer_journal;
 mod installer_mount;
 mod installer_plan;

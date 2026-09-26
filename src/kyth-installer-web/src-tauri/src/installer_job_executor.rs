@@ -10,6 +10,11 @@ use std::fmt;
 use std::process::Command;
 use std::sync::Mutex;
 
+// systemd creates this parent as root-owned and non-writable by the live user.
+// A fixed staging path under /var/tmp could be pre-created as a symlink before
+// the privileged installer mounts the selected target there.
+const BTRFS_STAGING_MOUNTPOINT: &str = "/run/kyth-installer/btrfs-root";
+
 use super::installer_executor::{self, InstallerExecutionInput, InstallerExecutionPlan};
 use super::installer_job::{CancellationToken, JobSupervisor, PhaseExecutor};
 use super::installer_plan::{self, InstallerPlan, InstallerPlanInput};
@@ -1464,7 +1469,7 @@ impl NativePhaseExecutor {
             cancellation,
             &serde_json::json!({
                 "operation": "ensure_directory",
-                "path": "/var/tmp/kyth-btrfs-root"
+                "path": BTRFS_STAGING_MOUNTPOINT
             }),
         )?;
         self.execute_disk_helper(
@@ -1473,10 +1478,10 @@ impl NativePhaseExecutor {
             &serde_json::json!({
                 "operation": "mount_filesystem",
                 "device": target,
-                "mountpoint": "/var/tmp/kyth-btrfs-root"
+                "mountpoint": BTRFS_STAGING_MOUNTPOINT
             }),
         )?;
-        self.register_mount("/var/tmp/kyth-btrfs-root")?;
+        self.register_mount(BTRFS_STAGING_MOUNTPOINT)?;
 
         let temporary_setup = (|| {
             for name in ["@", "@home"] {
@@ -1485,7 +1490,7 @@ impl NativePhaseExecutor {
                     cancellation,
                     &serde_json::json!({
                         "operation": "btrfs_subvolume_create",
-                        "mountpoint": "/var/tmp/kyth-btrfs-root",
+                        "mountpoint": BTRFS_STAGING_MOUNTPOINT,
                         "name": name
                     }),
                 )?;
@@ -1495,7 +1500,7 @@ impl NativePhaseExecutor {
                 cancellation,
                 &serde_json::json!({
                     "operation": "btrfs_subvolume_set_default",
-                    "mountpoint": "/var/tmp/kyth-btrfs-root",
+                    "mountpoint": BTRFS_STAGING_MOUNTPOINT,
                     "name": "@"
                 }),
             )
@@ -1505,12 +1510,12 @@ impl NativePhaseExecutor {
             &CancellationToken::default(),
             &serde_json::json!({
                 "operation": "unmount_filesystem",
-                "mountpoint": "/var/tmp/kyth-btrfs-root",
+                "mountpoint": BTRFS_STAGING_MOUNTPOINT,
                 "recursive": true,
                 "lazy": true
             }),
         );
-        self.release_mount("/var/tmp/kyth-btrfs-root")?;
+        self.release_mount(BTRFS_STAGING_MOUNTPOINT)?;
         temporary_setup?;
         cleanup_result?;
 

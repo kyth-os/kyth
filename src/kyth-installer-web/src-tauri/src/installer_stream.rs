@@ -9,6 +9,7 @@ use std::collections::VecDeque;
 use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant};
@@ -66,6 +67,20 @@ fn append_installer_log(line: &str) {
     append_installer_log_at(&path, line);
 }
 
+pub(crate) fn kill_process_group(child: &mut Child) {
+    // Disk and bootc tools can spawn helpers. Killing only the direct child
+    // leaves those helpers mutating storage after cancellation or timeout.
+    let process_group = i32::try_from(child.id()).unwrap_or(i32::MAX);
+    if process_group > 0 {
+        // SAFETY: the process group is created for this child before spawn;
+        // a negative pid targets only that group, never the caller's group.
+        unsafe {
+            libc::kill(-process_group, libc::SIGKILL);
+        }
+    }
+    let _ = child.kill();
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum StreamEvent {
     Log(String),
@@ -82,6 +97,7 @@ pub(crate) fn run_command(
     cancel_requested: impl Fn() -> bool,
 ) -> Result<ExitStatus, String> {
     let mut child = command
+        .process_group(0)
         .stdout(Stdio::piped())
         // Keep diagnostics flowing to the daemon's journal. Leaving a piped
         // stderr unread can fill the pipe and deadlock a verbose disk tool.
@@ -90,7 +106,7 @@ pub(crate) fn run_command(
         .map_err(|error| format!("could not spawn streaming command: {error}"))?;
     let result = run_child(&mut child, cancel_requested, DEFAULT_OPERATION_TIMEOUT);
     if result.is_err() && child.try_wait().ok().flatten().is_none() {
-        let _ = child.kill();
+        kill_process_group(&mut child);
     }
     let _ = child.wait();
     result
@@ -102,13 +118,14 @@ pub(crate) fn run_command_timeout(
     timeout: Duration,
 ) -> Result<ExitStatus, String> {
     let mut child = command
+        .process_group(0)
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
         .spawn()
         .map_err(|error| format!("could not spawn streaming command: {error}"))?;
     let result = run_child(&mut child, cancel_requested, timeout);
     if result.is_err() && child.try_wait().ok().flatten().is_none() {
-        let _ = child.kill();
+        kill_process_group(&mut child);
     }
     let _ = child.wait();
     result
@@ -123,6 +140,7 @@ pub(crate) fn run_command_with_input(
     cancel_requested: impl Fn() -> bool,
 ) -> Result<ExitStatus, String> {
     let mut child = command
+        .process_group(0)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit())
@@ -135,7 +153,7 @@ pub(crate) fn run_command_with_input(
     }
     let result = run_child(&mut child, cancel_requested, DEFAULT_OPERATION_TIMEOUT);
     if result.is_err() && child.try_wait().ok().flatten().is_none() {
-        let _ = child.kill();
+        kill_process_group(&mut child);
     }
     let _ = child.wait();
     result
@@ -164,14 +182,14 @@ fn run_child(
     let mut output_closed = false;
     loop {
         if cancel_requested() {
-            let _ = child.kill();
+            kill_process_group(child);
             return Err(
                 "Installation cancelled by user. Disk changes may have already started."
                     .to_string(),
             );
         }
         if started.elapsed() >= timeout {
-            let _ = child.kill();
+            kill_process_group(child);
             return Err(format!(
                 "Command timed out after {} seconds",
                 timeout.as_secs()
@@ -190,7 +208,8 @@ fn run_child(
                 Err(error) if error.kind() == io::ErrorKind::WouldBlock => {}
                 Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
                 Err(error) => {
-                    return Err(format!("could not read streaming command output: {error}"))
+                    kill_process_group(child);
+                    return Err(format!("could not read streaming command output: {error}"));
                 }
             }
         }
@@ -432,6 +451,22 @@ mod tests {
         std::os::unix::fs::symlink(&target, &link).unwrap();
         append_installer_log_at(&link, "do not follow");
         assert_eq!(std::fs::read_to_string(&target).unwrap(), "preserve");
+    }
+
+    #[test]
+    fn timeout_kills_descendants_before_they_can_continue_storage_work() {
+        let directory = tempfile::tempdir().expect("temporary process directory");
+        let marker = directory.path().join("orphan-finished");
+        let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "sleep 0.3; printf leaked > \"$1\"",
+            "sh",
+            marker.to_str().expect("UTF-8 temporary path"),
+        ]);
+        assert!(run_command_timeout(&mut command, || false, Duration::from_millis(50)).is_err());
+        std::thread::sleep(Duration::from_millis(400));
+        assert!(!marker.exists(), "timed-out command descendant survived");
     }
 
     #[test]
