@@ -1026,12 +1026,12 @@ pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
     if !std::path::Path::new("/usr/bin/kyth-safe-upgrade").exists() {
         return Err("The native KythOS update helper is not installed on this system.".to_string());
     }
-    // Admission check like rollback/switch/apply below: kyth-safe-upgrade
-    // takes the shared bootc lock for the whole stage, so refuse a second
-    // mutating launch here instead of stacking two sudo prompts that
-    // serialize anyway.
+    // No lock check here on purpose: the Hub shell runs as the user and
+    // /run/kyth-bootc.lock is root-only, so opening it here fails with
+    // EACCES before any update can start. Serialization is the slot above
+    // (no stacked sudo prompts from this Hub) plus the flock that
+    // kyth-safe-upgrade holds for the whole stage.
     let slot = take_mutating_slot()?;
-    kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_stage_job(
         "stage",
         "Download and stage",
@@ -1046,11 +1046,10 @@ pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
 
 #[tauri::command]
 pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
-    // Admission check on the shared bootc lock: the privileged helper takes
-    // it for the whole rollback, so refuse a second mutating launch here
-    // instead of stacking two sudo prompts that serialize anyway.
+    // No lock check here on purpose (see bootc_upgrade): the Hub shell
+    // runs as the user and cannot open the root-only lock file. The slot
+    // above plus the helper-owned flock provide the serialization.
     let slot = take_mutating_slot()?;
-    kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "rollback",
         "Rollback",
@@ -1080,10 +1079,10 @@ pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, 
         .map(String::from)
         .collect::<Vec<_>>();
     argv.push(operation);
-    // Same admission check as rollback: kyth-bootc-guard takes the shared
-    // lock for the whole switch.
+    // Same as rollback: no in-process lock check — the Hub shell cannot
+    // open the root-only lock file; kyth-bootc-guard takes it for the
+    // whole switch.
     let slot = take_mutating_slot()?;
-    kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "switch",
         "Switch channel",
@@ -1098,11 +1097,9 @@ pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
     if !std::path::Path::new("/usr/libexec/kyth-finalize-staged").exists() {
         return Err("The staged-update finalizer is not installed on this system.".to_string());
     }
-    // Systemd's shutdown hook finalizes any raw staged deployment; the Hub
-    // only requests the reboot here. Serialize that restart against other
-    // bootc mutations so it cannot race an upgrade/switch.
+    // No in-process lock check (see bootc_upgrade): the slot above keeps
+    // the restart from racing an upgrade/switch launched from this Hub.
     let slot = take_mutating_slot()?;
-    kyth_shared::system::bootc_guard::with_bootc_lock(|| Ok::<(), String>(()))?;
     start_update_job(
         "apply",
         "Restart to apply staged update",
@@ -1588,6 +1585,38 @@ mod tests {
             ..current.clone()
         };
         assert_eq!(super::merge_stage_snapshot(&current, advanced).pct, 61);
+    }
+
+    #[test]
+    fn hub_shell_launchers_never_touch_the_root_only_bootc_lock() {
+        // Regression pin: the Hub shell runs as the user and /run is
+        // root-only, so a with_bootc_lock() admission check in any launch
+        // command fails with EACCES before the job can start. Serialization
+        // is take_mutating_slot() plus the flock each privileged helper
+        // holds for its whole run.
+        let source = include_str!("updates.rs");
+        for launcher in [
+            "pub(crate) fn bootc_upgrade()",
+            "pub(crate) fn bootc_rollback()",
+            "pub(crate) fn bootc_switch_branch(",
+            "pub(crate) fn apply_staged()",
+        ] {
+            let start = source.find(launcher).expect("launcher fn");
+            let tail = &source[start + launcher.len()..];
+            let end = tail
+                .find("#[tauri::command]")
+                .or_else(|| tail.find("#[cfg(test)]"))
+                .unwrap_or(tail.len());
+            let body = &tail[..end];
+            assert!(
+                !body.contains("with_bootc_lock"),
+                "{launcher} must not touch the root-only bootc lock from the user shell"
+            );
+            assert!(
+                body.contains("take_mutating_slot()?"),
+                "{launcher} must still serialize stacked launches via the mutating slot"
+            );
+        }
     }
 
     #[test]
