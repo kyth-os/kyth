@@ -265,17 +265,42 @@ fn power_check_at(root: &Path) -> PowerCheck {
     let mut batteries = Vec::new();
     let entries = match fs::read_dir(root) {
         Ok(entries) => entries,
-        Err(_) => {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             return PowerCheck {
                 status: "pass".to_string(),
                 detail: "No battery power constraint detected".to_string(),
             }
         }
+        Err(error) => {
+            return PowerCheck {
+                status: "fail".to_string(),
+                detail: format!("Could not read battery power state: {error}"),
+            }
+        }
     };
-    for entry in entries.flatten() {
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
+            Err(error) => {
+                return PowerCheck {
+                    status: "fail".to_string(),
+                    detail: format!("Could not inspect battery power state: {error}"),
+                }
+            }
+        };
         let path = entry.path();
-        let kind = fs::read_to_string(path.join("type")).ok();
-        if kind.as_deref().map(str::trim) != Some("Battery") {
+        let battery_name = entry.file_name().to_string_lossy().starts_with("BAT");
+        let kind = match fs::read_to_string(path.join("type")) {
+            Ok(kind) => kind,
+            Err(error) if battery_name => {
+                return PowerCheck {
+                    status: "fail".to_string(),
+                    detail: format!("Could not read battery power state: {error}"),
+                }
+            }
+            Err(_) => continue,
+        };
+        if kind.trim() != "Battery" {
             continue;
         }
         let capacity = fs::read_to_string(path.join("capacity"))
@@ -284,8 +309,24 @@ fn power_check_at(root: &Path) -> PowerCheck {
         let status = fs::read_to_string(path.join("status"))
             .ok()
             .map(|value| value.trim().to_ascii_lowercase());
-        if let (Some(capacity), Some(status)) = (capacity, status) {
-            batteries.push((capacity, status));
+        match (capacity, status) {
+            (Some(capacity @ 0..=100), Some(status))
+                if matches!(
+                    status.as_str(),
+                    "charging" | "discharging" | "not charging" | "full"
+                ) =>
+            {
+                batteries.push((capacity, status));
+            }
+            _ => {
+                return PowerCheck {
+                    status: "fail".to_string(),
+                    detail: format!(
+                        "Could not determine a safe battery power state for {}. Connect external power before installing.",
+                        path.display()
+                    ),
+                };
+            }
         }
     }
     let Some((capacity, status)) = batteries.into_iter().min_by_key(|battery| battery.0) else {
@@ -391,5 +432,24 @@ mod tests {
         let result = power_check_at(directory.path());
         assert_eq!(result.status, "fail");
         assert!(result.detail.contains("9%"));
+    }
+
+    #[test]
+    fn power_probe_fails_closed_when_a_battery_state_is_incomplete() {
+        let directory = tempfile::tempdir().unwrap();
+        let battery = directory.path().join("BAT0");
+        fs::create_dir(&battery).unwrap();
+        fs::write(battery.join("type"), "Battery\n").unwrap();
+        fs::write(battery.join("capacity"), "87\n").unwrap();
+        let result = power_check_at(directory.path());
+        assert_eq!(result.status, "fail");
+        assert!(result.detail.contains("Connect external power"));
+    }
+
+    #[test]
+    fn missing_power_supply_tree_is_valid_on_desktop_install_media() {
+        let directory = tempfile::tempdir().unwrap();
+        let result = power_check_at(&directory.path().join("no-power-supply-tree"));
+        assert_eq!(result.status, "pass");
     }
 }

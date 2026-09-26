@@ -108,7 +108,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...init,
       headers,
       credentials: inTauriShell() ? "omit" : "same-origin",
-    }, 60_000, `Installer request ${path}`);
+    }, path === "/api/disk/commit" ? 4 * 60 * 60 * 1000 + 60_000 : 60_000, `Installer request ${path}`);
     status = response.status;
     text = await response.text();
   }
@@ -172,11 +172,21 @@ export function subscribeToInstallEvents(onEvent: (event: InstallerEvent) => voi
   let closed = false;
   let unlistenEvent: (() => void) | undefined;
   let unlistenError: (() => void) | undefined;
+  const deliver = (event: InstallerEvent) => {
+    onEvent(event);
+    if (event.type === "done" || event.type === "error") {
+      closed = true;
+      source?.close();
+      unlistenEvent?.();
+      unlistenError?.();
+      if (connection?.transport === "unix") void invoke("installer_stream_stop").catch(() => undefined);
+    }
+  };
   void ensureConnection().then(() => {
     if (closed) return;
     if (connection?.transport === "unix") {
       void Promise.all([
-        listen<InstallerEvent>("installer-event", (event) => onEvent(event.payload)),
+        listen<InstallerEvent>("installer-event", (event) => deliver(event.payload)),
         listen<string>("installer-stream-error", () => onDisconnect()),
       ]).then(([removeEvent, removeError]) => {
         if (closed) {
@@ -198,7 +208,7 @@ export function subscribeToInstallEvents(onEvent: (event: InstallerEvent) => voi
     const streamPath = "/api/stream";
     source = new EventSource(apiUrl(streamPath), { withCredentials: true });
     source.onmessage = (message) => {
-      try { onEvent(JSON.parse(message.data) as InstallerEvent); } catch {
+      try { deliver(JSON.parse(message.data) as InstallerEvent); } catch {
         source?.close();
         onDisconnect();
       }

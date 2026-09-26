@@ -258,6 +258,17 @@ fn read_http_response<R: Read>(stream: R) -> Result<InstallerResponse, String> {
     Ok(InstallerResponse { status, body })
 }
 
+fn response_timeout(path: &str) -> Duration {
+    // Filesystem resize helpers can legitimately run for 30 minutes. Let a
+    // complete partition commit finish before the client times out while the
+    // daemon is still mutating the disk.
+    if path == "/api/disk/commit" {
+        Duration::from_secs(4 * 60 * 60 + 60)
+    } else {
+        Duration::from_secs(610)
+    }
+}
+
 fn send_socket_request(
     value: &InstallerConnection,
     method: &str,
@@ -269,7 +280,7 @@ fn send_socket_request(
     }
     let mut stream = UnixStream::connect(socket_path(value)?)
         .map_err(|err| format!("could not connect to installer service: {err}"))?;
-    stream.set_read_timeout(Some(Duration::from_secs(610))).ok();
+    stream.set_read_timeout(Some(response_timeout(path))).ok();
     // A dead backend that never reads must fail fast on write instead of
     // wedging install Send/Cancel behind the 610 s read bound.
     stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
@@ -295,7 +306,7 @@ fn send_http_request(
     }
     let mut stream = TcpStream::connect("127.0.0.1:7777")
         .map_err(|err| format!("could not connect to installer HTTP service: {err}"))?;
-    stream.set_read_timeout(Some(Duration::from_secs(610))).ok();
+    stream.set_read_timeout(Some(response_timeout(path))).ok();
     // Same write bound as the socket path: fail fast against a dead
     // backend instead of blocking forever in write_all.
     stream.set_write_timeout(Some(Duration::from_secs(30))).ok();
@@ -462,6 +473,15 @@ fn main() {
 #[cfg(test)]
 mod transport_tests {
     use super::*;
+
+    #[test]
+    fn long_partition_commits_get_a_matching_client_wait_bound() {
+        assert!(response_timeout("/api/disk/commit") > Duration::from_secs(1800));
+        assert_eq!(
+            response_timeout("/api/disk/pending"),
+            Duration::from_secs(610)
+        );
+    }
 
     #[test]
     fn all_backend_writes_are_bounded() {

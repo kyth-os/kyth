@@ -60,4 +60,16 @@ test("filesystem install modes submit their selected device and mount layout", (
   assert.match(app, /Assign selected partition/);
   assert.match(app, /onUpdate\("mounts", mounts\)/);
   assert.match(app, /mountpoint, fstype:/);
+  assert.match(app, /manualCommitted && pending\.length === 0/);
+  assert.match(app, /mode === "manual" && next !== "manual"\) setManualCommitted\(false\)/);
+  assert.match(app, /let polling = false/);
+  assert.match(app, /if \(polling\) return/);
+});
+
+test("offline warning matches the selected image source requirement", () => {
+  assert.match(app, /!online && config\?\.source\?\.requires_network === true/);
+  assert.match(api, /event\.type === "done" \|\| event\.type === "error"/);
+  assert.match(api, /source\?\.close\(\)/);
+  assert.match(api, /4 \* 60 \* 60 \* 1000 \+ 60_000/);
+  assert.match(app, /setError\(event\.message\); setStep\("rescue"\); void probe\(\)/);
 });

@@ -147,9 +147,11 @@ pub(crate) fn run_command_with_input(
         .spawn()
         .map_err(|error| format!("could not spawn helper operation: {error}"))?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(input)
-            .map_err(|error| format!("could not provide helper operation input: {error}"))?;
+        if let Err(error) = stdin.write_all(input) {
+            kill_process_group(&mut child);
+            let _ = child.wait();
+            return Err(format!("could not provide helper operation input: {error}"));
+        }
     }
     let result = run_child(&mut child, cancel_requested, DEFAULT_OPERATION_TIMEOUT);
     if result.is_err() && child.try_wait().ok().flatten().is_none() {
@@ -427,6 +429,15 @@ mod tests {
             run_command_timeout(&mut command, || false, Duration::from_millis(150)).unwrap_err();
         assert!(error.contains("timed out"));
         assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn helper_input_failure_kills_and_reaps_the_child() {
+        let mut command = Command::new("/bin/sh");
+        command.args(["-c", "exec 0<&-; exec sleep 30"]);
+        let error = run_command_with_input(&mut command, &vec![b'x'; 1024 * 1024], || false)
+            .expect_err("a helper that closes stdin must fail input delivery");
+        assert!(error.contains("could not provide helper operation input"));
     }
 
     #[test]

@@ -1075,6 +1075,32 @@ fn first_usb_mount() -> Option<String> {
     })
 }
 
+fn validate_recovery_mount_probe(output: &str) -> Result<(), String> {
+    #[derive(serde::Deserialize)]
+    struct FindmntSnapshot {
+        filesystems: Vec<FindmntEntry>,
+    }
+    #[derive(serde::Deserialize)]
+    struct FindmntEntry {
+        target: String,
+        source: String,
+    }
+
+    let snapshot: FindmntSnapshot = serde_json::from_str(output)
+        .map_err(|error| format!("could not parse recovery destination mount: {error}"))?;
+    let media_root = Path::new("/run/media");
+    if snapshot.filesystems.iter().any(|entry| {
+        Path::new(&entry.target).starts_with(media_root) && entry.source.starts_with("/dev/")
+    }) {
+        Ok(())
+    } else {
+        Err(
+            "Selected recovery destination is not a mounted storage device under /run/media."
+                .into(),
+        )
+    }
+}
+
 fn validate_recovery_export_mount(path: &str) -> Result<String, String> {
     let path = Path::new(path.trim());
     let media_root = Path::new("/run/media");
@@ -1089,23 +1115,9 @@ fn validate_recovery_export_mount(path: &str) -> Result<String, String> {
     let target = mount.to_string_lossy().into_owned();
     let output = command_output(
         "/usr/bin/findmnt",
-        &[
-            "--noheadings",
-            "--target",
-            &target,
-            "--output",
-            "TARGET,SOURCE",
-        ],
+        &["--json", "--target", &target, "--output", "TARGET,SOURCE"],
     )?;
-    let mut fields = output.split_whitespace();
-    let mounted_target = fields.next().unwrap_or_default();
-    let source = fields.next().unwrap_or_default();
-    if !Path::new(mounted_target).starts_with(media_root) || !source.starts_with("/dev/") {
-        return Err(
-            "Selected recovery destination is not a mounted storage device under /run/media."
-                .into(),
-        );
-    }
+    validate_recovery_mount_probe(&output)?;
     Ok(target)
 }
 
@@ -2024,6 +2036,19 @@ mod tests {
     fn recovery_export_rejects_non_media_paths_before_helper_dispatch() {
         assert!(super::validate_recovery_export_mount("/etc").is_err());
         assert!(super::validate_recovery_export_mount("/root").is_err());
+    }
+
+    #[test]
+    fn recovery_mount_probe_parses_mount_paths_with_spaces() {
+        let output =
+            r#"{"filesystems":[{"target":"/run/media/test/USB Drive","source":"/dev/sdb1"}]}"#;
+        assert!(super::validate_recovery_mount_probe(output).is_ok());
+    }
+
+    #[test]
+    fn recovery_mount_probe_rejects_non_device_sources() {
+        let output = r#"{"filesystems":[{"target":"/run/media/test/USB","source":"overlay"}]}"#;
+        assert!(super::validate_recovery_mount_probe(output).is_err());
     }
 
     #[test]
