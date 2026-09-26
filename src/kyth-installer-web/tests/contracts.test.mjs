@@ -53,3 +53,11 @@ test("resize attest guards survive UI refactors and daemon hangs surface", () =>
   assert.match(api, /fetchBounded/);
   assert.match(api, /clearTimeout\(timer\)/);
 });
+
+test("filesystem install modes submit their selected device and mount layout", () => {
+  assert.match(app, /Windows partition to shrink/);
+  assert.match(app, /onUpdate\("resize_partition", e\.target\.value\)/);
+  assert.match(app, /Assign selected partition/);
+  assert.match(app, /onUpdate\("mounts", mounts\)/);
+  assert.match(app, /mountpoint, fstype:/);
+});

@@ -8,6 +8,7 @@ export interface FreeRegion { start_bytes: number; end_bytes?: number; size_byte
 export interface SourceStatus { available?: boolean; kind?: string; message?: string; requires_network?: boolean; }
 export interface Config { source_image: string; is_live: boolean; source?: SourceStatus; }
 export interface PendingOperation { index?: number; kind: string; params?: Record<string, unknown>; }
+export interface ManualMount { partition: string; mountpoint: string; fstype: string; }
 export interface TransactionReport { status?: string; phase?: Phase; lifecycle?: Lifecycle; message?: string; [key: string]: unknown; }
 export interface RescueProbe { log_tail?: string; transaction?: TransactionReport; rescue_guidance?: { message?: string; bootable?: boolean; severity?: string }; [key: string]: unknown; }
 
@@ -17,6 +18,7 @@ export interface InstallRequest {
   timezone: string; locale: string; keymap: string; username: string; password: string; mok_password: string; kernel: string;
   confirm_backup: boolean; confirm_erase: boolean; confirm_current: boolean;
   encryption: string; tpm_recovery_ack: boolean; acknowledged_irreversible: boolean;
+  mounts?: ManualMount[];
 }
 
 export type InstallerEvent =

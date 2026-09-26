@@ -506,9 +506,9 @@ pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, Stri
 
 /// Select the installed Btrfs root partition from a fresh lsblk tree.
 ///
-/// Partition numbers are not guessed: the result must be a child of the
-/// requested disk, must be a partition, and must report Btrfs as its
-/// filesystem. EFI, BIOS-boot, and unrelated filesystems are ignored.
+/// The result must be a Btrfs block device below the requested disk. For an
+/// encrypted bootc layout that device is the opened `crypt` mapper below the
+/// LUKS partition rather than the partition itself.
 pub(crate) fn root_partition_from_snapshot(input: &str, disk: &str) -> Result<String, String> {
     let disk = normalize_device_path(disk)
         .ok_or_else(|| "root partition query has an invalid disk".to_string())?;
@@ -524,13 +524,10 @@ pub(crate) fn root_partition_from_snapshot(input: &str, disk: &str) -> Result<St
         .ok_or_else(|| "target disk was not present in root partition probe".to_string())?;
     let mut candidates = Vec::new();
     fn collect(device: &LsblkDevice, candidates: &mut Vec<String>) {
-        if device.device_type.as_deref() == Some("part")
-            && device
-                .fstype
-                .as_deref()
-                .map(str::to_ascii_lowercase)
-                .as_deref()
-                == Some("btrfs")
+        if device
+            .fstype
+            .as_deref()
+            .is_some_and(|fstype| fstype.eq_ignore_ascii_case("btrfs"))
         {
             if let Some(name) = device.name.as_deref().and_then(normalize_device_path) {
                 candidates.push(name);
@@ -1043,6 +1040,19 @@ mod tests {
         let error = root_partition_from_snapshot(snapshot, "/dev/sda")
             .expect_err("ambiguous roots must not select the first filesystem");
         assert!(error.contains("multiple Btrfs partitions"), "{error}");
+    }
+
+    #[test]
+    fn selects_opened_btrfs_mapper_for_encrypted_root() {
+        let snapshot = r#"{"blockdevices":[{"name":"/dev/sda","type":"disk","children":[
+            {"name":"/dev/sda1","type":"part","fstype":"crypto_LUKS","children":[
+                {"name":"/dev/mapper/bootc-root","type":"crypt","fstype":"btrfs"}
+            ]}
+        ]}]}"#;
+        assert_eq!(
+            root_partition_from_snapshot(snapshot, "/dev/sda").unwrap(),
+            "/dev/mapper/bootc-root"
+        );
     }
 
     #[test]

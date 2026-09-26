@@ -12,7 +12,8 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::thread;
@@ -25,6 +26,7 @@ use super::installer_runtime::RuntimeCoordinator;
 use super::installer_storage;
 
 const MAX_REQUEST_BYTES: usize = 16 * 1024 * 1024;
+const MAX_ACTIVE_CLIENTS: usize = 32;
 const MAX_LOG_RESPONSE_BYTES: u64 = 1024 * 1024;
 fn transaction_path() -> PathBuf {
     std::env::var_os("KYTH_INSTALLER_TRANSACTION")
@@ -52,8 +54,10 @@ type NativeSupervisor = JobSupervisor<NativePhaseExecutor>;
 /// VMs) read as on-AC because there is nothing to gate on. Pure over an
 /// explicit sysfs root so it is unit-testable.
 pub(super) fn ac_online_in(root: &Path) -> bool {
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return true;
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return true,
+        Err(_) => return false,
     };
     let mut saw_battery = false;
     let mut ac_online = false;
@@ -841,6 +845,32 @@ fn read_request(stream: &mut UnixStream) -> Result<Vec<u8>, String> {
     Ok(request)
 }
 
+fn reserve_client_slot(active: &AtomicUsize) -> bool {
+    let mut current = active.load(Ordering::Relaxed);
+    loop {
+        if current >= MAX_ACTIVE_CLIENTS {
+            return false;
+        }
+        match active.compare_exchange_weak(
+            current,
+            current + 1,
+            Ordering::AcqRel,
+            Ordering::Relaxed,
+        ) {
+            Ok(_) => return true,
+            Err(actual) => current = actual,
+        }
+    }
+}
+
+struct ClientSlot(Arc<AtomicUsize>);
+
+impl Drop for ClientSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
+
 fn forbidden(stream: &mut UnixStream) {
     let _ = stream
         .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
@@ -909,6 +939,33 @@ fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|_| format!("{program} returned non-UTF-8 output"))
 }
 
+fn wait_for_child(mut child: Child, operation: &str, timeout: Duration) -> Result<Output, String> {
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                return child
+                    .wait_with_output()
+                    .map_err(|error| format!("could not collect {operation} output: {error}"));
+            }
+            Ok(None) if started.elapsed() < timeout => thread::sleep(Duration::from_millis(50)),
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait_with_output();
+                return Err(format!(
+                    "{operation} timed out after {} seconds",
+                    timeout.as_secs()
+                ));
+            }
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait_with_output();
+                return Err(format!("could not wait for {operation}: {error}"));
+            }
+        }
+    }
+}
+
 fn disk_exists(disk: &str) -> Result<(), String> {
     let disk = super::installer_plan::normalize_device_path(disk)
         .ok_or_else(|| "Invalid or unsafe disk.".to_string())?;
@@ -951,13 +1008,13 @@ fn run_native_helper(
         .spawn()
         .map_err(|error| format!("could not start native helper: {error}"))?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(&input)
-            .map_err(|error| format!("could not provide native helper input: {error}"))?;
+        if let Err(error) = stdin.write_all(&input) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!("could not provide native helper input: {error}"));
+        }
     }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("could not wait for native helper: {error}"))?;
+    let output = wait_for_child(child, "native recovery helper", Duration::from_secs(180))?;
     if !output.status.success() {
         let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
         return Err(if detail.is_empty() {
@@ -981,13 +1038,19 @@ fn run_native_action(operation: &str, value: &serde_json::Value) -> Result<(), S
         .spawn()
         .map_err(|error| format!("could not start native {operation}: {error}"))?;
     if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(&input)
-            .map_err(|error| format!("could not provide native {operation} input: {error}"))?;
+        if let Err(error) = stdin.write_all(&input) {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(format!(
+                "could not provide native {operation} input: {error}"
+            ));
+        }
     }
-    let output = child
-        .wait_with_output()
-        .map_err(|error| format!("could not wait for native {operation}: {error}"))?;
+    let output = wait_for_child(
+        child,
+        &format!("native {operation}"),
+        Duration::from_secs(60),
+    )?;
     if output.status.success() {
         return Ok(());
     }
@@ -1010,6 +1073,40 @@ fn first_usb_mount() -> Option<String> {
         (path.starts_with("/run/media/") && path.is_dir() && !path.is_symlink())
             .then(|| path.to_string_lossy().into_owned())
     })
+}
+
+fn validate_recovery_export_mount(path: &str) -> Result<String, String> {
+    let path = Path::new(path.trim());
+    let media_root = Path::new("/run/media");
+    let mount = path
+        .canonicalize()
+        .map_err(|error| format!("could not resolve USB mount: {error}"))?;
+    if !mount.starts_with(media_root) || mount == media_root || !mount.is_dir() {
+        return Err(
+            "Recovery logs can only be exported to a mounted drive under /run/media.".into(),
+        );
+    }
+    let target = mount.to_string_lossy().into_owned();
+    let output = command_output(
+        "/usr/bin/findmnt",
+        &[
+            "--noheadings",
+            "--target",
+            &target,
+            "--output",
+            "TARGET,SOURCE",
+        ],
+    )?;
+    let mut fields = output.split_whitespace();
+    let mounted_target = fields.next().unwrap_or_default();
+    let source = fields.next().unwrap_or_default();
+    if !Path::new(mounted_target).starts_with(media_root) || !source.starts_with("/dev/") {
+        return Err(
+            "Selected recovery destination is not a mounted storage device under /run/media."
+                .into(),
+        );
+    }
+    Ok(target)
 }
 
 fn native_rescue_probe() -> serde_json::Value {
@@ -1692,6 +1789,17 @@ fn handle(
             );
             return Ok(());
         };
+        let usb_mount = match validate_recovery_export_mount(&usb_mount) {
+            Ok(path) => path,
+            Err(error) => {
+                json_response(
+                    &mut client,
+                    "400 Bad Request",
+                    &serde_json::json!({"ok": false, "message": error}),
+                );
+                return Ok(());
+            }
+        };
         let export = serde_json::json!({
             "usb_mount": usb_mount,
             "log_path": installer_log_path(),
@@ -1838,6 +1946,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
     let native_registry = Arc::new(NativeJobRegistry::default());
     let native_journal = Arc::new(NativeJournalRegistry::default());
     let storage_gate = Arc::new(Mutex::new(()));
+    let active_clients = Arc::new(AtomicUsize::new(0));
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
@@ -1847,6 +1956,16 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     eprintln!("could not set installer client timeout: {error}");
                     continue;
                 }
+                if !reserve_client_slot(&active_clients) {
+                    let mut stream = stream;
+                    json_response(
+                        &mut stream,
+                        "503 Service Unavailable",
+                        &serde_json::json!({"ok": false, "message": "Installer is busy; retry shortly."}),
+                    );
+                    continue;
+                }
+                let slot = ClientSlot(Arc::clone(&active_clients));
                 let token = token.clone();
                 let expected_uid = options.peer_uid;
                 let runtime = Arc::clone(&runtime);
@@ -1854,6 +1973,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                 let native_journal = Arc::clone(&native_journal);
                 let storage_gate = Arc::clone(&storage_gate);
                 thread::spawn(move || {
+                    let _slot = slot;
                     if let Err(error) = handle(
                         stream,
                         &token,
@@ -1867,6 +1987,7 @@ pub fn run(args: &[String]) -> Result<(), String> {
                     }
                 });
             }
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
             Err(error) => return Err(format!("installer socket accept failed: {error}")),
         }
     }
@@ -1883,7 +2004,47 @@ mod tests {
     use serde_json::Value;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::Arc;
     use tempfile::tempdir;
+
+    #[test]
+    fn daemon_client_slots_are_bounded_and_released() {
+        let active = Arc::new(AtomicUsize::new(0));
+        for _ in 0..super::MAX_ACTIVE_CLIENTS {
+            assert!(super::reserve_client_slot(&active));
+        }
+        assert!(!super::reserve_client_slot(&active));
+        let slot = super::ClientSlot(Arc::clone(&active));
+        drop(slot);
+        assert!(super::reserve_client_slot(&active));
+    }
+
+    #[test]
+    fn recovery_export_rejects_non_media_paths_before_helper_dispatch() {
+        assert!(super::validate_recovery_export_mount("/etc").is_err());
+        assert!(super::validate_recovery_export_mount("/root").is_err());
+    }
+
+    #[test]
+    fn helper_wait_is_bounded_and_reaps_timed_out_processes() {
+        let child = std::process::Command::new("/bin/sleep")
+            .arg("2")
+            .spawn()
+            .unwrap();
+        let error =
+            super::wait_for_child(child, "test helper", std::time::Duration::from_millis(30))
+                .expect_err("stalled helpers must time out");
+        assert!(error.contains("timed out"), "{error}");
+    }
+
+    #[test]
+    fn unreadable_existing_power_tree_fails_closed() {
+        let directory = tempdir().unwrap();
+        let file = directory.path().join("not-a-supply-directory");
+        fs::write(&file, "not a directory").unwrap();
+        assert!(!super::ac_online_in(&file));
+    }
 
     #[test]
     fn options_require_the_native_socket_boundary() {

@@ -2028,6 +2028,29 @@ mod tests {
     }
 
     #[test]
+    fn manual_mount_assignments_survive_http_request_projection() {
+        let request = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "/dev/sda",
+            "install_mode": "manual",
+            "target_partition": "/dev/sda2",
+            "acknowledged_irreversible": true,
+            "mounts": [{
+                "partition": "/dev/sda3",
+                "mountpoint": "/home",
+                "fstype": "btrfs"
+            }]
+        }))
+        .expect("manual request should parse");
+        let mounts = request
+            .manual_mounts
+            .expect("manual mounts should be retained");
+        assert_eq!(mounts.mounts.len(), 1);
+        assert_eq!(mounts.mounts[0].partition, "/dev/sda3");
+        assert_eq!(mounts.mounts[0].mountpoint, "/home");
+        assert_eq!(mounts.mounts[0].fstype, "btrfs");
+    }
+
+    #[test]
     fn unsupported_encryption_fails_before_any_worker_starts() {
         let mut bad = request(false);
         bad.execution.bootc.encryption = "luks".into();
