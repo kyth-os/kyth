@@ -504,6 +504,11 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertIn("for cosign_attempt in 1 2 3", build)
         self.assertIn("after 3 attempts", build)
         self.assertIn('signature_state="verified"', build)
+        # cosign's TUF client mkdir-fatals when HOME exists (bootc payload
+        # images ship a real /root): TUF_ROOT must point at a fresh dir or
+        # no ISO build can ever pass this gate.
+        self.assertIn("TUF_ROOT", build)
+        self.assertIn('mkdir -p "${TUF_ROOT}"', build)
         # No silent pass: every failure path in the cosign block exits 1.
         gate = build.split("Registry signature gate", 1)[1].split("KYTH_SOURCE_IMAGE=oci", 1)[0]
         self.assertNotIn("exit 0", gate)
