@@ -29,12 +29,15 @@ class HubWebPerformanceTests(unittest.TestCase):
             source = (WEB_SRC / "pages" / page).read_text(encoding="utf-8")
             self.assertNotIn("defaultToFirstSection", source, page)
         # Updates is a single page-level workflow and no longer mounts a
-        # HubPage workspace. VPN is single-section. Apps opts in too: the
-        # sidebar's Apps entry should land directly on the App Store
-        # section rather than an intermediate overview click-through.
-        for page in ("Vpn.tsx", "Apps.tsx"):
-            source = (WEB_SRC / "pages" / page).read_text(encoding="utf-8")
-            self.assertIn("defaultToFirstSection", source, page)
+        # HubPage workspace. VPN is single-section and opts into
+        # defaultToFirstSection. Apps stacks both workspaces with the App
+        # Store on top — no tabs, so no defaultToFirstSection opt-in and a
+        # stacked HubPage instead of an overview click-through.
+        vpn = (WEB_SRC / "pages" / "Vpn.tsx").read_text(encoding="utf-8")
+        self.assertIn("defaultToFirstSection", vpn, "Vpn.tsx")
+        apps = (WEB_SRC / "pages" / "Apps.tsx").read_text(encoding="utf-8")
+        self.assertNotIn("defaultToFirstSection", apps, "Apps.tsx")
+        self.assertIn("stacked", apps, "Apps.tsx")
 
     def test_expensive_bridge_reads_are_shared_and_short_lived(self) -> None:
         self.assertIn("const sharedReads = new Map", LIVE_DATA)

@@ -433,15 +433,19 @@ class HubWebUpdateActionTests(unittest.TestCase):
         self.assertIn("update remains", next_step.lower())
         self.assertIn("Check for updates", next_step)
 
-    def test_apps_page_opens_directly_on_the_app_store_section(self):
+    def test_apps_page_stacks_the_app_store_on_top_with_no_tabs(self):
         apps_page = (HUB_WEB / "pages" / "Apps.tsx").read_text(encoding="utf-8")
-        self.assertIn("defaultToFirstSection", apps_page)
-        # App Store must stay the first section in the route manifest, since
-        # defaultToFirstSection lands on whichever section is listed first.
+        self.assertIn("stacked", apps_page)
+        self.assertIn("showTabs={false}", apps_page)
+        self.assertNotIn("defaultToFirstSection", apps_page)
+        # App Store must stay the first section in the route manifest:
+        # stacked pages render every workspace in manifest order.
         apps_destination = next(
             destination for destination in HUB_ROUTES["destinations"] if destination["key"] == "Apps"
         )
         self.assertEqual("App Store", apps_destination["sections"][0]["key"])
+        hub_page = (HUB_WEB / "pages" / "HubPage.tsx").read_text(encoding="utf-8")
+        self.assertIn("sections.map", hub_page)
 
 
 if __name__ == "__main__":
