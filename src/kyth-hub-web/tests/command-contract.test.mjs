@@ -424,12 +424,17 @@ test("persisted slots carry timestamps and stale ones are dropped", () => {
   assert.match(service, /DOMAIN_STATUS_COMMAND\[domain\]/, "reattach validation must probe each domain's own status command");
 });
 
-test("mutating Hub update launches serialize on the shared bootc lock", () => {
+test("mutating Hub update launches serialize without touching the root-only lock", () => {
+  // The Hub shell runs as the user and /run/kyth-bootc.lock is root-only,
+  // so a with_bootc_lock() admission check fails with EACCES before any
+  // job can start — every update action 100% broken, not racy. The
+  // in-process slot stops stacked launches from this Hub; cross-process
+  // serialization is the flock each privileged helper holds for its run.
   for (const command of ["bootc_upgrade", "bootc_rollback", "bootc_switch_branch", "apply_staged"]) {
     const fn = updatesRust.match(new RegExp(`fn ${command}\\b[\\s\\S]*?start_(update|stage)_job`))?.[0] ?? "";
     assert.notEqual(fn, "", `${command} not found`);
-    assert.match(fn, /with_bootc_lock/, `${command} must admission-check the shared bootc lock before launching`);
-    assert.match(fn, /take_mutating_slot/, `${command} must take the in-process mutating slot: the flock probe is check-then-act across two rapid launches`);
+    assert.doesNotMatch(fn, /with_bootc_lock/, `${command} must not touch the root-only bootc lock from the user shell`);
+    assert.match(fn, /take_mutating_slot/, `${command} must take the in-process mutating slot against stacked launches`);
   }
 });
 
