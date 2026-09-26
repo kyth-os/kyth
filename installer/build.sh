@@ -124,6 +124,13 @@ if [ -n "${cosign_registry_ref}" ]; then
 	fi
 	cosign_identity="${KYTH_COSIGN_IDENTITY:-^https://github.com/.+/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$}"
 	cosign_issuer="https://token.actions.githubusercontent.com"
+	# cosign's TUF client bootstraps its cache with a plain mkdir of the
+	# cache root: with HOME=/root (which already exists in bootc payload
+	# images) that fatals as "mkdir /root: file exists" before any network
+	# happens, so no ISO build could ever pass this gate. Point TUF at a
+	# fresh directory; verification itself is unchanged.
+	export TUF_ROOT="${TUF_ROOT:-/tmp/kyth-sigstore-tuf}"
+	mkdir -p "${TUF_ROOT}"
 	# The TUF root refresh and registry reads flake on shared runners; retry a
 	# few times before failing. The gate itself stays hard — after retries it
 	# still exits 1, never records "verified" without a real verification.
