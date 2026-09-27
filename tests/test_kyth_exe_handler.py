@@ -44,6 +44,12 @@ class ExeHandlerTests(unittest.TestCase):
             save_auto_bottles(False, conf)
             self.assertFalse(load_auto_bottles(conf))
 
+    def test_installer_worker_is_a_tracked_thread(self):
+        from kyth_shared.desktop.exe_handler import _InstallerWorker
+        from kyth_shared.desktop.qt_threads import TrackedThread
+
+        self.assertTrue(issubclass(_InstallerWorker, TrackedThread))
+
 
 if __name__ == "__main__":
     unittest.main()

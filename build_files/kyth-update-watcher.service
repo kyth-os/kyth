@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS intelligent update watcher (oneshot)
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=network-online.target
 Wants=network-online.target
 ConditionACPower=true
@@ -13,9 +13,29 @@ StandardError=journal
 SyslogIdentifier=kyth-update-watcher
 # Runs as root; bootc upgrade requires it
 User=root
+UMask=0077
+NoNewPrivileges=yes
+# bootc performs the deployment in PID 1's mount namespace and writes the
+# staged deployment plus Kyth's durable update status under /var/lib/kyth.
+# Mount-namespace hardening (PrivateTmp/ProtectSystem/ProtectHome and the
+# ProtectKernel* family) prevents that handoff before bootc can stage an
+# image, reported as: "Ensuring mountns: Reading /proc/1/ns/mnt: Permission
+# denied".  Keep this one fixed-root updater outside those mount restrictions;
+# its executable, argv, user, and timer are all image-owned and it cannot
+# accept user input.
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CacheDirectory=kyth
+CacheDirectoryMode=0700
 
 # Give the upgrade plenty of time (large container layers on slow connections)
 TimeoutStartSec=2400
 # Keep automatic staging from competing with the foreground desktop.
 Nice=10
 IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=512M
+MemoryMax=768M

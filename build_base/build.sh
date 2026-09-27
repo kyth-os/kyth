@@ -2,6 +2,7 @@
 set -euo pipefail
 
 KYTH_KERNEL_FLAVOR="${KYTH_KERNEL_FLAVOR:-fedora}"
+# curl callers must use --fail --retry 3 (see build_files/scripts/lib/curl-common.sh: --retry 5 covers it)
 
 write_kernel_flavor() {
 	mkdir -p /usr/share/kyth
@@ -19,9 +20,9 @@ VERSION="44"
 VERSION_ID="44"
 ANSI_COLOR="0;34"
 LOGO=kyth
-HOME_URL="https://github.com/mrtrick37/kyth"
-SUPPORT_URL="https://github.com/mrtrick37/kyth/discussions"
-BUG_REPORT_URL="https://github.com/mrtrick37/kyth/issues"
+HOME_URL="https://github.com/kyth-os/kyth"
+SUPPORT_URL="https://github.com/kyth-os/kyth/discussions"
+BUG_REPORT_URL="https://github.com/kyth-os/kyth/issues"
 EOF
 }
 
@@ -93,7 +94,9 @@ install_cachyos_kernel() {
 	done
 	remove_kernel_packages_except 'cachyos'
 
-	if [ ! -f "/usr/lib/modules/${kver}/vmlinuz" ] && [ -f "/boot/vmlinuz-${kver}" ]; then
+	# Risk9: CachyOS kernel image may live only in /boot after install (vmlinuz not in module dir);
+# fallback copy ensures latest_kernel_version() still finds it for greenboot module-tree check.
+if [ ! -f "/usr/lib/modules/${kver}/vmlinuz" ] && [ -f "/boot/vmlinuz-${kver}" ]; then
 		cp --no-preserve=all "/boot/vmlinuz-${kver}" "/usr/lib/modules/${kver}/vmlinuz" 2>/dev/null || true
 	fi
 
@@ -114,6 +117,17 @@ cachy | cachyos)
 	exit 1
 	;;
 esac
+
+# ── NVIDIA pre-stage (opt-in, Bazzite desktop-nvidia) ─────────────────────────
+# Keep fedora default lean; when ENABLE_NVIDIA=1, pre-install akmod-nvidia so
+# first boot on NVIDIA hardware skips the 49s flatpak-system-update-like akmod
+# build. Same base digest when 0.
+if [[ "${ENABLE_NVIDIA:-0}" == "1" ]]; then
+	echo "Pre-staging NVIDIA akmods (ENABLE_NVIDIA=1)..."
+	dnf5 install -y --setopt=install_weak_deps=False akmod-nvidia xorg-x11-drv-nvidia || \
+		echo "WARNING: akmod-nvidia pre-stage failed — continuing without NVIDIA pre-stage." >&2
+fi
+
 write_kernel_flavor
 
 write_kyth_os_release /usr/lib/os-release
@@ -201,6 +215,10 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 	install -d -m 0700 /var/roothome
 	_kyth_dracut_stderr="$(mktemp)"
 	_kyth_dracut_status=1
+	# Explicit --add (not just the 99-kyth.conf fallback) so this build-time
+	# image never depends on conf ordering. This is KYTH_DRACUT_MODULES from
+	# build_files/scripts/lib/dracut-modules.sh — build_base's isolated Docker
+	# context cannot bind-mount that file, so the list is inlined; keep in sync.
 	for _kyth_dracut_attempt in 1 2; do
 		rm -f "${_kyth_initramfs}"
 		if TMPDIR=/var/tmp dracut \
@@ -209,7 +227,7 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 			--kver "${KVER}" \
 			--force \
 			--nohardlink \
-			--add kyth-plymouth \
+			--add "drm plymouth ostree kyth-plymouth" \
 			--include "${_kyth_plymouth_include_root}" / \
 			"${_kyth_initramfs}" \
 			2>"${_kyth_dracut_stderr}"; then
@@ -277,15 +295,35 @@ if [[ "${KYTH_KERNEL_FLAVOR}" == "cachy" ]]; then
 fi
 
 # ── Kernel args (bootc kargs.d) ───────────────────────────────────────────────
+# rootflags scope: KythOS installs ONLY on btrfs (installer formats btrfs with
+# a subvol=@ layout and passes --karg=rootflags=subvol=@ at install time), so
+# these btrfs-only mount options are safe to ship unconditionally here:
+#   noatime ......... skip atime writes (SSD wear + throughput; relatime default off)
+#   compress=zstd:1 . light transparent compression; level 1 is ~free on modern CPUs
+#   ssd ............. SSD allocation heuristics (no-op on HDDs/virtio, harmless)
+#   discard=async ... async TRIM; batched, no foreground latency like sync discard
+# commit= is deliberately absent: btrfs already defaults to commit=30, so
+# spelling it out would only add cmdline noise for zero behavior change. A
+# shorter sync interval (commit=5) was considered and rejected — it multiplies
+# metadata writeback on desktop workloads for crash-consistency gains that
+# don't matter behind greenboot rollback + btrfs checksums.
 mkdir -p /usr/lib/bootc/kargs.d
 cat >/usr/lib/bootc/kargs.d/99-kyth.toml <<'KARGSEOF'
-kargs = ["quiet", "rhgb", "splash", "rd.plymouth=1", "plymouth.enable=1", "plymouth.ignore-serial-consoles", "systemd.show_status=false", "rd.systemd.show_status=false", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0", "threadirqs", "split_lock_detect=off", "rootflags=noatime,compress=zstd:1,ssd,discard=async,commit=30", "amdgpu.ppfeaturemask=0xffffffff", "pcie_aspm=performance"]
+kargs = ["quiet", "rhgb", "splash", "rd.plymouth=1", "plymouth.enable=1", "plymouth.ignore-serial-consoles", "systemd.show_status=false", "rd.systemd.show_status=false", "loglevel=3", "rd.udev.log_level=3", "vt.global_cursor_default=0", "threadirqs", "split_lock_detect=off", "rootflags=noatime,compress=zstd:1,ssd,discard=async"]
 KARGSEOF
+# NOTE: keep the splash karg list in sync with the post-upgrade migration in
+# build_files/scripts/branding/28-bootc-kernel-arguments-and-boot-splash.sh,
+# which writes the same set to /etc/bootc/kargs.d for pre-existing installs.
 
-# ── SDDM — ensure graphical target ───────────────────────────────────────────
-systemctl enable sddm 2>/dev/null || true
+# ── Plasma Login Manager — ensure graphical target ───────────────────────────
+if [[ ! -f /usr/lib/systemd/system/plasmalogin.service ]]; then
+	echo "ERROR: plasmalogin.service missing; cannot set display-manager" >&2
+	exit 1
+fi
+systemctl unmask plasmalogin.service 2>/dev/null || true
+systemctl enable plasmalogin.service
 systemctl set-default graphical.target 2>/dev/null || true
-ln -sf /usr/lib/systemd/system/sddm.service \
+ln -sf /usr/lib/systemd/system/plasmalogin.service \
 	/etc/systemd/system/display-manager.service
 mkdir -p /etc/systemd/system/graphical.target.wants
 ln -sf /etc/systemd/system/display-manager.service \
@@ -293,8 +331,16 @@ ln -sf /etc/systemd/system/display-manager.service \
 ln -sf /usr/lib/systemd/system/graphical.target \
 	/etc/systemd/system/default.target
 
+# Unit masks that are deliberate image policy, not leftovers:
+# - bootloader-update.service: bootc manages bootloader state on atomic
+#   updates; letting the legacy updater rewrite BLS entries/shim underneath
+#   it races deployments and can leave an unbootable entry behind.
+# - systemd-remount-fs.service: /usr is an ostree bind mount, not fstab
+#   state — a remount pass driven by /etc/fstab fights ostree's mount
+#   namespace setup ordering. (sysconfig.sh documents the same mask on the
+#   runtime layer; both must stay masked or early boot remount races return.)
 systemctl mask bootloader-update.service 2>/dev/null || true
 systemctl mask systemd-remount-fs.service 2>/dev/null || true
 
-rm -f /etc/systemd/system/plasmalogin.service
-ln -s /dev/null /etc/systemd/system/plasmalogin.service
+rm -f /etc/systemd/system/sddm.service
+ln -s /dev/null /etc/systemd/system/sddm.service

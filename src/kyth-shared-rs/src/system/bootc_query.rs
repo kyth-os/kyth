@@ -1,0 +1,446 @@
+//! Port of `kyth_shared.system.bootc_query` — bootc status queries.
+
+use regex::Regex;
+use serde_json::Value;
+use std::time::Duration;
+
+pub fn nested_get<'a>(data: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut cur = data;
+    for k in path {
+        cur = cur.get(*k)?;
+    }
+    Some(cur)
+}
+
+pub fn walk_strings(v: &Value, out: &mut Vec<String>) {
+    match v {
+        Value::String(s) => out.push(s.clone()),
+        Value::Object(m) => {
+            for val in m.values() {
+                walk_strings(val, out);
+            }
+        }
+        Value::Array(arr) => {
+            for val in arr {
+                walk_strings(val, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn run_with_timeout(cmd: &[String], timeout: Duration) -> Option<(i32, String)> {
+    if cmd.is_empty() {
+        return None;
+    }
+    let output = super::process::run_bounded(cmd, timeout).ok()?;
+    Some((
+        output.status.code().unwrap_or(-1),
+        String::from_utf8_lossy(&output.stdout).to_string(),
+    ))
+}
+
+fn status_commands(json_mode: bool) -> Vec<Vec<String>> {
+    let guard_op = if json_mode { "status-json" } else { "status" };
+    let guard = vec![
+        "/usr/bin/kyth-bootc-guard".to_string(),
+        guard_op.to_string(),
+    ];
+    let bootc = if json_mode {
+        vec![
+            "bootc".to_string(),
+            "status".to_string(),
+            "--json".to_string(),
+        ]
+    } else {
+        vec!["bootc".to_string(), "status".to_string()]
+    };
+    if effective_uid() == 0 {
+        vec![guard, bootc]
+    } else {
+        vec![
+            vec![
+                "sudo".to_string(),
+                "-n".to_string(),
+                guard[0].clone(),
+                guard[1].clone(),
+            ],
+            bootc,
+        ]
+    }
+}
+
+/// Run the fixed, read-only bootc update check from the Hub process.
+///
+/// The Tauri webview is normally unprivileged, while bootc must inspect the
+/// host sysroot as root. The guard is explicitly allowlisted in sudoers and
+/// accepts no caller-provided image reference or arguments.
+pub fn update_check(timeout: Duration) -> Result<String, String> {
+    let command = if effective_uid() == 0 {
+        vec!["/usr/bin/kyth-bootc-guard".to_string(), "check".to_string()]
+    } else {
+        vec![
+            "sudo".to_string(),
+            "-n".to_string(),
+            "/usr/bin/kyth-bootc-guard".to_string(),
+            "check".to_string(),
+        ]
+    };
+    let output = super::process::run_bounded(&command, timeout)
+        .map_err(|error| format!("Could not run the bootc update check: {error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let detail = if stdout.is_empty() {
+        stderr.clone()
+    } else if stderr.is_empty() {
+        stdout
+    } else {
+        format!("{stdout}\n{stderr}")
+    };
+    if output.status.success() {
+        Ok(detail)
+    } else if detail.is_empty() {
+        Err(format!(
+            "bootc update check failed (exit code {}).",
+            output.status.code().unwrap_or(-1)
+        ))
+    } else {
+        Err(detail)
+    }
+}
+
+/// Convert bootc's stable check messages into the Hub availability state.
+/// Unknown successful output is rejected rather than shown as up to date.
+pub fn update_check_state(output: &str) -> Option<&'static str> {
+    let lower = output.to_ascii_lowercase();
+    if lower.contains("update available for:") {
+        Some("available")
+    } else if lower.contains("no changes in:") || lower.contains("no changes") {
+        Some("uptodate")
+    } else {
+        None
+    }
+}
+
+fn effective_uid() -> u32 {
+    std::fs::read_to_string("/proc/self/status")
+        .ok()
+        .and_then(|status| {
+            status.lines().find_map(|line| {
+                let value = line.strip_prefix("Uid:")?.split_whitespace().next()?;
+                value.parse().ok()
+            })
+        })
+        .unwrap_or(1)
+}
+
+pub fn holds_sysroot_lock(cmdline: &str) -> bool {
+    let text = cmdline.trim();
+    if text.contains("ostree admin finalize-staged") {
+        // ostree-finalize-staged-hold.service parks
+        // `ostree admin finalize-staged --hold` for the entire uptime to keep
+        // /boot open; it performs no mutation and must not read as an active
+        // operation, or every status read starves forever. Only a real
+        // finalization (no --hold token) counts as a lock holder.
+        let holding = !text.split_whitespace().any(|token| token == "--hold");
+        return holding;
+    }
+    let Some(captures) = Regex::new(r"(?:^|[\s/])bootc\s+(upgrade|switch|rollback|reset)(?:\s|$)")
+        .ok()
+        .and_then(|pattern| pattern.captures(text))
+    else {
+        return false;
+    };
+    // `bootc upgrade --check` only queries the registry; it stages nothing
+    // and must not be mistaken for the mutating `upgrade` that does. Treating
+    // it as a lock-holder starves every concurrent status read (page loads,
+    // kyth-probe) of data for as long as the check is in flight.
+    !(&captures[1] == "upgrade" && text.contains("--check"))
+}
+
+pub fn active_operation() -> Option<String> {
+    let output = super::process::run_bounded(
+        &["ps", "-eo", "pid=,args="]
+            .into_iter()
+            .map(String::from)
+            .collect::<Vec<_>>(),
+        Duration::from_secs(3),
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(str::trim)
+        .find(|line| holds_sysroot_lock(line))
+        .map(str::to_string)
+}
+
+pub fn fetch_status_text() -> String {
+    if active_operation().is_some() {
+        return String::new();
+    }
+    for cmd in status_commands(false) {
+        if let Some((0, stdout)) = run_with_timeout(&cmd, Duration::from_secs(10)) {
+            let t = stdout.trim().to_string();
+            if !t.is_empty() {
+                return t;
+            }
+        }
+    }
+    String::new()
+}
+
+pub fn fetch_status_data() -> Option<Value> {
+    if active_operation().is_some() {
+        return None;
+    }
+    for cmd in status_commands(true) {
+        if let Some((0, stdout)) = run_with_timeout(&cmd, Duration::from_secs(10)) {
+            if let Some(value) = parse_status_data(&stdout) {
+                return Some(value);
+            }
+        }
+    }
+    None
+}
+
+/// Decode the structured status response and reject valid JSON that is not an
+/// object, matching the Python `parse_json_object` contract.
+pub fn parse_status_data(raw: &str) -> Option<Value> {
+    let value = serde_json::from_str::<Value>(raw).ok()?;
+    value.is_object().then_some(value)
+}
+
+pub fn image_reference_from_status(data: &Value) -> Option<String> {
+    image_reference_from_status_with_output(data, "")
+}
+
+/// Resolve an image reference from structured bootc data, then from the
+/// human-readable status output used by older bootc versions.
+pub fn image_reference_from_status_with_output(
+    data: &Value,
+    status_output: &str,
+) -> Option<String> {
+    // Try status.booted.image.reference etc.
+    for path in [
+        vec!["status", "booted", "image", "reference"],
+        vec!["status", "booted", "image", "image", "reference"],
+        vec!["status", "booted", "image", "image", "image"],
+        vec!["status", "booted", "image", "image"],
+        vec!["status", "booted", "image"],
+        vec!["spec", "image", "image"],
+        vec!["spec", "image", "reference"],
+    ] {
+        if let Some(v) = nested_get(data, &path.iter().map(|s| *s).collect::<Vec<_>>()) {
+            if let Some(s) = v.as_str() {
+                if !s.trim().is_empty() {
+                    return Some(s.trim().to_string());
+                }
+            }
+            if let Some(obj) = v.as_object() {
+                if let Some(s) = obj.get("reference").and_then(|x| x.as_str()) {
+                    if !s.trim().is_empty() {
+                        return Some(s.trim().to_string());
+                    }
+                }
+                if let Some(s) = obj.get("image").and_then(|x| x.as_str()) {
+                    if !s.trim().is_empty() {
+                        return Some(s.trim().to_string());
+                    }
+                }
+            }
+        }
+    }
+    // walk strings for ghcr.io
+    let mut strs = Vec::new();
+    walk_strings(data, &mut strs);
+    for s in strs {
+        if s.to_lowercase().contains("ghcr.io/kyth-os/kyth") {
+            return Some(s.trim().to_string());
+        }
+    }
+    if !status_output.is_empty() {
+        let pattern =
+            Regex::new(r"(ghcr\.io/kyth-os/kyth(?::[A-Za-z0-9._-]+)?(?:@sha256:[a-fA-F0-9]+)?)")
+                .ok()?;
+        if let Some(reference) = pattern
+            .captures(status_output)
+            .and_then(|captures| captures.get(1))
+        {
+            return Some(reference.as_str().to_string());
+        }
+    }
+    None
+}
+
+/// Read the current image reference through the same bounded fallbacks as
+/// the Python compatibility layer. This is observation only: no update or
+/// deployment command is issued.
+pub fn image_reference() -> Option<String> {
+    let data = crate::system::probe::read_section("bootc-status-data")
+        .or_else(fetch_status_data)
+        .unwrap_or(Value::Object(serde_json::Map::new()));
+    if let Some(reference) = image_reference_from_status_with_output(&data, "") {
+        return Some(reference);
+    }
+    let status_output = fetch_status_text();
+    if let Some(reference) = image_reference_from_status_with_output(&data, &status_output) {
+        return Some(reference);
+    }
+    let command = vec!["rpm-ostree".to_string(), "status".to_string()];
+    run_with_timeout(&command, Duration::from_secs(10))
+        .filter(|(code, _)| *code == 0)
+        .and_then(|(_, output)| {
+            image_reference_from_status_with_output(&Value::Object(serde_json::Map::new()), &output)
+        })
+}
+
+pub fn image_digest_from_status(data: &Value, section: &str) -> Option<String> {
+    for path in [
+        vec!["status", section, "image", "imageDigest"],
+        vec!["status", section, "image", "digest"],
+        vec!["status", section, "imageDigest"],
+        vec!["status", section, "digest"],
+    ] {
+        if let Some(v) = nested_get(data, &path.iter().map(|s| *s).collect::<Vec<_>>()) {
+            if let Some(s) = v.as_str() {
+                if s.starts_with("sha256:") {
+                    return Some(s.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+pub fn image_digest(data: &Value, section: &str) -> Option<(String, String)> {
+    let full = image_digest_from_status(data, section)?;
+    Some((full[7..].chars().take(12).collect(), full[7..].to_string()))
+}
+
+/// Read the human-readable image version for one bootc status section.
+///
+/// bootc reports the OCI `org.opencontainers.image.version` label (when the
+/// publisher sets one) alongside each deployment. The exact key varies by
+/// bootc release, so probe the known shapes and return the first non-empty
+/// value. `None` means the version is unavailable — callers must treat the
+/// release as unorderable, never as version zero.
+pub fn image_version_from_status(data: &Value, section: &str) -> Option<String> {
+    for path in [
+        vec!["status", section, "image", "imageVersion"],
+        vec!["status", section, "image", "version"],
+        vec!["status", section, "imageVersion"],
+        vec!["status", section, "version"],
+    ] {
+        if let Some(v) = nested_get(data, &path.to_vec()) {
+            if let Some(s) = v.as_str() {
+                let trimmed = s.trim();
+                if !trimmed.is_empty() {
+                    return Some(trimmed.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn nested() {
+        let v = json!({"a":{"b":2}});
+        assert_eq!(nested_get(&v, &["a", "b"]).unwrap().as_i64(), Some(2));
+        assert!(nested_get(&v, &["a", "c"]).is_none());
+    }
+    #[test]
+    fn image_ref() {
+        let v = json!({"status":{"booted":{"image":{"reference":"ghcr.io/kyth-os/kyth:latest"}}}});
+        assert_eq!(
+            image_reference_from_status(&v),
+            Some("ghcr.io/kyth-os/kyth:latest".to_string())
+        );
+    }
+
+    #[test]
+    fn image_ref_falls_back_to_human_readable_status_output() {
+        let output = "Image: ghcr.io/kyth-os/kyth:testing@sha256:abcdef1234\n";
+        assert_eq!(
+            image_reference_from_status_with_output(&Value::Null, output),
+            Some("ghcr.io/kyth-os/kyth:testing@sha256:abcdef1234".into())
+        );
+        assert!(image_reference_from_status_with_output(
+            &Value::Null,
+            "Image: quay.io/example/other:latest"
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn status_json_fallback_rejects_non_object_documents() {
+        assert!(parse_status_data("[]").is_none());
+        assert!(parse_status_data("{bad").is_none());
+        assert_eq!(
+            parse_status_data(r#"{"status":{}}"#).unwrap()["status"],
+            json!({})
+        );
+    }
+
+    #[test]
+    fn lock_detection_matches_bootc_operations() {
+        assert!(holds_sysroot_lock("123 /usr/bin/bootc upgrade"));
+        assert!(holds_sysroot_lock("/usr/bin/ostree admin finalize-staged"));
+        assert!(!holds_sysroot_lock("/usr/bin/bootc status --json"));
+    }
+
+    #[test]
+    fn lock_detection_ignores_the_permanent_boot_hold_daemon() {
+        // ostree-finalize-staged-hold.service parks this exact command for
+        // the whole uptime. Treating it as an active operation starved every
+        // status read (and every kyth-safe-upgrade run) forever.
+        assert!(!holds_sysroot_lock(
+            "79830 /usr/bin/ostree admin finalize-staged --hold"
+        ));
+        // A real finalization without the token still counts.
+        assert!(holds_sysroot_lock("/usr/bin/ostree admin finalize-staged"));
+    }
+
+    #[test]
+    fn lock_detection_treats_a_read_only_upgrade_check_as_no_lock() {
+        assert!(!holds_sysroot_lock("/usr/bin/bootc upgrade --check"));
+        assert!(holds_sysroot_lock("/usr/bin/bootc upgrade"));
+    }
+
+    #[test]
+    fn digest_shortens_without_the_algorithm_prefix() {
+        let v = serde_json::json!({"status":{"staged":{"image":{"imageDigest":"sha256:1234567890abcdef"}}}});
+        assert_eq!(
+            image_digest(&v, "staged"),
+            Some(("1234567890ab".into(), "1234567890abcdef".into()))
+        );
+    }
+
+    #[test]
+    fn update_check_state_accepts_bootc_available_output() {
+        assert_eq!(
+            update_check_state("Update available for: ghcr.io/kyth-os/kyth:testing"),
+            Some("available")
+        );
+    }
+
+    #[test]
+    fn update_check_state_accepts_bootc_no_changes_output() {
+        assert_eq!(
+            update_check_state("No changes in: ghcr.io/kyth-os/kyth:testing"),
+            Some("uptodate")
+        );
+    }
+
+    #[test]
+    fn update_check_state_rejects_unknown_success_output() {
+        assert_eq!(update_check_state("Checking complete."), None);
+    }
+}

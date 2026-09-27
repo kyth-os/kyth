@@ -39,6 +39,30 @@ class InstallerAssuranceTests(unittest.TestCase):
             checks = validate_installed_target(etc, request)
         self.assertEqual({check.name for check in checks}, {"hostname", "account", "filesystem"})
 
+    def test_missing_bootloader_on_mounted_root_fails_closed(self):
+        request = InstallRequest(hostname="kyth", username="")
+        with tempfile.TemporaryDirectory() as tmp:
+            etc = Path(tmp) / "etc"
+            etc.mkdir()
+            (etc / "hostname").write_text("kyth\n")
+            (etc / "fstab").write_text("# generated\n")
+            with self.assertRaisesRegex(RuntimeError, "no bootloader"):
+                validate_installed_target(etc, request, root=Path(tmp))
+
+    def test_bootloader_present_via_loader_entries(self):
+        request = InstallRequest(hostname="kyth", username="")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            etc = root / "etc"
+            etc.mkdir()
+            (etc / "hostname").write_text("kyth\n")
+            (etc / "fstab").write_text("# generated\n")
+            entries = root / "boot" / "loader" / "entries"
+            entries.mkdir(parents=True)
+            (entries / "kyth.conf").write_text("title KythOS\n")
+            checks = validate_installed_target(etc, request, root=root)
+        self.assertIn("bootloader", {check.name for check in checks})
+
     def test_missing_installed_account_fails_closed(self):
         request = InstallRequest(hostname="kyth", username="alice")
         with tempfile.TemporaryDirectory() as tmp:

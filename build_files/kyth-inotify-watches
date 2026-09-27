@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-inotify-watches — 1048576 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-inotify-watches "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.inotify_watches import load_inotify_watches, inotify_watches_status; c=load_inotify_watches(); print(f\"profile={c['profile']} active={inotify_watches_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.inotify_watches import load_inotify_watches,save_inotify_watches,generate_inotify_watches; c=load_inotify_watches(); c['profile']='gaming'; save_inotify_watches(c); generate_inotify_watches(c)"; sysctl --system >/dev/null 2>&1 || true; echo "inotify watches gaming 1048576" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.inotify_watches import load_inotify_watches,save_inotify_watches,generate_inotify_watches; c=load_inotify_watches(); c['profile']='balanced'; save_inotify_watches(c); generate_inotify_watches(c)"; echo "inotify watches balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.inotify_watches import load_inotify_watches,generate_inotify_watches; generate_inotify_watches(load_inotify_watches())" ;;
-    *) echo "Usage: kyth-inotify-watches [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -1,14 +1,20 @@
 [Unit]
 Description=KythOS unattended VM acceptance guest
-After=network-online.target display-manager.service
+After=network-online.target
 Wants=network-online.target
 [Service]
 Type=oneshot
-ExecCondition=/usr/libexec/kyth-vm-acceptance-guest enabled
+# The guest executable owns the fw_cfg enablement check. Keeping it out of an
+# ExecCondition avoids a boot-order race where systemd evaluates the condition
+# before QEMU exposes the acceptance flag and permanently skips this oneshot.
 ExecStart=/usr/libexec/kyth-vm-acceptance-guest run
-TimeoutStartSec=infinity
+TimeoutStartSec=1800
+MemoryMax=4G
+CPUQuota=50%
+Nice=10
+IOSchedulingClass=idle
 StandardOutput=journal+console
 StandardError=journal+console
 
 [Install]
-WantedBy=graphical.target
+WantedBy=multi-user.target

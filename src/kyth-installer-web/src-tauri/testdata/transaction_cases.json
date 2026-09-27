@@ -1,0 +1,41 @@
+[
+  {
+    "name": "complete-transaction",
+    "json": {
+      "schema_version": 1,
+      "transaction_id": "abc123",
+      "updated_at": "2026-08-28T00:00:00+00:00",
+      "status": "complete",
+      "phase": "complete",
+      "lifecycle": "done",
+      "install_mode": "wipe",
+      "disk": "/dev/sda",
+      "target_partition": "",
+      "source": {"kind": "embedded", "digest": "sha256:deadbeef", "verified": true, "target_ref": "ghcr.io/kyth-os/kyth:testing"},
+      "checks": [{"name": "source", "status": "passed"}],
+      "partition_steps": [{"kind": "create", "status": "completed", "target": "/dev/sda2"}],
+      "message": "Install finished."
+    },
+    "expected": {"status": "complete", "phase": "complete", "disk": "/dev/sda", "source_digest": "sha256:deadbeef", "severity": "ready", "bootable": true}
+  },
+  {
+    "name": "interrupted-configuration-with-defaults",
+    "json": {"status": "configure_started", "disk": "/dev/nvme0n1", "message": "interrupted"},
+    "expected": {"status": "configure_started", "phase": "", "disk": "/dev/nvme0n1", "source_digest": "", "severity": "unbootable", "bootable": false}
+  },
+  {
+    "name": "unknown-status-fails-closed",
+    "json": {"schema_version": 1, "status": "future_status"},
+    "expected": {"status": "future_status", "phase": "", "disk": "", "source_digest": "", "severity": "unknown", "bootable": false}
+  },
+  {
+    "name": "rejects-unsupported-schema",
+    "json": {"schema_version": 2, "status": "complete"},
+    "error_contains": "unsupported transaction state schema"
+  },
+  {
+    "name": "rejects-malformed-json",
+    "json": "not-json",
+    "error_contains": "invalid transaction state"
+  }
+]

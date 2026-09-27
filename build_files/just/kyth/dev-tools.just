@@ -62,8 +62,11 @@ install-jetbrains-toolbox:
 
     echo "Fetching latest JetBrains Toolbox release..."
     download_url=$(curl -fsSL "${TOOLBOX_REPO}" \
-        | python3 -c "import sys,json; d=json.load(sys.stdin); \
-          print(d['TBA'][0]['downloads']['linux']['link'])")
+        | jq -r '.TBA[0].downloads.linux.link // empty')
+    if [[ -z "${download_url}" ]]; then
+        echo "ERROR: JetBrains Toolbox did not publish a Linux download URL." >&2
+        exit 1
+    fi
 
     tarball="${download_url##*/}"
     tmpdir=$(mktemp -d)

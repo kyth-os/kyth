@@ -10,8 +10,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/find-kver.sh"
 # shellcheck source=lib/dracut-retry.sh disable=SC1091
 source "${SCRIPT_DIR}/lib/dracut-retry.sh"
+# shellcheck source=lib/dracut-modules.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/dracut-modules.sh"
 
 KVER="$(find_active_kver)"
+if [ -z "${KVER}" ]; then
+	# Prefer the newest module dir that actually ships a vmlinuz; only fall
+	# back to the newest dir overall so the missing-vmlinuz repair below
+	# still has a candidate to staple a vmlinuz onto.
+	KVER="$(for d in /usr/lib/modules/*/; do [ -s "${d}vmlinuz" ] && basename "${d}"; done | sort -V | tail -n 1)"
+fi
 if [ -z "${KVER}" ]; then
 	KVER="$(find /usr/lib/modules -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort -V | tail -n 1)"
 fi
@@ -37,7 +45,7 @@ if [ ! -s "/usr/lib/modules/${KVER}/vmlinuz" ]; then
 		cp --no-preserve=all "${src}" "/usr/lib/modules/${KVER}/vmlinuz"
 	else
 		echo "  vmlinuz not found in /boot, checking /usr/lib/kernel..."
-		src=$(find /usr/lib/kernel -name "vmlinuz*" 2>/dev/null | head -1)
+		src=$(find /usr/lib/kernel -name "vmlinuz-${KVER}" 2>/dev/null | head -1)
 		if [ -n "${src}" ] && [ -s "${src}" ]; then
 			echo "  Found vmlinuz at ${src}, copying..."
 			cp --no-preserve=all "${src}" "/usr/lib/modules/${KVER}/vmlinuz"
@@ -45,8 +53,14 @@ if [ ! -s "/usr/lib/modules/${KVER}/vmlinuz" ]; then
 	fi
 fi
 
-{ depmod -a "${KVER}" 2>/dev/null || true; }
+depmod_output="$(depmod -a "${KVER}" 2>&1)" || {
+	echo "ERROR: depmod -a ${KVER} failed:" >&2
+	echo "${depmod_output}" >&2
+	exit 1
+}
 
+# Dracut modules for the rebuilt initramfs: the canonical KYTH_DRACUT_MODULES
+# from lib/dracut-modules.sh (mirrors 99-kyth.conf).
 if [ ! -s "/usr/lib/modules/${KVER}/initramfs" ]; then
 	if [ -s "/boot/initramfs-${KVER}.img" ]; then
 		cp --no-preserve=all "/boot/initramfs-${KVER}.img" "/usr/lib/modules/${KVER}/initramfs"
@@ -54,7 +68,8 @@ if [ ! -s "/usr/lib/modules/${KVER}/initramfs" ]; then
 		kyth_build_initramfs "/usr/lib/modules/${KVER}/initramfs" \
 			--no-hostonly \
 			--compress "zstd -3" \
-			--kver "${KVER}"
+			--kver "${KVER}" \
+			--add "${KYTH_DRACUT_MODULES}"
 	fi
 fi
 

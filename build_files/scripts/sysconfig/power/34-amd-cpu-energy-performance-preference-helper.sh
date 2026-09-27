@@ -10,6 +10,8 @@ set -euo pipefail
 
 install -m 0755 /dev/stdin /usr/bin/kyth-set-epp <<'EPPEOF'
 #!/bin/bash
+set -euo pipefail
+[[ $# -eq 1 ]] || { echo "Usage: kyth-set-epp <preference>" >&2; exit 2; }
 EPP="${1:-balance_performance}"
 case "$EPP" in
     performance|balance_performance|balance_power|power|default) ;;

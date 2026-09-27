@@ -1,9 +1,8 @@
+import re
 import unittest
-import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-
 
 class QualityContractsTests(unittest.TestCase):
     def test_quality_dependencies_are_exactly_pinned(self):
@@ -17,34 +16,82 @@ class QualityContractsTests(unittest.TestCase):
     def test_validation_publishes_coverage_even_on_failure(self):
         workflow = (ROOT / ".github/workflows/validation.yml").read_text()
         self.assertIn("./build_files/scripts/run-quality.sh", workflow)
-        quality_job = workflow.split("  quality:", 1)[1]
+        quality_job = re.split(
+            r"^  [a-z][a-z0-9-]*:$",
+            workflow.split("  quality:\n", 1)[1],
+            maxsplit=1,
+            flags=re.MULTILINE,
+        )[0]
         self.assertNotIn("run: just ", quality_job)
+        self.assertIn("run-quality.sh", quality_job)
         self.assertIn("if: always()", workflow)
         self.assertIn("coverage.xml", workflow)
+
+    def test_validation_job_configures_rust_for_runtime_compile_tests(self):
+        workflow = (ROOT / ".github/workflows/validation.yml").read_text()
+        validation_job = workflow.split("  validation:\n", 1)[1].split("\n  quality:\n", 1)[0]
+        self.assertIn("rustup toolchain install stable", validation_job)
+        self.assertIn("rustup default stable", validation_job)
+        self.assertIn("cargo --version", validation_job)
+
+    def test_validation_preserves_rustup_home_when_isolating_test_home(self):
+        validation = (ROOT / "build_files/scripts/validate.sh").read_text()
+        self.assertIn('rustup_home="${RUSTUP_HOME:-${HOME}/.rustup}"', validation)
+        self.assertIn('cargo_home="${CARGO_HOME:-${HOME}/.cargo}"', validation)
+        self.assertIn('export RUSTUP_HOME="${rustup_home}"', validation)
+        self.assertIn('export CARGO_HOME="${cargo_home}"', validation)
 
     def test_pre_push_runs_the_same_quality_gate_as_ci(self):
         preflight = (ROOT / "build_files/scripts/ci-preflight.sh").read_text()
         self.assertIn("./build_files/scripts/run-quality.sh", preflight)
 
+    def test_snapshot_preflight_uses_native_owner(self):
+        preflight = (ROOT / "build_files/scripts/ci-preflight.sh").read_text()
+        self.assertIn("kyth-snapshot-timeline", preflight)
+        self.assertNotIn("from kyth_shared.snapshot_timeline", preflight)
+
+        launcher = (ROOT / "build_files/kyth-snapshot-timeline").read_text()
+        self.assertTrue(launcher.startswith("#!/usr/bin/env bash"))
+        self.assertNotIn("kyth_shared.snapshot_timeline", launcher)
+
+    def test_shared_package_build_callers_use_native_boundaries(self):
+        hash_gate = (ROOT / "build_files/scripts/hash-gaming-versions.sh").read_text()
+        self.assertIn("kyth-build-support", hash_gate)
+        self.assertNotIn("kyth_shared.gaming_resolve", hash_gate)
+
+        for path in (
+            ROOT / "build_files/scripts/packages/12-vram-latency-and-copr-disable.sh",
+            ROOT / "build_files/scripts/packages/19-vscode.sh",
+            ROOT / "build_files/scripts/packages/21-windows-management-tools.sh",
+            ROOT / "build_files/scripts/packages/23-tailscale.sh",
+        ):
+            source = path.read_text()
+            self.assertIn("kyth-build-support", source, path.name)
+            self.assertNotIn("kyth_shared.", source, path.name)
+
+        optimization = (ROOT / "build_files/scripts/optimization-report.py").read_text()
+        self.assertIn("kyth-probe", optimization)
+        self.assertNotIn("from kyth_shared.system.probe", optimization)
+
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        self.assertIn("--bin kyth-build-support", dockerfile)
+        self.assertIn("/usr/bin/kyth-build-support", dockerfile)
+
+        diagnostics = (ROOT / "build_files/scripts/branding/35-diagnostic-script-installs.sh").read_text()
+        self.assertNotIn("install -m 0755 /ctx/kyth-qualify", diagnostics)
+        self.assertIn("/usr/bin/kyth-qualify", dockerfile)
+
     def test_validation_tool_archives_do_not_require_archive_owners(self):
-        installer = (
-            ROOT / "build_files/scripts/install-validation-tools.sh"
-        ).read_text()
+        installer = (ROOT / "build_files/scripts/install-validation-tools.sh").read_text()
         self.assertIn("--no-same-owner", installer)
         self.assertIn('SHELLCHECK_VERSION="${SHELLCHECK_VERSION:-', installer)
         self.assertIn('download_and_verify "shellcheck"', installer)
 
     def test_critical_modules_have_explicit_thresholds(self):
-        gate = (ROOT / "build_files/scripts/check-critical-coverage.py").read_text()
+        gate = (ROOT / "build_files/config/coverage-floors.json").read_text()
         for module in (
-            "installer_service.py",
-            "recovery.py",
-            "privileged.py",
-            "updates.py",
-            "windows_installer.py",
-            "thirdparty.py",
-            "user_polish.py",
-            "vm_acceptance.py",
+            "installer_service.py", "recovery.py",
+            "windows_installer.py", "thirdparty.py", "user_polish.py", "vm_acceptance.py",
         ):
             self.assertIn(module, gate)
 
@@ -62,69 +109,21 @@ class QualityContractsTests(unittest.TestCase):
         self.assertTrue(report.is_file())
         self.assertTrue(budgets.is_file())
 
-    def test_primary_ui_shells_do_not_bypass_command_gateway(self):
-        ui_paths = (
-            ROOT / "build_files/kyth-welcome/kyth_welcome/windows.py",
-            ROOT / "build_files/kyth-welcome/kyth_welcome/wizard/window.py",
-            ROOT / "build_files/kyth-welcome/kyth_welcome/wizard/steps_finish.py",
+    def test_retired_python_hub_ui_is_absent(self):
+        self.assertFalse(
+            any(path.is_file() for path in (ROOT / "src/kyth-welcome").rglob("*"))
         )
-        violations = []
-        for path in ui_paths:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    violations.extend(
-                        f"{path.relative_to(ROOT)} imports subprocess"
-                        for alias in node.names
-                        if alias.name == "subprocess"
-                    )
-                elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
-                    violations.append(
-                        f"{path.relative_to(ROOT)} imports from subprocess"
-                    )
-        self.assertEqual(violations, [])
+        self.assertFalse((ROOT / "fuzz/kyth_welcome_fuzzer.py").exists())
+        self.assertFalse((ROOT / ".github/workflows/fuzzing.yml").exists())
+        metadata = (ROOT / "pyproject.toml").read_text()
+        self.assertNotIn('"src/kyth-welcome"', metadata)
+        self.assertNotIn('"build_files/kyth-welcome"', metadata)
 
-    def test_page_and_wizard_modules_do_not_call_subprocess_directly(self):
-        """System Hub pages must run commands through the async worker
-        framework in services/runtime.py (TrackedThread/Worker/
-        StreamingProcessWorker), not by shelling out on the GUI thread.
-
-        A multi-commit cleanup (see git log for "blocking the GUI thread")
-        moved every direct subprocess/os.system call out of page_*/wizard/
-        code and into services/. This test keeps a new page or wizard step
-        from silently reintroducing one.
-        """
-        welcome_root = ROOT / "build_files/kyth-welcome/kyth_welcome"
-        checked_dirs = [
-            path for path in welcome_root.glob("page_*") if path.is_dir()
-        ] + [welcome_root / "wizard"]
-        checked_files = [
-            path for path in welcome_root.glob("page_*.py") if path.is_file()
-        ]
-        for directory in checked_dirs:
-            checked_files.extend(directory.rglob("*.py"))
-
-        violations = []
-        for path in checked_files:
-            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-            for node in ast.walk(tree):
-                if isinstance(node, ast.Import):
-                    violations.extend(
-                        f"{path.relative_to(ROOT)} imports {alias.name}"
-                        for alias in node.names
-                        if alias.name == "subprocess"
-                    )
-                elif isinstance(node, ast.ImportFrom) and node.module == "subprocess":
-                    violations.append(f"{path.relative_to(ROOT)} imports from subprocess")
-                elif (
-                    isinstance(node, ast.Attribute)
-                    and node.attr in ("system", "popen")
-                    and isinstance(node.value, ast.Name)
-                    and node.value.id == "os"
-                ):
-                    violations.append(f"{path.relative_to(ROOT)} calls os.{node.attr}")
-        self.assertEqual(violations, [])
-
+    def test_retired_python_hub_package_has_no_source_files(self):
+        self.assertFalse(
+            any(path.is_file() for path in (ROOT / "src/kyth-welcome").rglob("*"))
+        )
+        self.assertFalse((ROOT / "src/kyth-welcome/pyproject.toml").exists())
 
 if __name__ == "__main__":
     unittest.main()

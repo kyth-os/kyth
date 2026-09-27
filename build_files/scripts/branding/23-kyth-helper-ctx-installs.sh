@@ -1,22 +1,24 @@
 # shellcheck shell=bash
-# ── KythOS Helper app — packaged Python install ───────────────────────────────
-# /ctx is a read-only BuildKit bind mount. Setuptools creates build metadata
-# beside a local project, so stage the package in the writable build tmpfs.
-welcome_package_dir="$(mktemp -d /tmp/kyth-welcome-package.XXXXXX)"
-cp -a /ctx/kyth-welcome/. "${welcome_package_dir}/"
-cp -a /ctx/kyth-installer "${welcome_package_dir}/kyth-installer"
-python3 -m pip install \
-	--no-cache-dir \
-	--no-deps \
-	--no-build-isolation \
-	--prefix=/usr \
-	"${welcome_package_dir}" \
-	"${welcome_package_dir}/kyth-installer"
-rm -rf "${welcome_package_dir}"
-unset welcome_package_dir
-install -m 0755 /ctx/kyth-welcome/kyth-welcome-launch /usr/bin/kyth-welcome-launch
-install -m 0644 /ctx/kyth-welcome/kyth-welcome.desktop \
+# ── KythOS Hub launcher and native installer packaging ───────────────────────
+# The supported Hub launcher is compiled Rust. The desktop metadata is kept
+# next to the React/Tauri source so packaging has no Python Hub dependency.
+_hub_data_src="/src/kyth-hub-web/src/data"
+install -m 0644 "${_hub_data_src}/kyth-welcome.desktop" \
 	/usr/share/applications/kyth-welcome.desktop
+
+# Hub search in KRunner — generated from the same route manifest imported by
+# the React frontend. The generator is a build-time Rust binary and has no
+# dependency on the retired Python/Qt Hub package.
+/usr/bin/kyth-hub-desktop-entries \
+	/src/kyth-hub-web/src/data/hubRoutes.json \
+	/usr/share/applications/kyth-hub
+# Keep the same route manifest available to installed-image acceptance. The
+# frontend remains the runtime authority; this copy only lets the guest derive
+# the complete --page matrix without duplicating page names in the harness.
+install -Dm0644 /src/kyth-hub-web/src/data/hubRoutes.json \
+	/usr/share/kyth/hubRoutes.json
+
+unset _hub_data_src
 write_config /usr/share/applications/kyth-app-store.desktop <<'APPSTOREEOF'
 [Desktop Entry]
 Type=Application
@@ -29,16 +31,19 @@ Terminal=false
 Categories=Settings;PackageManager;
 Keywords=apps;store;software;flatpak;install;remove;
 StartupNotify=true
-StartupWMClass=kyth-welcome
+StartupWMClass=com.kythos.hub
 APPSTOREEOF
-install -m 0755 /ctx/kyth-network-share /usr/libexec/kyth-network-share
+# The native Rust helper is copied into the base stage by Dockerfile. Keep the
+# stable /usr/libexec path used by kyth-privileged, but do not install the
+# legacy Python wrapper from the build context.
+install -m 0755 /usr/bin/kyth-network-share /usr/libexec/kyth-network-share
 install -m 0755 /ctx/kyth-set-sleep-mode /usr/libexec/kyth-set-sleep-mode
 install -m 0755 /ctx/kyth-retry-hardware-setup /usr/libexec/kyth-retry-hardware-setup
 
-# Place System Hub on the desktop for all new users. The executable bit is
+# Place Kyth Hub on the desktop for all new users. The executable bit is
 # required so KDE Plasma 6 treats it as trusted without prompting the user.
 mkdir -p /etc/skel/Desktop
-install -m 0755 /ctx/kyth-welcome/kyth-welcome.desktop \
+install -m 0755 "/src/kyth-hub-web/src/data/kyth-welcome.desktop" \
 	/etc/skel/Desktop/kyth-welcome.desktop
 
 # Recycle Bin on the desktop keeps deletion recovery visible. Type=Link entries

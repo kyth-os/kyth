@@ -7,6 +7,7 @@ root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 # shellcheck disable=SC2046
 sha256sum \
   "$root/build_files/plymouth/"* \
+  "$root/build_base/plymouth/"* \
   "$root/build_files/branding/kyth-logo-transparent.svg" \
   "$root/build_files/branding/transparent-watermark.svg" \
   "$root/build_files/scripts/plymouth-setup.sh" \

@@ -21,7 +21,11 @@ set -euo pipefail
 for dbus_policy in \
 	/usr/share/dbus-1/system.d/asusd.conf \
 	/etc/dbus-1/system.d/org.supergfxctl.Daemon.conf; do
-	[[ -f "${dbus_policy}" ]] && sed -i 's/group="sudo"/group="wheel"/' "${dbus_policy}"
+	[[ -f "${dbus_policy}" ]] || continue
+	# On bootc the base image is read-only; skip if not writable instead of
+	# exiting non-zero and failing kyth-asus-dbus-policy-fixup.service.
+	[[ -w "${dbus_policy}" ]] || continue
+	sed -i 's/group="sudo"/group="wheel"/' "${dbus_policy}" || true
 done
 ASUSDBUSFIXEOF
 
@@ -29,7 +33,17 @@ write_config /usr/lib/systemd/system/kyth-asus-dbus-policy-fixup.service <<'ASUS
 [Unit]
 Description=Rewrite asusd/supergfxd D-Bus policy group for Fedora
 DefaultDependencies=no
+After=local-fs.target
 Before=dbus.socket dbus-broker.service sockets.target
+# No After=ostree-remount needed — script is read-only-safe (checks -w).
+# RemainAfterExit=yes below is what actually stops dbus.socket +
+# dbus-broker.service from re-running this: a start job on an already-active
+# oneshot no-ops. StartLimit is only a backstop against repeated *failures*
+# (the old script exited 1 on ro composefs; now guarded with -w + || true),
+# so disable the limit outright rather than give it a window — these keys
+# live in [Unit], not [Service]; stranded in [Service] they're silently
+# ignored and the unit runs under systemd's compiled-in 10s/5 default.
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot

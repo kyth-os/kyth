@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import subprocess
 import sys
 import unittest
 from unittest import mock
@@ -14,6 +15,22 @@ from kyth_shared.smoke_check import Result, SmokeCheck
 
 
 class SmokeCheckTests(unittest.TestCase):
+    def test_missing_live_booted_deployment_is_a_warning(self) -> None:
+        checker = SmokeCheck(quiet=True)
+        status = subprocess.CompletedProcess(
+            ["bootc", "status"], 0, '{"status":{"booted":null}}', ""
+        )
+        with (
+            mock.patch("shutil.which", side_effect=lambda command: "/usr/bin/" + command),
+            mock.patch.object(checker, "command", return_value=status),
+            mock.patch.object(checker, "check_unit"),
+            mock.patch.object(checker, "check_command"),
+        ):
+            checker.identity_and_updates()
+        booted = next(item for item in checker.results if item.name == "Booted image")
+        self.assertEqual(booted.level, "WARN")
+        self.assertIn("no booted deployment", booted.detail)
+
     def test_results_retain_their_section(self) -> None:
         checker = SmokeCheck()
         with mock.patch("builtins.print"):
@@ -54,6 +71,19 @@ class SmokeCheckTests(unittest.TestCase):
             checker.check_command("optional", "Optional", optional=True)
         self.assertEqual(checker.results[0].level, "WARN")
 
+    def test_x11_session_type_is_a_failure(self) -> None:
+        checker = SmokeCheck(quiet=True)
+        with (
+            mock.patch.dict("os.environ", {"XDG_SESSION_TYPE": "x11", "XDG_CURRENT_DESKTOP": "KDE"}),
+            mock.patch.object(checker, "check_unit"),
+            mock.patch.object(checker, "check_path"),
+            mock.patch.object(checker, "check_contains"),
+        ):
+            checker.desktop()
+        session = next(item for item in checker.results if item.name == "Session type")
+        self.assertEqual(session.level, "FAIL")
+        self.assertIn("journalctl -u plasmalogin", session.detail)
+
     def test_health_report_has_stable_json_schema(self) -> None:
         report = from_smoke_results(
             [
@@ -69,7 +99,8 @@ class SmokeCheckTests(unittest.TestCase):
         self.assertEqual(payload["summary"]["healthy"], 1)
         self.assertEqual(payload["summary"]["warning"], 1)
         self.assertEqual(payload["summary"]["error"], 1)
-        self.assertIn("System Hub", payload["results"][1]["remediation"])
+        self.assertIn("Hub", payload["results"][1]["remediation"])
+        self.assertNotIn("Pulse", payload["results"][1]["remediation"])
 
     def test_health_text_groups_components_by_section(self) -> None:
         report = HealthReport(

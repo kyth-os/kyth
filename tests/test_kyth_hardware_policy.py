@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import sys
 import tempfile
 import unittest
@@ -254,13 +255,47 @@ class HardwarePolicySafetyTests(unittest.TestCase):
         service = (ROOT / "build_files/kyth-hw-setup.service").read_text()
         retry = (ROOT / "build_files/kyth-retry-hardware-setup").read_text()
         self.assertIn("hardware-profiles.toml", install)
+        self.assertIn("install -d -m 0755 /etc/modprobe.d /etc/scx /var/lib/akmods /var/cache/akmods", install)
         self.assertNotIn("hw-setup-done", service)
         self.assertIn("kyth-hardware-policy apply --force", retry)
+        self.assertIn("ReadWritePaths=/etc/modprobe.d", service)
+        self.assertIn("StateDirectory=kyth", service)
+
+    def test_service_timeout_survives_a_real_akmods_build(self):
+        """_configure_nvidia() shells out to `akmods --force` synchronously when
+        the module isn't already built for the running kernel -- exactly the
+        case right after a kernel bump, which the code/Hub UI both document as
+        5-15 minutes. TimeoutStartSec must clear that with real headroom or
+        systemd kills the build mid-way every time, silently skipping the
+        nvidia-suspend/resume/hibernate enablement that follows it and leaving
+        Wayland suspend broken until the user notices the failed unit.
+        """
+        service = (ROOT / "build_files/kyth-hw-setup.service").read_text()
+        match = re.search(r"^TimeoutStartSec=(\d+)$", service, re.MULTILINE)
+        self.assertIsNotNone(match, "kyth-hw-setup.service must set an explicit TimeoutStartSec")
+        self.assertGreaterEqual(int(match.group(1)), 900, "must clear the documented 15-minute akmods build")
 
     def test_blanket_power_and_driver_options_are_removed(self):
         migration = (ROOT / "build_files/scripts/branding/28-bootc-kernel-arguments-and-boot-splash.sh").read_text()
-        self.assertEqual(migration.count("pcie_aspm=performance"), 1)
-        self.assertIn('--remove-args="console=tty0 console=ttyS0,115200 amdgpu.ppfeaturemask', migration)
+        # The migration is additive-only via kargs.d: it must never strip
+        # kargs the user may have set deliberately (GPU/power flags included).
+        # Per-device GPU tuning lives in the versioned hardware policy and
+        # user tunables instead.
+        self.assertNotIn("grubby --", migration)
+        self.assertNotIn("command -v grubby", migration)
+        self.assertNotIn("--remove-args", migration)
+        # The shipped kargs payload itself must not carry the retired blanket
+        # GPU/power globals (assert on the kargs line, not the comments that
+        # document why they were retired).
+        shipped = next(line for line in migration.splitlines() if line.startswith("kargs = ["))
+        self.assertNotIn("amdgpu.ppfeaturemask", shipped)
+        self.assertNotIn("pcie_aspm", shipped)
+        base = (ROOT / "build_base/build.sh").read_text()
+        # Image kargs.d must not reintroduce the retired globals after migration.
+        kargs_line = next(line for line in base.splitlines() if line.startswith("kargs = ["))
+        self.assertNotIn("pcie_aspm=performance", kargs_line)
+        self.assertNotIn("amdgpu.ppfeaturemask", kargs_line)
+
         for relative in (
             "build_files/scripts/sysconfig/gpu/10-amd-gpu-kernel-module-options.sh",
             "build_files/scripts/sysconfig/gpu/11-nvidia-kernel-module-options.sh",

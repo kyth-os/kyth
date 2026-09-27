@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-flatpak-trim — flatpak-trim.toml
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-flatpak-trim "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.flatpak_trim import load_flatpak_trim,flatpak_trim_status; c=load_flatpak_trim(); print(f"enabled={c[\"enabled\"]} active={flatpak_trim_status()}")' ;;
-    on) need_root "$@"; python3 -c 'from kyth_shared.flatpak_trim import load_flatpak_trim,save_flatpak_trim,generate_flatpak_trim; c=load_flatpak_trim(); c["enabled"]=True; save_flatpak_trim(c); generate_flatpak_trim(c)'; systemctl enable --now kyth-flatpak-trim.timer 2>/dev/null || true; echo "flatpak trim on" ;;
-    off) need_root "$@"; python3 -c 'from kyth_shared.flatpak_trim import load_flatpak_trim,save_flatpak_trim,generate_flatpak_trim; c=load_flatpak_trim(); c["enabled"]=False; save_flatpak_trim(c); generate_flatpak_trim(c)'; systemctl disable --now kyth-flatpak-trim.timer 2>/dev/null || true; echo "flatpak trim off" ;;
-    apply|run) need_root "$@"; python3 -c 'from kyth_shared.flatpak_trim import load_flatpak_trim,generate_flatpak_trim; generate_flatpak_trim(load_flatpak_trim())'; /usr/bin/flatpak uninstall --unused -y --noninteractive 2>&1 | tail -n 20 || true ;;
-    *) echo "Usage: kyth-flatpak-trim [status|on|off|apply|run]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -1,17 +1,46 @@
 [Unit]
 Description=KythOS system probe cache refresh (oneshot)
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=local-fs.target
+# Start-limit is a [Unit] key. A boot-time probe storm must not hit
+# start-limit and paint the unit --failed on an otherwise healthy boot.
+StartLimitIntervalSec=120
+StartLimitBurst=5
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 ExecStart=/usr/bin/kyth-probe --system
+CacheDirectory=kyth
+CacheDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+# PrivateUsers deliberately absent: the native Rust bootc collector uses the
+# installed root-only guard when needed, and a private user namespace would
+# remap root outside the real host identity boundary.
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=kyth-probe
 # Read-only probes; keep impact low.
 Nice=10
 IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=384M
+MemoryMax=512M
 # bootc/flatpak can be slow on cold cache
 TimeoutStartSec=120
 

@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-netdev-budget — 600 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-netdev-budget "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.netdev_budget import load_netdev_budget, netdev_budget_status; c=load_netdev_budget(); print(f\"profile={c['profile']} active={netdev_budget_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.netdev_budget import load_netdev_budget,save_netdev_budget,generate_netdev_budget; c=load_netdev_budget(); c['profile']='gaming'; save_netdev_budget(c); generate_netdev_budget(c)"; sysctl --system >/dev/null 2>&1 || true; echo "netdev budget gaming 600" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.netdev_budget import load_netdev_budget,save_netdev_budget,generate_netdev_budget; c=load_netdev_budget(); c['profile']='balanced'; save_netdev_budget(c); generate_netdev_budget(c)"; echo "netdev budget balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.netdev_budget import load_netdev_budget,generate_netdev_budget; generate_netdev_budget(load_netdev_budget())" ;;
-    *) echo "Usage: kyth-netdev-budget [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

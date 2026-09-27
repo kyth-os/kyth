@@ -35,13 +35,19 @@ if [[ -z "${iwlwifi_firmware_probe}" ]]; then
 fi
 echo "Intel iwlwifi firmware present: ${iwlwifi_firmware_probe}"
 
-# Purge unused heavy enterprise / server firmware blobs to keep workstation image lean
+# Purge unused heavy enterprise / server firmware blobs to keep workstation image lean.
+# These are datacenter NIC / SmartNIC / storage-offload families that no desktop or
+# laptop ships (Mellanox ConnectX, QLogic/Cavium FC, Netronome/LiquidIO/Chelsio).
+#
+# NOTE: brcm/bcm43* is deliberately NOT pruned. Despite the "brcm" path it is
+# consumer Broadcom Wi-Fi (brcmfmac BCM43xx) and Bluetooth (BCM43xx *.hcd) firmware
+# used by a large share of laptops, all-in-ones, and USB dongles. Removing it left
+# those machines with no Wi-Fi and no Bluetooth after boot.
 rm -rf \
 	/usr/lib/firmware/mellanox \
 	/usr/lib/firmware/qlogic \
 	/usr/lib/firmware/netronome \
 	/usr/lib/firmware/liquidio \
 	/usr/lib/firmware/cxgb4 \
-	/usr/lib/firmware/brcm/bcm43* \
 	2>/dev/null || true
 

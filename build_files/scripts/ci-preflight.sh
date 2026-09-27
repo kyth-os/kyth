@@ -2,15 +2,42 @@
 # Local PR gate: exact GitHub Validation plus changed-file Codacy analysis.
 set -euo pipefail
 
+# Heaviest local gate (validate + quality + Codacy + CodeQL). Must not starve
+# the desktop compositor — see lib/desktop-throttle.sh. Falls back
+# gracefully on CI where --user is unavailable.
 repo_root="$(git rev-parse --show-toplevel)"
+# shellcheck source=lib/desktop-throttle.sh disable=SC1091
+source "${repo_root}/build_files/scripts/lib/desktop-throttle.sh"
+kyth_deprioritize_on_desktop "$@"
+
 cd "${repo_root}"
 
 echo "==> GitHub Validation parity"
 ./build_files/scripts/validate.sh
 
-echo "==> Perf gate ledger + snapshot dry-run (release gate)"
-PYTHONPATH=build_files/kyth_shared python3 -c "from kyth_shared.perf_gate import check_perf_gate; r=check_perf_gate(current_ms=None); print(f\"perf_gate ledger dry-run: {r}\")"
-PYTHONPATH=build_files/kyth_shared python3 -c "from kyth_shared.snapshot_timeline import snapshot_timeline; snaps=snapshot_timeline(limit=3); print(f\"snapshot dry-run: {len(snaps)} entries\")" 2>&1 | head -n 5 || echo "snapshot dry-run: no timeline"
+echo "==> Snapshot dry-run (release gate)"
+# The perf gate itself already ran for real inside validate.sh above
+# (build_files/scripts/check-perf-gate.py) — this used to be a second,
+# separate call that passed current_ms=None and could only ever print a
+# trivial dry-run, never actually check anything.
+snapshot_timeline_cmd=()
+for candidate in \
+	/usr/bin/kyth-snapshot-timeline \
+	"${repo_root}/src/kyth-shared-rs/target/release/kyth-snapshot-timeline" \
+	"${repo_root}/src/kyth-shared-rs/target/debug/kyth-snapshot-timeline"; do
+	if [[ -x "${candidate}" ]]; then
+		snapshot_timeline_cmd=("${candidate}")
+		break
+	fi
+done
+if ((${#snapshot_timeline_cmd[@]} == 0)); then
+	snapshot_timeline_cmd=(cargo run --quiet --manifest-path src/kyth-shared-rs/Cargo.toml --bin kyth-snapshot-timeline --)
+fi
+if snapshot_json="$("${snapshot_timeline_cmd[@]}" --json --limit 3 2>/dev/null)"; then
+	printf 'snapshot dry-run: %s entries\n' "$(jq -r 'length' <<<"${snapshot_json}")"
+else
+	echo "snapshot dry-run: no timeline"
+fi
 
 echo "==> GitHub quality parity"
 ./build_files/scripts/run-quality.sh
@@ -70,6 +97,7 @@ if [[ ! -x "${codeql_bin}" ]]; then
 	mkdir -p "${codeql_cache}"
 	archive="${work_dir}/codeql-bundle-linux64.tar.zst"
 	curl --fail --location --silent --show-error \
+		--retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 \
 		--output "${archive}" \
 		"https://github.com/github/codeql-action/releases/download/codeql-bundle-v${codeql_version}/codeql-bundle-linux64.tar.zst"
 	echo "${codeql_sha256}  ${archive}" | sha256sum --check --strict

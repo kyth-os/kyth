@@ -1,0 +1,75 @@
+{
+  "cases": [
+    {
+      "name": "auth headers and bearer tokens",
+      "input": "Authorization: Bearer hunter2-token\nProxy-Authorization: Basic dXNlcjpwYXNz\nCookie: session=browser-secret; theme=dark\n",
+      "must_not_contain": [
+        "hunter2-token",
+        "dXNlcjpwYXNz",
+        "browser-secret"
+      ],
+      "expected": "Authorization: [redacted]\nProxy-Authorization: [redacted]\nCookie: [redacted]\n"
+    },
+    {
+      "name": "structured secrets json and pairs",
+      "input": "oauth={\"access_token\":\"access-secret\",\"refresh_token\":\"refresh-secret\"}\npassword=hunter2 api_key=api-secret passphrase='quoted-secret'\n",
+      "must_not_contain": [
+        "access-secret",
+        "refresh-secret",
+        "hunter2",
+        "api-secret",
+        "quoted-secret"
+      ],
+      "expected": "oauth={\"access_token\":\"[redacted]\",\"refresh_token\":\"[redacted]\"}\npassword=[redacted] api_key=[redacted] passphrase='[redacted]'\n"
+    },
+    {
+      "name": "cli flags and query strings",
+      "input": "command --cookie cli-secret --token=flag-secret --password hunter3\nhttps://alice:password@example.test/path?access_token=query-secret&safe=yes\n",
+      "must_not_contain": [
+        "cli-secret",
+        "flag-secret",
+        "hunter3",
+        "alice:password",
+        "query-secret"
+      ],
+      "expected": "command --cookie [redacted] --token=[redacted] --password [redacted]\nhttps://[credentials-redacted]@example.test/path?access_token=[redacted]&safe=yes\n"
+    },
+    {
+      "name": "private key block",
+      "input": "\u002d\u002d\u002d\u002d\u002dBEGIN OPENSSH PRIVATE KEY\u002d\u002d\u002d\u002d\u002d\nprivate-material-aaa\n\u002d\u002d\u002d\u002d\u002dEND OPENSSH PRIVATE KEY\u002d\u002d\u002d\u002d\u002d\n",
+      "must_not_contain": [
+        "private-material-aaa"
+      ],
+      "expected": "[private key redacted]\n"
+    },
+    {
+      "name": "network identifiers",
+      "input": "IPv6 2001:db8:85a3::8a2e:370:7334 IPv4 192.0.2.10 MAC aa:bb:cc:dd:ee:ff\n",
+      "must_not_contain": [
+        "2001:db8:85a3::8a2e:370:7334",
+        "192.0.2.10",
+        "aa:bb:cc:dd:ee:ff"
+      ],
+      "expected": "IPv6 xxxx:xxxx:xxxx:xxxx::xxxx IPv4 xxx.xxx.xxx.xxx MAC xx:xx:xx:xx:xx:xx\n"
+    },
+    {
+      "name": "identity keys email uuid paths",
+      "input": "hostname=mybox serial=ABC123 SSID=CoffeeNet user=operator@example.com id=123e4567-e89b-12d3-a456-426614174000 home=/var/home/operator/project\n",
+      "must_not_contain": [
+        "mybox",
+        "ABC123",
+        "CoffeeNet",
+        "operator@example.com",
+        "123e4567-e89b-12d3-a456-426614174000",
+        "/var/home/operator"
+      ],
+      "expected": "hostname=redacted Serial: [scrubbed] SSID: [scrubbed] user=redacted@example.com id=xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx home=/var/home/redacted/project\n"
+    },
+    {
+      "name": "benign text preserved",
+      "input": "plain status: ok\nvalue=42\n",
+      "must_not_contain": [],
+      "expected": "plain status: ok\nvalue=42\n"
+    }
+  ]
+}

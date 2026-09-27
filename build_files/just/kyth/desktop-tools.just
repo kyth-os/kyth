@@ -67,9 +67,11 @@ install-ms-fonts:
     fi
 
 # Set up a printer — enables CUPS and opens KDE Printer Settings.
-# Most USB and network printers are detected automatically.
-# If your printer is not listed, connect it via USB or use Add Printer → Network.
-# For stubborn printers, the CUPS web interface is at http://localhost:631
+# Network printers (driverless IPP Everywhere over Avahi) are detected
+# automatically. USB printers are NOT supported in this image: ipp-usb and
+# sane-airscan (packages + units) do not ship, so a USB-connected printer
+# will not appear no matter which setup UI is opened.
+# For stubborn network printers, the CUPS web interface is at http://localhost:631
 [group('KythOS')]
 setup-printer:
     #!/usr/bin/env bash
@@ -80,8 +82,9 @@ setup-printer:
     echo "  ✓ CUPS is running."
     echo
     echo "  Opening KDE Printer Settings..."
-    echo "  Tip: if your printer is not listed, click Add Printer."
-    echo "  For network printers, choose Enter URI and type its IP address."
+    echo "  Tip: network (IPP Everywhere) printers are found automatically —"
+    echo "  if yours is not listed, click Add Printer and enter its IP address."
+    echo "  Note: USB printers are not supported (ipp-usb is not installed)."
     echo
     echo "  Advanced: CUPS web interface → http://localhost:631"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

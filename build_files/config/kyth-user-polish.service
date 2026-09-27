@@ -1,12 +1,16 @@
 [Unit]
 Description=KythOS User Comfort Polish Setup
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=graphical-session.target
 
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-user-polish
 RemainAfterExit=yes
+Nice=10
+IOSchedulingClass=idle
+MemoryMax=384M
+TimeoutStartSec=60
 
 [Install]
 WantedBy=graphical-session.target

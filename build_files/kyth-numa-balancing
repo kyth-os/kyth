@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-numa-balancing — 0 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-numa-balancing "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.numa_balancing import load_numa_balancing, numa_balancing_status; c=load_numa_balancing(); print(f\"profile={c['profile']} active={numa_balancing_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.numa_balancing import load_numa_balancing,save_numa_balancing,generate_numa_balancing; c=load_numa_balancing(); c['profile']='gaming'; save_numa_balancing(c); generate_numa_balancing(c)"; sysctl --system >/dev/null 2>&1 || true; echo "numa balancing gaming 0" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.numa_balancing import load_numa_balancing,save_numa_balancing,generate_numa_balancing; c=load_numa_balancing(); c['profile']='balanced'; save_numa_balancing(c); generate_numa_balancing(c)"; echo "numa balancing balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.numa_balancing import load_numa_balancing,generate_numa_balancing; generate_numa_balancing(load_numa_balancing())" ;;
-    *) echo "Usage: kyth-numa-balancing [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -1,6 +1,9 @@
 target-version = "py311"
 line-length = 120
 
+# The only extensionless Hub executable is the Bash compatibility-named
+# launcher; keep it out of Ruff's Python discovery.
+
 [lint]
 # Correctness + blind-except (BLE001) — bare `except Exception:` now surfaces.
 # Existing debt is grandfathered via per-file-ignores below; new code must

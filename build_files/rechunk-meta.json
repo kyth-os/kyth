@@ -301,7 +301,7 @@
         "kdeplasma-addons",
         "plasma-drkonqi",
         "plasma-systemmonitor",
-        "sddm-kcm",
+        "kcm-plasmalogin",
         "plasma-nm-openconnect",
         "plasma-nm-openvpn",
         "plasma-nm-vpnc",
@@ -321,9 +321,8 @@
       "packages": [
         "plasma-workspace*",
         "plasma-lookandfeel*",
-        "sddm-breeze*",
-        "libkworkspace*",
-        "sddm-wayland*"
+        "plasma-login-manager*",
+        "libkworkspace*"
       ]
     },
     "webkit": {

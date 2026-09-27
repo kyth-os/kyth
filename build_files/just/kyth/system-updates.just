@@ -2,6 +2,18 @@
 # so this stays valid both standalone and when pulled in via kyth.just.
 import 'common.just'
 
+# Update the OS image, Flatpaks, firmware, and rclone via the guarded path.
+# Replaces Universal Blue's `ujust update`, which calls `rpm-ostree update`
+# (ostree-unverified-registry, no quarantine) and prints "Completed" even
+# when rpm-ostreed crashes mid-pull ("Bus owner changed").
+# VERB_LEVEL is accepted for ublue compatibility and ignored.
+[group('KythOS')]
+update VERB_LEVEL="full":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    _="{{ VERB_LEVEL }}"
+    exec /usr/bin/kyth-full-update
+
 # Upgrade the OS and Flatpak apps.
 # Pulls the latest KythOS image via bootc and updates all Flatpak apps.
 
@@ -21,7 +33,7 @@ kyth-upgrade:
     # waydroid' from ujust setup-waydroid); requested-local-packages covers
     # local RPM files; layered-commit-packages covers commit-layered ones.
     layered=$(rpm-ostree status --json 2>/dev/null \
-        | python3 -c "import sys,json; d=json.load(sys.stdin).get('deployments', [{}])[0]; pkgs=d.get('requested-packages', []) + d.get('requested-local-packages', []) + d.get('layered-commit-packages', []); print(' '.join(pkgs) if pkgs else '')" 2>/dev/null || true)
+        | jq -r '(.deployments[0] // {}) | [.["requested-packages"][]?, .["requested-local-packages"][]?, .["layered-commit-packages"][]?] | join(" ")' 2>/dev/null || true)
 
     if [[ -n "${layered}" ]]; then
         echo "  ERROR: rpm-ostree packages are layered:" >&2
@@ -45,16 +57,13 @@ kyth-upgrade:
     # ── OS update via bootc ───────────────────────────────────────────────────
     echo "── OS (bootc) ──────────────────────────────────────────────────────"
     booted_digest=$(bootc status --format json 2>/dev/null \
-        | python3 -c "import sys,json; s=json.load(sys.stdin); \
-          print(s.get('status',{}).get('booted',{}).get('image',{}) \
-                 .get('imageDigest','unknown'))" 2>/dev/null || echo "unknown")
+        | jq -r '.status.booted.image.imageDigest // "unknown"' 2>/dev/null || echo "unknown")
 
     sudo kyth-safe-upgrade
+    sudo /usr/libexec/kyth-finalize-staged 2>/dev/null || sudo ostree admin finalize-staged || true
 
     staged_digest=$(bootc status --format json 2>/dev/null \
-        | python3 -c "import sys,json; s=json.load(sys.stdin); \
-          print(s.get('status',{}).get('staged',{}).get('image',{}) \
-                 .get('imageDigest','') or '')" 2>/dev/null || echo "")
+        | jq -r '.status.staged.image.imageDigest // empty' 2>/dev/null || echo "")
 
     if [[ -n "${staged_digest}" && "${staged_digest}" != "${booted_digest}" ]]; then
         os_updated=1
@@ -77,10 +86,25 @@ kyth-upgrade:
     # ── Summary ───────────────────────────────────────────────────────────────
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     if [[ "${os_updated}" -eq 1 ]]; then
-        echo "  OS update staged. Reboot when ready to apply it:"
-        echo "    systemctl reboot"
+        echo "  OS update is the next boot. Reboot when ready:"
+        echo "    sudo kyth-finalize-staged reboot"
     else
         echo "  Everything is up to date."
+    fi
+
+# Write the staged image into the bootloader, then reboot into it.
+# Use this when `bootc upgrade` says "Queued for next boot" but reboot
+# keeps the old deployment (Kyth /boot remount EINVAL).
+[group('KythOS')]
+apply-staged:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ -x /usr/libexec/kyth-finalize-staged ]]; then
+        sudo /usr/libexec/kyth-finalize-staged reboot
+    else
+        sudo mount -o remount,bind,rw /boot
+        sudo ostree admin finalize-staged
+        sudo systemctl reboot
     fi
 
 # Show the currently booted image, any staged update, and rollback availability.
@@ -88,7 +112,11 @@ kyth-upgrade:
 status:
     #!/usr/bin/env bash
     set -euo pipefail
-    bootc status
+    if [[ -x /usr/bin/kyth-bootc-guard ]]; then
+        sudo -n /usr/bin/kyth-bootc-guard status
+    else
+        bootc status
+    fi
 
 # Show the digest-aware boot health and quarantined update records.
 [group('KythOS')]
@@ -132,6 +160,12 @@ rebase image_ref="kyth:latest":
     echo "Rebasing to: ${ref}"
     echo "This will take effect on next reboot."
     sudo bootc switch "${ref}"
+    if [[ -x /usr/libexec/kyth-finalize-staged ]]; then
+        sudo /usr/libexec/kyth-finalize-staged
+    else
+        sudo mount -o remount,bind,rw /boot || true
+        sudo ostree admin finalize-staged || true
+    fi
 
 # Switch to a KythOS release channel.
 # Channels:
@@ -150,7 +184,7 @@ switch-channel channel="stable" *args:
         echo "Dry-run: perf delta + snapshot cost"
         /usr/bin/kyth-system-audit 2>&1 | head -n 20 || true
         /usr/bin/kyth-gaming-audit 2>&1 | head -n 20 || true
-        python3 -c "from kyth_shared.perf_gate import check_perf_gate; import json; print(json.dumps(check_perf_gate(current_ms=16.0), indent=2))" 2>&1 | head -n 20 || true
+        /usr/bin/kyth-perf-gate status 2>&1 | head -n 20 || true
         echo "Snapshot timeline (last 3):"
         /usr/bin/btrfs subvolume list / 2>&1 | head -n 20 || /usr/bin/snapper list 2>&1 | head -n 20 || echo "no snapshot tool"
         exit 0
@@ -171,7 +205,7 @@ switch-channel channel="stable" *args:
     esac
     tag="${base_tag}${suffix}"
     echo "Switching to KythOS :${tag}..."
-    sudo bootc switch "{{ kyth_registry }}/kyth:${tag}"
+    sudo /usr/bin/kyth-bootc-guard "switch-${tag}"
     echo "Channel switch staged. Reboot to activate."
 
 # Compat wrapper for internal tests that call switch-channel-impl
@@ -195,7 +229,7 @@ switch-channel-impl channel="stable":
     esac
     tag="${base_tag}${suffix}"
     echo "Switching to KythOS :${tag}..."
-    sudo bootc switch "{{ kyth_registry }}/kyth:${tag}"
+    sudo /usr/bin/kyth-bootc-guard "switch-${tag}"
     echo "Channel switch staged. Reboot to activate."
 
 # Switch to a kernel-flavored KythOS image.
@@ -220,7 +254,7 @@ switch-kernel flavor="fedora":
             ;;
     esac
 
-    status_text="$(sudo -n bootc status 2>/dev/null || bootc status 2>/dev/null || true)"
+    status_text="$(sudo -n /usr/bin/kyth-bootc-guard status 2>/dev/null || bootc status 2>/dev/null || true)"
     current_ref="$(awk '/Booted image:/ {print $NF; exit}' <<<"${status_text}")"
     current_tag=""
     if [[ "${current_ref}" == {{ kyth_registry }}/kyth:* ]]; then
@@ -239,7 +273,8 @@ switch-kernel flavor="fedora":
     target="{{ kyth_registry }}/kyth:${channel}${suffix}"
     echo "Switching to ${label} kernel image: ${target}"
     echo "This stages a new deployment and keeps rollback available from the boot menu."
-    if ! output="$(sudo bootc switch "${target}" 2>&1)"; then
+    guard_operation="switch-${channel}${suffix}"
+    if ! output="$(sudo /usr/bin/kyth-bootc-guard "${guard_operation}" 2>&1)"; then
         printf '%s\n' "${output}" >&2
         if grep -qi 'manifest unknown' <<<"${output}"; then
             echo "ERROR: ${target} is not published yet." >&2

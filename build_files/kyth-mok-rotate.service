@@ -1,7 +1,29 @@
 [Unit]
-Description=Kyth MOK rotation check (sbctl + TPM PCR7)
+Description=Kyth MOK expiry check (openssl)
 After=network.target
 
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-mok-rotate
+# Brief periodic check — deprioritized so it never competes with the
+# desktop session for cycles.
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=384M
+PrivateTmp=yes
+PrivateUsers=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+UMask=0077

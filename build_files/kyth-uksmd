@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-uksmd — uksmd.toml → /etc/uksmd.conf + systemd enable
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-uksmd "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.uksmd_preset import load_uksmd,uksmd_suggested; import pathlib; c=load_uksmd(); print(f"enabled={c[\"enabled\"]} cpu={c[\"max_cpu_percent\"]} suggested={uksmd_suggested()} total_gb_open={open(\"/proc/meminfo\").read().splitlines()[0]}"); print(f"service uksmd exists={bool(__import__(\"pathlib\").Path(\"/usr/lib/systemd/system/uksmd.service\").exists())}")' ;;
-    on|enable) need_root "$@"; python3 -c 'from kyth_shared.uksmd_preset import load_uksmd,save_uksmd,generate_uksmd_conf; c=load_uksmd(); c["enabled"]=True; save_uksmd(c); generate_uksmd_conf(c)'; systemctl enable --now uksmd 2>&1 | tail -n 20 || echo "uksmd not installed — install uksmd pkg, config written";;
-    off|disable) need_root "$@"; python3 -c 'from kyth_shared.uksmd_preset import load_uksmd,save_uksmd,generate_uksmd_conf; c=load_uksmd(); c["enabled"]=False; save_uksmd(c); generate_uksmd_conf(c)'; systemctl disable --now uksmd 2>&1 | tail -n 20 || true; echo "uksmd disabled" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.uksmd_preset import load_uksmd,generate_uksmd_conf; generate_uksmd_conf(load_uksmd())';;
-    *) echo "Usage: kyth-uksmd [status|on|off|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

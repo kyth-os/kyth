@@ -97,7 +97,7 @@ class ShortcutTests(unittest.TestCase):
         mock_which.return_value = "/usr/bin/update-desktop-database"
         refresh_desktop_database("/tmp/apps")
         mock_run.assert_called_once_with(
-            ["update-desktop-database", "/tmp/apps"], capture_output=True, check=False
+            ["update-desktop-database", "/tmp/apps"], capture_output=True, check=False, timeout=30
         )
 
     @mock.patch("subprocess.run")
@@ -113,7 +113,7 @@ class ShortcutTests(unittest.TestCase):
         mock_which.return_value = "/usr/bin/gtk-update-icon-cache"
         refresh_icon_cache("/tmp/icons")
         mock_run.assert_called_once_with(
-            ["gtk-update-icon-cache", "-q", "-t", "/tmp/icons"], capture_output=True, check=False
+            ["gtk-update-icon-cache", "-q", "-t", "/tmp/icons"], capture_output=True, check=False, timeout=30
         )
 
     @mock.patch("subprocess.run")
@@ -121,7 +121,7 @@ class ShortcutTests(unittest.TestCase):
     def test_refresh_kde_sycoca(self, mock_which, mock_run) -> None:
         mock_which.return_value = "/usr/bin/kbuildsycoca6"
         refresh_kde_sycoca()
-        mock_run.assert_called_once_with(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False)
+        mock_run.assert_called_once_with(["kbuildsycoca6", "--noincremental"], capture_output=True, check=False, timeout=30)
 
     def test_categorize_web_apps(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:

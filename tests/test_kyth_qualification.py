@@ -140,13 +140,15 @@ class AcceptanceReportTests(unittest.TestCase):
             for phase in (
                 "LIVE_READY", "LIVE_SMOKE_OK", "INSTALL_COMPLETE",
                 "INSTALLED_READY", "INSTALLED_SMOKE_OK", "COMPLETE",
+                "HUB_BINARY_OK", "HUB_DEEP_LINKS_OK", "HUB_SECOND_LAUNCH_OK",
+                "HUB_DASHBOARD_DEGRADED_OK", "HUB_UPDATES_OK", "HUB_PRIVILEGED_FAILURE_OK",
             )
         )
 
         report = acceptance_report(log)
 
         self.assertEqual(report.overall, "pass")
-        self.assertEqual(len(report.checks), 6)
+        self.assertEqual(len(report.checks), 12)
         self.assertEqual(report.identity["installed_image"], "ok")
 
     def test_update_gate_requires_update_and_rollback_phases(self):

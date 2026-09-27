@@ -1,3 +1,4 @@
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -19,7 +20,7 @@ class ShrinkFilesystemDispatchTests(unittest.TestCase):
     def test_ntfs_dispatches_to_shrink_ntfs(self):
         with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda1", "ntfs", 10 * 1024**3, lambda _m: None)
-        mock_shrink.assert_called_once_with("/dev/sda1", 10 * 1024**3, unittest.mock.ANY)
+        mock_shrink.assert_called_once_with("/dev/sda1", 10 * 1024**3, unittest.mock.ANY, cancel_event=None)
 
     def test_ntfs3_dispatches_to_shrink_ntfs(self):
         with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
@@ -29,7 +30,7 @@ class ShrinkFilesystemDispatchTests(unittest.TestCase):
     def test_ext4_dispatches_to_shrink_ext(self):
         with patch.object(fsresize, "_shrink_ext") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda2", "ext4", 5 * 1024**3, lambda _m: None)
-        mock_shrink.assert_called_once_with("/dev/sda2", 5 * 1024**3, unittest.mock.ANY)
+        mock_shrink.assert_called_once_with("/dev/sda2", 5 * 1024**3, unittest.mock.ANY, cancel_event=None)
 
     def test_ext2_and_ext3_also_dispatch_to_shrink_ext(self):
         for fstype in ("ext2", "ext3"):
@@ -40,7 +41,63 @@ class ShrinkFilesystemDispatchTests(unittest.TestCase):
     def test_btrfs_dispatches_to_shrink_btrfs(self):
         with patch.object(fsresize, "_shrink_btrfs") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda3", "btrfs", 20 * 1024**3, lambda _m: None)
-        mock_shrink.assert_called_once_with("/dev/sda3", 20 * 1024**3, unittest.mock.ANY)
+        mock_shrink.assert_called_once_with("/dev/sda3", 20 * 1024**3, unittest.mock.ANY, cancel_event=None, register_mount=None, release_mount=None)
+
+    def test_cancel_before_shrink_raises_before_any_backend(self):
+        import threading
+        from kyth_installer.execution import InstallCancelled
+        event = threading.Event()
+        event.set()
+        with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
+            with self.assertRaises(InstallCancelled):
+                fsresize.shrink_filesystem(
+                    "/dev/sda1", "ntfs", 10 * 1024**3, lambda _m: None,
+                    cancel_event=event,
+                )
+        mock_shrink.assert_not_called()
+
+    def test_cancel_event_reaches_stream_runner(self):
+        import threading
+        event = threading.Event()
+        seen = {}
+        fake_runner = MagicMock()
+        def capture(command, *args, **kwargs):
+            seen.update(kwargs)
+            raise RuntimeError("stop here")
+        fake_runner.run.side_effect = capture
+        with patch.object(fsresize, "_runner", fake_runner):
+            with self.assertRaises(RuntimeError):
+                fsresize._stream_typed(
+                    {"operation": "noop"}, lambda _m: None,
+                    cancel_event=event,
+                )
+        self.assertIs(seen.get("cancel_event"), event)
+
+    def test_btrfs_temp_mount_is_registered_released_and_lazy_retried(self):
+        import tempfile as _tempfile
+        registered, released, unmounts = [], [], []
+        def fake_run_typed(payload, **kwargs):
+            if payload.get("operation") == "unmount_filesystem":
+                unmounts.append(payload)
+                # First unmount is busy; lazy retry succeeds.
+                if payload.get("lazy"):
+                    return MagicMock(returncode=0)
+                return MagicMock(returncode=1)
+            return MagicMock(returncode=0)
+        with patch.object(fsresize, "_run_typed", side_effect=fake_run_typed), \
+             patch.object(fsresize, "_stream_typed", side_effect=RuntimeError("resize exploded")), \
+             patch.object(fsresize, "_require_tools", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "resize exploded"):
+                fsresize._shrink_btrfs(
+                    "/dev/sda3", 20 * 1024**3, lambda _m: None,
+                    register_mount=registered.append,
+                    release_mount=released.append,
+                )
+        # Mount was tracked, then released even on failure; the busy
+        # unmount fell back to a lazy detach.
+        self.assertEqual(len(registered), 1)
+        self.assertEqual(released, registered)
+        self.assertTrue(any(u.get("lazy") for u in unmounts))
 
     def test_bitlocker_is_rejected_with_a_targeted_message(self):
         with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
@@ -59,6 +116,17 @@ class ShrinkFilesystemDispatchTests(unittest.TestCase):
     def test_empty_fstype_is_rejected_fail_closed(self):
         with self.assertRaisesRegex(RuntimeError, "not supported"):
             fsresize.shrink_filesystem("/dev/sda1", "", 10 * 1024**3, lambda _m: None)
+
+    def test_encryption_warn_on_parent_disk_blocks_shrink(self):
+        from kyth_installer.assurance import AssuranceCheck
+
+        warn = AssuranceCheck("encryption", "warn", "Partition /dev/sda1 appears BitLocker-locked")
+        with patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"), \
+             patch("kyth_installer.assurance._encryption_check", return_value=warn), \
+             patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
+            with self.assertRaisesRegex(RuntimeError, "BitLocker"):
+                fsresize.shrink_filesystem("/dev/sda1", "ntfs", 10 * 1024**3, lambda _m: None)
+        mock_shrink.assert_not_called()
 
 
 class RequireToolsTests(unittest.TestCase):
@@ -79,73 +147,76 @@ class ShrinkNtfsTests(unittest.TestCase):
     def test_full_sequence_runs_in_order_with_correct_argv(self):
         calls = []
 
-        def fake_stream(argv, _log, **_kwargs):
-            calls.append(argv)
+        def fake_stream(payload, _log, **_kwargs):
+            calls.append(payload)
 
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "_stream", side_effect=fake_stream):
+             patch.object(fsresize, "_stream_typed", side_effect=fake_stream):
             fsresize._shrink_ntfs("/dev/sda1", 100 * 1024**3, lambda _m: None)
 
-        size_arg = str(100 * 1024**3)
         self.assertEqual(calls, [
-            ["ntfsresize", "--check", "/dev/sda1"],
-            ["ntfsresize", "--info", "/dev/sda1"],
-            ["ntfsresize", "--no-action", "--size", size_arg, "/dev/sda1"],
-            ["ntfsresize", "--size", size_arg, "/dev/sda1"],
+            {"operation": "filesystem_resize", "device": "/dev/sda1", "fs": "ntfs",
+             "new_size_bytes": 100 * 1024**3, "stage": "check"},
+            {"operation": "filesystem_resize", "device": "/dev/sda1", "fs": "ntfs",
+             "new_size_bytes": 100 * 1024**3, "stage": "info"},
+            {"operation": "filesystem_resize", "device": "/dev/sda1", "fs": "ntfs",
+             "new_size_bytes": 100 * 1024**3, "stage": "dry_run"},
+            {"operation": "filesystem_resize", "device": "/dev/sda1", "fs": "ntfs",
+             "new_size_bytes": 100 * 1024**3, "stage": "resize"},
         ])
 
     def test_check_failure_mentions_hibernation_and_fast_startup(self):
-        def fake_stream(argv, _log, *, error_factory=None, **_kwargs):
-            if argv[:2] == ["ntfsresize", "--check"]:
-                raise error_factory(1, [], argv)
+        def fake_stream(payload, _log, *, error_factory=None, **_kwargs):
+            if payload["stage"] == "check":
+                raise error_factory(1, [], payload)
 
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "_stream", side_effect=fake_stream):
+             patch.object(fsresize, "_stream_typed", side_effect=fake_stream):
             with self.assertRaisesRegex(RuntimeError, "Fast Startup"):
                 fsresize._shrink_ntfs("/dev/sda1", 100 * 1024**3, lambda _m: None)
 
     def test_dry_run_too_small_gives_specific_message(self):
-        def fake_stream(argv, _log, *, error_factory=None, **_kwargs):
-            if "--no-action" in argv:
-                raise error_factory(1, ["Error: Volume too small"], argv)
+        def fake_stream(payload, _log, *, error_factory=None, **_kwargs):
+            if payload["stage"] == "dry_run":
+                raise error_factory(1, ["Error: Volume too small"], payload)
 
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "_stream", side_effect=fake_stream):
+             patch.object(fsresize, "_stream_typed", side_effect=fake_stream):
             with self.assertRaisesRegex(RuntimeError, "Not enough free space"):
                 fsresize._shrink_ntfs("/dev/sda1", 100 * 1024**3, lambda _m: None)
 
     def test_dry_run_immovable_files_gives_specific_message(self):
-        def fake_stream(argv, _log, *, error_factory=None, **_kwargs):
-            if "--no-action" in argv:
-                raise error_factory(1, ["Sorry, this partition has immovable files"], argv)
+        def fake_stream(payload, _log, *, error_factory=None, **_kwargs):
+            if payload["stage"] == "dry_run":
+                raise error_factory(1, ["Sorry, this partition has immovable files"], payload)
 
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "_stream", side_effect=fake_stream):
+             patch.object(fsresize, "_stream_typed", side_effect=fake_stream):
             with self.assertRaisesRegex(RuntimeError, "Immovable files"):
                 fsresize._shrink_ntfs("/dev/sda1", 100 * 1024**3, lambda _m: None)
 
-    def test_real_shrink_sends_y_confirmation_on_stdin(self):
+    def test_real_shrink_leaves_confirmation_to_rust_helper(self):
         captured = {}
 
-        def fake_stream(argv, _log, **kwargs):
-            if argv == ["ntfsresize", "--size", str(100 * 1024**3), "/dev/sda1"]:
-                captured.update(kwargs)
+        def fake_stream(payload, _log, **kwargs):
+            if payload["stage"] == "resize":
+                captured.update(payload=payload, kwargs=kwargs)
 
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "_stream", side_effect=fake_stream):
+             patch.object(fsresize, "_stream_typed", side_effect=fake_stream):
             fsresize._shrink_ntfs("/dev/sda1", 100 * 1024**3, lambda _m: None)
 
-        self.assertEqual(captured.get("stdin_data"), "y\n")
+        self.assertEqual(captured["payload"]["stage"], "resize")
+        self.assertNotIn("stdin_data", captured["kwargs"])
 
 
 class ShrinkExtTests(unittest.TestCase):
-    """The ext path uses plain run_command for e2fsck (short summary output,
-    not worth streaming) and the streamed _stream() helper for resize2fs."""
+    """The ext path uses the typed helper for check and resize stages."""
 
     def test_uncorrectable_fsck_errors_abort_before_any_resize(self):
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "run_command", return_value=MagicMock(returncode=4, stdout="uncorrectable")), \
-             patch.object(fsresize, "_stream") as mock_stream:
+             patch.object(fsresize, "_run_typed", return_value=MagicMock(returncode=4, stdout="uncorrectable")), \
+             patch.object(fsresize, "_stream_typed") as mock_stream:
             with self.assertRaisesRegex(RuntimeError, "uncorrectable errors"):
                 fsresize._shrink_ext("/dev/sda2", 5 * 1024**3, lambda _m: None)
         mock_stream.assert_not_called()
@@ -153,27 +224,28 @@ class ShrinkExtTests(unittest.TestCase):
     def test_corrected_fsck_errors_below_4_still_proceed_to_resize(self):
         # e2fsck exit 1 = "errors corrected" — a normal, successful outcome.
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "run_command", return_value=MagicMock(returncode=1, stdout="corrected")), \
-             patch.object(fsresize, "_stream") as mock_stream:
+             patch.object(fsresize, "_run_typed", return_value=MagicMock(returncode=1, stdout="corrected")), \
+             patch.object(fsresize, "_stream_typed") as mock_stream:
             fsresize._shrink_ext("/dev/sda2", 5 * 1024**3, lambda _m: None)
         mock_stream.assert_called_once()
-        resize_argv = mock_stream.call_args.args[0]
-        self.assertEqual(resize_argv[0], "resize2fs")
-        self.assertEqual(resize_argv[1], "/dev/sda2")
-        self.assertTrue(resize_argv[2].endswith("K"))
+        resize_payload = mock_stream.call_args.args[0]
+        self.assertEqual(resize_payload["operation"], "filesystem_resize")
+        self.assertEqual(resize_payload["device"], "/dev/sda2")
+        self.assertEqual(resize_payload["fs"], "ext4")
+        self.assertEqual(resize_payload["stage"], "resize")
 
 
 class ShrinkBtrfsTests(unittest.TestCase):
     def test_mounts_shrinks_and_always_unmounts_even_on_failure(self):
         calls = []
 
-        def fake_run(argv, **kwargs):
-            calls.append(argv)
+        def fake_run(payload, **kwargs):
+            calls.append(payload)
             return MagicMock(returncode=0)
 
         with patch.object(fsresize, "_require_tools"), \
-             patch.object(fsresize, "run_command", side_effect=fake_run), \
-             patch.object(fsresize, "_stream", side_effect=RuntimeError("resize failed")), \
+             patch.object(fsresize, "_run_typed", side_effect=fake_run), \
+             patch.object(fsresize, "_stream_typed", side_effect=RuntimeError("resize failed")), \
              patch.object(fsresize.tempfile, "mkdtemp", return_value="/tmp/kyth-btrfs-resize-test"), \
              patch.object(fsresize.Path, "rmdir"):
             with self.assertRaisesRegex(RuntimeError, "resize failed"):
@@ -181,8 +253,8 @@ class ShrinkBtrfsTests(unittest.TestCase):
 
         # mount happened, and umount was still attempted despite the resize
         # raising — the mount must never be leaked on failure.
-        self.assertTrue(any("mount" in c and "/dev/sda3" in c for c in calls))
-        self.assertTrue(any("umount" in c for c in calls))
+        self.assertTrue(any(c["operation"] == "mount_filesystem" and c["device"] == "/dev/sda3" for c in calls))
+        self.assertTrue(any(c["operation"] == "unmount_filesystem" for c in calls))
 
 
 class StreamTests(unittest.TestCase):
@@ -195,6 +267,23 @@ class StreamTests(unittest.TestCase):
         with patch.object(fsresize, "_as_root", side_effect=lambda cmd: cmd):
             fsresize._stream(["echo", "hello from resize"], logs.append, timeout=5)
         self.assertIn("hello from resize", logs)
+
+    def test_typed_stream_wraps_request_for_rust_process_lifecycle(self):
+        payload = {
+            "operation": "filesystem_resize",
+            "device": "/dev/sda1",
+            "fs": "ntfs",
+            "new_size_bytes": 10 * 1024**3,
+            "stage": "resize",
+        }
+        with patch.object(fsresize, "_stream") as stream:
+            fsresize._stream_typed(payload, lambda _message: None)
+
+        self.assertEqual(stream.call_args.args[0], fsresize._STREAM_HELPER)
+        self.assertEqual(
+            json.loads(stream.call_args.kwargs["stdin_data"]),
+            {"kind": "disk", "request": payload},
+        )
 
     def test_stream_pipes_input_to_the_process(self):
         logs = []
@@ -216,6 +305,38 @@ class StreamTests(unittest.TestCase):
         with patch.object(fsresize, "_as_root", side_effect=lambda cmd: cmd):
             with self.assertRaises(RuntimeError):
                 fsresize._stream(["false"], logs.append, timeout=5)
+
+
+class ValidateShrinkRequestTests(unittest.TestCase):
+    def test_broken_encryption_probe_blocks_the_shrink(self):
+        # A probe that cannot run leaves BitLocker/LUKS state unknown; the
+        # shrink must refuse, not proceed blind into a locked volume.
+        with patch("kyth_installer.assurance._battery_check", return_value=None), \
+             patch("kyth_installer.assurance._encryption_check", side_effect=OSError("no lsblk")), \
+             patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            with self.assertRaisesRegex(RuntimeError, "refusing to shrink blind"):
+                fsresize.validate_shrink_request("/dev/sda1", "ntfs")
+
+    def test_encryption_warn_blocks_the_shrink(self):
+        warn = MagicMock(status="warn", detail="LUKS locked")
+        with patch("kyth_installer.assurance._battery_check", return_value=None), \
+             patch("kyth_installer.assurance._encryption_check", return_value=warn), \
+             patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            with self.assertRaisesRegex(RuntimeError, "LUKS locked"):
+                fsresize.validate_shrink_request("/dev/sda1", "ntfs")
+
+    def test_clean_probe_passes_through(self):
+        with patch("kyth_installer.assurance._battery_check", return_value=None), \
+             patch("kyth_installer.assurance._encryption_check", return_value=None), \
+             patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            fsresize.validate_shrink_request("/dev/sda1", "ntfs")
+
+    def test_bitlocker_fstype_blocks_even_with_clean_probe(self):
+        with patch("kyth_installer.assurance._battery_check", return_value=None), \
+             patch("kyth_installer.assurance._encryption_check", return_value=None), \
+             patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            with self.assertRaisesRegex(RuntimeError, "BitLocker"):
+                fsresize.validate_shrink_request("/dev/sda1", "bitlocker")
 
 
 if __name__ == "__main__":

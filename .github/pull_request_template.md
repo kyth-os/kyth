@@ -1,16 +1,13 @@
-## What does this change?
+# STOP — this repository does not use pull requests
 
-<!-- One or two sentences. What problem does it solve or what does it add? -->
+Agent and maintainer work is committed on `testing` and pushed to `origin/testing`.
 
-## How was it tested?
+```bash
+git checkout testing
+git commit
+git push origin testing
+```
 
-<!-- How did you verify the change works? e.g. local build, booted ISO, checked a game, ran just lint -->
+Do not open this PR. Close it and push to `testing` instead.
 
-## Checklist
-
-- [ ] `just lint` passes (shellcheck + shfmt)
-- [ ] `python3 -m unittest discover -s tests` passes
-- [ ] Changes to build scripts tested with `just build` or `just build-live-iso`
-- [ ] Major behavior changes include automated tests or a documented rationale
-- [ ] New packages or COPRs justified in the PR description
-- [ ] Breaking changes to the installer or upgrade path noted above
+Promotion to `main` is a human step after CI, not an agent PR.

@@ -4,21 +4,18 @@
 # Runs in sysconfig-static layer; replaces fragmented write_config sysctl fragments.
 set -euo pipefail
 
-PYTHONPATH="/ctx/kyth_shared:${PYTHONPATH:-}" python3 -m kyth_shared.sysctl_compose --emit-all
-
-# Ensure legacy colliding files are gone; generator is single writer
-rm -f /etc/sysctl.d/99-kyth.conf \
-      /etc/sysctl.d/99-kyth-vm-compaction.conf \
-      /etc/sysctl.d/99-kyth-network-qdisc.conf 2>/dev/null || true
-
-# Modules that were previously loaded by retired fragments — still needed.
-mkdir -p /etc/modules-load.d
-printf '%s\n' 'tcp_bbr' > /etc/modules-load.d/bbr.conf
-chmod 0644 /etc/modules-load.d/bbr.conf
+if [[ -x /usr/bin/kyth-sysctl-compose ]]; then
+    /usr/bin/kyth-sysctl-compose --emit-all
+elif [[ -x src/kyth-shared-rs/target/release/kyth-sysctl-compose ]]; then
+    src/kyth-shared-rs/target/release/kyth-sysctl-compose --emit-all
+else
+    cargo run --quiet --manifest-path src/kyth-shared-rs/Cargo.toml --bin kyth-sysctl-compose -- --emit-all
+fi
 
 if [[ -f /ctx/config/sysctl.conf ]]; then
     echo "00-sysctl-compose: dead file /ctx/config/sysctl.conf still present — delete after migrating keys" >&2
     exit 1
 fi
 
+# shellcheck disable=SC2012
 echo "00-sysctl-compose: emitted $(ls -1 /etc/sysctl.d/99-kyth-*.conf 2>/dev/null | tr '\n' ' ')"

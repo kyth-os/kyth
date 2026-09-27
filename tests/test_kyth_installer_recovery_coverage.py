@@ -9,7 +9,12 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_installer.context import InstallerContext
-from kyth_installer.recovery import read_transaction_state, write_failure_summary, write_transaction_state
+from kyth_installer.recovery import (  # noqa: E402
+    read_transaction_state,
+    rescue_guidance,
+    write_failure_summary,
+    write_transaction_state,
+)
 
 
 class RecoveryDurabilityCoverageTests(unittest.TestCase):
@@ -66,6 +71,38 @@ class RecoveryDurabilityCoverageTests(unittest.TestCase):
             link.symlink_to(target)
             # read_transaction_state guards is_symlink -> {} (line 129)
             self.assertEqual(read_transaction_state(link), {})
+
+    def test_rescue_guidance_treats_legacy_image_installed_as_unbootable(self):
+        guide = rescue_guidance({"status": "image_installed"})
+        self.assertFalse(guide["bootable"])
+        self.assertEqual(guide["severity"], "unbootable")
+        self.assertIn("configure", guide["message"].lower())
+
+    def test_rescue_guidance_splits_storage_and_configure(self):
+        self.assertFalse(rescue_guidance({"status": "storage_complete"})["bootable"])
+        self.assertFalse(rescue_guidance({"status": "configure_started"})["bootable"])
+        self.assertFalse(rescue_guidance({"status": "configure_complete"})["bootable"])
+        self.assertTrue(rescue_guidance({"status": "secure_boot_staged"})["bootable"])
+        self.assertTrue(rescue_guidance({"status": "complete"})["bootable"])
+
+    def test_install_worker_records_split_durable_statuses(self):
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "src"
+            / "kyth-installer"
+            / "kyth_installer"
+            / "phases"
+            / "run.py"
+        ).read_text(encoding="utf-8")
+        for status in (
+            "storage_complete",
+            "configure_started",
+            "configure_complete",
+            "secure_boot_staged",
+            "complete",
+        ):
+            self.assertIn(f'_record_transaction(context, "{status}"', source)
+        self.assertNotIn('_record_transaction(context, "image_installed"', source)
 
 
 if __name__ == "__main__":

@@ -1,45 +1,83 @@
 #!/usr/bin/env python3
-"""kyth-configure-session — configure SDDM session defaults based on virtualization state."""
+"""kyth-configure-session — keep Plasma Login Manager on Wayland across upgrades.
+
+Older images wrote DisplayServer=x11 into /etc/sddm.conf.d/11-kyth-session.conf
+for VMs or nomodeset, and leftover LastSession=plasmax11 may still live in
+/var/lib/sddm/state.conf, /var/lib/plasmalogin/state.conf, or ~/.dmrc. Those
+locally modified files survive bootc updates unless this ExecStartPre
+overwrites them. Software-compose rescue (including nomodeset) is handled by
+kyth-greeter-compositor and /run/kyth-greeter.env.
+
+Fail-open: a write error logs a warning and returns 0 so ExecStartPre cannot
+block the greeter. ``10-kyth.conf`` still provides the Wayland default.
+"""
 from __future__ import annotations
 
-import os
-import shutil
 import sys
 from pathlib import Path
 
-from kyth_shared.commands import run as run_command
+from kyth_shared.wayland_compose import (
+    LEGACY_SDDM_STATE_FILE,
+    PLM_STATE_FILE,
+    greeter_session_conf,
+    migrate_greeter_last_session,
+    migrate_home_dmrcs,
+    write_greeter_compose_env,
+)
 
 
-def configure_session() -> int:
-    sddm_dir = Path("/etc/sddm.conf.d")
+def configure_session(conf_dir: Path | None = None, cmdline: str | None = None) -> int:
+    directory = Path(conf_dir) if conf_dir is not None else Path("/etc/plasmalogin.conf.d")
     try:
-        sddm_dir.mkdir(parents=True, exist_ok=True)
-    except Exception as exc:
-        print(f"Error creating {sddm_dir}: {exc}", file=sys.stderr)
-        return 1
-
-    is_virt = False
-    if shutil.which("systemd-detect-virt"):
-        res = run_command(["systemd-detect-virt", "-q"], check=False)
-        if res.returncode == 0:
-            is_virt = True
-
-    conf_file = sddm_dir / "11-kyth-session.conf"
-    if is_virt:
-        content = "[General]\nDisplayServer=x11\nDefaultSession=plasmax11.desktop\n"
-    else:
-        content = "[General]\nDisplayServer=wayland\nDefaultSession=plasma.desktop\n"
-
-    try:
-        conf_file.write_text(content, encoding="utf-8")
+        directory.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        print(f"Warning: could not create {directory}: {exc}", file=sys.stderr)
         return 0
-    except Exception as exc:
-        print(f"Error writing {conf_file}: {exc}", file=sys.stderr)
-        return 1
+    conf_file = directory / "11-kyth-session.conf"
+    try:
+        conf_file.write_text(greeter_session_conf(cmdline), encoding="utf-8")
+    except OSError as exc:
+        print(f"Warning: could not write {conf_file}: {exc}", file=sys.stderr)
+        return 0
+    return 0
+
+
+def configure_host_session(
+    conf_dir: Path | None = None,
+    cmdline: str | None = None,
+    *,
+    state_file: Path | None = None,
+    homes: Path | None = None,
+    env_file: Path | None = None,
+) -> int:
+    """Wayland drop-in plus leftover LastSession / ~/.dmrc X11 values.
+
+    Fail-open: migration errors are warnings. Login must not be blocked.
+    """
+    configure_session(conf_dir, cmdline)
+    targets = (
+        [state_file]
+        if state_file is not None
+        else [PLM_STATE_FILE, LEGACY_SDDM_STATE_FILE]
+    )
+    for path in targets:
+        try:
+            migrate_greeter_last_session(path)
+        except OSError as exc:
+            print(f"Warning: could not migrate greeter last session {path}: {exc}", file=sys.stderr)
+    try:
+        migrate_home_dmrcs(homes or Path("/home"))
+    except OSError as exc:
+        print(f"Warning: could not migrate user session files: {exc}", file=sys.stderr)
+    try:
+        write_greeter_compose_env(env_file)
+    except OSError as exc:
+        print(f"Warning: could not write greeter compose env: {exc}", file=sys.stderr)
+    return 0
 
 
 def main() -> None:
-    sys.exit(configure_session())
+    sys.exit(configure_host_session())
 
 
 if __name__ == "__main__":

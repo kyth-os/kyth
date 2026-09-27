@@ -1,0 +1,2298 @@
+//! Native production executor between the job supervisor and typed operations.
+//!
+//! It accepts a complete typed request, validates it through the plan
+//! builders, and retains only the resulting non-secret plans. Every phase is
+//! either implemented by Rust or a fixed, typed root-only helper operation;
+//! there is no Python whole-install worker or generic command/filesystem
+//! bridge.
+
+use std::fmt;
+use std::process::Command;
+use std::sync::Mutex;
+
+// systemd creates this parent as root-owned and non-writable by the live user.
+// A fixed staging path under /var/tmp could be pre-created as a symlink before
+// the privileged installer mounts the selected target there.
+const BTRFS_STAGING_MOUNTPOINT: &str = "/run/kyth-installer/btrfs-root";
+const WIPE_STAGING_MOUNTPOINT: &str = "/run/kyth-installer/install-root";
+const FILESYSTEM_STAGING_MOUNTPOINT: &str = "/run/kyth-installer/alongside-target";
+
+use super::installer_executor::{self, InstallerExecutionInput, InstallerExecutionPlan};
+use super::installer_job::{CancellationToken, JobSupervisor, PhaseExecutor};
+use super::installer_plan::{self, InstallerPlan, InstallerPlanInput};
+use super::installer_runtime::Phase;
+use crate::installer_configuration;
+
+/// The complete typed request accepted by the native phase adapter.
+///
+/// The storage request and executor request intentionally remain separate:
+/// the former describes the selected install mode, while the latter contains
+/// the typed bootc, configuration, account, and Secure Boot inputs.
+pub(crate) struct NativeInstallRequest {
+    pub storage: InstallerPlanInput,
+    pub execution: InstallerExecutionInput,
+    pub manual_mounts: Option<crate::installer_manual::ManualMountsInput>,
+    pub secure_boot_password: String,
+    pub transaction_path: String,
+}
+
+fn normalize_kernel_flavor(value: &str) -> String {
+    let normalized = value.trim().to_ascii_lowercase();
+    if normalized == "cachyos" {
+        "cachy".to_string()
+    } else {
+        normalized
+    }
+}
+
+/// Install modes whose storage phase formats a Btrfs target with `@` and
+/// `@home` subvolumes (`prepare_btrfs_target`), so configuration must mount
+/// `@home` at /var/home and persist it in fstab. Python rewrote free_space
+/// and resize_ntfs to "alongside" after partitioning, so all three share the
+/// alongside-home step; manual installs configure /home via manual mounts.
+fn lays_out_home_subvolume(mode: &str) -> bool {
+    matches!(mode, "alongside" | "free_space" | "resize_ntfs")
+}
+
+/// Disk-helper request that mounts the target ESP at `mountpoint`. An ESP the
+/// live session already has mounted is bind-mounted from that mountpoint:
+/// the helper keys bind mounts on the `bind` field, and without it treats the
+/// mountpoint path as a device, which its `/dev/` device gate rejects.
+fn efi_mount_operation(
+    efi: &crate::installer_storage::EfiPartition,
+    mountpoint: &str,
+) -> serde_json::Value {
+    match &efi.mounted_at {
+        Some(source) => serde_json::json!({
+            "operation": "mount_filesystem",
+            "device": source,
+            "mountpoint": mountpoint,
+            "bind": true
+        }),
+        None => serde_json::json!({
+            "operation": "mount_filesystem",
+            "device": efi.name,
+            "mountpoint": mountpoint
+        }),
+    }
+}
+
+impl NativeInstallRequest {
+    /// Decode the flat HTTP representation used by the existing frontend.
+    /// Secrets are consumed into the typed request and never serialized back.
+    pub(crate) fn from_http(value: serde_json::Value) -> Result<Self, String> {
+        let object = value
+            .as_object()
+            .ok_or_else(|| "installer start request must be a JSON object".to_string())?;
+        let text = |name: &str, default: &str| {
+            object
+                .get(name)
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or(default)
+                .to_string()
+        };
+        let number = |name: &str| {
+            object
+                .get(name)
+                .and_then(serde_json::Value::as_i64)
+                .unwrap_or(0)
+        };
+        let flag = |name: &str, default: bool| {
+            object
+                .get(name)
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(default)
+        };
+        // The irreversible acknowledgement is a daemon-side gate, not just a
+        // frontend checkbox: the Slint shell sends `acknowledged-irreversible`
+        // and the web frontend sends `acknowledged_irreversible`. A start
+        // request without either must fail closed before any worker starts.
+        let acknowledged = object
+            .get("acknowledged-irreversible")
+            .and_then(serde_json::Value::as_bool)
+            .or_else(|| {
+                object
+                    .get("acknowledged_irreversible")
+                    .and_then(serde_json::Value::as_bool)
+            })
+            .unwrap_or(false);
+        if !acknowledged {
+            return Err("installation cannot start until the irreversible step is acknowledged: once partitioning starts, erased or resized data cannot be restored."
+                .to_string());
+        }
+        let username = text("username", "").trim().to_string();
+        let password_hash = {
+            let supplied_hash = text("password_hash", "");
+            if supplied_hash.is_empty() && !username.is_empty() {
+                crate::installer_accounts::hash_password(&text("password", ""))?
+            } else {
+                supplied_hash
+            }
+        };
+        let install_mode = text("install_mode", "wipe").to_ascii_lowercase();
+        let filesystem_install = matches!(
+            install_mode.as_str(),
+            "alongside" | "manual" | "free_space" | "resize_ntfs"
+        );
+        // Implied by the mode, never a separate request key: bootc to-disk
+        // refuses a partitioned disk without --wipe, and no frontend sends
+        // one. Filesystem installs never wipe the disk.
+        let erase_disk = install_mode == "wipe";
+        let target_root = if filesystem_install {
+            FILESYSTEM_STAGING_MOUNTPOINT.to_string()
+        } else {
+            WIPE_STAGING_MOUNTPOINT.to_string()
+        };
+        let manual_mounts = if install_mode == "manual" {
+            let mounts = object
+                .get("mounts")
+                .cloned()
+                .unwrap_or_else(|| serde_json::json!([]));
+            Some(
+                serde_json::from_value(serde_json::json!({
+                    "config_root": target_root.clone(),
+                    "fstab_path": format!("{target_root}/etc/fstab"),
+                    "mounts": mounts,
+                }))
+                .map_err(|error| format!("invalid manual mount request: {error}"))?,
+            )
+        } else {
+            None
+        };
+        let account =
+            (!username.is_empty()).then_some(crate::installer_accounts::CreateUserInput {
+                deploy_root: target_root.clone(),
+                target_root: target_root.clone(),
+                username,
+                password_hash,
+            });
+        Ok(Self {
+            storage: InstallerPlanInput {
+                disk: text("disk", ""),
+                install_mode,
+                target_partition: text("target_partition", ""),
+                resize_partition: text("resize_partition", ""),
+                resize_gib: number("resize_gib"),
+                free_region_start: number("free_region_start"),
+                free_region_end: number("free_region_end"),
+            },
+            execution: InstallerExecutionInput {
+                bootc: crate::installer_bootc::BootcInstallInput {
+                    subcommand: if filesystem_install {
+                        "to-filesystem".to_string()
+                    } else {
+                        text("subcommand", "to-disk")
+                    },
+                    source_imgref: text(
+                        "source_imgref",
+                        &std::env::var("KYTH_SOURCE_IMAGE")
+                            .unwrap_or_else(|_| "oci:/usr/share/kyth/image:latest".to_string()),
+                    ),
+                    target_imgref: text(
+                        "target_imgref",
+                        &std::env::var("KYTH_TARGET_IMAGE")
+                            .unwrap_or_else(|_| "ghcr.io/kyth-os/kyth:latest".to_string()),
+                    ),
+                    target: if filesystem_install {
+                        FILESYSTEM_STAGING_MOUNTPOINT.to_string()
+                    } else {
+                        text("disk", "")
+                    },
+                    skip_fetch_check: flag("skip_fetch_check", false),
+                    // bootc's finalize remounts the target read-only; the
+                    // configuration phase still has to write into it.
+                    skip_finalize: filesystem_install,
+                    root_subvolume: flag("root_subvolume", filesystem_install),
+                    wipe: erase_disk,
+                    encryption: text("encryption", "none"),
+                    tpm_recovery_ack: flag("tpm_recovery_ack", false),
+                },
+                configuration: crate::installer_configuration::ConfigurationInput {
+                    target_root: target_root.clone(),
+                    hostname: text("hostname", "kyth"),
+                    timezone: text("timezone", "UTC"),
+                    locale: text("locale", "en_US.UTF-8"),
+                    keymap: text("keymap", "us"),
+                },
+                account,
+                secure_boot: crate::installer_secure_boot::SecureBootInput {
+                    kernel: normalize_kernel_flavor(&text("kernel", "fedora")),
+                    force_stage: flag("force_stage", false),
+                    certificate_present: flag("certificate_present", false),
+                    mokutil_present: flag("mokutil_present", false),
+                    secure_boot: text("secure_boot", "unknown"),
+                    enrolled: text("enrolled", "unknown"),
+                    pending: text("pending", "unknown"),
+                },
+            },
+            manual_mounts,
+            secure_boot_password: text("mok_password", ""),
+            transaction_path: text(
+                "transaction_path",
+                &std::env::var("KYTH_INSTALLER_TRANSACTION")
+                    .unwrap_or_else(|_| "/run/kyth-installer/transaction.json".to_string()),
+            ),
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum NativeOperation {
+    ValidateStoragePlan,
+    ValidateExecutionPlan,
+    StorageMutation,
+    ImageWrite,
+    ConfigurationWrite,
+    AccountCreate,
+    SecureBootInteraction,
+    CompletionCommit,
+}
+
+impl fmt::Display for NativeOperation {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = match self {
+            Self::ValidateStoragePlan => "validate_storage_plan",
+            Self::ValidateExecutionPlan => "validate_execution_plan",
+            Self::StorageMutation => "storage_mutation",
+            Self::ImageWrite => "image_write",
+            Self::ConfigurationWrite => "configuration_write",
+            Self::AccountCreate => "account_create",
+            Self::SecureBootInteraction => "secure_boot_interaction",
+            Self::CompletionCommit => "completion_commit",
+        };
+        formatter.write_str(value)
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum NativePhaseError {
+    Cancelled {
+        phase: Phase,
+    },
+    InvalidPlan {
+        phase: Phase,
+        operation: NativeOperation,
+    },
+    Execution {
+        phase: Phase,
+        message: String,
+    },
+}
+
+impl fmt::Display for NativePhaseError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Cancelled { phase } => write!(
+                formatter,
+                "native installer phase {phase:?} was cancelled before execution"
+            ),
+            Self::InvalidPlan { phase, operation } => write!(
+                formatter,
+                "native installer operation {operation} is unavailable for invalid phase {phase:?}"
+            ),
+            Self::Execution { phase, message } => {
+                write!(
+                    formatter,
+                    "native installer phase {phase:?} failed: {message}"
+                )
+            }
+        }
+    }
+}
+
+/// A typed phase executor suitable for `JobSupervisor` in production.
+///
+/// The plans are built before a worker can start, so malformed requests fail
+/// before any lifecycle state is claimed.  The account password hash is
+/// consumed by plan construction and is not retained by this type.
+pub(crate) struct NativePhaseExecutor {
+    storage_plan: InstallerPlan,
+    execution_plan: InstallerExecutionPlan,
+    bootc_request: crate::installer_bootc::BootcInstallInput,
+    account: Option<crate::installer_accounts::CreateUserInput>,
+    manual_mounts: Option<crate::installer_manual::ManualMountsInput>,
+    source_imgref: String,
+    target_imgref: String,
+    secure_boot_kernel: String,
+    secure_boot_force_stage: bool,
+    secure_boot_password: String,
+    transaction_id: String,
+    transaction_path: String,
+    transaction: Mutex<crate::installer_transaction::TransactionState>,
+    mounts: Mutex<crate::installer_mount::MountRegistry>,
+    storage_target: Mutex<Option<String>>,
+    secure_boot_state: Mutex<Option<String>>,
+}
+
+impl NativePhaseExecutor {
+    pub(crate) fn from_request(request: NativeInstallRequest) -> Result<Self, String> {
+        let bootc_request = request.execution.bootc.clone();
+        let account = request.execution.account.clone();
+        let manual_mounts = request.manual_mounts;
+        let source_imgref = request.execution.bootc.source_imgref.clone();
+        let target_imgref = request.execution.bootc.target_imgref.clone();
+        let secure_boot_kernel = request.execution.secure_boot.kernel.clone();
+        let secure_boot_force_stage = request.execution.secure_boot.force_stage;
+        let secure_boot_password = request.secure_boot_password;
+        let transaction_path = request.transaction_path;
+        let storage_plan = installer_plan::build_plan(request.storage)?;
+        let execution_plan = installer_executor::build_plan(request.execution)?;
+        let transaction_id = Self::new_transaction_id();
+        let transaction = Self::initial_transaction(
+            &storage_plan,
+            &source_imgref,
+            &target_imgref,
+            transaction_id.clone(),
+        );
+        Ok(Self {
+            storage_plan,
+            execution_plan,
+            bootc_request,
+            account,
+            manual_mounts,
+            source_imgref,
+            target_imgref,
+            secure_boot_kernel,
+            secure_boot_force_stage,
+            secure_boot_password,
+            transaction_id: transaction_id.clone(),
+            transaction_path,
+            transaction: Mutex::new(transaction),
+            mounts: Mutex::new(crate::installer_mount::MountRegistry::default()),
+            storage_target: Mutex::new(None),
+            secure_boot_state: Mutex::new(None),
+        })
+    }
+
+    pub(crate) fn from_plans(
+        storage_plan: InstallerPlan,
+        execution_plan: InstallerExecutionPlan,
+    ) -> Self {
+        let transaction_id = Self::new_transaction_id();
+        let transaction = Self::initial_transaction(&storage_plan, "", "", transaction_id.clone());
+        Self {
+            storage_plan,
+            execution_plan,
+            bootc_request: crate::installer_bootc::BootcInstallInput {
+                subcommand: "to-disk".to_string(),
+                source_imgref: String::new(),
+                target_imgref: String::new(),
+                target: String::new(),
+                skip_fetch_check: false,
+                skip_finalize: false,
+                root_subvolume: false,
+                wipe: false,
+                encryption: String::new(),
+                tpm_recovery_ack: false,
+            },
+            account: None,
+            manual_mounts: None,
+            source_imgref: "".to_string(),
+            target_imgref: "".to_string(),
+            secure_boot_kernel: "fedora".to_string(),
+            secure_boot_force_stage: false,
+            secure_boot_password: String::new(),
+            transaction_id: transaction_id.clone(),
+            transaction_path: "/run/kyth-installer/transaction.json".to_string(),
+            transaction: Mutex::new(transaction),
+            mounts: Mutex::new(crate::installer_mount::MountRegistry::default()),
+            storage_target: Mutex::new(None),
+            secure_boot_state: Mutex::new(None),
+        }
+    }
+
+    fn new_transaction_id() -> String {
+        format!(
+            "native-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_nanos())
+                .unwrap_or_default()
+        )
+    }
+
+    fn initial_transaction(
+        storage_plan: &InstallerPlan,
+        source_imgref: &str,
+        target_imgref: &str,
+        transaction_id: String,
+    ) -> crate::installer_transaction::TransactionState {
+        let source_kind = if source_imgref.starts_with("docker://") {
+            "network"
+        } else if source_imgref.starts_with("oci:") {
+            "embedded"
+        } else if source_imgref.is_empty() {
+            "unresolved"
+        } else {
+            "local"
+        };
+        let source_status =
+            crate::installer_readonly::source_status_for(source_imgref, target_imgref);
+        let source = source_status
+            .get("kind")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or(source_kind);
+        let digest = source_status
+            .get("digest")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        let verified = source_status
+            .get("verified")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        crate::installer_transaction::TransactionState {
+            schema_version: 1,
+            transaction_id,
+            job_id: None,
+            updated_at: String::new(),
+            status: String::new(),
+            phase: "prepare".to_string(),
+            lifecycle: "idle".to_string(),
+            install_mode: storage_plan.mode.clone(),
+            disk: storage_plan.disk.clone(),
+            target_partition: storage_plan
+                .target_partition
+                .clone()
+                .or_else(|| storage_plan.resize_partition.clone())
+                .unwrap_or_default(),
+            source: crate::installer_transaction::TransactionSource {
+                kind: source.to_string(),
+                digest: digest.to_string(),
+                verified,
+                target_ref: target_imgref.to_string(),
+            },
+            checks: Vec::new(),
+            partition_steps: Vec::new(),
+            message: String::new(),
+            recovery_required: false,
+        }
+    }
+
+    pub(crate) fn storage_plan(&self) -> &InstallerPlan {
+        &self.storage_plan
+    }
+
+    pub(crate) fn execution_plan(&self) -> &InstallerExecutionPlan {
+        &self.execution_plan
+    }
+
+    /// Return the only operation sequence this adapter may expose to the
+    /// native job.  The sequence is also useful for fixture-based parity tests
+    /// before the corresponding live operation is implemented.
+    pub(crate) fn operation_order(&self) -> Vec<NativeOperation> {
+        let mut operations = vec![
+            NativeOperation::ValidateStoragePlan,
+            NativeOperation::ValidateExecutionPlan,
+            NativeOperation::StorageMutation,
+            NativeOperation::ImageWrite,
+            NativeOperation::ConfigurationWrite,
+        ];
+        if self.execution_plan.account.is_some() {
+            operations.push(NativeOperation::AccountCreate);
+        }
+        operations.extend([
+            NativeOperation::SecureBootInteraction,
+            NativeOperation::CompletionCommit,
+        ]);
+        operations
+    }
+
+    pub(crate) fn execute_phase_typed(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
+        if cancellation.is_cancelled() {
+            return Err(NativePhaseError::Cancelled { phase });
+        }
+        let start_status = match phase {
+            Phase::Prepare => Some(("started", "Installer started")),
+            Phase::Configure => Some(("configure_started", "Configuring the installed system")),
+            _ => None,
+        };
+        if let Some((status, message)) = start_status {
+            self.write_transaction(status, phase, "installing", message)
+                .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        }
+
+        let result = match phase {
+            Phase::Prepare => {
+                let power = crate::installer_orchestration::power_check();
+                self.append_check(serde_json::json!({
+                    "name": "power",
+                    "status": power.status.clone(),
+                    "detail": power.detail.clone()
+                }))?;
+                if power.status == "fail" {
+                    Err(NativePhaseError::Execution {
+                        phase,
+                        message: power.detail.clone(),
+                    })
+                } else {
+                    self.append_check(serde_json::json!({
+                        "name": "native_plan",
+                        "status": "pass",
+                        "detail": "Typed Rust installer plan validated"
+                    }))?;
+                    Ok(())
+                }
+            }
+            Phase::Storage => self.execute_storage(phase, cancellation),
+            Phase::Image => self.execute_image(phase, cancellation),
+            Phase::Configure => self.execute_configuration(phase, cancellation),
+            Phase::SecureBoot => self.execute_secure_boot(phase, cancellation),
+            Phase::Complete => self.execute_complete(phase),
+        };
+        result?;
+
+        let completion = match phase {
+            Phase::Prepare => Some(("prepared", "Install plan prepared")),
+            Phase::Image => Some(("storage_complete", "Operating system image written")),
+            Phase::Configure => Some(("configure_complete", "Installed system configured")),
+            Phase::SecureBoot => Some((
+                "secure_boot_staged",
+                "Secure Boot enrollment state classified",
+            )),
+            Phase::Complete => None,
+            Phase::Storage => None,
+        };
+        if let Some((status, message)) = completion {
+            self.write_transaction(status, phase, "installing", message)
+                .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        }
+        Ok(())
+    }
+
+    fn write_transaction(
+        &self,
+        status: &str,
+        phase: Phase,
+        lifecycle: &str,
+        message: &str,
+    ) -> Result<(), String> {
+        let updated_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|error| format!("could not determine transaction timestamp: {error}"))?
+            .as_secs()
+            .to_string();
+        let state = {
+            let mut state = self
+                .transaction
+                .lock()
+                .map_err(|_| "native transaction state is unavailable".to_string())?;
+            if status == "started" {
+                state.checks.clear();
+                state.partition_steps.clear();
+            }
+            state.updated_at = updated_at;
+            state.status = status.to_string();
+            state.phase = serde_json::to_value(phase)
+                .ok()
+                .and_then(|value| value.as_str().map(str::to_string))
+                .unwrap_or_else(|| "unknown".to_string());
+            state.lifecycle = lifecycle.to_string();
+            state.message = message.to_string();
+            state.recovery_required = status == "failed";
+            state.clone()
+        };
+        crate::installer_transaction::write_request(
+            crate::installer_transaction::TransactionWriteInput {
+                path: self.transaction_path.clone(),
+                state,
+            },
+        )
+    }
+
+    fn append_check(&self, check: serde_json::Value) -> Result<(), NativePhaseError> {
+        self.append_check_for_phase(Phase::Prepare, check)
+    }
+
+    fn append_check_for_phase(
+        &self,
+        phase: Phase,
+        check: serde_json::Value,
+    ) -> Result<(), NativePhaseError> {
+        let state = {
+            let mut state = self
+                .transaction
+                .lock()
+                .map_err(|_| NativePhaseError::Execution {
+                    phase,
+                    message: "native transaction state is unavailable".to_string(),
+                })?;
+            state.checks.push(check);
+            state.clone()
+        };
+        crate::installer_transaction::write_request(
+            crate::installer_transaction::TransactionWriteInput {
+                path: self.transaction_path.clone(),
+                state,
+            },
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })
+    }
+
+    fn append_partition_step(
+        &self,
+        kind: &str,
+        status: &str,
+        target: &str,
+        phase: Phase,
+    ) -> Result<(), NativePhaseError> {
+        let state = {
+            let mut state = self
+                .transaction
+                .lock()
+                .map_err(|_| NativePhaseError::Execution {
+                    phase,
+                    message: "native transaction state is unavailable".to_string(),
+                })?;
+            let index = state.partition_steps.len();
+            state.partition_steps.push(serde_json::json!({
+                "index": index.to_string(),
+                "kind": kind,
+                "status": status,
+                "target": target
+            }));
+            state.clone()
+        };
+        crate::installer_transaction::write_request(
+            crate::installer_transaction::TransactionWriteInput {
+                path: self.transaction_path.clone(),
+                state,
+            },
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })
+    }
+
+    fn persist_failure_summary(&self, message: &str) {
+        if let Ok(state) = self.transaction.lock().map(|state| state.clone()) {
+            let path = std::env::var("KYTH_INSTALLER_FAILURE_SUMMARY")
+                .unwrap_or_else(|_| "/run/kyth-installer/failure.json".to_string());
+            let _ = crate::installer_transaction::write_failure_summary(&path, &state, message);
+        }
+    }
+
+    fn register_mount(&self, path: &str) -> Result<(), NativePhaseError> {
+        self.mounts
+            .lock()
+            .map_err(|_| NativePhaseError::Execution {
+                phase: Phase::Configure,
+                message: "native mount state is unavailable".to_string(),
+            })?
+            .register(path);
+        Ok(())
+    }
+
+    fn release_mount(&self, path: &str) -> Result<(), NativePhaseError> {
+        self.mounts
+            .lock()
+            .map_err(|_| NativePhaseError::Execution {
+                phase: Phase::Configure,
+                message: "native mount state is unavailable".to_string(),
+            })?
+            .release(path);
+        Ok(())
+    }
+
+    fn cleanup_mounts(&self, phase: Phase) -> Result<(), String> {
+        let paths = self
+            .mounts
+            .lock()
+            .map_err(|_| "native mount state is unavailable".to_string())?
+            .cleanup_order();
+        let cancellation = CancellationToken::default();
+        let mut first_error = None;
+        for path in paths {
+            let operation = serde_json::json!({
+                "operation": "unmount_filesystem",
+                "mountpoint": path,
+                "recursive": true,
+                "lazy": true
+            });
+            if let Err(error) = self.execute_disk_helper(phase, &cancellation, &operation) {
+                if first_error.is_none() {
+                    first_error = Some(error.to_string());
+                }
+            }
+        }
+        first_error.map_or(Ok(()), Err)
+    }
+
+    fn execute_fixed_helper(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+        operation: &str,
+        request: &serde_json::Value,
+    ) -> Result<(), NativePhaseError> {
+        let input = serde_json::to_vec(request).map_err(|error| NativePhaseError::Execution {
+            phase,
+            message: format!("could not encode {operation} request: {error}"),
+        })?;
+        let mut command = Command::new("/usr/bin/kyth-installer-exec");
+        command.args(["--operation", operation]);
+        let status = super::installer_stream::run_command_with_input(&mut command, &input, || {
+            cancellation.is_cancelled()
+        })
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        if status.success() {
+            Ok(())
+        } else {
+            Err(NativePhaseError::Execution {
+                phase,
+                message: format!("{operation} helper exited with status {status}"),
+            })
+        }
+    }
+
+    fn execute_configuration(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
+        let target = self
+            .storage_target
+            .lock()
+            .map_err(|_| NativePhaseError::Execution {
+                phase,
+                message: "native storage target state is unavailable".to_string(),
+            })?
+            .clone();
+        let config = &self.execution_plan.configuration;
+        // config.target_root is the physical sysroot, which has no /etc of
+        // its own; the installed system's /etc is inside the deployment the
+        // image phase just wrote. Every /etc write below goes there.
+        let deploy_root = installer_configuration::find_deploy_root(&config.target_root)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        let deploy_fstab = format!("{deploy_root}/etc/fstab");
+        let fstab = installer_configuration::snapshot_fstab(&deploy_fstab)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        let result = (|| {
+            match self.storage_plan.mode.as_str() {
+                mode if lays_out_home_subvolume(mode) => {
+                    let target_device = target
+                        .or_else(|| self.storage_plan.target_partition.clone())
+                        .ok_or_else(|| NativePhaseError::Execution {
+                            phase,
+                            message: "filesystem install has no configured target partition"
+                                .to_string(),
+                        })?;
+                    self.execute_fixed_helper(
+                        phase,
+                        cancellation,
+                        "alongside-home",
+                        &serde_json::json!({
+                            "config_root": config.target_root,
+                            "target_device": target_device,
+                            "fstab_path": deploy_fstab,
+                        }),
+                    )?;
+                }
+                "manual" => {
+                    if let Some(mounts) = &self.manual_mounts {
+                        let mut mounts = mounts.clone();
+                        mounts.fstab_path = deploy_fstab.clone();
+                        self.execute_fixed_helper(
+                            phase,
+                            cancellation,
+                            "manual-mounts",
+                            &serde_json::to_value(&mounts).map_err(|error| {
+                                NativePhaseError::Execution {
+                                    phase,
+                                    message: format!("could not encode manual mounts: {error}"),
+                                }
+                            })?,
+                        )?;
+                    }
+                }
+                _ => {}
+            }
+            let deployed = config
+                .for_deployment(&deploy_root)
+                .map_err(|message| NativePhaseError::Execution { phase, message })?;
+            installer_configuration::apply_plan(deployed)
+                .map_err(|message| NativePhaseError::Execution { phase, message })?;
+            if let Some(account) = &self.account {
+                // useradd --root and the shadow edit need the deployment;
+                // the home directory stays under the sysroot's shared /var.
+                let mut account = account.clone();
+                account.deploy_root = deploy_root.clone();
+                let request = serde_json::to_value(&account).map_err(|error| {
+                    NativePhaseError::Execution {
+                        phase,
+                        message: format!("could not encode create-user request: {error}"),
+                    }
+                })?;
+                self.execute_fixed_helper(phase, cancellation, "create-user", &request)?;
+            }
+            let assurance =
+                crate::installer_assurance::validate(crate::installer_assurance::AssuranceInput {
+                    target_root: config.target_root.clone(),
+                    deploy_root: deploy_root.clone(),
+                    hostname: config
+                        .writes
+                        .iter()
+                        .find(|write| write.path.ends_with("/hostname"))
+                        .map(|write| write.content.trim().to_string())
+                        .unwrap_or_default(),
+                    locale: config
+                        .writes
+                        .iter()
+                        .find(|write| write.path.ends_with("/locale.conf"))
+                        .and_then(|write| write.content.strip_prefix("LANG="))
+                        .map(str::trim)
+                        .unwrap_or_default()
+                        .to_string(),
+                    keymap: config
+                        .writes
+                        .iter()
+                        .find(|write| write.path.ends_with("/vconsole.conf"))
+                        .and_then(|write| write.content.strip_prefix("KEYMAP="))
+                        .map(str::trim)
+                        .unwrap_or_default()
+                        .to_string(),
+                    timezone: config
+                        .localtime_target
+                        .strip_prefix("/usr/share/zoneinfo/")
+                        .unwrap_or_default()
+                        .to_string(),
+                    username: self
+                        .account
+                        .as_ref()
+                        .map(|account| account.username.clone())
+                        .unwrap_or_default(),
+                })
+                .map_err(|message| NativePhaseError::Execution { phase, message })?;
+            for check in assurance {
+                self.append_check_for_phase(
+                    phase,
+                    serde_json::to_value(check).map_err(|error| NativePhaseError::Execution {
+                        phase,
+                        message: format!("could not encode assurance check: {error}"),
+                    })?,
+                )?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            let rollback = installer_configuration::restore_fstab(fstab);
+            if let Err(rollback_error) = rollback {
+                return Err(NativePhaseError::Execution {
+                    phase,
+                    message: format!("{error}; fstab rollback failed: {rollback_error}"),
+                });
+            }
+            return Err(error);
+        }
+        Ok(())
+    }
+
+    fn write_terminal_transaction(&self, phase: Option<Phase>, message: &str) {
+        let phase = phase.unwrap_or(Phase::Prepare);
+        let _ = self.write_transaction("failed", phase, "failed", message);
+    }
+
+    fn verify_install_source(&self, phase: Phase) -> Result<(), NativePhaseError> {
+        // Re-verify the embedded image digest against the release digest AND
+        // the build-time cosign signature bundle immediately before bootc
+        // writes anything. `source_status_for` fails closed on any mismatch.
+        // Key off the claimed source, not the reported kind: a missing or
+        // tampered layout reports "invalid", which must also refuse bootc.
+        let claims_embedded = self.source_imgref.trim().starts_with("oci:");
+        if !claims_embedded {
+            return Ok(());
+        }
+        let status =
+            crate::installer_readonly::source_status_for(&self.source_imgref, &self.target_imgref);
+        if !status
+            .get("verified")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false)
+        {
+            let detail = status
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("embedded image verification failed");
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: format!("refusing bootc install: {detail}"),
+            });
+        }
+        Ok(())
+    }
+
+    fn check_storage_preflight(&self, phase: Phase) -> Result<(), NativePhaseError> {
+        // Live ESP-preservation / Windows / BitLocker preflight immediately
+        // before mutation or bootc: locked BitLocker fails closed in every
+        // mode, and non-wipe modes require an existing ESP to preserve.
+        let snapshot = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+        let preflight = crate::installer_storage::storage_preflight_from_snapshot(
+            &snapshot,
+            &self.storage_plan.disk,
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        crate::installer_storage::validate_storage_preflight(&preflight, &self.storage_plan.mode)
+            .map_err(|message| NativePhaseError::Execution { phase, message })
+    }
+
+    fn execute_image(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
+        self.verify_install_source(phase)?;
+        self.check_storage_preflight(phase)?;
+        if self.storage_plan.mode == "wipe" {
+            crate::installer_guard::validate_target_disk(&self.storage_plan.disk)
+                .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        }
+        let status = self.execute_stream_helper(
+            phase,
+            cancellation,
+            serde_json::json!({
+                "kind": "bootc_install",
+                "request": self.bootc_request.clone(),
+            }),
+            None,
+        )?;
+        if status {
+            if self.storage_plan.mode == "wipe" {
+                self.mount_wipe_root(phase, cancellation)?;
+            }
+            Ok(())
+        } else {
+            Err(NativePhaseError::Execution {
+                phase,
+                message: format!("bootc exited with status {}", status),
+            })
+        }
+    }
+
+    fn execute_disk_helper(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+        operation: &serde_json::Value,
+    ) -> Result<(), NativePhaseError> {
+        let step_kind = operation
+            .get("operation")
+            .and_then(serde_json::Value::as_str)
+            .filter(|kind| {
+                matches!(
+                    *kind,
+                    "create_label"
+                        | "create_partition"
+                        | "create_unformatted_partition"
+                        | "delete_partition"
+                        | "resize_partition"
+                        | "format_filesystem"
+                        | "set_partition_flag"
+                        | "filesystem_resize"
+                        | "btrfs_subvolume_create"
+                        | "btrfs_subvolume_set_default"
+                )
+            });
+        let step_target = operation
+            .get("partition")
+            .or_else(|| operation.get("device"))
+            .or_else(|| operation.get("disk"))
+            .or_else(|| operation.get("mountpoint"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default();
+        if let Some(kind) = step_kind {
+            self.append_partition_step(kind, "started", step_target, phase)?;
+        }
+        let input = serde_json::to_vec(operation).map_err(|error| NativePhaseError::Execution {
+            phase,
+            message: format!("could not encode disk operation: {error}"),
+        })?;
+        let mut command = Command::new("/usr/bin/kyth-installer-exec");
+        command.args(["--operation", "disk"]);
+        let status = super::installer_stream::run_command_with_input(&mut command, &input, || {
+            cancellation.is_cancelled()
+        })
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        if status.success() {
+            if let Some(kind) = step_kind {
+                self.append_partition_step(kind, "completed", step_target, phase)?;
+            }
+            Ok(())
+        } else {
+            if let Some(kind) = step_kind {
+                let _ = self.append_partition_step(kind, "failed", step_target, phase);
+            }
+            Err(NativePhaseError::Execution {
+                phase,
+                message: format!("disk helper exited with status {status}"),
+            })
+        }
+    }
+
+    fn mount_wipe_root(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
+        let output = Command::new("/usr/bin/lsblk")
+            .args([
+                "--json",
+                "--bytes",
+                "--paths",
+                "--output",
+                "NAME,TYPE,FSTYPE,PKNAME",
+                &self.storage_plan.disk,
+            ])
+            .output()
+            .map_err(|error| NativePhaseError::Execution {
+                phase,
+                message: format!("could not probe installed root partition: {error}"),
+            })?;
+        if !output.status.success() {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "installed root partition probe failed".to_string(),
+            });
+        }
+        let snapshot =
+            String::from_utf8(output.stdout).map_err(|_| NativePhaseError::Execution {
+                phase,
+                message: "installed root partition probe was not UTF-8".to_string(),
+            })?;
+        let root = crate::installer_storage::root_partition_from_snapshot(
+            &snapshot,
+            &self.storage_plan.disk,
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        for operation in [
+            serde_json::json!({
+                "operation": "ensure_directory",
+                "path": WIPE_STAGING_MOUNTPOINT
+            }),
+            serde_json::json!({
+                "operation": "mount_filesystem",
+                "device": root,
+                "mountpoint": WIPE_STAGING_MOUNTPOINT
+            }),
+        ] {
+            self.execute_disk_helper(phase, cancellation, &operation)?;
+        }
+        self.register_mount(WIPE_STAGING_MOUNTPOINT)?;
+        Ok(())
+    }
+
+    fn disk_snapshot(&self, phase: Phase, disk: &str) -> Result<String, NativePhaseError> {
+        let output = Command::new("/usr/bin/lsblk")
+            .args([
+                "--json",
+                "--bytes",
+                "--paths",
+                "--output",
+                "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,PARTN,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO,PKNAME,PTTYPE",
+                disk,
+            ])
+            .output()
+            .map_err(|error| NativePhaseError::Execution {
+                phase,
+                message: format!("could not probe target disk: {error}"),
+            })?;
+        if !output.status.success() {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "target disk probe failed".to_string(),
+            });
+        }
+        String::from_utf8(output.stdout).map_err(|_| NativePhaseError::Execution {
+            phase,
+            message: "target disk probe was not UTF-8".to_string(),
+        })
+    }
+
+    fn execute_stream_helper(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+        operation: serde_json::Value,
+        partition_step: Option<(&str, &str)>,
+    ) -> Result<bool, NativePhaseError> {
+        let step_kind = operation
+            .get("request")
+            .and_then(|request| request.get("operation"))
+            .and_then(serde_json::Value::as_str)
+            .filter(|kind| *kind == "filesystem_resize")
+            .or_else(|| partition_step.map(|(kind, _)| kind));
+        let step_target = operation
+            .get("request")
+            .and_then(|request| request.get("device"))
+            .and_then(serde_json::Value::as_str)
+            .or_else(|| partition_step.map(|(_, target)| target))
+            .unwrap_or_default();
+        if let Some(kind) = step_kind {
+            self.append_partition_step(kind, "started", step_target, phase)?;
+        }
+        let input =
+            serde_json::to_vec(&operation).map_err(|error| NativePhaseError::Execution {
+                phase,
+                message: format!("could not encode streaming disk operation: {error}"),
+            })?;
+        let mut command = Command::new("/usr/bin/kyth-installer-exec");
+        command.args(["--operation", "stream"]);
+        let status = super::installer_stream::run_command_with_input(&mut command, &input, || {
+            cancellation.is_cancelled()
+        })
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        if status.success() {
+            if let Some(kind) = step_kind {
+                self.append_partition_step(kind, "completed", step_target, phase)?;
+            }
+            Ok(true)
+        } else {
+            if let Some(kind) = step_kind {
+                let _ = self.append_partition_step(kind, "failed", step_target, phase);
+            }
+            Err(NativePhaseError::Execution {
+                phase,
+                message: format!("streaming disk helper exited with status {status}"),
+            })
+        }
+    }
+
+    /// Pure control-flow core of [`Self::guarded_table_mutation`]: run `body`,
+    /// and on failure invoke `restore` before propagating the original error.
+    /// A restore failure never replaces or masks the mutation's own error —
+    /// callers learn what actually broke the disk operation.
+    fn run_guarded<T, E>(
+        body: impl FnOnce() -> Result<T, E>,
+        restore: impl FnOnce() -> Result<(), E>,
+    ) -> Result<T, (E, Option<E>)> {
+        match body() {
+            Ok(value) => Ok(value),
+            Err(error) => Err((error, restore().err())),
+        }
+    }
+
+    /// Back up `disk`'s partition table, run `body`, and restore the table if
+    /// `body` fails. Mirrors Python's `PartitionTableGuard`
+    /// (`storage_guard.py`), which both the manual Journal commit
+    /// (`installer_journal.rs`'s `commit_request`, already ported) and this
+    /// guided-install partition creation share in the Python original —
+    /// `commit_new_kythos_partition` always wraps bios-boot creation, the
+    /// new KythOS partition, and (for a resize-NTFS install) the preceding
+    /// `resizepart` boundary move in one backed-up/restored scope. Restore
+    /// runs on a fresh, never-cancelled token (like `cleanup_mounts`): a
+    /// cancellation that triggered `body`'s failure must not also block the
+    /// table restore.
+    fn guarded_table_mutation<T>(
+        &self,
+        phase: Phase,
+        body: impl FnOnce() -> Result<T, NativePhaseError>,
+    ) -> Result<T, NativePhaseError> {
+        let directory = tempfile::Builder::new()
+            .prefix("kyth-partition-")
+            .tempdir()
+            .map_err(|error| NativePhaseError::Execution {
+                phase,
+                message: format!("could not create partition backup directory: {error}"),
+            })?;
+        let backup_path = directory
+            .path()
+            .join("partition-table.backup")
+            .to_string_lossy()
+            .into_owned();
+        let backup_cancellation = CancellationToken::default();
+        self.execute_disk_helper(
+            phase,
+            &backup_cancellation,
+            &serde_json::json!({
+                "operation": "backup_table",
+                "disk": &self.storage_plan.disk,
+                "backup_path": backup_path,
+            }),
+        )?;
+        match Self::run_guarded(body, || {
+            let restore_cancellation = CancellationToken::default();
+            self.execute_disk_helper(
+                phase,
+                &restore_cancellation,
+                &serde_json::json!({
+                    "operation": "restore_table",
+                    "disk": &self.storage_plan.disk,
+                    "backup_path": backup_path,
+                }),
+            )
+        }) {
+            Ok(value) => Ok(value),
+            Err((operation_error, None)) => Err(operation_error),
+            Err((operation_error, Some(restore_error))) => Err(NativePhaseError::Execution {
+                phase,
+                message: format!(
+                    "{operation_error}; partition-table restore also failed: {restore_error}"
+                ),
+            }),
+        }
+    }
+
+    fn create_target_partition(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+        start: u64,
+        end: u64,
+    ) -> Result<String, NativePhaseError> {
+        const BIOS_BOOT_BYTES: u64 = 1024 * 1024;
+        const SECTOR_SIZE: u64 = 512;
+        if end <= start {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "free-space target has invalid geometry".to_string(),
+            });
+        }
+        let mut before = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+        let mut target_start = start;
+        if !crate::installer_storage::has_bios_boot_partition(&before)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?
+        {
+            if end - start < BIOS_BOOT_BYTES + SECTOR_SIZE {
+                return Err(NativePhaseError::Execution {
+                    phase,
+                    message: "free-space target cannot fit a BIOS boot partition".to_string(),
+                });
+            }
+            self.execute_disk_helper(
+                phase,
+                cancellation,
+                &serde_json::json!({
+                    "operation": "create_unformatted_partition",
+                    "disk": &self.storage_plan.disk,
+                    "start": start,
+                    "size": BIOS_BOOT_BYTES,
+                    "label": "biosboot",
+                    "sector_size": SECTOR_SIZE
+                }),
+            )?;
+            let after = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+            let bios = crate::installer_storage::new_partition_from_snapshots(
+                &before,
+                &after,
+                start,
+                BIOS_BOOT_BYTES,
+            )
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
+            let bios_probe = crate::installer_storage::partition_probe_from_snapshot(
+                &after,
+                &self.storage_plan.disk,
+                &bios,
+            )
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
+            self.execute_disk_helper(
+                phase,
+                cancellation,
+                &serde_json::json!({
+                    "operation": "set_partition_flag",
+                    "disk": &self.storage_plan.disk,
+                    "part_num": bios_probe.number,
+                    "flag": "bios_grub",
+                    "enabled": true
+                }),
+            )?;
+            before = after;
+            target_start = target_start.saturating_add(BIOS_BOOT_BYTES);
+        }
+        let target_size =
+            end.checked_sub(target_start)
+                .ok_or_else(|| NativePhaseError::Execution {
+                    phase,
+                    message: "free-space target has invalid post-boot geometry".to_string(),
+                })?;
+        if target_size < 32 * 1024 * 1024 * 1024 {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "free-space target is smaller than the KythOS minimum".to_string(),
+            });
+        }
+        self.execute_disk_helper(
+            phase,
+            cancellation,
+            &serde_json::json!({
+                "operation": "create_partition",
+                "disk": &self.storage_plan.disk,
+                "start": target_start,
+                "size": target_size,
+                "fs": "btrfs",
+                "label": "KythOS",
+                "sector_size": SECTOR_SIZE
+            }),
+        )?;
+        let after = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+        let target = crate::installer_storage::new_partition_from_snapshots(
+            &before,
+            &after,
+            target_start,
+            target_size,
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        crate::installer_storage::partition_probe_from_snapshot(
+            &after,
+            &self.storage_plan.disk,
+            &target,
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        Ok(target)
+    }
+
+    fn resize_ntfs_target(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<String, NativePhaseError> {
+        const SECTOR_SIZE: u64 = 512;
+        const MIN_WINDOWS_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+        if !super::installer_daemon::ac_online_in(std::path::Path::new("/sys/class/power_supply")) {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "Connect AC power before shrinking Windows. Power loss during a filesystem or partition resize can leave the disk unbootable.".to_string(),
+            });
+        }
+        let partition = self
+            .storage_plan
+            .resize_partition
+            .as_deref()
+            .ok_or_else(|| NativePhaseError::Execution {
+                phase,
+                message: "NTFS resize has no selected partition".to_string(),
+            })?;
+        let before = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+        let probe = crate::installer_storage::partition_probe_from_snapshot(
+            &before,
+            &self.storage_plan.disk,
+            partition,
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        if !matches!(probe.fstype.as_str(), "ntfs" | "ntfs3") {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "Only NTFS partitions can be resized by this installer path".to_string(),
+            });
+        }
+        if probe.efi || probe.current || probe.in_use || probe.read_only {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "The selected NTFS partition is mounted, read-only, or reserved"
+                    .to_string(),
+            });
+        }
+        let new_size = probe
+            .size_bytes
+            .checked_sub(self.storage_plan.resize_bytes)
+            .ok_or_else(|| NativePhaseError::Execution {
+                phase,
+                message: "NTFS shrink exceeds the selected partition size".to_string(),
+            })?;
+        if new_size < MIN_WINDOWS_BYTES || new_size % SECTOR_SIZE != 0 {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "NTFS shrink would leave an unsafe or unaligned Windows partition"
+                    .to_string(),
+            });
+        }
+        for stage in ["check", "info", "dry_run", "resize"] {
+            self.execute_stream_helper(
+                phase,
+                cancellation,
+                serde_json::json!({
+                    "kind": "disk",
+                    "request": {
+                        "operation": "filesystem_resize",
+                        "device": partition,
+                        "fs": "ntfs",
+                        "new_size_bytes": new_size,
+                        "stage": stage
+                    }
+                }),
+                Some(("filesystem_resize", partition)),
+            )?;
+        }
+        self.execute_disk_helper(
+            phase,
+            cancellation,
+            &serde_json::json!({
+                "operation": "resize_partition",
+                "disk": &self.storage_plan.disk,
+                "part_num": probe.number,
+                "start": probe.start_bytes,
+                "new_size": new_size,
+                "sector_size": SECTOR_SIZE
+            }),
+        )?;
+        let after = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+        let resized = crate::installer_storage::partition_probe_from_snapshot(
+            &after,
+            &self.storage_plan.disk,
+            partition,
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        if resized.size_bytes.abs_diff(new_size) > SECTOR_SIZE {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "NTFS partition boundary did not match the requested size".to_string(),
+            });
+        }
+        let old_end = probe
+            .start_bytes
+            .checked_add(probe.size_bytes)
+            .ok_or_else(|| NativePhaseError::Execution {
+                phase,
+                message: "NTFS partition geometry overflowed".to_string(),
+            })?;
+        let new_end =
+            probe
+                .start_bytes
+                .checked_add(new_size)
+                .ok_or_else(|| NativePhaseError::Execution {
+                    phase,
+                    message: "NTFS target geometry overflowed".to_string(),
+                })?;
+        self.create_target_partition(phase, cancellation, new_end, old_end)
+    }
+
+    fn prepare_btrfs_target(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+        target: &str,
+    ) -> Result<(), NativePhaseError> {
+        self.execute_disk_helper(
+            phase,
+            cancellation,
+            &serde_json::json!({
+                "operation": "format_filesystem",
+                "device": target,
+                "fs": "btrfs",
+                "label": "KythOS"
+            }),
+        )?;
+        self.execute_disk_helper(
+            phase,
+            cancellation,
+            &serde_json::json!({
+                "operation": "ensure_directory",
+                "path": BTRFS_STAGING_MOUNTPOINT
+            }),
+        )?;
+        self.execute_disk_helper(
+            phase,
+            cancellation,
+            &serde_json::json!({
+                "operation": "mount_filesystem",
+                "device": target,
+                "mountpoint": BTRFS_STAGING_MOUNTPOINT
+            }),
+        )?;
+        self.register_mount(BTRFS_STAGING_MOUNTPOINT)?;
+
+        let temporary_setup = (|| {
+            for name in ["@", "@home"] {
+                self.execute_disk_helper(
+                    phase,
+                    cancellation,
+                    &serde_json::json!({
+                        "operation": "btrfs_subvolume_create",
+                        "mountpoint": BTRFS_STAGING_MOUNTPOINT,
+                        "name": name
+                    }),
+                )?;
+            }
+            self.execute_disk_helper(
+                phase,
+                cancellation,
+                &serde_json::json!({
+                    "operation": "btrfs_subvolume_set_default",
+                    "mountpoint": BTRFS_STAGING_MOUNTPOINT,
+                    "name": "@"
+                }),
+            )
+        })();
+        let cleanup_result = self.execute_disk_helper(
+            phase,
+            &CancellationToken::default(),
+            &serde_json::json!({
+                "operation": "unmount_filesystem",
+                "mountpoint": BTRFS_STAGING_MOUNTPOINT,
+                "recursive": true,
+                "lazy": true
+            }),
+        );
+        self.release_mount(BTRFS_STAGING_MOUNTPOINT)?;
+        temporary_setup?;
+        cleanup_result?;
+
+        self.execute_disk_helper(
+            phase,
+            cancellation,
+            &serde_json::json!({
+                "operation": "ensure_directory",
+                "path": FILESYSTEM_STAGING_MOUNTPOINT
+            }),
+        )?;
+        self.execute_disk_helper(
+            phase,
+            cancellation,
+            &serde_json::json!({
+                "operation": "mount_filesystem",
+                "device": target,
+                "mountpoint": FILESYSTEM_STAGING_MOUNTPOINT,
+                "options": ["subvol=@"]
+            }),
+        )?;
+        self.register_mount(FILESYSTEM_STAGING_MOUNTPOINT)?;
+
+        self.mount_efi(phase, cancellation)?;
+        Ok(())
+    }
+
+    fn mount_efi(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
+        let snapshot = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+        let Some(efi) = crate::installer_storage::efi_partition_from_snapshot(
+            &snapshot,
+            &self.storage_plan.disk,
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })?
+        else {
+            return Ok(());
+        };
+        let mountpoint = format!("{FILESYSTEM_STAGING_MOUNTPOINT}/boot/efi");
+        self.execute_disk_helper(
+            phase,
+            cancellation,
+            &serde_json::json!({
+                "operation": "ensure_directory",
+                "path": mountpoint
+            }),
+        )?;
+        self.execute_disk_helper(phase, cancellation, &efi_mount_operation(&efi, &mountpoint))?;
+        self.register_mount(&mountpoint)?;
+        Ok(())
+    }
+
+    fn execute_storage(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
+        if self.storage_plan.mode != "wipe" {
+            crate::installer_guard::validate_target_disk(&self.storage_plan.disk)
+                .map_err(|message| NativePhaseError::Execution { phase, message })?;
+            self.check_storage_preflight(phase)?;
+        }
+        let target = match self.storage_plan.mode.as_str() {
+            "wipe" => {
+                // bootc to-disk owns the complete wipe layout and is run in
+                // the image phase; there is no separate storage mutation.
+                return Ok(());
+            }
+            "alongside" | "manual" => {
+                let requested = self
+                    .storage_plan
+                    .target_partition
+                    .as_deref()
+                    .ok_or_else(|| NativePhaseError::Execution {
+                        phase,
+                        message: "filesystem install has no target partition".to_string(),
+                    })?;
+                // prepare_btrfs_target formats this partition. Every gate
+                // above validates `disk`; re-check the partition itself
+                // (on that disk, not the ESP, unmounted, big enough, not
+                // holding someone's data) against a fresh snapshot.
+                let role = if self.storage_plan.mode == "manual" {
+                    "root partition"
+                } else {
+                    "target partition"
+                };
+                let snapshot = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+                if self.storage_plan.mode == "alongside" {
+                    // Unlike free-space/NTFS-shrink, alongside never creates
+                    // a BIOS boot partition. A missing /sys/firmware/efi
+                    // reads as legacy BIOS: the stricter answer.
+                    crate::installer_storage::validate_alongside_bios_boot(
+                        &snapshot,
+                        &self.storage_plan.disk,
+                        std::path::Path::new("/sys/firmware/efi").exists(),
+                    )
+                    .map_err(|message| NativePhaseError::Execution { phase, message })?;
+                }
+                crate::installer_storage::validate_replace_target(
+                    &snapshot,
+                    &self.storage_plan.disk,
+                    requested,
+                    role,
+                )
+                .map_err(|message| NativePhaseError::Execution { phase, message })?
+                .name
+            }
+            "free_space" => {
+                let start = self.storage_plan.free_region_start.ok_or_else(|| {
+                    NativePhaseError::Execution {
+                        phase,
+                        message: "free-space install has no selected region".to_string(),
+                    }
+                })?;
+                let end = self.storage_plan.free_region_end.ok_or_else(|| {
+                    NativePhaseError::Execution {
+                        phase,
+                        message: "free-space install has no selected region end".to_string(),
+                    }
+                })?;
+                let snapshot = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+                if !crate::installer_storage::contains_free_region(
+                    &snapshot,
+                    &self.storage_plan.disk,
+                    start,
+                    end,
+                    512,
+                )
+                .map_err(|message| NativePhaseError::Execution { phase, message })?
+                {
+                    return Err(NativePhaseError::Execution {
+                        phase,
+                        message: "selected free space is no longer available".to_string(),
+                    });
+                }
+                self.guarded_table_mutation(phase, || {
+                    self.create_target_partition(phase, cancellation, start, end)
+                })?
+            }
+            "resize_ntfs" => {
+                self.guarded_table_mutation(phase, || self.resize_ntfs_target(phase, cancellation))?
+            }
+            _ => {
+                return Err(NativePhaseError::InvalidPlan {
+                    phase,
+                    operation: NativeOperation::StorageMutation,
+                });
+            }
+        };
+        self.prepare_btrfs_target(phase, cancellation, &target)?;
+        *self
+            .storage_target
+            .lock()
+            .map_err(|_| NativePhaseError::Execution {
+                phase,
+                message: "native storage target state is unavailable".to_string(),
+            })? = Some(target);
+        Ok(())
+    }
+
+    fn execute_secure_boot(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
+        let plan = crate::installer_secure_boot::stage_with_cancellation(
+            crate::installer_secure_boot::SecureBootStageInput {
+                kernel: self.secure_boot_kernel.clone(),
+                force_stage: self.secure_boot_force_stage,
+                password: self.secure_boot_password.clone(),
+            },
+            || cancellation.is_cancelled(),
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        *self
+            .secure_boot_state
+            .lock()
+            .map_err(|_| NativePhaseError::Execution {
+                phase,
+                message: "native Secure Boot state is unavailable".to_string(),
+            })? = Some(plan.state.clone());
+        if plan.state == "failed" {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: plan.message,
+            });
+        }
+        Ok(())
+    }
+
+    fn execute_complete(&self, phase: Phase) -> Result<(), NativePhaseError> {
+        self.cleanup_mounts(phase)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        self.write_transaction(
+            "complete",
+            phase,
+            "done",
+            "Native installer completed successfully",
+        )
+        .map_err(|message| NativePhaseError::Execution { phase, message })
+    }
+
+    /// Build a native supervisor for the daemon's route integration.
+    pub(crate) fn into_supervisor(self) -> JobSupervisor<Self> {
+        JobSupervisor::new(self)
+    }
+}
+
+impl PhaseExecutor for NativePhaseExecutor {
+    fn execute_phase(&self, phase: Phase, cancellation: &CancellationToken) -> Result<(), String> {
+        self.execute_phase_typed(phase, cancellation)
+            .map_err(|error| error.to_string())
+    }
+
+    fn record_job_started(&self, job_id: u64) -> Result<(), String> {
+        self.transaction
+            .lock()
+            .map_err(|_| "native transaction state is unavailable".to_string())?
+            .job_id = Some(job_id);
+        Ok(())
+    }
+
+    fn record_cancelled(&self, phase: Option<Phase>) {
+        let _ = self.cleanup_mounts(phase.unwrap_or(Phase::Prepare));
+        let message = super::installer_job::CANCELLATION_MESSAGE;
+        self.write_terminal_transaction(phase, message);
+        self.persist_failure_summary(message);
+    }
+
+    fn record_failed(&self, phase: Phase, message: &str) {
+        let _ = self.cleanup_mounts(phase);
+        self.write_terminal_transaction(Some(phase), message);
+        self.persist_failure_summary(message);
+    }
+
+    fn success_mok_state(&self) -> Option<String> {
+        self.secure_boot_state
+            .lock()
+            .ok()
+            .and_then(|state| state.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::installer_accounts::CreateUserInput;
+    use crate::installer_bootc::BootcInstallInput;
+    use crate::installer_configuration::ConfigurationInput;
+    use crate::installer_secure_boot::SecureBootInput;
+
+    #[test]
+    fn erase_disk_install_always_passes_wipe_to_bootc() {
+        // Neither frontend sends a `wipe` key (native_main.rs as_request,
+        // the web InstallRequest type). bootc install to-disk refuses a disk
+        // with existing partitions unless --wipe is passed ("Detected
+        // existing partitions on ...; use e.g. `wipefs` or --wipe"), so the
+        // default "Erase full disk" mode must imply it, as Python did.
+        let request = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+            "install_mode": "wipe",
+            "acknowledged_irreversible": true,
+        }))
+        .expect("frontend request should decode");
+        assert!(request.execution.bootc.wipe);
+        let plan = crate::installer_bootc::build_plan(request.execution.bootc)
+            .expect("bootc plan validates");
+        assert!(
+            plan.argv.iter().any(|arg| arg == "--wipe"),
+            "{:?}",
+            plan.argv
+        );
+
+        // Filesystem installs write into a prepared mountpoint and never
+        // wipe the disk.
+        let alongside = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+            "install_mode": "alongside",
+            "target_partition": "sda3",
+            "wipe": true,
+            "acknowledged_irreversible": true,
+        }))
+        .expect("frontend request should decode");
+        assert!(!alongside.execution.bootc.wipe);
+    }
+
+    #[test]
+    fn filesystem_installs_skip_bootc_finalize() {
+        // Without --skip-finalize, bootc to-filesystem ends by remounting
+        // the target read-only ("finally mounting it readonly"), and the
+        // configuration phase that follows must write hostname, locale,
+        // fstab, and the user account into that same filesystem. No
+        // frontend sends `skip_finalize`; Python always passed it here.
+        for (mode, extra) in [
+            ("alongside", serde_json::json!({"target_partition": "sda3"})),
+            (
+                "free_space",
+                serde_json::json!({"free_region_start": 1048576, "free_region_end": 68720525312_i64}),
+            ),
+            (
+                "resize_ntfs",
+                serde_json::json!({"resize_partition": "sda2", "resize_gib": 64}),
+            ),
+            ("manual", serde_json::json!({"target_partition": "sda3"})),
+        ] {
+            let mut body = serde_json::json!({
+                "disk": "sda",
+                "install_mode": mode,
+                "acknowledged_irreversible": true,
+            });
+            for (key, value) in extra.as_object().unwrap() {
+                body[key] = value.clone();
+            }
+            let request = NativeInstallRequest::from_http(body).expect(mode);
+            assert!(request.execution.bootc.skip_finalize, "{mode}");
+            assert_eq!(
+                request.execution.bootc.target,
+                FILESYSTEM_STAGING_MOUNTPOINT
+            );
+            assert_eq!(
+                request.execution.configuration.target_root,
+                FILESYSTEM_STAGING_MOUNTPOINT
+            );
+            let plan = crate::installer_bootc::build_plan(request.execution.bootc).expect(mode);
+            assert!(
+                plan.argv.iter().any(|arg| arg == "--skip-finalize"),
+                "{mode}: {:?}",
+                plan.argv
+            );
+        }
+        let wipe = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+            "install_mode": "wipe",
+            "acknowledged_irreversible": true,
+        }))
+        .expect("wipe request decodes");
+        assert_eq!(
+            wipe.execution.configuration.target_root,
+            WIPE_STAGING_MOUNTPOINT
+        );
+        let plan = crate::installer_bootc::build_plan(wipe.execution.bootc).expect("wipe plan");
+        assert!(!plan.argv.iter().any(|arg| arg == "--skip-finalize"));
+    }
+
+    #[test]
+    fn every_mode_that_creates_home_subvolume_mounts_it() {
+        // free_space and resize_ntfs build the same @/@home layout as
+        // alongside; skipping alongside-home for them left @home empty and
+        // unmounted, with /var/home silently living inside @.
+        for mode in ["alongside", "free_space", "resize_ntfs"] {
+            assert!(lays_out_home_subvolume(mode), "{mode}");
+        }
+        // wipe: bootc to-disk owns the layout. manual: /home comes from the
+        // user's own manual mounts.
+        for mode in ["wipe", "manual"] {
+            assert!(!lays_out_home_subvolume(mode), "{mode}");
+        }
+    }
+
+    #[test]
+    fn efi_mount_requests_build_through_the_disk_helper() {
+        use crate::installer_disk::{build_plan, DiskOperationInput};
+        use crate::installer_storage::EfiPartition;
+        let mountpoint = format!("{FILESYSTEM_STAGING_MOUNTPOINT}/boot/efi");
+        let plan = |efi: &EfiPartition| {
+            let input: DiskOperationInput =
+                serde_json::from_value(efi_mount_operation(efi, &mountpoint))
+                    .expect("request decodes");
+            build_plan(input).map(|plan| plan.argv)
+        };
+        // An ESP the live session already mounted must bind-mount, not be
+        // rejected as a non-/dev "device" after the target was formatted.
+        let mounted = EfiPartition {
+            name: "/dev/sda1".into(),
+            mounted_at: Some("/mnt/esp".into()),
+        };
+        assert_eq!(
+            plan(&mounted).expect("bind mount validates"),
+            ["/usr/sbin/mount", "--bind", "/mnt/esp", &mountpoint]
+        );
+        let unmounted = EfiPartition {
+            name: "/dev/sda1".into(),
+            mounted_at: None,
+        };
+        assert_eq!(
+            plan(&unmounted).expect("device mount validates"),
+            ["/usr/sbin/mount", "/dev/sda1", &mountpoint]
+        );
+    }
+
+    #[test]
+    fn run_guarded_skips_restore_on_success() {
+        let mut restore_calls = 0;
+        let result: Result<i32, (&str, Option<&str>)> = NativePhaseExecutor::run_guarded(
+            || Ok(42),
+            || {
+                restore_calls += 1;
+                Ok(())
+            },
+        );
+        assert_eq!(result, Ok(42));
+        assert_eq!(restore_calls, 0, "restore must not run on success");
+    }
+
+    #[test]
+    fn run_guarded_restores_on_failure_and_preserves_the_original_error() {
+        // The guided-install partition-create/resize-NTFS paths lost their
+        // partition-table backup/restore safety net in the Rust port (the
+        // manual Journal commit kept it) — Python's `PartitionTableGuard`
+        // always restores on any failure inside the guarded scope. A failing
+        // restore (e.g. the disk helper itself errors) must never mask what
+        // actually broke the mutation.
+        let mut restore_ran = false;
+        let restore_outcome: Result<(), &str> = Err("restore also failed");
+        let result: Result<i32, (&str, Option<&str>)> = NativePhaseExecutor::run_guarded(
+            || Err("original failure"),
+            || {
+                restore_ran = true;
+                restore_outcome
+            },
+        );
+        assert_eq!(
+            result,
+            Err(("original failure", Some("restore also failed"))),
+            "both the operation and restore failures must be reported"
+        );
+        assert!(restore_ran, "restore must run exactly once on failure");
+    }
+
+    fn request(with_account: bool) -> NativeInstallRequest {
+        NativeInstallRequest {
+            storage: InstallerPlanInput {
+                disk: "sda".into(),
+                install_mode: "wipe".into(),
+                target_partition: String::new(),
+                resize_partition: String::new(),
+                resize_gib: 0,
+                free_region_start: 0,
+                free_region_end: 0,
+            },
+            execution: InstallerExecutionInput {
+                bootc: BootcInstallInput {
+                    subcommand: "to-disk".into(),
+                    source_imgref: "oci:/usr/share/kyth/image:latest".into(),
+                    target_imgref: "ghcr.io/kyth-os/kyth:latest".into(),
+                    target: "/dev/sda".into(),
+                    skip_fetch_check: false,
+                    skip_finalize: false,
+                    root_subvolume: false,
+                    wipe: true,
+                    encryption: "none".into(),
+                    tpm_recovery_ack: false,
+                },
+                configuration: ConfigurationInput {
+                    target_root: "/mnt/target".into(),
+                    hostname: "kyth".into(),
+                    timezone: "UTC".into(),
+                    locale: "en_US.UTF-8".into(),
+                    keymap: "us".into(),
+                },
+                account: with_account.then_some(CreateUserInput {
+                    deploy_root: "/mnt/deploy".into(),
+                    target_root: "/mnt/target".into(),
+                    username: "kyth_user".into(),
+                    password_hash: "$6$secret-must-not-leak".into(),
+                }),
+                secure_boot: SecureBootInput {
+                    kernel: "fedora".into(),
+                    force_stage: false,
+                    certificate_present: false,
+                    mokutil_present: false,
+                    secure_boot: "unknown".into(),
+                    enrolled: "unknown".into(),
+                    pending: "unknown".into(),
+                },
+            },
+            manual_mounts: None,
+            secure_boot_password: String::new(),
+            transaction_path: "/run/kyth-installer/transaction.json".into(),
+        }
+    }
+
+    #[test]
+    fn frontend_encryption_choice_reaches_bootc_request() {
+        let request = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+            "encryption": "tpm2",
+            "acknowledged-irreversible": true,
+        }))
+        .expect("frontend request should decode");
+        assert_eq!(request.execution.bootc.encryption, "tpm2");
+
+        let default = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+            "acknowledged_irreversible": true,
+        }))
+        .expect("frontend request should decode");
+        assert_eq!(default.execution.bootc.encryption, "none");
+    }
+
+    #[test]
+    fn manual_mount_assignments_survive_http_request_projection() {
+        let request = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "/dev/sda",
+            "install_mode": "manual",
+            "target_partition": "/dev/sda2",
+            "acknowledged_irreversible": true,
+            "mounts": [{
+                "partition": "/dev/sda3",
+                "mountpoint": "/home",
+                "fstype": "btrfs"
+            }]
+        }))
+        .expect("manual request should parse");
+        let mounts = request
+            .manual_mounts
+            .expect("manual mounts should be retained");
+        assert_eq!(mounts.mounts.len(), 1);
+        assert_eq!(mounts.mounts[0].partition, "/dev/sda3");
+        assert_eq!(mounts.mounts[0].mountpoint, "/home");
+        assert_eq!(mounts.mounts[0].fstype, "btrfs");
+    }
+
+    #[test]
+    fn unsupported_encryption_fails_before_any_worker_starts() {
+        let mut bad = request(false);
+        bad.execution.bootc.encryption = "luks".into();
+        let error = NativePhaseExecutor::from_request(bad)
+            .err()
+            .expect("unsupported encryption must fail closed");
+        assert!(
+            error.contains("encryption unsupported"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn frontend_cachyos_kernel_alias_is_normalized_for_native_secure_boot() {
+        let request = NativeInstallRequest::from_http(serde_json::json!({
+            "kernel": " CachyOS ",
+            "acknowledged-irreversible": true,
+        }))
+        .expect("frontend request should decode");
+
+        assert_eq!(request.execution.secure_boot.kernel, "cachy");
+    }
+
+    #[test]
+    fn start_without_irreversible_acknowledgement_fails_closed() {
+        let error = NativeInstallRequest::from_http(serde_json::json!({
+            "disk": "sda",
+        }))
+        .err()
+        .expect("missing ack must fail closed");
+        assert!(
+            error.contains("irreversible step is acknowledged"),
+            "unexpected error: {error}"
+        );
+        // Either spelling satisfies the gate (Slint vs web frontend).
+        for key in ["acknowledged-irreversible", "acknowledged_irreversible"] {
+            let mut body = serde_json::Map::new();
+            body.insert("disk".to_string(), serde_json::json!("sda"));
+            body.insert(key.to_string(), serde_json::json!(true));
+            NativeInstallRequest::from_http(serde_json::Value::Object(body))
+                .expect("ack spelling should decode");
+        }
+    }
+
+    #[test]
+    fn image_phase_refuses_unverifiable_embedded_source_before_bootc() {
+        let mut missing = request(false);
+        missing.execution.bootc.source_imgref = "oci:/nonexistent/kyth/image:latest".into();
+        let executor =
+            NativePhaseExecutor::from_request(missing).expect("request shape should validate");
+        let error = executor
+            .verify_install_source(Phase::Image)
+            .expect_err("missing embedded image must refuse bootc");
+        assert!(
+            error.to_string().contains("refusing bootc install"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn image_phase_passes_through_non_embedded_sources() {
+        let mut network = request(false);
+        network.execution.bootc.source_imgref = "docker://ghcr.io/kyth-os/kyth:testing".into();
+        let executor =
+            NativePhaseExecutor::from_request(network).expect("request shape should validate");
+        executor
+            .verify_install_source(Phase::Image)
+            .expect("network source defers to fetch-time checks");
+    }
+
+    #[test]
+    fn validates_request_and_preserves_native_operation_order() {
+        let executor = NativePhaseExecutor::from_request(request(true))
+            .expect("typed native install request should validate");
+        assert_eq!(
+            executor.operation_order(),
+            vec![
+                NativeOperation::ValidateStoragePlan,
+                NativeOperation::ValidateExecutionPlan,
+                NativeOperation::StorageMutation,
+                NativeOperation::ImageWrite,
+                NativeOperation::ConfigurationWrite,
+                NativeOperation::AccountCreate,
+                NativeOperation::SecureBootInteraction,
+                NativeOperation::CompletionCommit,
+            ]
+        );
+        assert_eq!(executor.storage_plan().mode, "wipe");
+        assert_eq!(executor.execution_plan().bootc.target, "/dev/sda");
+    }
+
+    #[test]
+    fn execution_plan_and_operation_diagnostics_exclude_password_hash() {
+        let executor = NativePhaseExecutor::from_request(request(true))
+            .expect("typed native install request should validate");
+        let plan = serde_json::to_string(executor.execution_plan()).unwrap();
+        let operations = executor
+            .operation_order()
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(!plan.contains("secret-must-not-leak"));
+        assert!(!operations.contains("secret-must-not-leak"));
+    }
+
+    #[test]
+    fn skipped_secure_boot_does_not_spawn_or_retain_secret_in_plan() {
+        let mut request = request(false);
+        let directory = tempfile::tempdir().expect("temporary transaction directory");
+        crate::installer_transaction::allow_test_transaction_base(directory.path());
+        request.transaction_path = directory
+            .path()
+            .join("transaction.json")
+            .to_string_lossy()
+            .into_owned();
+        request.secure_boot_password = "mok-secret-must-not-leak".into();
+        let executor = NativePhaseExecutor::from_request(request)
+            .expect("typed native install request should validate");
+        let cancellation = CancellationToken::default();
+        assert_eq!(
+            executor.execute_phase_typed(Phase::SecureBoot, &cancellation),
+            Ok(())
+        );
+        assert_eq!(
+            <NativePhaseExecutor as PhaseExecutor>::success_mok_state(&executor),
+            Some("skipped".to_string())
+        );
+        let plan = serde_json::to_string(executor.execution_plan()).unwrap();
+        assert!(!plan.contains("mok-secret-must-not-leak"));
+    }
+
+    #[test]
+    fn completion_writes_a_secret_free_native_transaction() {
+        let directory = tempfile::tempdir().expect("temporary transaction directory");
+        crate::installer_transaction::allow_test_transaction_base(directory.path());
+        let mut request = request(false);
+        request.transaction_path = directory
+            .path()
+            .join("transaction.json")
+            .to_string_lossy()
+            .into_owned();
+        let executor = NativePhaseExecutor::from_request(request)
+            .expect("typed native install request should validate");
+        executor
+            .execute_phase_typed(Phase::Complete, &CancellationToken::default())
+            .expect("native completion should persist transaction");
+        let transaction = std::fs::read_to_string(directory.path().join("transaction.json"))
+            .expect("native transaction should exist");
+        assert!(transaction.contains("Native installer completed successfully"));
+        assert!(!transaction.contains("secret"));
+    }
+
+    #[test]
+    fn preparation_persists_a_recoverable_native_transaction() {
+        let directory = tempfile::tempdir().expect("temporary transaction directory");
+        crate::installer_transaction::allow_test_transaction_base(directory.path());
+        let mut request = request(false);
+        request.transaction_path = directory
+            .path()
+            .join("transaction.json")
+            .to_string_lossy()
+            .into_owned();
+        let executor = NativePhaseExecutor::from_request(request)
+            .expect("typed native install request should validate");
+        <NativePhaseExecutor as PhaseExecutor>::record_job_started(&executor, 42)
+            .expect("job correlation should be accepted");
+        executor
+            .execute_phase_typed(Phase::Prepare, &CancellationToken::default())
+            .expect("native preparation should persist transaction");
+        let transaction: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(directory.path().join("transaction.json"))
+                .expect("native preparation transaction should exist"),
+        )
+        .expect("native preparation transaction should be JSON");
+        assert_eq!(transaction["status"], "prepared");
+        assert_eq!(transaction["phase"], "prepare");
+        assert_eq!(transaction["lifecycle"], "installing");
+        assert!(transaction["transaction_id"]
+            .as_str()
+            .is_some_and(|id| { id.starts_with("native-") }));
+        assert_eq!(transaction["job_id"], 42);
+        assert_eq!(transaction["checks"].as_array().unwrap().len(), 2);
+        assert_eq!(transaction["checks"][0]["name"], "power");
+        assert_eq!(transaction["checks"][1]["name"], "native_plan");
+    }
+
+    #[test]
+    fn native_failure_hook_persists_support_safe_failure_state() {
+        let directory = tempfile::tempdir().expect("temporary transaction directory");
+        crate::installer_transaction::allow_test_transaction_base(directory.path());
+        let mut request = request(false);
+        request.transaction_path = directory
+            .path()
+            .join("transaction.json")
+            .to_string_lossy()
+            .into_owned();
+        let executor = NativePhaseExecutor::from_request(request)
+            .expect("typed native install request should validate");
+        executor.record_failed(Phase::Storage, "native failure secret-free");
+        let transaction = std::fs::read_to_string(directory.path().join("transaction.json"))
+            .expect("native failure transaction should exist");
+        assert!(transaction.contains("native failure secret-free"));
+        assert!(!transaction.contains("password_hash"));
+        assert!(!transaction.contains("mok_password"));
+    }
+
+    #[test]
+    fn wipe_storage_is_owned_by_bootc_and_resize_has_a_native_path() {
+        let executor = NativePhaseExecutor::from_request(request(false))
+            .expect("typed native install request should validate");
+        let cancellation = CancellationToken::default();
+        assert_eq!(
+            executor.execute_phase_typed(Phase::Storage, &cancellation),
+            Ok(())
+        );
+        let mut resize = request(false);
+        resize.storage.install_mode = "resize_ntfs".into();
+        resize.storage.resize_partition = "sda2".into();
+        resize.storage.resize_gib = 40;
+        let executor =
+            NativePhaseExecutor::from_request(resize).expect("resize plan should validate");
+        assert!(matches!(
+            executor.execute_phase_typed(Phase::Storage, &cancellation),
+            Err(NativePhaseError::Execution {
+                phase: Phase::Storage,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn cancellation_is_reported_before_any_phase_operation() {
+        let executor = NativePhaseExecutor::from_request(request(false))
+            .expect("typed native install request should validate");
+        let cancellation = CancellationToken::default();
+        cancellation.cancel();
+        assert_eq!(
+            executor.execute_phase_typed(Phase::Prepare, &cancellation),
+            Err(NativePhaseError::Cancelled {
+                phase: Phase::Prepare,
+            })
+        );
+    }
+}

@@ -47,15 +47,15 @@ if ! getent group plugdev >/dev/null 2>&1; then
     groupadd --system plugdev
 fi
 
-ensure_group_line sddm "sddm:x:959:"
-ensure_passwd_line sddm "sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin"
+ensure_group_line plasmalogin "plasmalogin:x:967:"
+ensure_passwd_line plasmalogin "plasmalogin:x:967:967:PLASMALOGIN Greeter Account:/var/lib/plasmalogin:/usr/sbin/nologin"
 
 chmod 0644 /etc/passwd /etc/group
 if [ -e /etc/shadow ]; then
     chmod 0000 /etc/shadow 2>/dev/null || chmod 0600 /etc/shadow
 fi
-mkdir -p /var/lib/sddm
-chown sddm:sddm /var/lib/sddm 2>/dev/null || true
+mkdir -p /var/lib/plasmalogin
+chown plasmalogin:plasmalogin /var/lib/plasmalogin 2>/dev/null || true
 if command -v restorecon >/dev/null 2>&1; then
-    restorecon /etc/passwd /etc/group /etc/shadow /var/lib/sddm 2>/dev/null || true
+    restorecon /etc/passwd /etc/group /etc/shadow /var/lib/plasmalogin 2>/dev/null || true
 fi

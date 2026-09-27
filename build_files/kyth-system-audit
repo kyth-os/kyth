@@ -1,4 +1,1 @@
-#!/usr/bin/env bash
-# kyth-system-audit — ledger + snapshot + trim due
-set -euo pipefail
-python3 -c 'from kyth_shared.system_audit import system_audit,format_system_audit; print(format_system_audit(system_audit()), end="")'
+kyth-tunable

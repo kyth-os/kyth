@@ -142,7 +142,7 @@ dmi_products = ["RC71L*", "RC72L*"]
 [[quirks]]
 id = "amdgpu-gaming-memory"
 reason = "Expose PowerPlay controls while bounding APU GTT pressure and retaining recoverable VM fault handling"
-expires_on = "2027-08-01"
+expires_on = "2027-02-01"
 provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
 
 [[quirks.match.pci]]
@@ -156,9 +156,25 @@ module = "amdgpu"
 options = { ppfeaturemask = "0xffffffff", gttsize = "4096", noretry = "0" }
 
 [[quirks]]
+id = "intel-xe-media-firmware"
+reason = "Enable GuC submission and HuC media firmware on Intel Arc (xe driver)"
+expires_on = "2027-02-01"
+provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
+
+[[quirks.match.pci]]
+vendor = "8086"
+classes = ["0300", "0302", "0380"]
+drivers = ["xe"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "xe"
+options = { enable_guc = "3" }
+
+[[quirks]]
 id = "intel-i915-media-firmware"
 reason = "Enable GuC submission and HuC media firmware on systems still using i915"
-expires_on = "2027-08-01"
+expires_on = "2027-02-01"
 provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
 
 [[quirks.match.pci]]
@@ -174,7 +190,7 @@ options = { enable_guc = "3", enable_huc = "2" }
 [[quirks]]
 id = "nvidia-wayland-suspend"
 reason = "Enable DRM modesetting and preserve video memory across suspend on the proprietary driver"
-expires_on = "2027-08-01"
+expires_on = "2027-05-01"
 provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
 
 [[quirks.match.pci]]
@@ -184,7 +200,7 @@ classes = ["0300", "0302", "0380"]
 [[quirks.actions]]
 kind = "modprobe"
 module = "nvidia-drm"
-options = { modeset = "1" }
+options = { modeset = "1", fbdev = "1" }
 
 [[quirks.actions]]
 kind = "modprobe"
@@ -194,7 +210,7 @@ options = { NVreg_PreserveVideoMemoryAllocations = "1", NVreg_TemporaryFilePath 
 [[quirks]]
 id = "mediatek-pcie-wifi-aspm"
 reason = "Avoid intermittent wake and association failures on mt7921e and mt7925e adapters"
-expires_on = "2027-08-01"
+expires_on = "2027-05-01"
 provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
 
 [[quirks.match.pci]]
@@ -214,7 +230,7 @@ options = { disable_aspm = "1" }
 [[quirks]]
 id = "intel-wifi-association-power"
 reason = "Keep Intel wireless active during WPA association while preserving Bluetooth coexistence"
-expires_on = "2027-08-01"
+expires_on = "2027-05-01"
 provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
 
 [[quirks.match.pci]]
@@ -236,6 +252,7 @@ id = "bluetooth-usb-autosuspend"
 reason = "Prevent missed remote wake traffic from Bluetooth controllers and low-bandwidth peripherals"
 expires_on = "2027-08-01"
 provenance = "[policy rationale](hardware-policy.md#managed-quirks)"
+# Staggered expiry note: amdgpu/i915 Feb, nvidia/wifi May, bluetooth/amdgpu-psr Aug — avoids single-day CI cliff
 
 [[quirks.match.usb]]
 drivers = ["btusb"]
@@ -244,3 +261,40 @@ drivers = ["btusb"]
 kind = "modprobe"
 module = "btusb"
 options = { enable_autosuspend = "0" }
+
+[[quirks]]
+id = "asus-tuf-amd-cachy-stability"
+reason = "ASUS TUF all-AMD on CachyOS lacks asus-armoury.ko; use conservative GTT 2048 and retain recoverable faults, keep amd_pstate=active"
+expires_on = "2027-08-01"
+provenance = "https://github.com/kyth-os/kyth/issues — TUF all-AMD vs ZBook Intel+AMD, build.sh:83 asus-armoury.ko missing on Cachy"
+
+[quirks.match]
+dmi_vendors = ["ASUSTeK*"]
+dmi_products = ["TUF*"]
+
+[[quirks.match.pci]]
+vendor = "1002"
+classes = ["0300", "0302", "0380"]
+drivers = ["amdgpu"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "amdgpu"
+options = { gttsize = "2048", noretry = "0" }
+
+[[quirks]]
+id = "amdgpu-psr-disable"
+reason = "Disable Display Core PSR on Navi 33 (7480) DCN 3.2.1, Rembrandt 780M (15b9/15bf/15be/164e) DCN 3.1.2/3.1.3 to avoid Pageflip timed out on eDP under Wayland/VRR — TUF A16 Phoenix"
+expires_on = "2027-08-01"
+provenance = "https://gitlab.freedesktop.org/drm/amd/-/issues and journalctl amdgpu Pageflip timed out (DCN 3.2.1 on 7480, DCN 3.1.2 eDP-2 PSR 1, TUF A16 15be/164e Phoenix)"
+
+[[quirks.match.pci]]
+vendor = "1002"
+devices = ["7480", "1681", "15bf", "15b9", "15be", "164e"]
+classes = ["0300", "0302", "0380"]
+drivers = ["amdgpu"]
+
+[[quirks.actions]]
+kind = "modprobe"
+module = "amdgpu"
+options = { dcdebugmask = "0x10" }

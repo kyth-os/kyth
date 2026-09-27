@@ -26,16 +26,18 @@ runs:
         VERSION: ${{ inputs.version }}
         SHA256: ${{ inputs.sha256 }}
       run: |
+        set -euo pipefail
         ARCHIVE="${TOOL}_${VERSION}_linux_amd64.tar.gz"
         BASE="https://github.com/anchore/${TOOL}/releases/download/v${VERSION}"
-        
-        curl --fail --location --silent --show-error \
+        CURL_RETRY=(--retry 5 --retry-all-errors --retry-delay 2 --retry-max-time 180 --connect-timeout 15 --max-time 300)
+
+        curl --fail --location --silent --show-error "${CURL_RETRY[@]}" \
           --output "${RUNNER_TEMP}/${ARCHIVE}" "${BASE}/${ARCHIVE}"
-        
+
         if [[ -n "${SHA256}" ]]; then
-          echo "${SHA256}  ${RUNNER_TEMP}/${ARCHIVE}" | sha256sum --check
+          echo "${SHA256}  ${RUNNER_TEMP}/${ARCHIVE}" | sha256sum --check --strict -
         else
-          curl --fail --location --silent --show-error \
+          curl --fail --location --silent --show-error "${CURL_RETRY[@]}" \
             --output "${RUNNER_TEMP}/${TOOL}_checksums.txt" \
             "${BASE}/${TOOL}_${VERSION}_checksums.txt"
           (cd "${RUNNER_TEMP}" && grep " ${ARCHIVE}$" "${TOOL}_checksums.txt" | sha256sum --check --strict -)

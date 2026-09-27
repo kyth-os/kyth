@@ -1,0 +1,33 @@
+[
+  {
+    "name": "nested_mounts_clean_up_inner_first",
+    "operations": [
+      {"action": "register", "path": "/target"},
+      {"action": "register", "path": "/target/boot"},
+      {"action": "register", "path": "/target/boot/efi"}
+    ],
+    "expected_snapshot": ["/target", "/target/boot", "/target/boot/efi"],
+    "expected_cleanup": ["/target/boot/efi", "/target/boot", "/target"]
+  },
+  {
+    "name": "duplicate_registration_does_not_repeat_cleanup",
+    "operations": [
+      {"action": "register", "path": "/target"},
+      {"action": "register", "path": "/target"},
+      {"action": "register", "path": "/target/home"},
+      {"action": "release", "path": "/target"}
+    ],
+    "expected_snapshot": ["/target/home"],
+    "expected_cleanup": ["/target/home"]
+  },
+  {
+    "name": "clear_discards_all_registered_mounts",
+    "operations": [
+      {"action": "register", "path": "/target"},
+      {"action": "register", "path": "/target/home"},
+      {"action": "clear"}
+    ],
+    "expected_snapshot": [],
+    "expected_cleanup": []
+  }
+]

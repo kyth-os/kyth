@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-selinux-gaming — selinux-gaming.toml allow_execheap
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-selinux-gaming "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.selinux_gaming import load_selinux_gaming; c=load_selinux_gaming(); print(f\"profile={c['profile']} allow_execheap={c['allow_execheap']}\")" ;;
-    gaming) need_root "$@"; python3 -c 'from kyth_shared.selinux_gaming import load_selinux_gaming,save_selinux_gaming,apply_selinux_gaming; c=load_selinux_gaming(); c["profile"]="gaming"; c["allow_execheap"]=True; save_selinux_gaming(c); apply_selinux_gaming(c)'; echo "selinux gaming allow_execheap on" ;;
-    balanced) need_root "$@"; python3 -c 'from kyth_shared.selinux_gaming import load_selinux_gaming,save_selinux_gaming,apply_selinux_gaming; c=load_selinux_gaming(); c["profile"]="balanced"; c["allow_execheap"]=False; save_selinux_gaming(c); apply_selinux_gaming(c)'; echo "selinux balanced off" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.selinux_gaming import load_selinux_gaming,apply_selinux_gaming; apply_selinux_gaming(load_selinux_gaming())' ;;
-    *) echo "Usage: kyth-selinux-gaming [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -11,6 +11,8 @@ source "${SCRIPT_DIR}/lib/plymouth-initrd-checks.sh"
 source "${SCRIPT_DIR}/lib/plymouth-stock-themes.sh"
 # shellcheck source=lib/plymouth-config.sh disable=SC1091
 source "${SCRIPT_DIR}/lib/plymouth-config.sh"
+# shellcheck source=lib/dracut-modules.sh disable=SC1091
+source "${SCRIPT_DIR}/lib/dracut-modules.sh"
 
 if [[ "${EUID}" -ne 0 ]]; then
 	printf 'ERROR: run as root, for example: run0 --pty /usr/bin/bash %q\n' "$0" >&2
@@ -33,6 +35,10 @@ boot_was_ro=0
 current_image=""
 current_backup=""
 repair_incomplete=0
+# lsinitrd scratch files for the image under repair. Tracked so cleanup()
+# can remove them when a plymouth_require_* check exits before the happy
+# path reaches the explicit rm -f below.
+verify_tmps=()
 
 cleanup() {
 	if [[ -n "${current_image}" && "${repair_incomplete}" -eq 1 ]]; then
@@ -43,6 +49,9 @@ cleanup() {
 			echo "ERROR: FAILED to restore ${current_backup} -> ${current_image}; this kernel may not boot. Restore it manually." >&2
 		fi
 	fi
+	if ((${#verify_tmps[@]} > 0)); then
+		rm -f "${verify_tmps[@]}"
+	fi
 	rm -rf "${include_root}"
 	if [[ "${boot_was_ro}" -eq 1 ]]; then
 		mount -o remount,ro /boot || true
@@ -51,8 +60,13 @@ cleanup() {
 trap cleanup EXIT
 
 if findmnt -no OPTIONS /boot 2>/dev/null | tr ',' '\n' | grep -qx ro; then
-	mount -o remount,rw /boot
-	boot_was_ro=1
+	# remount,rw is EINVAL on the root-subvol bind; bind,rw is the working layout.
+	if mount -o remount,bind,rw /boot 2>/dev/null || mount -o remount,rw /boot 2>/dev/null; then
+		boot_was_ro=1
+	else
+		echo "ERROR: /boot is read-only and could not be remounted" >&2
+		exit 1
+	fi
 fi
 
 mkdir -p \
@@ -126,7 +140,7 @@ for image in "${images[@]}"; do
 			--kver "${kernel}" \
 			--force \
 			--nohardlink \
-			--add "drm plymouth ostree kyth-plymouth" \
+			--add "${KYTH_DRACUT_MODULES}" \
 			--include "${include_root}/etc/plymouth" /etc/plymouth \
 			--include "${include_root}/usr/share/plymouth" /usr/share/plymouth \
 			--include "${include_root}/usr/share/pixmaps/system-logo-white.png" /usr/share/pixmaps/system-logo-white.png \
@@ -138,7 +152,10 @@ for image in "${images[@]}"; do
 		echo "WARNING: dracut failed with status ${dracut_status} for ${image} (attempt ${attempt}/2)" >&2
 		if ((attempt < 2)); then
 			echo "Restoring pre-repair backup before retrying..." >&2
-			cp -a "${backup}" "${image}"
+			cp -a "${backup}" "${image}" || {
+				echo "ERROR: FAILED to restore ${backup} -> ${image} before retry; this kernel may not boot. Restore it manually." >&2
+				exit 1
+			}
 		fi
 	done
 	if ((dracut_status != 0)); then
@@ -149,6 +166,7 @@ for image in "${images[@]}"; do
 	defaults="$(mktemp /tmp/kyth-plymouth-defaults.XXXXXX)"
 	listing="$(mktemp /tmp/kyth-plymouth-listing.XXXXXX)"
 	logo="$(mktemp /tmp/kyth-plymouth-logo.XXXXXX)"
+	verify_tmps=("${defaults}" "${listing}" "${logo}")
 	lsinitrd -f /usr/share/plymouth/plymouthd.defaults "${image}" >"${defaults}"
 	lsinitrd -f /usr/share/pixmaps/system-logo-white.png "${image}" >"${logo}"
 	lsinitrd "${image}" >"${listing}"
@@ -175,8 +193,13 @@ for image in "${images[@]}"; do
 	plymouth_forbid_fallback_theme "${listing}" "Plymouth fallback theme leaked into repaired initramfs"
 
 	rm -f "${defaults}" "${listing}" "${logo}"
+	verify_tmps=()
 
 	repair_incomplete=0
+	# The repaired image verified good above, so rotate the backup forward:
+	# the next repair starts from this known-good image instead of a stale
+	# pre-first-repair copy.
+	cp -a "${image}" "${backup}"
 	echo "Repaired ${image}"
 	echo "Backup: ${backup}"
 done

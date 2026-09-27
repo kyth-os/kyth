@@ -30,22 +30,60 @@ desktop defaults, and labels the image with source and release metadata.
 installer writes a selected target disk using `bootc install to-disk`, creates
 the local user, and installs the standard image offline from the live ISO. The
 embedded OCI manifest is checked against release metadata before destructive
-storage work. A durable, redacted transaction record tracks the source digest,
+storage work (preflight fails closed if `verified` is false). A durable, redacted transaction record (`atomic_write_json` + fsync + parent fsync) tracks the source digest,
 phase, safety checks, and outcome; browser progress resumes by event ID after a
 temporary UI disconnect.
 
 ### System Hub
 
-`build_files/kyth-welcome/` contains the Python/PySide6 System Hub. It provides
-first-run setup, update controls, hardware status, gaming setup, software
-install helpers, network-share and cloud-storage helpers, VPN flows, diagnostics,
-and repair actions.
+`src/kyth-hub-web/` contains the supported React frontend and Tauri/Rust command
+shell for first-run setup, update controls, hardware status, gaming setup,
+software installation, network/storage helpers, diagnostics, and repair actions.
+The installed probe collector, Guardian extended sweep, update watcher,
+telemetry writer, VPN workflow, privileged socket daemon, and network-share
+executor are native Rust authorities. The retired Python/Qt Hub service tree
+and its source-only tests were removed after the cutover; no Python Hub
+fallback is packaged or used by the System Hub.
 
 ### Runtime Helpers
 
 `build_files/` contains shell and Python helpers installed into the image, such
 as smoke checks, update checks, performance profiles, gamescope wrappers,
-controller checks, NVIDIA status checks, VPN helpers, and migration tools.
+controller checks, NVIDIA status checks, VPN helpers, and migration tools. The
+Python helpers that remain outside the Hub action path are listed in
+`docs/kyth-hub-migration-finalization-plan.md`; the native Rust service
+authorities are built from `src/kyth-shared-rs/`.
+
+### Conditional Device and First-Boot Defaults
+
+These image defaults apply only when their conditions hold; explicit user or
+operator configuration always wins:
+
+- **Default Flatpaks** (`kyth-default-flatpaks.service`, via `kyth-runtime
+  default-flatpaks`): system-wide (`--system --or-update -y flathub`)
+  first-boot install with its own 1800s timeout inside the unit's 3600s
+  bound. The completion stamp is versioned
+  (`/var/lib/kyth/default-flatpaks-v13-done`, bumped with the app list
+  because the old stamp survives OS upgrades in `/var`) and is written only
+  on full success — a flaky first-online pull exits cleanly with the stamp
+  unset so the next boot retries. An absent Flathub remote skips the unit
+  instead of failing it.
+- **Bluetooth** (`kyth-bluetooth-enable.service` + BlueZ `AutoEnable=true`
+  for newly-seen controllers): the boot service powers adapters on only when
+  no explicit user block exists. An `rfkill` soft-block skips the unit via
+  `ExecCondition`, and a BlueZ-persisted `Powered=false` on every known
+  adapter stays off; stale rfkill persistence is dropped only past those
+  checks, and a wifi soft-block is preserved while bluetooth is unblocked.
+  There is deliberately no udev unblock rule — unblocking on every adapter
+  event would undo an explicit user block.
+- **Wi-Fi power save**: NetworkManager defaults to powersave on
+  (`wifi.powersave = 3`, battery-friendly); the
+  `99-kyth-wifi-powersave` dispatcher turns the radio's `power_save` off on
+  AC power or while a game runs (`/run/kyth/gaming-hint`), back on
+  otherwise. `/etc/kyth/wifi-powersave.conf` with
+  `KYTH_WIFI_POWERSAVE=off|on` overrides unconditionally. The wireless
+  regulatory domain is derived from the system timezone
+  (`kyth-wifi-regdom`).
 
 ### CI/CD and Release Workflows
 
@@ -72,8 +110,11 @@ runs CVE scans.
 - GHCR stores signed OCI image artifacts and attached SBOMs.
 - Cloudflare R2 mirrors ISO downloads, while GitHub releases retain signed
   checksums, signature bundles, metadata, and provenance links.
-- The live installer exposes a local-only web UI and uses a session token to
-  protect installer actions from unrelated local browser requests.
+- The live installer exposes a React/Tauri UI as the supported client and uses
+  an authenticated root-owned Rust Unix-socket service for installer actions.
+  The Python installer tree is source-only parity-fixture material and is not
+  installed or used as an authority in the supported image. Its classification
+  is tracked in the generated [runtime migration report](../build_files/config/runtime-migration-report.json).
 - System Hub invokes privileged actions through narrowly scoped installed
   helpers and the platform's normal authentication paths.
 
@@ -98,7 +139,7 @@ KythOS uses multiple validation layers:
 
 ## External Interfaces
 
-- OCI image: `ghcr.io/mrtrick37/kyth`.
+- OCI image: `ghcr.io/kyth-os/kyth`.
 - ISO downloads: stable and testing channel URLs documented in `README.md`.
 - GitHub issues and discussions for public support and bug reporting.
 - GitHub private vulnerability reporting for security reports.

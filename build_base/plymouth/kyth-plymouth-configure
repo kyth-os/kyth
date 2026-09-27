@@ -33,6 +33,10 @@ install -m 0644 "${plymouth_etc}/plymouthd.conf" \
 
 # This file is KythOS-owned. Writing it deterministically prevents append-order
 # drift between base builds, final builds, and runtime repair.
+# The add_dracutmodules set here is the canonical KYTH_DRACUT_MODULES from
+# build_files/scripts/lib/dracut-modules.sh — keep in sync (shell callers
+# source that file; this generator inlines it because it must also render
+# under KYTH_PLYMOUTH_ROOT for tests).
 cat >"${dracut_conf_dir}/99-kyth.conf" <<'DRACUTEOF'
 add_dracutmodules+=" ostree drm plymouth kyth-plymouth "
 force_add_dracutmodules+=" kyth-plymouth "

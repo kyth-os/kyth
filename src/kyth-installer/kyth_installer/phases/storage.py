@@ -1,0 +1,405 @@
+"""Storage preparation for install — Phase 2 verbatim from install.py."""
+from __future__ import annotations
+
+import json
+import pathlib
+import re
+import shutil
+import subprocess
+import tempfile
+import threading
+from collections.abc import Callable
+from pathlib import Path
+
+from ..config import SKIP_FETCH_CHECK
+from ..context import InstallerContext, InstallPhase
+from ..plan import ResolvedInstallPlan
+from ..system import unmount_target_disk  # pylint: disable=unused-import
+from .common import (
+    _assert_still_on_ac,
+    _disk_image_hold,
+    _push,
+    _start_power_watch,
+    _stop_power_watch,
+)
+from ..storage_guard import PartitionTableGuard
+from .compat import phase_dependency
+
+def _prepare_storage_for_plan(
+    plan: ResolvedInstallPlan,
+    log,
+    progress,
+    alongside_mount: str,
+    context: InstallerContext,
+):
+    """Execute storage preparation from a resolved immutable plan."""
+    return _prepare_install_storage(
+        plan.disk,
+        plan.mode,
+        plan.source_ref,
+        plan.target_ref,
+        log,
+        progress,
+        alongside_mount,
+        context,
+        target_partition=plan.target_partition,
+        efi_partition=plan.efi_partition,
+    )
+
+def _prepare_install_storage(
+    disk, install_mode, src_ref, tgt_ref, log, progress, alongside_mount,
+    context: InstallerContext,
+    *,
+    target_partition: str | None = None,
+    efi_partition: str | None = None,
+):
+    from ..execution import check_cancelled
+
+    check_cancelled(context)
+    _assert_still_on_ac(log)
+    context.enter_phase(InstallPhase.STORAGE)
+    if install_mode in ("alongside", "manual"):
+        target_part = target_partition if target_partition is not None else context.state.get("target_partition", "")
+        efi_part = efi_partition if efi_partition is not None else context.state.get("efi_partition", "")
+        from ..config import STAGING_ALONGSIDE_MOUNT
+        alongside_mount = STAGING_ALONGSIDE_MOUNT
+        return _prepare_partition_target_storage(
+            target_part, efi_part, alongside_mount, src_ref, tgt_ref, log, progress, context
+        )
+    return _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_mount, context)
+
+
+def _create_btrfs_subvolumes(target_part, log, progress, context: InstallerContext) -> None:
+    """Format `target_part` as btrfs and lay out the @ / @home subvolumes.
+
+    Mounts target_part at a private temp root just long enough to create the
+    subvolumes and set @ as default; the temp mount must not outlive this
+    function regardless of success or failure, hence the finally.
+    """
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
+    _require_no_symlink = phase_dependency("_require_no_symlink")
+    _safe_umount = phase_dependency("_safe_umount")
+    ensure_directory = phase_dependency("ensure_directory")
+    mount_filesystem = phase_dependency("mount_filesystem")
+    _run_cmd = phase_dependency("_run_cmd")
+    log(f"Formatting {target_part} as btrfs ...")
+    helper = shutil.which("kyth-installer-exec")
+    if helper:
+        run_command(
+            _as_root(["kyth-installer-exec", "--operation", "disk"]),
+            input=json.dumps({
+                "operation": "format_filesystem",
+                "device": target_part,
+                "fs": "btrfs",
+                "label": "KythOS",
+            }, separators=(",", ":")),
+            text=True,
+            stdout=subprocess.DEVNULL,
+            check=True,
+            timeout=300,
+        )
+    else:
+        _run_cmd(
+            ["mkfs.btrfs", "-f", "-L", "KythOS", target_part],
+            5, 10, log, progress,
+            publish=lambda event: _push(event, context),
+        )
+
+    log("Creating Btrfs subvolumes @ and @home ...")
+    from ..config import STAGING_BTRFS_ROOT
+    btrfs_temp_root = STAGING_BTRFS_ROOT  # noqa: S108 — _require_no_symlink guards this below
+    _safe_umount(run_command, btrfs_temp_root)
+    _require_no_symlink(btrfs_temp_root)
+    ensure_directory(btrfs_temp_root, run=run_command, as_root=_as_root, check=True)
+    context.register_mount(btrfs_temp_root)
+    mount_filesystem(target_part, btrfs_temp_root, run=run_command, as_root=_as_root, check=True)
+    try:
+        for name in ("@", "@home"):
+            if helper:
+                run_command(
+                    _as_root(["kyth-installer-exec", "--operation", "disk"]),
+                    input=json.dumps({
+                        "operation": "btrfs_subvolume_create",
+                        "mountpoint": btrfs_temp_root,
+                        "name": name,
+                    }, separators=(",", ":")),
+                    text=True,
+                    stdout=subprocess.DEVNULL,
+                    check=True,
+                    timeout=60,
+                )
+            else:
+                run_command(_as_root(["btrfs", "subvolume", "create", f"{btrfs_temp_root}/{name}"]), check=True)
+        log("Setting Btrfs default subvolume to @ ...")
+        if helper:
+            run_command(
+                _as_root(["kyth-installer-exec", "--operation", "disk"]),
+                input=json.dumps({
+                    "operation": "btrfs_subvolume_set_default",
+                    "mountpoint": btrfs_temp_root,
+                    "name": "@",
+                }, separators=(",", ":")),
+                text=True,
+                stdout=subprocess.DEVNULL,
+                check=True,
+                timeout=60,
+            )
+        else:
+            run_command(_as_root(["btrfs", "subvolume", "set-default", f"{btrfs_temp_root}/@"]), check=True)
+    finally:
+        _safe_umount(run_command, btrfs_temp_root, check=True)
+        context.release_mount(btrfs_temp_root)
+
+
+def _mount_efi_for_alongside(alongside_mount, efi_part, log, context: InstallerContext) -> None:
+    """Mount efi_part under alongside_mount/boot/efi.
+
+    Bind-mounts from efi_part's current mountpoint when the live session
+    already has it mounted (e.g. /boot/efi), rather than mounting the device
+    a second time.
+    """
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
+    mount_filesystem = phase_dependency("mount_filesystem")
+    ensure_directory = phase_dependency("ensure_directory")
+    efi_mountpoint = Path(alongside_mount) / "boot" / "efi"
+    ensure_directory(str(efi_mountpoint), run=run_command, as_root=_as_root, check=True)
+    context.register_mount(str(efi_mountpoint))
+    try:
+        result = run_command(
+            ["findmnt", "-n", "-o", "MOUNTPOINT", efi_part],
+            capture_output=True, text=True, check=True, timeout=5,
+        )
+        current_efi_mnt = result.stdout.strip()
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        current_efi_mnt = ""
+    if current_efi_mnt:
+        mount_filesystem(
+            efi_part, str(efi_mountpoint), bind_source=current_efi_mnt,
+            run=run_command, as_root=_as_root, check=True,
+        )
+        log(f"EFI bind-mounted from {current_efi_mnt}")
+    else:
+        mount_filesystem(efi_part, str(efi_mountpoint), run=run_command, as_root=_as_root, check=True)
+        log(f"EFI mounted from {efi_part}")
+
+
+def _snapshot_efi_boot_entries(log) -> str:
+    """Best-effort capture of 'efibootmgr -v' output for later comparison.
+
+    Returns "" (never raises) when efibootmgr is unavailable — legacy BIOS
+    boot, a container test environment, or a live session with no UEFI
+    firmware access — since this is a diagnostic safety net, not a
+    requirement the install should ever fail on.
+    """
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
+    if shutil.which("efibootmgr") is None:
+        return ""
+    try:
+        result = run_command(_as_root(["efibootmgr", "-v"]), capture_output=True, text=True, timeout=10)
+        return result.stdout if result.returncode == 0 else ""
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        return ""
+
+
+_EFI_BOOT_ENTRY_RE = re.compile(r"^Boot[0-9A-Fa-f]{4}\*?\s+(.+)$")
+
+
+def _warn_if_efi_boot_entries_disappeared(before: str, after: str, log) -> None:
+    """Warn if a named EFI boot entry present before the install
+    — e.g. "Windows Boot Manager" — is gone from NVRAM afterward.
+
+    bootc's bootupd step registers KythOS's own boot entry and can rewrite
+    BootOrder; this is the safety net for it silently dropping another OS's
+    entry rather than just reordering it. Empty snapshots (no efibootmgr, or
+    only one side captured) stay a no-op so BIOS and test environments work.
+
+    Called after a successful image write, so this logs a rescue checklist
+    rather than aborting configure/user/fstab.
+    """
+    if not before or not after:
+        return
+
+    def entry_labels(text: str) -> set[str]:
+        labels = set()
+        for line in text.splitlines():
+            match = _EFI_BOOT_ENTRY_RE.match(line)
+            if match:
+                labels.add(match.group(1).strip())
+        return labels
+
+    lost = entry_labels(before) - entry_labels(after)
+    if lost:
+        msg = (
+            "EFI boot entries were present before the install "
+            f"but are missing from firmware NVRAM afterward: {', '.join(sorted(lost))}. "
+            "The other OS on disk is unaffected — only its boot menu entry may "
+            "be gone. Use your firmware's boot menu (often F12/Esc at power-on) "
+            "or 'efibootmgr' to recreate the entry if needed."
+        )
+        log(msg)
+        # After IMAGE the OS is already on disk. Aborting here skips
+        # configure/user/fstab and reports a failed install while the other
+        # OS's files are intact — only its firmware boot entry may be gone.
+        # Surface a rescue checklist instead of failing closed after the write.
+
+
+def _run_guarded_image_write(
+    disk: str, log, context: InstallerContext, write: Callable[[], None],
+) -> None:
+    """Hold the disk lock, watch AC power, and fail closed if power is yanked."""
+    stop_event = threading.Event()
+    watch = _start_power_watch(log, context, stop_event)
+    caught: BaseException | None = None
+    try:
+        with _disk_image_hold(disk, log):
+            write()
+    except BaseException as exc:  # noqa: BLE001 -- preserve cancellation/power-loss cleanup semantics
+        caught = exc
+    finally:
+        _stop_power_watch(watch, stop_event)
+    failed = getattr(context, "_power_failed", None)
+    if failed:
+        raise RuntimeError(failed) from caught
+    if caught is not None:
+        raise caught
+
+
+def _prepare_partition_target_storage(
+    target_part, efi_part, alongside_mount, src_ref, tgt_ref, log, progress,
+    context: InstallerContext,
+):
+    """Storage prep for the alongside/manual install modes: format the
+    user-selected target partition as btrfs, lay out @ / @home subvolumes,
+    mount it (plus EFI if present) under alongside_mount, then write the OS
+    image into that mountpoint via `bootc install to-filesystem`.
+    """
+    run_command = phase_dependency("run_command")
+    _as_root = phase_dependency("_as_root")
+    _require_no_symlink = phase_dependency("_require_no_symlink")
+    _safe_umount = phase_dependency("_safe_umount")
+    mount_filesystem = phase_dependency("mount_filesystem")
+    ensure_directory = phase_dependency("ensure_directory")
+    unmount_filesystem = phase_dependency("unmount_filesystem")
+    _run_cmd = phase_dependency("_run_cmd")
+    _build_bootc_install_cmd = phase_dependency("_build_bootc_install_cmd")
+    # Fresh re-probe immediately before anything destructive: the explicit
+    # alongside/manual path validated once at plan time, and a stale
+    # selection (USB replug/udev rename, a mount from another shell between
+    # review and commit) would otherwise format the wrong volume. The
+    # guided paths already revalidate twice; this matches them.
+    from .. import plan as _plan_module
+    _parent = _plan_module._parent_disk(target_part)
+    if not _parent:
+        raise RuntimeError(
+            f"The selected target {target_part} vanished during the final disk scan; "
+            "re-scan disks and choose the partition again. Nothing was formatted."
+        )
+    _fresh_snapshot = _plan_module._probe_storage(_parent)
+    _plan_module._validate_partition_target(_parent, target_part, "target partition", snapshot=_fresh_snapshot)
+    log(f"Target partition : {target_part}")
+    log(f"EFI partition    : {efi_part or '(none detected)'}")
+
+    _safe_umount(run_command, target_part)
+    unmount_filesystem(alongside_mount, recursive=True, lazy=True, run=run_command, as_root=_as_root, check=False, capture_output=True)
+    if efi_part:
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                ro = mount_filesystem(efi_part, td, options=["ro"], run=run_command, as_root=_as_root, check=False, capture_output=True)
+                if ro.returncode == 0:
+                    has_ms = pathlib.Path(td, "EFI", "Microsoft").exists() or pathlib.Path(td, "EFI", "microsoft").exists()
+                    unmount_filesystem(td, run=run_command, as_root=_as_root, check=False, capture_output=True)
+                    if has_ms:
+                        log(f"ESP {efi_part} contains Windows bootloader — will not format, only reuse.")
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
+            log(f"Warning: could not inspect ESP {efi_part}: {exc}")
+    _create_btrfs_subvolumes(target_part, log, progress, context)
+
+    _require_no_symlink(alongside_mount)
+    ensure_directory(alongside_mount, run=run_command, as_root=_as_root, check=True)
+    context.register_mount(alongside_mount)
+    mount_filesystem(target_part, alongside_mount, options=["subvol=@"], run=run_command, as_root=_as_root, check=True)
+    progress(11)
+
+    if efi_part:
+        _mount_efi_for_alongside(alongside_mount, efi_part, log, context)
+
+    install_cmd = _build_bootc_install_cmd(
+        "to-filesystem", src_ref, tgt_ref, alongside_mount,
+        # --skip-fetch-check unconditionally here (not gated behind the
+        # SKIP_FETCH_CHECK env toggle, which controls the unrelated
+        # network-preflight check below): this target mountpoint already
+        # has other partitions (e.g. a bind-mounted /boot/efi) mounted
+        # under it, which is exactly the case the partition CLI exercises.
+        # See plan.py's install_mode
+        # docstring for the "alongside" mode.
+        extra_flags=["--skip-finalize", "--karg=rootflags=subvol=@", "--skip-fetch-check"],
+    )
+    efi_before = _snapshot_efi_boot_entries(log)
+    context.enter_phase(InstallPhase.IMAGE)
+
+    def _write() -> None:
+        _run_cmd(
+            install_cmd, 12, 90, log, progress,
+            stall_timeout=3600, absolute_timeout=None,
+            publish=lambda event: _push(event, context),
+            cancel_event=context.cancel_requested,
+            io_stall_timeout=600,
+            net_stall_timeout=600,
+            execution_request={
+                "subcommand": "to-filesystem",
+                "source_imgref": src_ref,
+                "target_imgref": tgt_ref,
+                "target": alongside_mount,
+                "skip_fetch_check": True,
+                "skip_finalize": True,
+                "root_subvolume": True,
+            },
+        )
+        _warn_if_efi_boot_entries_disappeared(efi_before, _snapshot_efi_boot_entries(log), log)
+
+    _run_guarded_image_write(
+        context.state.get("disk") or target_part, log, context, _write,
+    )
+
+    return target_part, target_part, alongside_mount
+
+
+def _prepare_wipe_disk_storage(disk, src_ref, tgt_ref, log, progress, alongside_mount, context: InstallerContext):
+    """Storage prep for the wipe install mode: unmount anything blocking the
+    disk, then write the OS image via `bootc install to-disk`.
+    """
+    unmount_target_disk = phase_dependency("unmount_target_disk")
+    get_root_partition = phase_dependency("get_root_partition")
+    _run_cmd = phase_dependency("_run_cmd")
+    _build_bootc_install_cmd = phase_dependency("_build_bootc_install_cmd")
+    unmount_target_disk(disk, log)
+    install_cmd = _build_bootc_install_cmd(
+        "to-disk", src_ref, tgt_ref, disk,
+        extra_flags=["--filesystem", "btrfs", "--wipe"],
+    )
+    context.enter_phase(InstallPhase.IMAGE)
+
+    def _write() -> None:
+        _run_cmd(
+            install_cmd, 5, 90, log, progress,
+            stall_timeout=3600, absolute_timeout=None,
+            publish=lambda event: _push(event, context),
+            cancel_event=context.cancel_requested,
+            io_stall_timeout=600,
+            net_stall_timeout=600,
+            execution_request={
+                "subcommand": "to-disk",
+                "source_imgref": src_ref,
+                "target_imgref": tgt_ref,
+                "target": disk,
+                "skip_fetch_check": SKIP_FETCH_CHECK,
+                "wipe": True,
+            },
+        )
+
+    with PartitionTableGuard(disk, log):
+        _run_guarded_image_write(disk, log, context, _write)
+    return "", get_root_partition(disk), alongside_mount

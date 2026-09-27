@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-gaming-master — gaming-performance.toml orchestrator
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-gaming-master "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.gaming_master import load_master; print(load_master())'; echo "---"; python3 -c 'from kyth_shared.gaming_master import apply_master; print(apply_master(dry_run=True))' ;;
-    gaming) need_root "$@"; python3 -c 'from kyth_shared.gaming_master import save_master,apply_master; save_master({"profile":"gaming"}); print(apply_master("gaming"))'; for s in kyth-thp-tune kyth-irq-tune kyth-btrfs-tune kyth-trim-tune kyth-ananicy kyth-zswap kyth-sched-latency kyth-net-tune; do /usr/bin/$s apply 2>&1 | tail -n1 || true; done; sysctl --system >/dev/null 2>&1 || true; echo "gaming master applied (reboot for kargs)" ;;
-    balanced) need_root "$@"; python3 -c 'from kyth_shared.gaming_master import save_master,apply_master; save_master({"profile":"balanced"}); print(apply_master("balanced"))'; for s in kyth-thp-tune kyth-irq-tune kyth-btrfs-tune kyth-trim-tune kyth-ananicy kyth-zswap kyth-sched-latency kyth-net-tune; do /usr/bin/$s apply 2>&1 | tail -n1 || true; done; sysctl --system >/dev/null 2>&1 || true; echo "balanced restored" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.gaming_master import load_master,apply_master; print(apply_master(load_master()["profile"]))';;
-    *) echo "Usage: kyth-gaming-master [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

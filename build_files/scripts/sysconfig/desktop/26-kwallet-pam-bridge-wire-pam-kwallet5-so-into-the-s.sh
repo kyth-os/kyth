@@ -4,15 +4,16 @@ set -euo pipefail
 
 source "../../lib/config-helpers.sh"
 
-# ── KWallet PAM bridge: wire pam_kwallet5.so into the SDDM PAM stack ─────────
-# kwallet-pam is installed but Fedora's sddm package does NOT always enable it.
-# Without the session hook the wallet is never unlocked at login; the first app
-# that touches it receives a "wallet is closed" error and prompts the user.
-# pam_kwallet5.so handles both kwalletd5 and kwalletd6.
+# ── KWallet PAM bridge: wire pam_kwallet5.so into the PLM PAM stack ──────────
+# kwallet-pam is installed but Fedora's plasmalogin PAM files do not always
+# include the relabel helper. Without the session hook the wallet is never
+# unlocked at login; the first app that touches it receives a "wallet is closed"
+# error and prompts the user. pam_kwallet5.so handles both kwalletd5 and
+# kwalletd6.
 #
 # We also inject a relabeling helper that runs BEFORE pam_kwallet5's session
 # hook. The kwalletd directory can end up labeled default_t when first created
-# by a system-context process (sddm-helper runs as xdm_t; SELinux denies
+# by a system-context process (the greeter helper runs as xdm_t; SELinux denies
 # xdm_t→default_t getattr, so pam_kwallet5 cannot read the salt file and
 # silently fails to unlock the wallet on every login).
 write_config /usr/libexec/kyth-kwallet-relabel 0755 <<'RELABELEOF'
@@ -22,18 +23,15 @@ write_config /usr/libexec/kyth-kwallet-relabel 0755 <<'RELABELEOF'
 exit 0
 RELABELEOF
 
-SDDM_PAM=/etc/pam.d/sddm
-if [ -f "${SDDM_PAM}" ]; then
-	if ! grep -q pam_kwallet5 "${SDDM_PAM}"; then
-		# Fedora SDDM package didn't include kwallet5 lines — add them with relabeler.
-		printf '\nauth     optional     pam_kwallet5.so\nsession  optional     pam_exec.so /usr/libexec/kyth-kwallet-relabel\nsession  optional     pam_kwallet5.so auto_start\n' >>"${SDDM_PAM}"
-	elif ! grep -q kyth-kwallet-relabel "${SDDM_PAM}"; then
-		# kwallet5 lines already present (standard Fedora path) — insert relabeler
-		# immediately before the first pam_kwallet5 session line so restorecon
-		# corrects the label before pam_kwallet5 tries to open the salt file.
+for PAM_FILE in /etc/pam.d/plasmalogin /usr/lib/pam.d/plasmalogin; do
+	[ -f "${PAM_FILE}" ] || continue
+	if ! grep -q pam_kwallet5 "${PAM_FILE}"; then
+		printf '\nauth     optional     pam_kwallet5.so\nsession  optional     pam_exec.so /usr/libexec/kyth-kwallet-relabel\nsession  optional     pam_kwallet5.so auto_start\n' >>"${PAM_FILE}"
+	elif ! grep -q kyth-kwallet-relabel "${PAM_FILE}"; then
 		awk '!done && /pam_kwallet5.*auto_start/ {
             print "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel"
             done=1
-        } { print }' "${SDDM_PAM}" >/tmp/kyth-sddm.tmp && mv /tmp/kyth-sddm.tmp "${SDDM_PAM}"
+        } { print }' "${PAM_FILE}" >/tmp/kyth-plasmalogin.tmp && mv /tmp/kyth-plasmalogin.tmp "${PAM_FILE}"
 	fi
-fi
+	break
+done

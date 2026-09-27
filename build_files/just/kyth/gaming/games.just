@@ -5,11 +5,13 @@ import '../common.just'
 install-battlenet:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v lutris >/dev/null 2>&1; then
+    # Lutris ships as a Flatpak (net.lutris.Lutris), never native: a bare
+    # `lutris` binary does not exist on KythOS.
+    if ! flatpak info net.lutris.Lutris >/dev/null 2>&1; then
         echo "Lutris is not installed on this system." >&2
         exit 1
     fi
-    nohup lutris "lutris:install/battlenet" >/dev/null 2>&1 &
+    nohup flatpak run net.lutris.Lutris "lutris:install/battlenet" >/dev/null 2>&1 &
     echo
     echo "Opened the Battle.net installer in Lutris."
 
@@ -18,7 +20,9 @@ install-battlenet:
 install-epic-launcher:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v lutris >/dev/null 2>&1; then
+    # Lutris ships as a Flatpak (net.lutris.Lutris), never native: a bare
+    # `lutris` binary does not exist on KythOS.
+    if ! flatpak info net.lutris.Lutris >/dev/null 2>&1; then
         echo "Lutris is not installed on this system." >&2
         exit 1
     fi
@@ -32,7 +36,7 @@ install-epic-launcher:
             echo "Moved previous Epic installer state to: $backup"
         fi
     done
-    nohup lutris "lutris:install/epic-games-store" >/dev/null 2>&1 &
+    nohup flatpak run net.lutris.Lutris "lutris:install/epic-games-store" >/dev/null 2>&1 &
     echo
     echo "Opened the Epic Games Launcher installer in Lutris."
 
@@ -41,11 +45,13 @@ install-epic-launcher:
 install-ea-app:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v lutris >/dev/null 2>&1; then
+    # Lutris ships as a Flatpak (net.lutris.Lutris), never native: a bare
+    # `lutris` binary does not exist on KythOS.
+    if ! flatpak info net.lutris.Lutris >/dev/null 2>&1; then
         echo "Lutris is not installed on this system." >&2
         exit 1
     fi
-    nohup lutris "lutris:ea-app-standard" >/dev/null 2>&1 &
+    nohup flatpak run net.lutris.Lutris "lutris:ea-app-standard" >/dev/null 2>&1 &
     echo
     echo "Opened the EA App installer in Lutris."
 
@@ -54,11 +60,13 @@ install-ea-app:
 install-ubisoft-connect:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! command -v lutris >/dev/null 2>&1; then
+    # Lutris ships as a Flatpak (net.lutris.Lutris), never native: a bare
+    # `lutris` binary does not exist on KythOS.
+    if ! flatpak info net.lutris.Lutris >/dev/null 2>&1; then
         echo "Lutris is not installed on this system." >&2
         exit 1
     fi
-    nohup lutris "lutris:ubisoft-connect-latest" >/dev/null 2>&1 &
+    nohup flatpak run net.lutris.Lutris "lutris:ubisoft-connect-latest" >/dev/null 2>&1 &
     echo
     echo "Opened the Ubisoft Connect installer in Lutris."
 

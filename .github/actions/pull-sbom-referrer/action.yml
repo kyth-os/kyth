@@ -17,6 +17,14 @@ inputs:
     description: Optional image version to match via referrer annotations.
     required: false
     default: ""
+  strict-version:
+    description: >-
+      When true, only a referrer whose version annotation matches `version`
+      is accepted. Without this, a single unmatched syft referrer is used as
+      a fallback — which can silently assess a stale SBOM when the current
+      build's SBOM has not been attached yet.
+    required: false
+    default: "false"
 outputs:
   path:
     description: Path to the pulled SBOM JSON file, or empty if none found.
@@ -31,14 +39,15 @@ runs:
         IMAGE_REF: ${{ inputs.image-ref }}
         DEST_DIR: ${{ inputs.dest-dir }}
         VERSION: ${{ inputs.version }}
+        STRICT_VERSION: ${{ inputs.strict-version }}
       run: |
         if [[ -n "${VERSION}" ]]; then
           SBOM_DIGEST="$(oras discover --format json "${IMAGE_REF}" \
-            | jq -r --arg version "${VERSION}" '
+            | jq -r --arg version "${VERSION}" --argjson strict "${STRICT_VERSION:-false}" '
                 [.referrers[] | select(.artifactType | contains("syft"))] as $all
                 | [$all[] | select(.annotations["org.opencontainers.image.version"] == $version)] as $matching
                 | if ($matching | length) == 1 then $matching[0].digest
-                  elif ($matching | length) == 0 and ($all | length) == 1 then $all[0].digest
+                  elif ($matching | length) == 0 and ($all | length) == 1 and ($strict | not) then $all[0].digest
                   else empty
                   end' 2>/dev/null || true)"
         else

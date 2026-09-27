@@ -1,0 +1,595 @@
+import json
+import sys
+import unittest
+from contextlib import nullcontext
+from pathlib import Path
+from types import SimpleNamespace
+from unittest import mock
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
+sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
+
+from kyth_installer import partition_ops  # noqa: E402
+from kyth_installer import partition_ops_journal as journal_mod  # noqa: E402
+from kyth_installer.context import InstallerContext  # noqa: E402
+
+
+class InstallerPartitionJournalCoverageTests(unittest.TestCase):
+    def setUp(self):
+        # Same hardware isolation as the durability suite: commits run
+        # against fakes, so the probe layer must report an empty disk.
+        # Tests that stage their own partitions override these locally.
+        for target in (
+            "kyth_installer.partition_ops_journal.list_partitions",
+            "kyth_installer.disk.list_partitions",
+        ):
+            patcher = mock.patch(target, return_value=[])
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def _journal(self, *, dry_run=True):
+        service = mock.MagicMock(dry_run=dry_run)
+        service.backup_table.side_effect = lambda _disk, path: Path(path).write_bytes(b"table")
+        with mock.patch.object(journal_mod, "_normal_device_path", side_effect=lambda value: value):
+            return journal_mod.Journal("/dev/sda", disk_service=service)
+
+    def test_journal_rejects_invalid_disk_and_exposes_queue_safely(self):
+        with mock.patch.object(journal_mod, "_normal_device_path", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "Invalid disk path"):
+                journal_mod.Journal("bad", disk_service=mock.MagicMock())
+        journal = self._journal()
+        original = {"table_type": "gpt"}
+        op = journal.add_op("new_table", original)
+        original["table_type"] = "msdos"
+        self.assertEqual(op["params"]["table_type"], "gpt")
+        self.assertEqual(journal.pending(), [op])
+        self.assertFalse(journal.remove_op(4))
+        self.assertTrue(journal.remove_op(0))
+
+    def test_tool_requirements_report_missing_binaries_and_filesystems(self):
+        with mock.patch.object(journal_mod.shutil, "which", return_value=None):
+            with self.assertRaisesRegex(RuntimeError, "sgdisk"):
+                journal_mod._require_sgdisk()
+            with self.assertRaisesRegex(RuntimeError, "parted"):
+                journal_mod._require_parted()
+            with self.assertRaisesRegex(RuntimeError, "not available"):
+                journal_mod._require_mkfs("btrfs")
+        with self.assertRaisesRegex(RuntimeError, "Unsupported filesystem"):
+            journal_mod._require_mkfs("unknown")
+
+    def test_snapshot_save_restore_and_discard_are_idempotent(self):
+        journal = self._journal()
+        journal._save_snapshot()
+        self.assertTrue(journal._snapshot_saved)
+        backup = Path(journal._backup_dir.name) / "partition-table.backup"
+        self.assertTrue(backup.exists())
+        journal._restore_snapshot()
+        journal._disk_service.restore_table.assert_called_once()
+        self.assertFalse(journal._snapshot_saved)
+        self.assertIsNone(journal._backup_dir)
+        journal._discard_snapshot()
+
+    def test_snapshot_fsync_failure_keeps_recoverable_backup(self):
+        journal = self._journal()
+        with mock.patch("os.fsync", side_effect=OSError("sync unavailable")):
+            journal._save_snapshot()
+        self.assertTrue(journal._snapshot_saved)
+        self.assertTrue((Path(journal._backup_dir.name) / "partition-table.backup").exists())
+        journal._discard_snapshot()
+
+    def test_restore_without_snapshot_or_backup_is_safe(self):
+        journal = self._journal(dry_run=False)
+        journal._restore_snapshot()
+        journal._disk_service.restore_table.assert_not_called()
+        journal._snapshot_saved = True
+        backup_dir = mock.MagicMock()
+        backup_dir.name = "/definitely/missing"
+        journal._backup_dir = backup_dir
+        with mock.patch.object(journal_mod, "_require_sgdisk"):
+            journal._restore_snapshot()
+        journal._disk_service.restore_table.assert_not_called()
+        backup_dir.cleanup.assert_called_once()
+
+    def test_root_partition_prefers_created_root_then_existing_assignment(self):
+        journal = self._journal()
+        journal.add_op("create", {"mountpoint": "/", "partition": "/dev/sda3"})
+        self.assertEqual(journal._find_root_partition(), "/dev/sda3")
+        journal.clear()
+        journal.add_op("set_mountpoint", {"mountpoint": "/", "partition": "/dev/sda2"})
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda2"}]):
+            self.assertEqual(journal._find_root_partition(), "/dev/sda2")
+
+    def test_superseded_set_mountpoint_is_ignored_everywhere(self):
+        # add_op() always appends — it never replaces an earlier pending
+        # set_mountpoint for the same partition when the user changes a
+        # mountpoint choice before committing (a completely normal WebUI
+        # flow: pick a mountpoint, then pick a different one). Every reader
+        # of self.ops must treat everything but each partition's LAST
+        # set_mountpoint op as stale, or a user who reconsiders can get
+        # blocked by a mountpoint they no longer have — or worse, commit()
+        # can report the wrong partition as root after already repartitioning
+        # the real disk (see _find_root_partition below).
+        parts = [
+            {"name": "/dev/sda1", "fstype": "ext4"},
+            {"name": "/dev/sda2", "fstype": "btrfs"},
+        ]
+        journal = self._journal()
+        # sda1 was first picked as root (ext4 — invalid for root), then
+        # reconsidered to /home; sda2 (valid btrfs) is the REAL final root.
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/home"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            self.assertEqual(journal.validate(), [])
+            self.assertEqual(journal._find_root_partition(), "/dev/sda2")
+
+    def test_superseded_set_mountpoint_does_not_double_count_root(self):
+        # Isolates the root-count/duplicate-mountpoint bookkeeping from the
+        # btrfs-fstype check above by using two partitions of the same
+        # filesystem — a stale "/" assignment must not make a later,
+        # genuinely different partition's "/" look like a duplicate.
+        parts = [
+            {"name": "/dev/sda1", "fstype": "btrfs"},
+            {"name": "/dev/sda2", "fstype": "btrfs"},
+        ]
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/home"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            self.assertEqual(journal.validate(), [])
+            self.assertEqual(journal._find_root_partition(), "/dev/sda2")
+
+    def test_genuine_duplicate_root_assignment_is_still_rejected(self):
+        # A real conflict (two partitions BOTH finally assigned "/") must
+        # still be caught — the fix above must not weaken this check.
+        parts = [
+            {"name": "/dev/sda1", "fstype": "btrfs"},
+            {"name": "/dev/sda2", "fstype": "btrfs"},
+        ]
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errors = journal.validate()
+        self.assertTrue(any("assigned more than once" in error for error in errors))
+
+    def test_reconsidered_in_use_root_assignment_is_not_blocked(self):
+        # _validate_not_in_use has the same stale-op class of bug: briefly
+        # assigning "/" to a mounted/in-use partition, then reconsidering,
+        # must not permanently block the commit over a choice that no
+        # longer applies.
+        parts = [
+            {"name": "/dev/sda1", "fstype": "btrfs", "current": True},
+            {"name": "/dev/sda2", "fstype": "btrfs"},
+        ]
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/data"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errors = journal.validate()
+        self.assertEqual(errors, [])
+
+    def test_in_use_partition_still_rejected_when_root_assignment_is_final(self):
+        parts = [{"name": "/dev/sda1", "fstype": "btrfs", "current": True}]
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errors = journal.validate()
+        self.assertTrue(any("currently mounted or in use" in error for error in errors))
+
+    def test_commit_create_dry_run_records_root_and_skips_swap_format(self):
+        journal = self._journal()
+        params = {
+            "start_bytes": 1024**2,
+            "size_bytes": 8 * 1024**3,
+            "fs_type": "linux-swap",
+            "mountpoint": "/",
+        }
+        journal._commit_create(params, mock.MagicMock())
+        self.assertEqual(params["partition"], "/dev/sdap99")
+        journal._disk_service.create_partition.assert_called_once()
+        journal._disk_service.format_filesystem.assert_not_called()
+
+    def test_gpt_table_requires_discoverable_bios_partition(self):
+        journal = self._journal(dry_run=False)
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(journal_mod, "_latest_partition_on_disk", return_value=None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "automatic BIOS boot partition"):
+                journal._commit_new_table({"table_type": "gpt"}, mock.Mock())
+
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(
+                journal_mod, "_latest_partition_on_disk", return_value="/dev/sda1"
+            ),
+            mock.patch.object(journal_mod, "_partition_number", return_value=1),
+        ):
+            journal._commit_new_table({"table_type": "gpt"}, mock.Mock())
+        journal._disk_service.set_partition_flag.assert_called_with(
+            "/dev/sda", 1, "bios_grub"
+        )
+
+    def test_real_create_requires_discovery_and_formats_esp(self):
+        journal = self._journal(dry_run=False)
+        params = {
+            "start_bytes": 1024**2,
+            "size_bytes": 1024**3,
+            "fs_type": "fat32",
+            "label": "EFI",
+            "mountpoint": "/boot/efi",
+        }
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(journal_mod, "_latest_partition_on_disk", return_value=None),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "newly created partition"):
+                journal._commit_create(dict(params), mock.Mock())
+
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(
+                journal_mod, "_latest_partition_on_disk", return_value="/dev/sda2"
+            ),
+            mock.patch.object(journal_mod, "_partition_number", return_value=2),
+        ):
+            journal._commit_create(params, mock.Mock())
+        self.assertEqual(params["partition"], "/dev/sda2")
+        journal._disk_service.format_filesystem.assert_called_with(
+            "/dev/sda2", "fat32", "EFI"
+        )
+        journal._disk_service.set_partition_flag.assert_called_with("/dev/sda", 2, "esp")
+
+    def test_real_resize_shrinks_filesystem_before_partition_boundary(self):
+        journal = self._journal(dry_run=False)
+        params = {"partition": "/dev/sda2", "new_size_bytes": 8 * 1024**3}
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[]):
+            with self.assertRaisesRegex(RuntimeError, "was not found"):
+                journal._commit_resize(params, mock.Mock())
+
+        with (
+            mock.patch.object(
+                journal_mod, "list_partitions",
+                return_value=[{"name": "/dev/sda2", "fstype": "ext4"}],
+            ),
+            mock.patch.object(journal_mod, "shrink_filesystem") as shrink,
+            mock.patch.object(journal_mod, "_partition_number", return_value=2),
+            mock.patch.object(journal_mod, "_partition_start_bytes", return_value=1024**2),
+        ):
+            journal._commit_resize(params, mock.Mock())
+        shrink.assert_called_once_with("/dev/sda2", "ext4", 8 * 1024**3, mock.ANY)
+        journal._disk_service.resize_partition.assert_called_once_with(
+            "/dev/sda", 2, 1024**2, 8 * 1024**3
+        )
+
+    def test_commit_dispatches_metadata_and_format_operations(self):
+        journal = self._journal()
+        journal.add_op("format", {"partition": "/dev/sda2", "fs_type": "btrfs", "label": "ROOT"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+        parts = [{"name": "/dev/sda2", "fstype": "btrfs",
+                  "start_bytes": 100 * 1024**2, "size_bytes": 50 * 1024**3}]
+        with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(
+            journal, "_save_snapshot"
+        ), mock.patch.object(journal_mod, "list_partitions", return_value=parts), mock.patch.object(
+            journal_mod, "_parent_disk", return_value="/dev/sda"
+        ):
+            root = journal.commit(mock.MagicMock())
+        self.assertEqual(root, "/dev/sda2")
+        self.assertTrue(journal.committed)
+        journal._disk_service.format_filesystem.assert_called_once_with("/dev/sda2", "btrfs", "ROOT")
+
+    def test_invalid_commit_helpers_fail_before_disk_mutation(self):
+        journal = self._journal()
+        with self.assertRaisesRegex(RuntimeError, "invalid start"):
+            journal._commit_create({"start_bytes": 0, "size_bytes": 1}, mock.MagicMock())
+        with self.assertRaisesRegex(RuntimeError, "no partition"):
+            journal._commit_delete({}, mock.MagicMock())
+        with self.assertRaisesRegex(RuntimeError, "invalid partition"):
+            journal._commit_resize({}, mock.MagicMock())
+        with self.assertRaisesRegex(RuntimeError, "no partition"):
+            journal._commit_format({}, mock.MagicMock())
+
+    def test_rollback_without_snapshot_clears_ops_and_with_snapshot_resets_state(self):
+        journal = self._journal()
+        journal.add_op("new_table", {})
+        log = mock.MagicMock()
+        journal.rollback(log)
+        self.assertEqual(journal.pending(), [])
+        self.assertIn("No partition snapshot", log.call_args.args[0])
+
+        journal.add_op("new_table", {})
+        journal._snapshot_saved = True
+        journal._committed = True
+        journal._root_partition = "/dev/sda2"
+        with mock.patch.object(journal, "_restore_snapshot") as restore:
+            journal.rollback(log)
+        restore.assert_called_once()
+        self.assertFalse(journal.committed)
+        self.assertIsNone(journal.root_partition)
+
+    def test_partition_facade_builds_labels_and_resets_existing_journal(self):
+        self.assertEqual(partition_ops._mkfs_cmd("unknown", "/dev/sda1"), [])
+        fat = partition_ops._mkfs_cmd("fat32", "/dev/sda1", "EFI")
+        self.assertEqual(fat[-3:], ["-n", "EFI", "/dev/sda1"])
+        btrfs = partition_ops._mkfs_cmd("btrfs", "/dev/sda2", "ROOT")
+        self.assertEqual(btrfs[-3:], ["-L", "ROOT", "/dev/sda2"])
+
+        context = InstallerContext()
+        old = SimpleNamespace(
+            ops=[{"kind": "x"}], _committed=True, _root_partition="/dev/sda1",
+            _discard_snapshot=mock.MagicMock(),
+        )
+        context.journal = old
+        partition_ops.reset_journal(context)
+        self.assertEqual(old.ops, [])
+        self.assertFalse(old._committed)
+        self.assertIsNone(old._root_partition)
+        old._discard_snapshot.assert_called_once()
+        self.assertIsNone(context.journal)
+
+    def test_shim_fallbacks_cover_exception_and_original_paths(self):
+        # Each _patched_* shim has an except Exception: pass + fallback import
+        # Trigger the exception path by making the facade function raise
+        with mock.patch("kyth_installer.partition_ops._parent_disk", side_effect=RuntimeError("facade boom")):
+            # should fall back to disk._parent_disk without propagating
+            with mock.patch("kyth_installer.disk._parent_disk", return_value="/dev/sda") as orig:
+                self.assertEqual(journal_mod._patched_parent_disk("/dev/sda1"), "/dev/sda")
+                orig.assert_called_once()
+        with mock.patch("kyth_installer.partition_ops.list_disks", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.disk.list_disks", return_value=[{"name": "/dev/sda"}]) as orig:
+                self.assertEqual(journal_mod._patched_list_disks(), [{"name": "/dev/sda"}])
+        with mock.patch("kyth_installer.partition_ops.list_partitions", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.disk.list_partitions", return_value=[]) as orig:
+                self.assertEqual(journal_mod._patched_list_partitions("/dev/sda"), [])
+        with mock.patch("kyth_installer.partition_ops._partition_number", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.disk._partition_number", return_value=1) as orig:
+                self.assertEqual(journal_mod._patched_partition_number("/dev/sda1"), 1)
+        with mock.patch("kyth_installer.partition_ops._partition_start_bytes", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.disk._partition_start_bytes", return_value=1024) as orig:
+                self.assertEqual(journal_mod._patched_partition_start_bytes("/dev/sda1"), 1024)
+        with mock.patch("kyth_installer.partition_ops.shrink_filesystem", side_effect=RuntimeError("boom")):
+            with mock.patch("kyth_installer.fsresize.shrink_filesystem", return_value=None) as orig:
+                journal_mod._patched_shrink_filesystem("/dev/sda1", "ext4", 1024, log=mock.Mock())
+                orig.assert_called_once()
+
+    def test_journal_validation_covers_create_and_resize_error_branches(self):
+        journal = self._journal()
+        # invalid start/size (389)
+        journal.clear()
+        journal.add_op("create", {"start_bytes": -1, "size_bytes": -1, "fs_type": "btrfs"})
+        errs = journal.validate()
+        self.assertTrue(any("invalid start" in e for e in errs))
+        # not present (427) and invalid new_size (432)
+        journal.clear()
+        journal.add_op("delete", {"partition": "/dev/sda9"})
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errs = journal.validate()
+            self.assertTrue(any("is not present" in e for e in errs))
+        journal.clear()
+        journal.add_op("resize", {"partition": "/dev/sda1", "new_size_bytes": 0})
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errs = journal.validate()
+            self.assertTrue(any("invalid new size" in e for e in errs))
+        # mountpoint duplicate (460) — use non-overlapping regions so overlap doesn't mask duplicate
+        journal.clear()
+        journal.add_op("create", {"partition": "/dev/sda2", "mountpoint": "/home", "fs_type": "btrfs", "start_bytes": 1024**2, "size_bytes": 4 * 1024**3})
+        journal.add_op("create", {"partition": "/dev/sda3", "mountpoint": "/home", "fs_type": "btrfs", "start_bytes": 8 * 1024**3, "size_bytes": 4 * 1024**3})
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errs = journal.validate()
+            self.assertTrue(any("assigned more than once" in e for e in errs))
+
+    def test_journal_msdos_delete_and_commit_dispatch(self):
+        # msdos delete and commit dispatch — use delete of a present partition without new_table reset
+        # to hit 353-355 and 583/585/568 we use a simple delete+resize on a gpt disk
+        journal = self._journal()
+        journal.clear()
+        journal.add_op("delete", {"partition": "/dev/sda2"})
+        # make delete present: list_partitions contains sda2, parent returns sda
+        with mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}, {"name": "/dev/sda2"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errs = journal.validate()
+            # may still have no-root error but should not have delete-not-present
+            self.assertFalse(any("is not present" in e for e in errs))
+        # delete commit with dry_run True (528-530) and commit dispatch (583,585,568)
+        journal = self._journal(dry_run=True)
+        journal.add_op("delete", {"partition": "/dev/sda1"})
+        journal.add_op("resize", {"partition": "/dev/sda2", "new_size_bytes": 1024**3})
+        # commit() validates before mutating, so the journal needs a root to
+        # be committable: the create op below satisfies validation and
+        # dispatches alongside the delete/resize under test.
+        journal.add_op("create", {"start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+                                  "fs_type": "btrfs", "mountpoint": "/"})
+        # commit should dispatch delete and resize even in dry_run (uses 99 and mocked helpers)
+        with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(journal, "_save_snapshot"), mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1"}, {"name": "/dev/sda2"}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"), mock.patch.object(journal_mod, "_partition_number", return_value=1), mock.patch.object(journal_mod, "_partition_start_bytes", return_value=0), mock.patch.object(journal_mod, "shrink_filesystem"):
+            journal.commit(mock.Mock())
+            self.assertTrue(journal.committed)
+            journal._disk_service.delete_partition.assert_called()
+            journal._disk_service.resize_partition.assert_called()
+        # non-dry_run commit must call _require_parted (568)
+        journal2 = self._journal(dry_run=False)
+        journal2.add_op("delete", {"partition": "/dev/sda1"})
+        # commit() validates before mutating: stage the root assignment first
+        # (on the btrfs partition, before its deletion) so the journal is
+        # committable and the test reaches the _require_parted assertion.
+        journal2.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/"})
+        journal2.ops[:] = sorted(journal2.ops, key=lambda op: 0 if op["kind"] == "set_mountpoint" else 1)
+        with mock.patch("kyth_installer.storage_guard.DiskLease", side_effect=lambda *a, **k: nullcontext()), mock.patch.object(journal2, "_save_snapshot"), mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda1", "fstype": "btrfs", "start_bytes": 1024**2, "size_bytes": 50 * 1024**3}]), mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"), mock.patch.object(journal_mod, "_partition_number", return_value=1), mock.patch.object(journal_mod, "_require_parted") as req:
+            journal2.commit(mock.Mock())
+            req.assert_called()
+
+    def test_journal_save_snapshot_requires_sgdisk_and_handles_missing_backup(self):
+        journal = self._journal(dry_run=False)
+        # save snapshot when not dry_run must call _require_sgdisk (154)
+        with mock.patch.object(journal_mod, "_require_sgdisk") as req, mock.patch.object(journal, "_discard_snapshot"):
+            journal._save_snapshot()
+            req.assert_called()
+        # restore without backup dir returns early (185)
+        journal = self._journal(dry_run=False)
+        journal._snapshot_saved = True
+        journal._backup_dir = None
+        with mock.patch.object(journal_mod, "_require_sgdisk"):
+            journal._restore_snapshot()
+            journal._disk_service.restore_table.assert_not_called()
+        # _find_root_partition returns None when no root (238)
+        journal = self._journal()
+        self.assertIsNone(journal._find_root_partition())
+
+    def test_native_commit_bridges_step_events_and_journal_metadata(self):
+        journal = self._journal(dry_run=False)
+        journal.add_op("create", {"start_bytes": 1024, "size_bytes": 4096, "fs_type": "btrfs"})
+        record = mock.Mock()
+        response_journal = {
+            "disk": "/dev/sda",
+            "ops": [{"kind": "create", "params": {"partition": "/dev/sda2"}, "index": 0}],
+            "committed": True,
+            "root_partition": "/dev/sda2",
+            "irreversible_completed": False,
+        }
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, _command, _start, _end, log, _progress, **_kwargs):
+                log(json.dumps({"event": "step", "kind": "create", "status": "started", "target": "/dev/sda"}))
+                log(json.dumps({"event": "step", "kind": "create", "status": "completed", "target": "/dev/sda2"}))
+                log(json.dumps({"ok": True, "journal": response_journal}))
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            response = journal._rust_commit(mock.Mock(), record=record)
+
+        self.assertTrue(response["ok"])
+        self.assertEqual(journal.root_partition, "/dev/sda2")
+        self.assertEqual(journal.ops[0]["params"]["partition"], "/dev/sda2")
+        self.assertEqual(record.call_count, 2)
+
+    def test_native_commit_rejects_missing_or_malformed_final_response(self):
+        journal = self._journal(dry_run=False)
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, _command, _start, _end, log, _progress, **_kwargs):
+                log(json.dumps({"ok": True, "journal": {"ops": "malformed"}}))
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "malformed journal metadata"):
+                journal._rust_commit(mock.Mock())
+
+    def test_native_commit_does_not_abort_for_transaction_event_write_failure(self):
+        journal = self._journal(dry_run=False)
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, _command, _start, _end, log, _progress, **_kwargs):
+                log(json.dumps({"event": "step", "kind": "delete", "status": "started"}))
+                log(json.dumps({"ok": True, "journal": {"ops": [], "committed": True}}))
+
+        def broken_record(*_args):
+            raise RuntimeError("transaction writer unavailable")
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            response = journal._rust_commit(mock.Mock(), record=broken_record)
+        self.assertTrue(response["ok"])
+
+    def test_native_target_validation_covers_success_failure_and_fail_closed_paths(self):
+        journal = self._journal(dry_run=False)
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.runner.run_command", return_value=SimpleNamespace(stdout='{"valid": true, "error": null}')),
+            mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+        ):
+            self.assertIsNone(journal.rust_validate_target("/dev/sda1"))
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.runner.run_command", return_value=SimpleNamespace(stdout='{"valid": false, "error": "not a target"}')),
+            mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+        ):
+            self.assertEqual(journal.rust_validate_target("/dev/sda1"), "not a target")
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.runner.run_command", return_value=SimpleNamespace(stdout='{"valid": "yes"}')),
+            mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+        ):
+            self.assertIn("refusing", journal.rust_validate_target("/dev/sda1"))
+
+    def test_native_commit_covers_resize_guard_and_non_json_runner_output(self):
+        journal = self._journal(dry_run=False)
+        journal.add_op("resize", {"partition": "/dev/sda2", "new_size_bytes": 4096})
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, _command, _start, _end, log, _progress, **_kwargs):
+                log("native progress")
+                log("[]")
+                log(json.dumps({"ok": True}))
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch.object(journal_mod, "list_partitions", return_value=[{"name": "/dev/sda2", "fstype": "ext4"}]),
+            mock.patch("kyth_installer.fsresize.validate_shrink_request"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            response = journal._rust_commit(mock.Mock())
+        self.assertTrue(response["ok"])
+
+    def test_native_commit_requires_a_valid_final_response(self):
+        journal = self._journal(dry_run=False)
+
+        class FakeRunner:
+            def __init__(self, **_kwargs):
+                pass
+
+            def run(self, *_args, **_kwargs):
+                return None
+
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "no valid response"):
+                journal._rust_commit(mock.Mock())
+
+    def test_commit_surfaces_native_failure_without_falling_back_to_disk(self):
+        journal = self._journal(dry_run=False)
+        # commit() validates before mutating: a committable op is needed so
+        # the test reaches the mocked native failure instead of stopping at
+        # validation.
+        journal.add_op("create", {"start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+                                  "fs_type": "btrfs", "mountpoint": "/"})
+        with mock.patch.object(
+            journal, "_rust_commit", return_value={"ok": False, "message": "native commit failed", "irreversible": True}
+        ):
+            with self.assertRaisesRegex(RuntimeError, "native commit failed"):
+                journal.commit(mock.Mock())
+
+
+if __name__ == "__main__":
+    unittest.main()

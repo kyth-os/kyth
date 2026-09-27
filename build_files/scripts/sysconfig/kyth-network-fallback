@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -u
+set -euo pipefail
 
 command -v nmcli >/dev/null 2>&1 || exit 0
 

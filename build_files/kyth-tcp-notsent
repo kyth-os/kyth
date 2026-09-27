@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-tcp-notsent — tcp_notsent_lowat 16384 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-notsent "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.tcp_notsent import load_tcp_notsent, tcp_notsent_status; c=load_tcp_notsent(); print(f\"profile={c['profile']} active={tcp_notsent_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_notsent import load_tcp_notsent,save_tcp_notsent,generate_tcp_notsent; c=load_tcp_notsent(); c['profile']='gaming'; save_tcp_notsent(c); generate_tcp_notsent(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp notsent gaming 16384" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_notsent import load_tcp_notsent,save_tcp_notsent,generate_tcp_notsent; c=load_tcp_notsent(); c['profile']='balanced'; save_tcp_notsent(c); generate_tcp_notsent(c)"; echo "tcp notsent balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_notsent import load_tcp_notsent,generate_tcp_notsent; generate_tcp_notsent(load_tcp_notsent())" ;;
-    *) echo "Usage: kyth-tcp-notsent [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

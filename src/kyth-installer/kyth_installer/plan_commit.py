@@ -1,0 +1,468 @@
+"""Destructive partition commits used by guided installer planning."""
+
+from __future__ import annotations
+
+import logging
+import subprocess
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Callable
+
+_logger = logging.getLogger(__name__)
+
+from .config import BIOS_BOOT_BYTES
+from .execution import InstallCancelled
+from .plan_types import InstallPlan
+
+
+@dataclass(frozen=True, slots=True)
+class CommitDependencies:
+    """Patchable mutation boundary for partition commits."""
+
+    is_gpt: Callable[[str], bool]
+    has_bios_boot: Callable[[str], bool]
+    list_partitions: Callable[[str], list[dict]]
+    block_size: Callable[[str], int]
+    latest_partition: Callable[..., str | None]
+    partition_number: Callable[[str], int]
+    human_size: Callable[[int], str]
+    run_command: Callable
+    as_root: Callable[[list[str]], list[str]]
+    settle: Callable[[], None]
+    disk_hold: Callable
+    guard_factory: Callable
+    disk_service_factory: Callable
+    resize_partition: Callable | None = None
+
+
+def _call_latest_partition(
+    dependencies: CommitDependencies,
+    disk: str,
+    before: set[str],
+    *,
+    start_bytes: int = 0,
+    size_bytes: int = 0,
+) -> str | None:
+    """Call latest_partition with geometry when the bound callable accepts it."""
+    try:
+        return dependencies.latest_partition(
+            disk, before, start_bytes=start_bytes, size_bytes=size_bytes,
+        )
+    except TypeError:
+        return dependencies.latest_partition(disk, before)
+
+
+def ensure_bios_boot_partition(
+    disk: str, gap_start: int, log, *, dependencies: CommitDependencies,
+) -> int:
+    """Create a missing GPT BIOS helper and return the next usable byte offset."""
+    # Last-moment battery guard before destructive mkpart.
+    try:
+        from .assurance import _battery_check
+
+        _battery_check()
+    except RuntimeError:
+        raise
+    except (OSError, ValueError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort guard
+        import logging as _lg
+
+        _lg.getLogger(__name__).debug("bios-boot pre-guard probe failed: %s", exc, exc_info=True)
+    if not dependencies.is_gpt(disk) or dependencies.has_bios_boot(disk):
+        return gap_start
+    before = {
+        part["name"] for part in dependencies.list_partitions(disk) if part.get("name")
+    }
+    sector = dependencies.block_size(disk)
+    bios_end = gap_start + BIOS_BOOT_BYTES - sector
+    log("Creating BIOS boot partition for GRUB...")
+    dependencies.run_command(
+        dependencies.as_root([
+            "parted", "-s", disk, "unit", "B", "mkpart", "biosboot",
+            f"{gap_start}B", f"{bios_end}B",
+        ]),
+        check=True, timeout=120,
+    )
+    created = _call_latest_partition(
+        dependencies, disk, before, start_bytes=gap_start, size_bytes=BIOS_BOOT_BYTES,
+    )
+    if not created:
+        dependencies.settle()
+        created = _call_latest_partition(
+            dependencies, disk, before, start_bytes=gap_start, size_bytes=BIOS_BOOT_BYTES,
+        )
+    if not created:
+        raise RuntimeError(
+            "The installer could not find the new BIOS boot partition after partitioning."
+        )
+    dependencies.run_command(
+        dependencies.as_root([
+            "parted", "-s", disk, "set", str(dependencies.partition_number(created)),
+            "bios_grub", "on",
+        ]),
+        check=True, timeout=120,
+    )
+    dependencies.settle()
+    return bios_end + sector
+
+
+def commit_new_kythos_partition(
+    disk: str,
+    gap_start: int,
+    gap_end: int,
+    log,
+    *,
+    dependencies: CommitDependencies,
+    before_partition: Callable[[], None] | None = None,
+    failure_message: str = "A step failed — restoring the original partition table...",
+    restored_message: str = "Partition table restored to its state before this attempt (table only — filesystem writes already made are not undone).",
+) -> str:
+    """Create and format a target partition inside a guarded table transaction."""
+    del restored_message  # guard owns restore logging; retained for compatibility
+    disk_service = dependencies.disk_service_factory()
+    if before_partition is not None:
+        # `before_partition` mutates the disk (boundary move / shrink) inside
+        # the guarded scope: if a LATER step fails, the guard restores the
+        # table, but that restore cannot undo filesystem writes already made
+        # and is unsafe to mistake for a full rollback. Say so up front.
+        log(
+            "Warning: a filesystem/boundary change runs inside this guarded step. "
+            "If a later step fails, the partition table is restored but any "
+            "filesystem write already made is NOT undone."
+        )
+    with dependencies.disk_hold(disk, log):
+        with dependencies.guard_factory(disk, log, disk_service=disk_service):
+            if before_partition is not None:
+                try:
+                    before_partition()
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
+                    log(f"{failure_message}: {exc}")
+                    raise
+            btrfs_start = ensure_bios_boot_partition(
+                disk, gap_start, log, dependencies=dependencies,
+            )
+            sector = dependencies.block_size(disk)
+            partition_end = gap_end - sector
+            before = {
+                part["name"] for part in dependencies.list_partitions(disk)
+                if part.get("name")
+            }
+            log(
+                "Creating KythOS Btrfs partition in "
+                f"{dependencies.human_size(gap_end - btrfs_start)} of free space..."
+            )
+            dependencies.run_command(
+                dependencies.as_root([
+                    "parted", "-s", disk, "unit", "B", "mkpart", "KythOS", "btrfs",
+                    f"{btrfs_start}B", f"{partition_end}B",
+                ]),
+                check=True, timeout=120,
+            )
+            for command in (
+                dependencies.as_root(["blockdev", "--rereadpt", disk]),
+                dependencies.as_root(["partprobe", disk]),
+            ):
+                try:
+                    dependencies.run_command(command, check=False, timeout=15)
+                except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+                    pass
+            dependencies.settle()
+            created = _call_latest_partition(
+                dependencies, disk, before,
+                start_bytes=btrfs_start, size_bytes=partition_end - btrfs_start,
+            )
+            if not created:
+                raise RuntimeError(
+                    "The installer could not find the new KythOS partition after partitioning."
+                )
+            dependencies.run_command(
+                dependencies.as_root(["mkfs.btrfs", "-f", "-L", "KythOS", created]),
+                check=True, timeout=300,
+            )
+            dependencies.settle()
+            try:
+                visible = {
+                    part["name"] for part in dependencies.list_partitions(disk)
+                    if part.get("name")
+                }
+                if created not in visible:
+                    log(
+                        f"Warning: kernel did not yet expose {created} after rereadpt — "
+                        "proceeding, udev may still settle."
+                    )
+            except Exception as exc:  # noqa: BLE001 -- broad: verify is best-effort, must catch StopIteration from mocks and any probe failure
+                log(f"Warning: could not verify new partition {created}: {exc}")
+            log(f"Created target partition {created}")
+            return created
+
+
+__all__ = ["CommitDependencies", "commit_new_kythos_partition", "ensure_bios_boot_partition"]
+
+
+def shrink_ntfs_filesystem_guarded(
+    partition: str, new_size: int, shrink_bytes: int, log, *, shrink_filesystem,
+    human_size, marker_root: Path = Path("/run/kyth-installer"),
+    cancel_event=None, register_mount=None, release_mount=None,
+) -> None:
+    """Shrink NTFS before table mutation and record the non-atomic boundary."""
+    log(f"NTFS resize requested: shrink {partition} by {human_size(shrink_bytes)}")
+    try:
+        shrink_filesystem(partition, "ntfs", new_size, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
+    except InstallCancelled:
+        # Never swallow cancellation as a shrink failure: the handler below
+        # would log "no destructive write" and CONTINUE to the table commit.
+        raise
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        log(
+            "NTFS filesystem shrink failed — no partition table change was made. "
+            "The NTFS volume is unchanged and the installer made no destructive write."
+        )
+        raise
+    log(
+        "NTFS filesystem shrink complete. If the next partition step fails, "
+        "the partition table will be restored but this filesystem will remain "
+        "at its new smaller size. Windows will see unallocated space after it; "
+        "use Windows Disk Management to extend the volume back if you want to undo."
+    )
+    try:
+        marker_root.mkdir(parents=True, exist_ok=True)
+        marker = marker_root / f"ntfs-shrunk-{partition.replace('/', '_')}"
+        marker.write_text(f"{new_size}\n")
+    except (OSError, ValueError) as exc:
+        # Fail closed: the shrink SUCCEEDED but its retry guard could not be
+        # recorded. Proceeding would let a retry double-shrink the volume
+        # with no marker and (if the probe also fails) no signal. Abort
+        # before any table commit instead.
+        raise RuntimeError(
+            f"NTFS filesystem shrink completed, but its progress marker could not be "
+            f"recorded ({exc}). Aborting before the partition table change: the "
+            f"filesystem is at its new smaller size while the partition still "
+            f"describes the old size. Reboot, let Windows extend the volume back, "
+            f"or reboot the live ISO before retrying."
+        ) from exc
+
+
+def _fail_if_ntfs_already_shrunk(partition: str, partition_size_bytes: int, log, *, ntfs_fs_size=None) -> None:
+    """Fail closed when the live NTFS filesystem is already smaller than its partition.
+
+    A previous shrink whose table change was rolled back (or a retry after a
+    reboot that wiped the tmpfs `/run` marker) leaves exactly this shape:
+    filesystem < partition. Shrinking again on top would compound the loss,
+    so refuse with remediation instead. `ntfs_fs_size=None` means no probe
+    was wired (unit-test hermeticity) — that returns so the in-session
+    marker check below still applies. But a WIRED probe that errors or
+    returns garbage fails closed: `ntfsresize --info` fails on dirty,
+    hibernated, or damaged volumes, which are exactly the volumes that must
+    not be shrunk.
+    """
+    probe = ntfs_fs_size
+    if probe is None:
+        return
+    try:
+        fs_size = probe(partition)
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+        raise RuntimeError(
+            "Could not read the live NTFS filesystem size — the volume may be "
+            f"dirty, hibernated, or damaged ({exc}). Refusing to shrink an "
+            "unverifiable volume: run chkdsk from Windows (or clear hibernation "
+            "with a full shutdown) and retry."
+        ) from exc
+    if not isinstance(fs_size, int) or fs_size <= 0:
+        # None strictly means "could not attempt" (helper missing) or
+        # unparsable output — fall back to the in-session marker check.
+        return
+    tolerance = 64 * 1024 * 1024
+    if fs_size < partition_size_bytes - tolerance:
+        raise RuntimeError(
+            "This NTFS filesystem is already smaller than its partition — a previous "
+            "shrink completed but its partition-table change was rolled back (or the "
+            "installer rebooted and lost its in-progress marker). Shrinking again would "
+            "compound the change. Reboot, let Windows extend the volume back to fill "
+            "the partition (Disk Management → Extend Volume), then retry the install."
+        )
+
+
+def prepare_free_space_target(
+    config: dict, log, *, validate_target, required_tools, which,
+    unmount_target_disk, commit_partition,
+) -> tuple[str, str]:
+    """Revalidate and commit a guided install into an existing free region."""
+    disk, start, end = validate_target(config)
+    selected_disk = disk
+    missing = [command for command in required_tools if which(command) is None]
+    if missing:
+        raise RuntimeError(
+            "Required partitioning tools are missing from the live environment: "
+            + ", ".join(missing)
+        )
+    unmount_target_disk(disk, log)
+    disk, start, end = validate_target(config)
+    if disk != selected_disk:
+        raise RuntimeError(
+            "The selected target disk changed during preparation; no partition was created."
+        )
+    return disk, commit_partition(disk, start, end, log)
+
+
+def prepare_ntfs_resize_target(
+    config: dict, log, *, normal_device_path, validate_target, required_tools,
+    which, unmount_target_disk, partition_size, partition_number, block_size,
+    partition_start, shrink_filesystem_guarded, run_command, as_root, settle,
+    commit_partition, resize_partition=None,
+    marker_root: Path = Path("/run/kyth-installer"),
+    ntfs_fs_size=None, cancel_event=None, register_mount=None, release_mount=None,
+) -> tuple[str, str]:
+    """Shrink a validated NTFS target and commit a partition in its freed tail."""
+    try:
+        preliminary = normal_device_path(
+            config.get("resize_partition") or config.get("target_partition")
+        )
+        if preliminary:
+            marker = marker_root / f"ntfs-shrunk-{preliminary.replace('/', '_')}"
+            if marker.is_file():
+                raise RuntimeError(
+                    "This NTFS partition was already shrunk in this installer session "
+                    "but the partition table was restored after a later failure. "
+                    "The filesystem is already at its new smaller size while the "
+                    "partition still describes the old larger size. Reboot, let "
+                    "Windows extend the volume back, or reboot the live ISO before "
+                    "retrying. Marker: " + str(marker)
+                )
+    except RuntimeError:
+        raise
+    except (OSError, ValueError) as exc:
+        _logger.debug("ntfs marker probe failed for %s: %s", preliminary if 'preliminary' in locals() else "unknown", exc, exc_info=True)
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
+        _logger.debug("ntfs marker probe unexpected error, failing closed: %s", exc, exc_info=True)
+        raise
+
+    disk, partition, shrink_bytes = validate_target(config)
+    selected_target = (disk, partition)
+    missing = [command for command in required_tools if which(command) is None]
+    if missing:
+        raise RuntimeError(
+            "Required NTFS resize tools are missing from the live environment: "
+            + ", ".join(missing)
+        )
+    unmount_target_disk(disk, log)
+    disk, partition, shrink_bytes = validate_target(config)
+    if (disk, partition) != selected_target:
+        raise RuntimeError(
+            "The selected NTFS target changed during preparation; no filesystem was shrunk."
+        )
+    current_size = partition_size(partition)
+    new_ntfs_size = current_size - shrink_bytes
+    # Reboot-persistent already-shrunk check: the /run marker below is tmpfs
+    # and vanishes on reboot, but a rolled-back table change leaves the live
+    # filesystem smaller than its partition. Probe that live state and fail
+    # closed instead of shrinking twice.
+    _fail_if_ntfs_already_shrunk(
+        partition, current_size, log, ntfs_fs_size=ntfs_fs_size,
+    )
+    part_num = partition_number(partition)
+    sector = block_size(disk)
+    start = partition_start(partition)
+    old_end = start + current_size - sector
+    new_end = start + new_ntfs_size - sector
+
+    shrink_filesystem_guarded(partition, new_ntfs_size, shrink_bytes, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
+
+    def shrink_partition_boundary() -> None:
+        log("Shrinking partition boundary...")
+        if resize_partition is None:
+            # Compatibility fallback for injected legacy test dependencies.
+            run_command(
+                as_root([
+                    "parted", "---pretend-input-tty", disk, "unit", "B", "resizepart",
+                    str(part_num), f"{new_end}B",
+                ]),
+                input="Yes\n", text=True, stdout=subprocess.DEVNULL, check=True,
+                timeout=120,
+            )
+            settle()
+        else:
+            resize_partition(disk, part_num, start, new_ntfs_size)
+        actual_size = partition_size(partition)
+        if abs(actual_size - new_ntfs_size) > sector:
+            raise RuntimeError(
+                "The partition tool did not produce the requested NTFS boundary. "
+                "No KythOS partition was created; the original partition table will "
+                "be restored."
+            )
+
+    created = commit_partition(
+        disk, new_end + sector, old_end + sector, log,
+        before_partition=shrink_partition_boundary,
+        failure_message=(
+            "A step after the NTFS shrink failed — restoring the original partition "
+            "table..."
+        ),
+        restored_message=(
+            "Partition table restored. The NTFS filesystem itself was already shrunk "
+            "and remains intact and usable — Windows may offer to grow it back to fill "
+            "the partition, or you can leave it as-is and try the install again."
+        ),
+    )
+    return disk, created
+
+
+__all__ += [
+    "prepare_free_space_target",
+    "prepare_ntfs_resize_target",
+    "shrink_ntfs_filesystem_guarded",
+]
+
+
+def prepare_explicit_install_plan(
+    plan: InstallPlan,
+    state,
+    context=None,
+    *,
+    validate_target,
+) -> InstallPlan:
+    """Resolve a validated wipe, alongside, or manual plan without mutation."""
+    disk, target_partition = validate_target(state, context)
+    return InstallPlan(plan.mode, disk=disk, target_partition=target_partition)
+
+
+__all__.append("prepare_explicit_install_plan")
+
+
+def prepare_guided_install_plan(state, log, *, validate_target, prepare_target, cancel_event=None, register_mount=None, release_mount=None) -> InstallPlan:
+    """Revalidate and convert a guided target into the alongside execution mode."""
+    validate_target(state)
+    disk, target_partition = prepare_target(state, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
+    return InstallPlan("alongside", disk=disk, target_partition=target_partition)
+
+
+__all__.append("prepare_guided_install_plan")
+
+
+def prepare_install_plan(
+    state,
+    log,
+    context=None,
+    *,
+    validate_report,
+    plan_from_state,
+    prepare_ntfs,
+    prepare_free_space,
+    prepare_explicit,
+) -> InstallPlan:
+    """Validate once, then dispatch to the selected destructive preparation path."""
+    report = validate_report(state, context)
+    if not report.valid:
+        raise RuntimeError(
+            report.errors[0] if report.errors else "Install plan validation failed"
+        )
+    plan = plan_from_state(state)
+    cancel_event = getattr(context, "cancel_requested", None)
+    register_mount = getattr(context, "register_mount", None)
+    release_mount = getattr(context, "release_mount", None)
+    if plan.mode == "resize_ntfs":
+        return prepare_ntfs(state, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
+    if plan.mode == "free_space":
+        return prepare_free_space(state, log, cancel_event=cancel_event)
+    return prepare_explicit(plan, state, context)
+
+
+__all__.append("prepare_install_plan")

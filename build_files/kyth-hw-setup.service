@@ -1,8 +1,10 @@
 [Unit]
 Description=KythOS declarative hardware policy
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 # Run after filesystems and PCI devices are enumerated, but don't block SDDM —
-# akmods can take 5-15 min and we don't want to stall the first login screen.
+# WantedBy=multi-user.target (not Before=/Requires= on graphical.target) plus
+# Nice=10 + IOSchedulingClass=idle below already keep this off the login
+# screen's critical path, so the timeout only bounds this unit's own job.
 After=sysinit.target local-fs.target
 
 [Service]
@@ -11,6 +13,57 @@ ExecStart=/usr/bin/kyth-hw-setup
 RemainAfterExit=yes
 StandardOutput=journal
 StandardError=journal
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# PrivateUsers deliberately absent: this unit's hardware_policy.py path shells out to
+# `sudo -n kyth-bootc-guard status-json` for the booted digest. Even running
+# as root already (no privilege to gain), a private user namespace remaps
+# that root to an unprivileged UID outside it, so the real-root ownership
+# check on /etc/sudoers fails — "unable to open /etc/sudoers: Invalid
+# argument" on every run (see kyth_shared/system/bootc_query.py).
+UMask=0077
+ProtectSystem=strict
+# ProtectSystem=strict remounts /etc and /var read-only. hardware_policy
+# atomically writes managed modprobe/scx config plus /var/lib/kyth state;
+# NVIDIA first-boot builds into /var/lib/akmods. Without these, apply
+# fails with EROFS on /etc/modprobe.d.
+StateDirectory=kyth
+StateDirectoryMode=0700
+# '-' means "ignore if the path is missing". /etc/scx and the akmods
+# dirs are NVIDIA/sched-ext only; a missing ReadWritePaths entry otherwise
+# fails the *entire* unit at namespace setup ("No such file or directory")
+# on AMD-only hosts. /boot is optional for grubby BLS writes.
+ReadWritePaths=/etc/modprobe.d -/etc/scx -/var/lib/akmods -/var/cache/akmods -/boot
+CacheDirectory=kyth
+CacheDirectoryMode=0700
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+# akmods can take 5-15 min to build the NVIDIA module on a fresh kernel (see
+# hardware_policy.py:_configure_nvidia and the Hub's own "5-15 minutes"
+# message in services/hardware/nvidia.py) — this used to be 90s, which
+# guaranteed systemd SIGTERM/SIGKILLed the build in exactly the one case
+# this unit exists to handle: a kernel bump. That silently skipped the
+# nvidia-suspend/resume/hibernate service-enable + grubby kernel-args steps
+# that run *after* the akmods call, leaving Wayland suspend broken until the
+# user noticed the failed unit and clicked "Retry Build" in the Hub by hand.
+# 20 min gives real headroom above the documented worst case.
+TimeoutStartSec=1200
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=768M
+MemoryMax=1024M
 
 [Install]
 WantedBy=multi-user.target

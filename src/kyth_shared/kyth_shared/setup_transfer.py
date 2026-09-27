@@ -1,0 +1,539 @@
+#!/usr/bin/env python3
+"""Export and restore a portable KythOS desktop setup archive."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import glob
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tarfile
+import tempfile
+from pathlib import Path
+
+from kyth_shared.commands import run_text
+
+
+ARCHIVE_VERSION = 1
+ARCHIVE_PREFIX = "kyth-setup"
+
+# Archive-bomb gates, mirroring system/updater.py: setup archives are
+# small settings bundles, so these bounds are generous — they exist to
+# refuse hostile input fast, before any byte is written.
+_MAX_ARCHIVE_MEMBERS = 100_000
+_MAX_ARCHIVE_BYTES = 16 * 1024**3
+
+FLATHUB_REPO = "https://dl.flathub.org/repo/flathub.flatpakrepo"
+
+# Deliberately excludes browser profiles, KWallet data, rclone.conf, and SMB
+# credential files. Those contain passwords, cookies, or OAuth tokens.
+CONFIG_PATHS = (
+    ".config/kdeglobals",
+    ".config/kglobalshortcutsrc",
+    ".config/kwinrc",
+    ".config/kwinrulesrc",
+    ".config/kcminputrc",
+    ".config/kscreenlockerrc",
+    ".config/klipperrc",
+    ".config/plasmarc",
+    ".config/powerdevilrc",
+    ".config/spectaclerc",
+    ".config/konsolerc",
+    ".config/kwalletrc",
+    ".config/kyth-cloud-sync.json",
+    ".config/kyth-dynamic-lock.json",
+    ".config/kyth-smb-shares.json",
+    ".config/MangoHud",
+    ".config/vkBasalt",
+    ".local/share/kyth/profile",
+)
+
+DEFAULT_MIME_TYPES = (
+    "text/html",
+    "x-scheme-handler/http",
+    "x-scheme-handler/https",
+    "x-scheme-handler/mailto",
+    "application/pdf",
+    "image/jpeg",
+    "image/png",
+    "video/mp4",
+    "audio/mpeg",
+    "text/plain",
+    "inode/directory",
+)
+
+
+def _run(cmd: list[str], timeout: int = 30):
+    return run_text(cmd, timeout=timeout)
+
+
+def _installed_flatpaks() -> list[dict[str, str]]:
+    result = _run(["flatpak", "list", "--app", "--columns=application,origin"])
+    if result is None or result.returncode != 0:
+        return []
+    apps: list[dict[str, str]] = []
+    for line in result.stdout.splitlines():
+        parts = line.split("\t", 1)
+        app_id = parts[0].strip()
+        if not app_id:
+            continue
+        apps.append({
+            "id": app_id,
+            "origin": parts[1].strip() if len(parts) > 1 else "flathub",
+        })
+    return sorted(apps, key=lambda item: item["id"].lower())
+
+
+def _default_apps() -> dict[str, str]:
+    defaults: dict[str, str] = {}
+    for mime in DEFAULT_MIME_TYPES:
+        result = _run(["xdg-mime", "query", "default", mime], timeout=5)
+        if result is not None and result.returncode == 0 and result.stdout.strip():
+            defaults[mime] = result.stdout.strip()
+    return defaults
+
+
+def _cloud_remotes() -> list[dict[str, str]]:
+    result = _run(["rclone", "listremotes", "--long"], timeout=10)
+    if result is None or result.returncode != 0:
+        return []
+    remotes: list[dict[str, str]] = []
+    for line in result.stdout.splitlines():
+        parts = line.split()
+        if not parts:
+            continue
+        remotes.append({
+            "name": parts[0].rstrip(":"),
+            "type": parts[1] if len(parts) > 1 else "unknown",
+        })
+    return remotes
+
+
+def _copy_into_payload(home: Path, payload: Path, rel: str) -> bool:
+    source = home / rel
+    if not source.exists():
+        return False
+    target = payload / "files" / rel
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Dereference on export (mirror the Rust side): preserving $HOME
+    # symlinks into the archive would let a hostile/shared archive re-plant
+    # arbitrary links in $HOME at restore time.
+    if source.is_dir() and not source.is_symlink():
+        shutil.copytree(source, target, symlinks=False)
+    else:
+        shutil.copy2(source, target, follow_symlinks=True)
+    return True
+
+
+def export_setup(destination: str) -> Path:
+    home = Path.home()
+    dest = Path(destination).expanduser().resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    timestamp = dt.datetime.now().astimezone().strftime("%Y%m%d-%H%M%S")
+    # Second-precision names collide: two exports in the same second (or a
+    # leftover from an earlier run) must never silently truncate an existing
+    # archive. Reserve the name with O_EXCL (atomic even across concurrent
+    # exports), bumping the stamp until the reservation succeeds.
+    archive: Path | None = None
+    archive_fd: int | None = None
+    for counter in range(100):
+        candidate = dest / (
+            f"{ARCHIVE_PREFIX}-{timestamp}.tar.gz"
+            if counter == 0
+            else f"{ARCHIVE_PREFIX}-{timestamp}-{counter:02d}.tar.gz"
+        )
+        try:
+            archive_fd = os.open(candidate, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            continue
+        archive = candidate
+        break
+    if archive is None or archive_fd is None:
+        raise FileExistsError(
+            f"Too many existing archives for timestamp {timestamp}; "
+            "move or rename older exports and retry."
+        )
+
+    with tempfile.TemporaryDirectory(prefix="kyth-setup-export-") as tmp:
+        payload = Path(tmp) / ARCHIVE_PREFIX
+        payload.mkdir(parents=True)
+        copied: list[str] = []
+        for rel in CONFIG_PATHS:
+            if _copy_into_payload(home, payload, rel):
+                copied.append(rel)
+        for source_name in glob.glob(str(home / ".local/share/applications/kyth-*.desktop")):
+            source = Path(source_name)
+            rel = str(source.relative_to(home))
+            if rel not in copied and _copy_into_payload(home, payload, rel):
+                copied.append(rel)
+
+        manifest = {
+            "format": "KythOS setup transfer",
+            "version": ARCHIVE_VERSION,
+            "created": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+            "hostname": os.uname().nodename,
+            "flatpaks": _installed_flatpaks(),
+            "default_apps": _default_apps(),
+            "cloud_remotes": _cloud_remotes(),
+            "copied_paths": sorted(copied),
+            "secrets_excluded": [
+                "browser profiles and cookies",
+                "KWallet contents",
+                "rclone OAuth tokens",
+                "SMB passwords",
+            ],
+        }
+        (payload / "manifest.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+        )
+        # Write through the O_EXCL-reserved fd: the name cannot have been
+        # taken between reservation and this write.
+        with os.fdopen(archive_fd, "wb") as raw:
+            archive_fd = None
+            with tarfile.open(fileobj=raw, mode="w:gz", format=tarfile.PAX_FORMAT) as tar:
+                tar.add(payload, arcname=ARCHIVE_PREFIX, recursive=True)
+
+    # Mode 0600 was set atomically at reservation time (os.open), so no
+    # chmod is needed — and none could be TOCTOU-safe here anyway.
+    print(f"Setup archive created: {archive}", flush=True)
+    print("Passwords, browser sessions, SMB credentials, and cloud OAuth tokens were not included.", flush=True)
+    return archive
+
+
+def _safe_extract(archive: Path, destination: Path) -> Path:
+    # Archive-bomb gates (mirror system/updater.py): count + summed-size
+    # pre-checks BEFORE extractall, so a hostile member-count bomb can't OOM
+    # getmembers() and a sparse/huge archive can't fill the disk before any
+    # validation of cost. Plus a free-space preflight on the destination.
+    with tarfile.open(archive, "r:gz") as tar:
+        base = destination.resolve()
+        members = tar.getmembers()
+        if len(members) > _MAX_ARCHIVE_MEMBERS:
+            raise ValueError(
+                f"Unsafe archive: {len(members)} members exceeds the "
+                f"{_MAX_ARCHIVE_MEMBERS} member limit."
+            )
+        total = 0
+        for member in members:
+            total += member.size
+            if total > _MAX_ARCHIVE_BYTES:
+                raise ValueError(
+                    "Unsafe archive: expanded size exceeds the "
+                    f"{_MAX_ARCHIVE_BYTES // 1024**3} GiB limit."
+                )
+        try:
+            anchor = destination
+            while not anchor.exists():
+                anchor = anchor.parent
+            free = shutil.disk_usage(anchor).free
+        except OSError:
+            free = 0
+        if total > free:
+            raise ValueError(
+                "Unsafe archive: not enough free space on the destination "
+                f"filesystem (needs {total} bytes, has {free})."
+            )
+        for member in members:
+            target = (destination / member.name).resolve()
+            try:
+                target.relative_to(base)
+            except ValueError as exc:
+                raise ValueError(f"Unsafe archive path: {member.name}") from exc
+        tar.extractall(destination, filter="data")
+    payload = destination / ARCHIVE_PREFIX
+    if not payload.is_dir():
+        raise ValueError("This is not a KythOS setup archive.")
+    # Symlink sweep (mirror the Rust side): tar plants files/.config/x-style
+    # links at extract time, and restore would recreate them in $HOME. Our
+    # own exporter never writes symlinks, so any is hostile — refuse the
+    # whole archive rather than restoring around it.
+    files_root = payload / "files"
+    links: list[str] = []
+    stack = [files_root]
+    while stack:
+        directory = stack.pop()
+        try:
+            entries = list(directory.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            try:
+                if entry.is_symlink():
+                    links.append(str(entry))
+                elif entry.is_dir():
+                    stack.append(entry)
+            except OSError:
+                continue
+    if links:
+        raise ValueError(
+            f"Unsafe archive: {len(links)} symlink(s) under files/ (first: {links[0]}). "
+            "Only archives exported by KythOS itself are safe to restore."
+        )
+    return payload
+
+
+def _load_manifest(payload: Path) -> dict:
+    manifest_path = payload / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError("The setup archive manifest is missing or invalid.") from exc
+    if manifest.get("format") != "KythOS setup transfer":
+        raise ValueError("This is not a KythOS setup archive.")
+    if manifest.get("version") != ARCHIVE_VERSION:
+        raise ValueError(f"Unsupported setup archive version: {manifest.get('version')}")
+    copied_paths = manifest.get("copied_paths")
+    if not isinstance(copied_paths, list) or not all(
+        isinstance(rel, str) and _is_allowed_restore_path(rel) for rel in copied_paths
+    ):
+        raise ValueError("The setup archive contains an unsupported settings path.")
+    return manifest
+
+
+def _is_allowed_restore_path(rel: str) -> bool:
+    path = Path(rel)
+    if path.is_absolute() or ".." in path.parts:
+        return False
+    if rel in CONFIG_PATHS:
+        return True
+    return (
+        len(path.parts) == 4
+        and path.parts[:3] == (".local", "share", "applications")
+        and path.name.startswith("kyth-")
+        and path.suffix == ".desktop"
+    )
+
+
+def archive_summary(archive_name: str) -> str:
+    archive = Path(archive_name).expanduser().resolve()
+    with tempfile.TemporaryDirectory(prefix="kyth-setup-summary-") as tmp:
+        payload = _safe_extract(archive, Path(tmp))
+        manifest = _load_manifest(payload)
+    flatpaks = len(manifest.get("flatpaks") or [])
+    settings = len(manifest.get("copied_paths") or [])
+    remotes = len(manifest.get("cloud_remotes") or [])
+    return (
+        f"Created {manifest.get('created', 'unknown')} on {manifest.get('hostname', 'unknown')}\n"
+        f"{flatpaks} Flatpak apps, {settings} settings paths, {remotes} cloud definitions\n"
+        "Passwords and login tokens are excluded. Network shares and cloud accounts will need reauthentication."
+    )
+
+
+def _backup_existing(home: Path, paths: list[str]) -> Path | None:
+    """Stage a timestamped backup of existing restore targets under `home`.
+
+    Restore overwrites dotfiles in place; without a backup, the user's
+    current settings are unrecoverable the moment the first copy lands.
+    Returns the backup dir, or None when no target existed yet. Failures
+    are loud (raise) — a restore that cannot back up first must not run.
+    """
+    existing = [rel for rel in paths if (home / rel).exists()]
+    if not existing:
+        return None
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    backup_dir = home / ".local/share/kyth/setup-restore-backup" / stamp
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    for rel in existing:
+        source = home / rel
+        # Never back the backup dir into itself: skip any target that is the
+        # backup dir or one of its ancestors.
+        try:
+            backup_dir.relative_to(source)
+            continue
+        except ValueError:
+            pass
+        dest = backup_dir / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir() and not source.is_symlink():
+            shutil.copytree(source, dest, dirs_exist_ok=True, symlinks=True)
+        else:
+            shutil.copy2(source, dest, follow_symlinks=False)
+    return backup_dir
+
+
+def _restore_files(payload: Path, home: Path, paths: list[str]) -> int:
+    restored = 0
+    backup_dir = _backup_existing(home, paths)
+    if backup_dir is not None:
+        print(
+            f"Existing settings backed up to {backup_dir} before restore.",
+            flush=True,
+        )
+    for rel in paths:
+        source = payload / "files" / rel
+        if not source.exists():
+            continue
+        target = home / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, target, dirs_exist_ok=True, symlinks=True)
+        else:
+            shutil.copy2(source, target, follow_symlinks=False)
+        restored += 1
+    return restored
+
+
+def _restore_defaults(defaults: dict[str, str]) -> int:
+    restored = 0
+    for mime, desktop in defaults.items():
+        # Archive-controlled values: allowlist the mime, shape-check the
+        # desktop id, and separate positionals with -- so `--help` (exit 0)
+        # can never count as restored.
+        if mime not in DEFAULT_MIME_TYPES:
+            continue
+        if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}\.desktop", str(desktop or "")):
+            continue
+        result = _run(["xdg-mime", "default", "--", desktop, mime], timeout=10)
+        if result is not None and result.returncode == 0:
+            restored += 1
+    return restored
+
+
+def _restore_dynamic_lock(home: Path) -> bool:
+    config_path = home / ".config/kyth-dynamic-lock.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(config, dict) or config.get("enabled") is not True:
+        return False
+    result = _run(
+        ["systemctl", "--user", "enable", "--now", "kyth-dynamic-lock.service"],
+        timeout=30,
+    )
+    return result is not None and result.returncode == 0
+
+
+def _valid_flatpak_id(app_id: str) -> bool:
+    """Reverse-DNS Flatpak ids only (mirror the Rust gate): manifest content
+    is untrusted, and option-like ids (`--help` exits 0) must never reach
+    the argv."""
+    return (
+        bool(app_id)
+        and len(app_id) <= 200
+        and "." in app_id
+        and all(c.isascii() and (c.isalnum() or c in ".-_") for c in app_id)
+    )
+
+
+def _restore_flatpaks(apps: list[dict[str, str]]) -> tuple[int, int]:
+    if not apps or shutil.which("flatpak") is None:
+        return 0, len(apps)
+    _run(["flatpak", "remote-add", "--if-not-exists", "flathub", FLATHUB_REPO], timeout=60)
+    remotes_result = _run(["flatpak", "remotes", "--columns=name"], timeout=10)
+    remotes = set(remotes_result.stdout.split()) if remotes_result else {"flathub"}
+    installed = 0
+    failed = 0
+    for item in apps:
+        app_id = str(item.get("id") or "").strip()
+        # Mirror the Rust side: manifest ids are untrusted archive content.
+        # {"id": "--help"} exits 0 and would be counted "installed"; any
+        # -flag is parsed as an option. Skip + count failed, and separate
+        # positionals with --.
+        if not _valid_flatpak_id(app_id):
+            print(f"Skipping unsafe app id: {app_id!r}", flush=True)
+            failed += 1
+            continue
+        origin = str(item.get("origin") or "flathub").strip()
+        if origin not in remotes:
+            origin = "flathub"
+        print(f"Restoring app: {app_id}", flush=True)
+        try:
+            proc = subprocess.Popen(  # noqa: S603 -- fixed flatpak argv
+                ["flatpak", "install", "-y", "--or-update", "--", origin, app_id],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                line = line.strip()
+                if line:
+                    print(line, flush=True)
+            try:
+                code = proc.wait(timeout=600)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                code = 1
+        except OSError:
+            code = 1
+        if code == 0:
+            installed += 1
+        else:
+            failed += 1
+    return installed, failed
+
+
+def restore_setup(archive_name: str, *, enable_dynamic_lock: bool = False) -> None:
+    archive = Path(archive_name).expanduser().resolve()
+    home = Path.home()
+    with tempfile.TemporaryDirectory(prefix="kyth-setup-restore-") as tmp:
+        payload = _safe_extract(archive, Path(tmp))
+        manifest = _load_manifest(payload)
+        restored_paths = _restore_files(payload, home, manifest.get("copied_paths") or [])
+        restored_defaults = _restore_defaults(manifest.get("default_apps") or {})
+        # Never auto-enable from the restored (untrusted) config alone: a
+        # shared archive must not silently persist a user service. The
+        # config is restored either way; enabling needs the explicit flag.
+        if enable_dynamic_lock:
+            dynamic_lock_restored = _restore_dynamic_lock(home)
+        else:
+            dynamic_lock_restored = False
+            print(
+                "Dynamic Lock config restored but left off — re-enable it in Settings if wanted.",
+                flush=True,
+            )
+        apps_ok, apps_failed = _restore_flatpaks(manifest.get("flatpaks") or [])
+
+    _run(["kbuildsycoca6", "--noincremental"], timeout=30)
+    print(
+        f"Setup restored: {restored_paths} settings paths, {restored_defaults} default app associations, "
+        f"{apps_ok} apps installed or updated.",
+        flush=True,
+    )
+    if apps_failed:
+        print(f"{apps_failed} app install(s) failed; retry them from Discover Apps.", flush=True)
+    if manifest.get("cloud_remotes"):
+        names = ", ".join(item.get("name", "unknown") for item in manifest["cloud_remotes"])
+        print(f"Reconnect cloud account(s) in Cloud Storage: {names}", flush=True)
+    if dynamic_lock_restored:
+        print("Trusted-device Dynamic Lock restored.", flush=True)
+    print("Re-enter network-share passwords from Network Shares, then sign out and back in.", flush=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    sub = parser.add_subparsers(dest="command", required=True)
+    export_parser = sub.add_parser("export", help="Create a setup archive")
+    export_parser.add_argument("destination", help="Directory for the archive")
+    summary_parser = sub.add_parser("summary", help="Describe a setup archive")
+    summary_parser.add_argument("archive")
+    restore_parser = sub.add_parser("restore", help="Restore a setup archive")
+    restore_parser.add_argument("archive")
+    restore_parser.add_argument(
+        "--enable-dynamic-lock",
+        action="store_true",
+        help="Also re-enable the Dynamic Lock user unit if the restored config opts in (off by default: restored configs are untrusted).",
+    )
+    args = parser.parse_args()
+
+    try:
+        if args.command == "export":
+            export_setup(args.destination)
+        elif args.command == "summary":
+            print(archive_summary(args.archive))
+        else:
+            restore_setup(args.archive, enable_dynamic_lock=args.enable_dynamic_lock)
+    except (OSError, ValueError, tarfile.TarError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr, flush=True)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

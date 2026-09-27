@@ -1,0 +1,51 @@
+"""HDR store — preserve per-output HDR peak across updates, KWin."""
+from __future__ import annotations
+
+import os, tomllib
+from pathlib import Path
+from typing import Any
+
+from .atomic_io import atomic_write_text
+
+
+DEFAULT_HDR_STORE_PATH = Path("/etc/kyth/hdr-store.toml")
+KWINRC = Path.home() / ".config/kwinrc"
+
+
+def hdr_store_path(path: Path | None = None) -> Path:
+    if path is not None:
+        return Path(path)
+    xdg = os.environ.get("XDG_CONFIG_HOME")
+    if xdg and os.environ.get("KYTH_TEST_MODE") == "1":
+        return Path(xdg) / "kyth" / "hdr-store.toml"
+    return DEFAULT_HDR_STORE_PATH
+
+
+def load_hdr_store(path: Path | None = None) -> dict[str, Any]:
+    p = hdr_store_path(path)
+    try:
+        with p.open("rb") as _f:
+            data = tomllib.load(_f)
+    except (OSError, tomllib.TOMLDecodeError):
+        return {"preserve": True}
+    return {"preserve": bool(data.get("preserve", True))}
+
+
+def save_hdr_store(cfg: dict[str, Any], path: Path | None = None) -> Path:
+    p = hdr_store_path(path)
+    pr = bool(cfg.get("preserve", True))
+    # Atomic temp+fsync+rename (like display_hdr/vrr/flatpak_trim): a kill
+    # or power loss mid-write left truncated TOML, which load_hdr_store
+    # silently read as the default — discarding the user's choice.
+    atomic_write_text(p, f"# Kyth HDR store — offline\npreserve = {str(pr).lower()}\n", mode=0o644)
+    return p
+
+
+def hdr_store_audit() -> dict[str, Any]:
+    try:
+        from .display_hdr import load_hdr_config
+
+        cfg = load_hdr_config()
+        return {"displays": len(cfg), "peak": {k: v.get("peak_nits") for k, v in cfg.items()}}
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+        return {"displays": 0}

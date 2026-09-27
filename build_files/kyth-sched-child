@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-sched-child — 0 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-sched-child "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.sched_child import load_sched_child, sched_child_status; c=load_sched_child(); print(f\"profile={c['profile']} active={sched_child_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.sched_child import load_sched_child,save_sched_child,generate_sched_child; c=load_sched_child(); c['profile']='gaming'; save_sched_child(c); generate_sched_child(c)"; sysctl --system >/dev/null 2>&1 || true; echo "sched child gaming 0" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.sched_child import load_sched_child,save_sched_child,generate_sched_child; c=load_sched_child(); c['profile']='balanced'; save_sched_child(c); generate_sched_child(c)"; echo "sched child balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.sched_child import load_sched_child,generate_sched_child; generate_sched_child(load_sched_child())" ;;
-    *) echo "Usage: kyth-sched-child [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

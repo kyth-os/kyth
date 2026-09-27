@@ -7,6 +7,7 @@ logic; these tests exercise the shared implementation directly.
 """
 from __future__ import annotations
 
+import io
 import pathlib
 import subprocess
 import sys
@@ -26,13 +27,31 @@ def _write(path: pathlib.Path, content: str) -> None:
 
 
 class EnsureSystemAccountsTests(unittest.TestCase):
+    def test_write_lines_is_atomic_on_mid_stream_kill(self):
+        # Fault-inject the writer dying during `tee`: the original file
+        # must be byte-identical afterward (old-or-new, never partial) —
+        # the content only ever lands via same-dir temp + rename.
+        import subprocess as _sp
+        original = "root:!locked:19700:0:99999:7:::\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            target = pathlib.Path(tmp) / "shadow"
+            target.write_text(original)
+            def dying_run(argv, **kwargs):
+                if argv[0] == "tee":
+                    raise _sp.CalledProcessError(1, argv)
+                return _sp.CompletedProcess(argv, 0, stdout="", stderr="")
+            with self.assertRaises(_sp.CalledProcessError):
+                accounts._write_lines(target, ["root:HACKED:1:2:3:4:5:6:7"], 0o000, dying_run)
+            self.assertEqual(target.read_text(), original)
+            self.assertFalse((pathlib.Path(tmp) / "shadow.tmp").exists())
+
     def test_merges_missing_records_and_locks_down_shadow(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _write(root / "usr/lib/passwd",
-                   "sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin\n"
+                   "plasmalogin:x:959:959:PLASMALOGIN Greeter Account:/var/lib/plasmalogin:/usr/sbin/nologin\n"
                    "foo:x:100:100::/home/foo:/sbin/nologin\n")
-            _write(root / "usr/lib/group", "sddm:x:959:\nfoo:x:100:\n")
+            _write(root / "usr/lib/group", "plasmalogin:x:959:\nfoo:x:100:\n")
             _write(root / "etc/passwd", "root:x:0:0:root:/root:/bin/bash\n")
             _write(root / "etc/group", "root:x:0:\n")
             _write(root / "etc/shadow", "root:!locked:19700:0:99999:7:::\n")
@@ -53,18 +72,18 @@ class EnsureSystemAccountsTests(unittest.TestCase):
 
             passwd = (root / "etc/passwd").read_text()
             group = (root / "etc/group").read_text()
-            self.assertIn("sddm:", passwd)
+            self.assertIn("plasmalogin:", passwd)
             self.assertIn("foo:", passwd)
-            self.assertIn("sddm:", group)
+            self.assertIn("plasmalogin:", group)
             self.assertIn("foo:", group)
-            self.assertIn("sddm:!*:19700:0:99999:7:::", shadow)
+            self.assertIn("plasmalogin:!*:19700:0:99999:7:::", shadow)
             self.assertIn("foo:!*:19700:0:99999:7:::", shadow)
             # root's existing shadow record must be untouched, not duplicated.
             self.assertEqual(shadow.count("root:!locked"), 1)
 
             self.assertEqual((root / "etc/passwd").stat().st_mode & 0o777, 0o644)
             self.assertEqual((root / "etc/group").stat().st_mode & 0o777, 0o644)
-            self.assertTrue((root / "var/lib/sddm").is_dir())
+            self.assertTrue((root / "var/lib/plasmalogin").is_dir())
             self.assertTrue(any("Repaired" in m for m in messages))
 
     def test_no_changes_still_re_locks_existing_shadow(self):
@@ -83,16 +102,16 @@ class EnsureSystemAccountsTests(unittest.TestCase):
 
             self.assertEqual(shadow_path.stat().st_mode & 0o777, 0o000)
 
-    def test_sddm_home_chowned_by_target_uid_gid_not_literal_name(self):
-        """The target tree's own sddm uid/gid must be used (not the string
-        'sddm'), since the process's own /etc/passwd may not have that user
+    def test_plasmalogin_home_chowned_by_target_uid_gid_not_literal_name(self):
+        """The target tree's own plasmalogin uid/gid must be used (not the string
+        'plasmalogin'), since the process's own /etc/passwd may not have that user
         or may allocate it a different id than the target image did."""
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _write(root / "etc/passwd",
                    "root:x:0:0:root:/root:/bin/bash\n"
-                   "sddm:x:777:888:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin\n")
-            _write(root / "etc/group", "root:x:0:\nsddm:x:888:\n")
+                   "plasmalogin:x:777:888:PLASMALOGIN Greeter Account:/var/lib/plasmalogin:/usr/sbin/nologin\n")
+            _write(root / "etc/group", "root:x:0:\nplasmalogin:x:888:\n")
 
             calls = []
 
@@ -122,6 +141,12 @@ class EnsureSystemAccountsTests(unittest.TestCase):
                 if argv[0] == "chmod":
                     pathlib.Path(argv[2]).chmod(int(argv[1], 8))
                     return subprocess.CompletedProcess(argv, 0)
+                if argv[0] == "mv":
+                    import shutil as _mv_shutil
+                    _mv_shutil.move(argv[1], argv[2])
+                    return subprocess.CompletedProcess(argv, 0)
+                if argv[0] == "sync":
+                    return subprocess.CompletedProcess(argv, 0)
                 return subprocess.CompletedProcess(argv, 0)
 
             accounts.ensure_system_accounts(str(root), lambda _msg: None, run=fake_run)
@@ -138,13 +163,13 @@ class EnsureSystemAccountsTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = pathlib.Path(tmp)
             _write(root / "usr/lib/passwd",
-                   "sddm:x:959:959:SDDM Greeter Account:/var/lib/sddm:/usr/sbin/nologin\n")
-            _write(root / "usr/lib/group", "sddm:x:959:\n")
+                   "plasmalogin:x:959:959:PLASMALOGIN Greeter Account:/var/lib/plasmalogin:/usr/sbin/nologin\n")
+            _write(root / "usr/lib/group", "plasmalogin:x:959:\n")
             _write(root / "etc/passwd", "root:x:0:0:root:/root:/bin/bash\n")
             _write(root / "etc/group", "root:x:0:\n")
 
             self.assertEqual(accounts.main([str(root)]), 0)
-            self.assertIn("sddm:", (root / "etc/passwd").read_text())
+            self.assertIn("plasmalogin:", (root / "etc/passwd").read_text())
 
 
 def _fake_useradd_run(useradd_uid_gid="1000:1000"):
@@ -186,7 +211,17 @@ def _fake_useradd_run(useradd_uid_gid="1000:1000"):
             path.write_text(kwargs.get("input", ""))  # lgtm[py/clear-text-storage-sensitive-data]
             return subprocess.CompletedProcess(argv, 0)
         if argv[0] == "chmod":
-            pathlib.Path(argv[2]).chmod(int(argv[1], 8))
+            # Record the requested mode, but keep the fixture readable: the
+            # test runner is non-root, so a real 0o000 would make the
+            # content assertions below unreadable. Mode intent is asserted
+            # from `calls` instead.
+            pathlib.Path(argv[2]).chmod(int(argv[1], 8) | 0o600)
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "mv":
+            import shutil as _mv_shutil
+            _mv_shutil.move(argv[1], argv[2])
+            return subprocess.CompletedProcess(argv, 0)
+        if argv[0] == "sync":
             return subprocess.CompletedProcess(argv, 0)
         if argv[0] == "chown":
             return subprocess.CompletedProcess(argv, 0)
@@ -218,6 +253,12 @@ class CreateInstallerUserTests(unittest.TestCase):
             self.assertIn("alice:x:1000:1000:", passwd)
             self.assertIn("alice:$6$fakehash:", shadow)
             self.assertEqual(shadow.count("root:!locked"), 1)
+            # Shadow must be locked to 0o000 (asserted from the recorded
+            # chmod call — the fixture itself stays readable for non-root).
+            # Note: the chmod lands on the same-dir temp (renamed over
+            # shadow after), so match the mode, not the final path.
+            zero_chmods = [c for c in calls if c[0] == "chmod" and c[1] == "0"]
+            self.assertTrue(zero_chmods)
 
             var_home = root / "ostree/deploy/default/var/home/alice"
             self.assertTrue(var_home.is_dir())
@@ -269,13 +310,27 @@ class CreateInstallerUserTests(unittest.TestCase):
     def test_cli_dispatches_create_user_with_parsed_arguments(self):
         # useradd --root needs real root, so this checks main()'s own
         # argument parsing/dispatch rather than re-testing create_installer_user.
-        with mock.patch.object(accounts, "create_installer_user") as mocked:
-            rc = accounts.main(["create-user", "/deploy", "/target", "dave", "$6$h"])
+        with mock.patch.object(accounts, "create_installer_user") as mocked, \
+             mock.patch.object(accounts.sys, "stdin", io.StringIO("$6$h\n")):
+            rc = accounts.main(["create-user", "/deploy", "/target", "dave"])
         self.assertEqual(rc, 0)
         mocked.assert_called_once()
         args, kwargs = mocked.call_args
         self.assertEqual(args[:4], ("/deploy", "/target", "dave", "$6$h"))
         self.assertIs(kwargs["run"], accounts._default_run)
+
+    def test_cli_refuses_hash_in_argv_and_requires_stdin(self):
+        # The hash must never travel in argv (/proc cmdline is world-readable).
+        with mock.patch.object(accounts, "create_installer_user") as mocked:
+            rc = accounts.main(["create-user", "/deploy", "/target", "dave", "$6$h"])
+        self.assertEqual(rc, 64)
+        mocked.assert_not_called()
+        # Empty stdin is also refused, not passed through as a blank hash.
+        with mock.patch.object(accounts, "create_installer_user") as mocked, \
+             mock.patch.object(accounts.sys, "stdin", io.StringIO("")):
+            rc = accounts.main(["create-user", "/deploy", "/target", "dave"])
+        self.assertEqual(rc, 64)
+        mocked.assert_not_called()
 
 
 if __name__ == "__main__":

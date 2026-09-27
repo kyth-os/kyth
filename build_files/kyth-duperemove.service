@@ -1,12 +1,34 @@
 [Unit]
 Description=KythOS Steam/Wine dedupe pass
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=local-fs.target
 ConditionACPower=true
 
 [Service]
 Type=oneshot
+StateDirectory=kyth/duperemove
+StateDirectoryMode=0700
 ExecCondition=/usr/libexec/kyth-storage-gate
 ExecStart=/usr/bin/kyth-duperemove
 Nice=19
 IOSchedulingClass=idle
+MemoryHigh=384M
+MemoryMax=512M
+TimeoutStartSec=1800
+PrivateTmp=yes
+PrivateUsers=yes
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+UMask=0077

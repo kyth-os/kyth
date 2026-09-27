@@ -1,5 +1,8 @@
 import ast
+import contextlib
+import shutil
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -10,6 +13,8 @@ INSTALLER = ROOT / "build_files" / "kyth-installer" / "kyth_installer"
 sys.path.insert(0, str(ROOT / "build_files" / "kyth-installer"))
 
 from kyth_installer import install, post_routes  # noqa: E402
+from kyth_installer import plan as plan_module  # noqa: E402
+from kyth_installer.phases import common as phases_common  # noqa: E402
 from kyth_installer.phases import finalize as phases_finalize  # noqa: E402
 from kyth_installer.phases import storage as phases_storage  # noqa: E402
 from kyth_installer.phases import run as phases_run  # noqa: E402  # noqa: E402
@@ -108,7 +113,11 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         with mock.patch.object(install, "_run_cmd"), \
              mock.patch.object(install, "run_command"), \
              mock.patch.object(install, "unmount_target_disk") as unmount_target_disk, \
-             mock.patch.object(install, "get_root_partition", return_value="/dev/sda3"):
+             mock.patch.object(install, "get_root_partition", return_value="/dev/sda3"), \
+             mock.patch.object(phases_storage, "PartitionTableGuard", return_value=contextlib.nullcontext()), \
+             mock.patch.object(phases_storage, "_start_power_watch", return_value=mock.Mock()), \
+             mock.patch.object(phases_storage, "_stop_power_watch"), \
+             mock.patch.object(phases_storage, "_disk_image_hold", return_value=contextlib.nullcontext()):
             target_part, root_part, alongside_mount = install._prepare_install_storage(
                 "/dev/sda",
                 "wipe",
@@ -167,6 +176,20 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 ), mock.patch.object(
                     install.Path,
                     "mkdir",
+                ), mock.patch.object(
+                    phases_storage, "PartitionTableGuard", return_value=contextlib.nullcontext(),
+                ), mock.patch.object(
+                    phases_storage, "_start_power_watch", return_value=mock.Mock(),
+                ), mock.patch.object(
+                    phases_storage, "_stop_power_watch",
+                ), mock.patch.object(
+                    phases_storage, "_disk_image_hold", return_value=contextlib.nullcontext(),
+                ), mock.patch.object(
+                    plan_module, "_parent_disk", return_value="/dev/sda",
+                ), mock.patch.object(
+                    plan_module, "_probe_storage", return_value=mock.Mock(),
+                ), mock.patch.object(
+                    plan_module, "_validate_partition_target", return_value=None,
                 ):
                     run_command.return_value.stdout = "UUID=abc\n"
                     run_command.return_value.returncode = 0
@@ -200,76 +223,71 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             "username": "user",
         })
 
-        with mock.patch.object(
-            install,
-            "_prepare_install_plan",
-            return_value=InstallPlan(mode="wipe", disk="/dev/sda"),
-        ), mock.patch.object(
-            install,
-            "_validate_install_target",
-            return_value=("/dev/sda", None),
-        ), mock.patch.object(
-            install,
-            "_install_images",
-            return_value=("src", "tgt"),
-        ), mock.patch.object(
-            install,
-            "_network_preflight",
-            return_value=None,
-        ), mock.patch.object(
-            install,
-            "_validate_storage_intent",
-            return_value=None,
-        ), mock.patch.object(
-            install,
-            "run_command",
-        ) as run_command, mock.patch.object(
-            install,
-            "_run_cmd",
-        ), mock.patch.object(
-            install,
-            "get_root_partition",
-            return_value="/dev/sda3",
-        ), mock.patch.object(
-            install,
-            "find_deploy_etc",
-            return_value=Path("/mnt/deploy/etc"),
-        ), mock.patch.object(
-            phases_finalize,
-            "find_deploy_etc",
-            return_value=Path("/mnt/deploy/etc"),
-        ), mock.patch.object(
-            install,
-            "validate_installed_target",
-            return_value=[],
-        ), mock.patch.object(
-            phases_finalize,
-            "validate_installed_target",
-            return_value=[],
-        ), mock.patch.object(
-            install,
-            "ensure_system_accounts",
-        ), mock.patch.object(
-            phases_finalize,
-            "ensure_system_accounts",
-        ), mock.patch.object(
-            install,
-            "_try_stage_mok_enrollment",
-            return_value={},
-        ), mock.patch.object(
-            phases_run,
-            "_try_stage_mok_enrollment",
-            return_value={},
-        ), mock.patch.object(
-            install,
-            "unmount_target_disk",
-        ), mock.patch.object(
-            phases_storage,
-            "unmount_target_disk",
-        ), mock.patch.object(
-            install,
-            "require_root",
-        ):
+        # A successful worker run still calls _record_transaction (phases/common.py),
+        # which writes to its own module-bound TRANSACTION_FILE — redirect it so
+        # this test doesn't write real state to /run/kyth-installer.
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        # One flat `with a, b, ...:` would exceed CPython's static block
+        # nesting limit here, so mocks are entered via an ExitStack.
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch.object(
+                phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_prepare_install_plan",
+                return_value=InstallPlan(mode="wipe", disk="/dev/sda"),
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_validate_install_target", return_value=("/dev/sda", None),
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_install_images", return_value=("src", "tgt"),
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_network_preflight", return_value=None,
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "_validate_storage_intent", return_value=None,
+            ))
+            run_command = stack.enter_context(mock.patch.object(install, "run_command"))
+            stack.enter_context(mock.patch.object(install, "_run_cmd"))
+            stack.enter_context(mock.patch.object(
+                install, "get_root_partition", return_value="/dev/sda3",
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "find_deploy_etc", return_value=Path("/mnt/deploy/etc"),
+            ))
+            stack.enter_context(mock.patch.object(
+                phases_finalize, "find_deploy_etc", return_value=Path("/mnt/deploy/etc"),
+            ))
+            stack.enter_context(mock.patch.object(
+                install, "validate_installed_target", return_value=[],
+            ))
+            stack.enter_context(mock.patch.object(
+                phases_finalize, "validate_installed_target", return_value=[],
+            ))
+            stack.enter_context(mock.patch.object(install, "ensure_system_accounts"))
+            stack.enter_context(mock.patch.object(phases_finalize, "ensure_system_accounts"))
+            stack.enter_context(mock.patch.object(
+                install, "_try_stage_mok_enrollment", return_value={},
+            ))
+            stack.enter_context(mock.patch.object(
+                phases_run, "_try_stage_mok_enrollment", return_value={},
+            ))
+            stack.enter_context(mock.patch.object(install, "unmount_target_disk"))
+            stack.enter_context(mock.patch.multiple(
+                phases_storage,
+                unmount_target_disk=mock.DEFAULT,
+                PartitionTableGuard=mock.Mock(return_value=contextlib.nullcontext()),
+                _start_power_watch=mock.Mock(return_value=mock.Mock()),
+                _stop_power_watch=mock.DEFAULT,
+                _disk_image_hold=mock.Mock(return_value=contextlib.nullcontext()),
+            ))
+            stack.enter_context(mock.patch.object(install, "require_root"))
+            # Fail-closed user creation would run the real shadow path here;
+            # this surface test mocks every side effect, so stub it too.
+            stack.enter_context(mock.patch.object(phases_finalize, "_create_installer_user"))
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
             install._run_install_worker(lambda _msg: None, lambda _pct: None, "", context)
@@ -292,7 +310,20 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
             "username": "user",
         })
 
+        # _run_cmd raises below, so this exercises _handle_install_failure
+        # (writes LOG_FILE/FAILURE_SUMMARY_FILE/TRANSACTION_FILE for real —
+        # see the note in test_worker_fails_closed_when_not_root above).
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         with mock.patch.object(
+            phases_finalize, "LOG_FILE", Path(tmp) / "log",
+        ), mock.patch.object(
+            phases_finalize, "FAILURE_SUMMARY_FILE", Path(tmp) / "failure.json",
+        ), mock.patch.object(
+            phases_finalize, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+        ), mock.patch.object(
+            phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+        ), mock.patch.object(
             install,
             "_prepare_install_plan",
             return_value=InstallPlan(
@@ -329,6 +360,14 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         ), mock.patch.object(
             install,
             "require_root",
+        ), mock.patch.object(
+            # Fresh re-probe before format must pass so the worker reaches
+            # the failing _run_cmd it is actually testing.
+            plan_module, "_parent_disk", return_value="/dev/sda",
+        ), mock.patch.object(
+            plan_module, "_probe_storage", return_value=mock.Mock(),
+        ), mock.patch.object(
+            plan_module, "_validate_partition_target", return_value=None,
         ):
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
@@ -398,7 +437,20 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 captured_cmd["argv"] = cmd
                 raise RuntimeError("stop after capturing the install command")
 
+        # fake_run_cmd raises above, so this exercises _handle_install_failure
+        # (writes LOG_FILE/FAILURE_SUMMARY_FILE/TRANSACTION_FILE for real —
+        # see the note in test_worker_fails_closed_when_not_root above).
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
         with mock.patch.object(
+            phases_finalize, "LOG_FILE", Path(tmp) / "log",
+        ), mock.patch.object(
+            phases_finalize, "FAILURE_SUMMARY_FILE", Path(tmp) / "failure.json",
+        ), mock.patch.object(
+            phases_finalize, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+        ), mock.patch.object(
+            phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json",
+        ), mock.patch.object(
             install,
             "_prepare_install_plan",
             return_value=InstallPlan(
@@ -435,6 +487,16 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
         ), mock.patch.object(
             install,
             "require_root",
+        ), mock.patch.object(
+            phases_storage,
+            "_disk_image_hold",
+            return_value=contextlib.nullcontext(),
+        ), mock.patch.object(
+            plan_module, "_parent_disk", return_value="/dev/sda",
+        ), mock.patch.object(
+            plan_module, "_probe_storage", return_value=mock.Mock(),
+        ), mock.patch.object(
+            plan_module, "_validate_partition_target", return_value=None,
         ):
             run_command.return_value.stdout = "UUID=abc\n"
             run_command.return_value.returncode = 0
@@ -472,20 +534,66 @@ class InstallerCommandSurfaceTests(unittest.TestCase):
                 cmd, 5, 90, logs.append, progress_values.append,
                 stall_timeout=10, absolute_timeout=10,
             )
-
         stats_events = [e for e in pushed if e.get("type") == "stats"]
         self.assertTrue(
             stats_events,
             "net monitor never pushed a stats event — output_state is likely undefined again",
         )
-        # Exact fraction is environment-dependent (real /proc/net/dev rx bytes
-        # may tick slightly between rx_start capture and the first sample) —
-        # what matters is the monitor thread ran at all, not the precise value.
         self.assertTrue(any(5 <= v <= 90 for v in progress_values))
+
+    def test_streaming_runner_reports_failure_output_and_custom_error(self):
+        runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
+        with mock.patch(
+            "kyth_installer.runner._validate_executable", side_effect=lambda value: value
+        ):
+            with self.assertRaisesRegex(RuntimeError, "exit 3"):
+                runner.run(
+                    [sys.executable, "-c", "print('disk failed'); raise SystemExit(3)"],
+                    0, 100, lambda _msg: None, lambda _pct: None,
+                )
+            with self.assertRaisesRegex(ValueError, "custom 4"):
+                runner.run(
+                    [sys.executable, "-c", "raise SystemExit(4)"], 0, 100,
+                    lambda _msg: None, lambda _pct: None,
+                    error_factory=lambda code, _lines, _argv: ValueError(f"custom {code}"),
+                )
+
+    def test_streaming_runner_writes_stdin_and_honors_cancellation(self):
+        runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
+        progress = []
+        with mock.patch(
+            "kyth_installer.runner._validate_executable", side_effect=lambda value: value
+        ):
+            runner.run(
+                [sys.executable, "-c", "import sys; assert sys.stdin.read() == 'yes\\n'"],
+                0, 100, lambda _msg: None, progress.append, stdin_data="yes\n",
+            )
+            cancelled = __import__("threading").Event()
+            cancelled.set()
+            from kyth_installer.execution import InstallCancelled
+
+            with self.assertRaises(InstallCancelled):
+                runner.run(
+                    [sys.executable, "-c", "import time; time.sleep(30)"], 0, 100,
+                    lambda _msg: None, lambda _pct: None, cancel_event=cancelled,
+                )
+        self.assertEqual(progress[-1], 100)
 
     def test_worker_fails_closed_when_not_root(self):
         context = InstallerContext()
-        with mock.patch.object(install, "require_root", side_effect=RuntimeError("must run as root")):
+        # The require_root() failure below is handled by _handle_install_failure,
+        # which writes a real log/failure-summary/transaction file — LOG_FILE,
+        # FAILURE_SUMMARY_FILE and TRANSACTION_FILE are each `from ..config
+        # import ...`-bound locally in phases/finalize.py and phases/common.py,
+        # so redirecting kyth_installer.config's copies wouldn't reach these
+        # already-bound names. Left unpatched, this test writes for real to the
+        # live /run/kyth-installer default, with no cleanup.
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(install, "require_root", side_effect=RuntimeError("must run as root")), \
+             mock.patch.object(phases_finalize, "LOG_FILE", Path(tmp) / "log"), \
+             mock.patch.object(phases_finalize, "FAILURE_SUMMARY_FILE", Path(tmp) / "failure.json"), \
+             mock.patch.object(phases_finalize, "TRANSACTION_FILE", Path(tmp) / "transaction.json"), \
+             mock.patch.object(phases_common, "TRANSACTION_FILE", Path(tmp) / "transaction.json"):
             install._run_install_worker(lambda _msg: None, lambda _pct: None, "", context)
         errors = [e for e in context.events.events if e.get("type") == "error"]
         self.assertTrue(errors)
@@ -629,7 +737,7 @@ class EfiBootEntrySnapshotTests(unittest.TestCase):
              mock.patch.object(install, "run_command", side_effect=RuntimeError("not UEFI")):
             self.assertEqual(install._snapshot_efi_boot_entries(lambda _m: None), "")
 
-    def test_warns_when_a_named_entry_disappears(self):
+    def test_fails_closed_when_a_named_entry_disappears(self):
         before = (
             "BootCurrent: 0001\n"
             "BootOrder: 0000,0001\n"

@@ -4,7 +4,8 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cache_dir="${KYTH_CI_TOOL_CACHE:-${repo_root}/.cache/kyth-ci-tools}"
 bin_dir="${cache_dir}/bin"
-mkdir -p "${cache_dir}" "${bin_dir}"
+checksum_dir="${cache_dir}/checksums"
+mkdir -p "${cache_dir}" "${bin_dir}" "${checksum_dir}"
 
 ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-1.7.7}"
 HADOLINT_VERSION="${HADOLINT_VERSION:-2.14.0}"
@@ -21,12 +22,22 @@ download_and_verify() {
 	local sha256_or_file="$4"
 	local bin_in_archive="$5"
 	local target="${bin_dir}/${name}"
+	local record="${checksum_dir}/${name}.sha256"
 
-	[[ -x "${target}" ]] && return
+	# Cache hit: re-verify the cached binary before trusting it. A corrupt
+	# or tampered cache entry must trigger a fresh download, not a silent
+	# pass (a restore-key can serve a stale entry).
+	if [[ -x "${target}" ]]; then
+		if [[ -f "${record}" ]] && (cd "${bin_dir}" && sha256sum --check --strict --status "${record}"); then
+			return 0
+		fi
+		echo "warning: cached ${name} failed checksum re-verify - re-downloading" >&2
+		rm -f "${target}" "${record}"
+	fi
 
 	local work
 	work="$(mktemp -d)"
-	curl -fsSL -o "${work}/${archive}" "${base_url}/${archive}"
+	curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 -o "${work}/${archive}" "${base_url}/${archive}"
 
 	if [[ -n "${sha256_or_file}" ]]; then
 		if [[ "${#sha256_or_file}" -eq 64 && "${sha256_or_file}" =~ ^[0-9a-fA-F]+$ ]]; then
@@ -34,7 +45,7 @@ download_and_verify() {
 		else
 			local check_file
 			check_file="$(basename "${sha256_or_file}")"
-			curl -fsSL -o "${work}/${check_file}" "${base_url}/${sha256_or_file}"
+			curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 -o "${work}/${check_file}" "${base_url}/${sha256_or_file}"
 			if [[ "${check_file}" == *.sha256 ]]; then
 				(cd "${work}" && sha256sum -c "${check_file}")
 			else
@@ -53,6 +64,8 @@ download_and_verify() {
 	else
 		install -m 0755 "${work}/${archive}" "${target}"
 	fi
+
+	(cd "${bin_dir}" && sha256sum "${name}" > "${record}")
 
 	rm -rf "${work}"
 }

@@ -34,11 +34,32 @@ if [ -f /etc/xdg/autostart/input-remapper-autoload.desktop ]; then
 	sed -i 's|^Exec=.*|Exec=/usr/libexec/kyth-input-remapper-autoload|' /etc/xdg/autostart/input-remapper-autoload.desktop
 fi
 
+
+# input-remapper-service logs ERROR: .../config.json" does not exist on every
+# login at 16:24:24 (4×) because the user config dir has never been created.
+# Seed an empty skeleton config so the daemon starts quietly; the existing
+# kyth-input-remapper-autoload wrapper already handles delayed autoload.
+mkdir -p /etc/skel/.config/input-remapper-2
+write_config /etc/skel/.config/input-remapper-2/config.json <<'IRMAPPERJSON'
+{
+  "autoload": {}
+}
+IRMAPPERJSON
+
 write_config /usr/lib/systemd/system/kyth-system-accounts.service <<'SYSACCOUNTUNITEOF'
 [Unit]
 Description=Ensure KythOS system accounts are visible in /etc
 DefaultDependencies=no
-Before=dbus.socket dbus-broker.service sockets.target sddm.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
+# mkdir -p /var/lib/plasmalogin needs /var writable; without this, the unit races
+# ostree-remount.service on every boot and fails with "Read-only file system"
+# (it self-heals via a second, later pull-in, but that transiently fails the
+# Requires= dependent kyth-dbus-runtime-dir.service too).
+After=local-fs.target ostree-remount.service
+# Must run before tmpfiles/sysusers/udev so groups like audio,disk,kvm are
+# visible when they parse static-nodes/udev rules — otherwise every boot
+# logs "Failed to resolve group 'audio': Unknown group" (see host journal).
+Before=dbus.socket dbus-broker.service sockets.target plasmalogin.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
+Before=systemd-tmpfiles-setup.service systemd-sysusers.service
 
 [Service]
 Type=oneshot
@@ -50,7 +71,8 @@ WantedBy=sysinit.target
 SYSACCOUNTUNITEOF
 
 install -d -m 0755 /usr/libexec
-install -m 0755 /ctx/sysconfig/kyth-fix-system-accounts /usr/libexec/kyth-fix-system-accounts
+# kyth-fix-system-accounts is a native binary (COPY layer); the retained
+# shell source stays in the tree only as a rollback fixture.
 systemctl enable kyth-system-accounts.service 2>/dev/null || true
 
 # input-remapper.service is the single owner of preset autoloading. The RPM's
@@ -76,11 +98,23 @@ write_config /usr/lib/systemd/system/kyth-dbus-runtime-dir.service <<'DBUSRUNDIR
 Description=Create D-Bus runtime directory
 DefaultDependencies=no
 Before=sockets.target dbus.socket
+# Ordered after, not Requires=: this unit only mkdirs a tmpfs path and does not
+# itself need kyth-system-accounts.service to succeed. A hard Requires= meant a
+# transient failure there (see kyth-system-accounts.service) permanently failed
+# this unit for the boot even though the later retry succeeded.
 After=kyth-system-accounts.service local-fs.target
-Requires=kyth-system-accounts.service
+Wants=kyth-system-accounts.service
+# RemainAfterExit=yes below is what stops dbus.socket / sockets.target from
+# re-running this unit: a start job on an already-active oneshot no-ops.
+# StartLimit only backstops repeated *failures*, so disable it outright
+# rather than give it a window — these keys belong in [Unit], not
+# [Service]; stranded in [Service] they're silently ignored and the unit
+# runs under systemd's compiled-in 10s/5 default instead.
+StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 ExecStart=/usr/bin/mkdir -p /run/dbus
 ExecStart=/usr/bin/chmod 0755 /run/dbus
 

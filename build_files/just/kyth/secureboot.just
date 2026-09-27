@@ -100,10 +100,22 @@ enroll-secureboot:
     echo "  Choose a one-time confirmation password — you will enter it at the"
     echo "  MokManager screen on next reboot to complete enrollment."
     echo
+    # Headless callers (Hub jobs) have no TTY: both reads get EOF, empty
+    # matches empty, and enrollment stages with a BLANK password anyone at
+    # the console can complete. Refuse instead of staging an open door.
+    if [[ ! -t 0 ]]; then
+        echo "  Enrollment needs a terminal for the password prompt." >&2
+        echo "  Run this from a terminal: ujust enroll-secureboot" >&2
+        exit 2
+    fi
     read -rsp "  Enrollment password: " MOK_PASS
     echo
     read -rsp "  Confirm password:    " MOK_PASS2
     echo
+    if [[ -z "${MOK_PASS}" ]]; then
+        echo "  Password must not be empty." >&2
+        exit 1
+    fi
     if [[ "${MOK_PASS}" != "${MOK_PASS2}" ]]; then
         echo "  Passwords do not match." >&2
         exit 1

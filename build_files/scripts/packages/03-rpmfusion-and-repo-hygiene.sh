@@ -6,9 +6,8 @@ set -euo pipefail
 # The release RPMs ship and install the GPG key themselves — this is the
 # standard RPM Fusion bootstrap pattern; there is no separately hosted key
 # URL to pre-import (unlike Brave/Negativo17).
-# Fail loudly: every later codec install uses --skip-unavailable, so a missing
-# RPM Fusion repo would otherwise ship an image silently lacking the
-# freeworld codec stack.
+# Fail loudly: later codec installs must not silently drop freeworld packages
+# when RPM Fusion is missing.
 fedora_release="$(rpm -E %fedora)"
 dnf5 install -y \
 	--setopt=retries=10 \
@@ -23,7 +22,8 @@ rpm -q rpmfusion-free-release rpmfusion-nonfree-release
 #
 # Also disable negativo17's fedora-multimedia repo when it is inherited from an
 # upstream base image. RPM Fusion supplies the codec stack we need, while
-# negativo17's Mesa builds have caused AMD VA-API to fail initialization.
+# negativo17's Mesa/ffmpeg builds have caused AMD VA-API failures and make
+# gstreamer1-plugin-libav unsatisfiable against the split libav* layout.
 python3 - <<'PY'
 from pathlib import Path
 import configparser
@@ -31,15 +31,15 @@ import configparser
 repo_dir = Path("/etc/yum.repos.d")
 patterns = ("debug", "source")
 disabled_repo_ids = {"fedora-multimedia"}
-disabled_repo_tokens = ("negativo17",)
+disabled_repo_tokens = ("negativo17", "fedora-multimedia")
 
-for repo_file in repo_dir.glob("*.repo"):
+for repo_file in sorted(repo_dir.glob("*.repo")):
     parser = configparser.RawConfigParser(strict=False)
     parser.optionxform = str
     try:
         with repo_file.open("r", encoding="utf-8") as fh:
             parser.read_file(fh)
-    except Exception:
+    except OSError:
         continue
 
     changed = False
@@ -64,3 +64,16 @@ for repo_file in repo_dir.glob("*.repo"):
         with repo_file.open("w", encoding="utf-8") as fh:
             parser.write(fh, space_around_delimiters=False)
 PY
+
+# Belt-and-suspenders: dnf config-manager + drop leftover multimedia repo files
+# so a later fragment cannot re-enable via cached metadata alone.
+if command -v dnf5 >/dev/null 2>&1; then
+	dnf5 -y config-manager setopt fedora-multimedia.enabled=0 2>/dev/null || true
+fi
+# Remove any leftover multimedia .repo files from the image (ublue/negativo inherit).
+shopt -s nullglob
+for repo_file in /etc/yum.repos.d/*multimedia*.repo /etc/yum.repos.d/*negativo*.repo; do
+	echo "Removing conflicting repo file: ${repo_file}"
+	rm -f "${repo_file}"
+done
+shopt -u nullglob

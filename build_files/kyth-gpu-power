@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-gpu-power — gpu-power.toml → DPM sysfs
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-gpu-power "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.gpu_power import load_gpu_power; c=load_gpu_power(); print(f"profile={c[\"profile\"]} dpm={c[\"dpm\"]}"); import pathlib; print("\n".join(str(p) for p in pathlib.Path("/sys/class/drm").glob("card*/device/power_dpm_force_performance_level")) or "no drm sysfs")' ;;
-    kyth|high) need_root "$@"; python3 -c 'from kyth_shared.gpu_power import load_gpu_power,save_gpu_power; c=load_gpu_power(); c["profile"]="kyth"; c["dpm"]="high"; save_gpu_power(c)'; python3 -c 'from kyth_shared.gpu_power import apply_gpu_power; print(apply_gpu_power())'; echo "gpu power kyth high" ;;
-    balanced|auto) need_root "$@"; python3 -c 'from kyth_shared.gpu_power import load_gpu_power,save_gpu_power; c=load_gpu_power(); c["profile"]="balanced"; c["dpm"]="auto"; save_gpu_power(c)'; python3 -c 'from kyth_shared.gpu_power import apply_gpu_power; print(apply_gpu_power())'; echo "gpu power balanced auto" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.gpu_power import load_gpu_power,apply_gpu_power; apply_gpu_power(load_gpu_power())';;
-    *) echo "Usage: kyth-gpu-power [status|kyth|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -53,17 +53,21 @@ class GamingTests(unittest.TestCase):
     def test_check_gaming_reason(self, mock_uids, mock_proc, mock_gamemode, mock_gamescope):
         mock_uids.return_value = [1000]
         mock_gamescope.return_value = True
+        gaming.invalidate_gaming_cache()
         self.assertEqual(gaming.check_gaming_reason(uid=1000), "gamescope session active (uid 1000)")
 
         mock_gamescope.return_value = False
         mock_gamemode.return_value = True
+        gaming.invalidate_gaming_cache()
         self.assertEqual(gaming.check_gaming_reason(uid=1000), "GameMode active (uid 1000)")
 
         mock_gamemode.return_value = False
         mock_proc.return_value = True
+        gaming.invalidate_gaming_cache()
         self.assertEqual(gaming.check_gaming_reason(uid=1000), "gaming process detected (/proc scan)")
 
         mock_proc.return_value = False
+        gaming.invalidate_gaming_cache()
         self.assertIsNone(gaming.check_gaming_reason(uid=1000))
 
 

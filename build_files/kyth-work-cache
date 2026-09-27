@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-work-cache — work-cache.toml
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-work-cache "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.work_cache import load_work_cache,work_cache_status; c=load_work_cache(); print(f"enabled={c[\"enabled\"]} size={c[\"size\"]} active={work_cache_status()}")' ;;
-    on) need_root "$@"; python3 -c 'from kyth_shared.work_cache import load_work_cache,save_work_cache,generate_work_cache; c=load_work_cache(); c["enabled"]=True; save_work_cache(c); generate_work_cache(c)'; systemctl enable --now kyth-work-cache.service 2>/dev/null || true; echo "work cache on" ;;
-    off) need_root "$@"; python3 -c 'from kyth_shared.work_cache import load_work_cache,save_work_cache,generate_work_cache; c=load_work_cache(); c["enabled"]=False; save_work_cache(c); generate_work_cache(c)'; systemctl disable --now kyth-work-cache.service 2>/dev/null || true; echo "work cache off" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.work_cache import load_work_cache,generate_work_cache; generate_work_cache(load_work_cache())' ;;
-    *) echo "Usage: kyth-work-cache [status|on|off|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

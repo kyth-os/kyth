@@ -1,0 +1,12 @@
+[
+  {"status": "", "severity": "unknown", "bootable": false, "message": "No install transaction recorded. Do not assume the disk is bootable."},
+  {"status": "started", "severity": "incomplete", "bootable": false, "message": "Install started but storage did not finish. Stay in this live session."},
+  {"status": "prepared", "severity": "incomplete", "bootable": false, "message": "Install prepared a plan but storage did not finish. Stay in this live session."},
+  {"status": "storage_complete", "severity": "unbootable", "bootable": false, "message": "The image is on disk but the installed system is not configured yet. Continue or rescue from this live session — do not reboot into the target."},
+  {"status": "image_installed", "severity": "unbootable", "bootable": false, "message": "Legacy journal: image written, configure unknown. Treat the target as not bootable until configure_complete."},
+  {"status": "configure_started", "severity": "unbootable", "bootable": false, "message": "Configuring the installed system was interrupted. Continue from this live session — the target is not bootable yet."},
+  {"status": "configure_complete", "severity": "almost", "bootable": false, "message": "The installed system is configured. Secure Boot enrollment may still be pending — check MOK staging before reboot."},
+  {"status": "secure_boot_staged", "severity": "ready", "bootable": true, "message": "Secure Boot enrollment is staged. Reboot and enroll the MOK if the firmware prompts."},
+  {"status": "complete", "severity": "ready", "bootable": true, "message": "Install finished. The target should be bootable."},
+  {"status": "failed", "severity": "failed", "bootable": false, "message": "Install failed. Use the log tail and transaction details below."}
+]

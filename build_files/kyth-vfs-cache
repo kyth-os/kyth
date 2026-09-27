@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-vfs-cache — vm.vfs_cache_pressure 50 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-vfs-cache "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.vfs_cache_pressure import load_vfs_cache, vfs_cache_status; c=load_vfs_cache(); print(f\"profile={c['profile']} active={vfs_cache_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.vfs_cache_pressure import load_vfs_cache,save_vfs_cache,generate_vfs_cache; c=load_vfs_cache(); c['profile']='gaming'; save_vfs_cache(c); generate_vfs_cache(c)"; sysctl --system >/dev/null 2>&1 || true; echo "vfs cache gaming 50" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.vfs_cache_pressure import load_vfs_cache,save_vfs_cache,generate_vfs_cache; c=load_vfs_cache(); c['profile']='balanced'; save_vfs_cache(c); generate_vfs_cache(c)"; echo "vfs cache balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.vfs_cache_pressure import load_vfs_cache,generate_vfs_cache; generate_vfs_cache(load_vfs_cache())" ;;
-    *) echo "Usage: kyth-vfs-cache [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -12,7 +12,11 @@ if str(INSTALLER_ROOT) not in sys.path:
 from kyth_installer.cleanup import clear_secrets_and_orphan_mount, unmount_configuration
 from kyth_installer.context import InstallLifecycle, InstallRequest, InstallerContext
 from kyth_installer.execution import start_installation
-from kyth_installer.validation import InstallRequestError, validate_install_request
+from kyth_installer.validation import (
+    InstallRequestError,
+    validate_install_request,
+    validate_partition_install_request,
+)
 
 
 class ImmediateThread:
@@ -61,6 +65,64 @@ class InstallerBoundaryTests(unittest.TestCase):
         list_disks.return_value = []
         with self.assertRaisesRegex(InstallRequestError, "Invalid disk"):
             validate_install_request({"disk": "/dev/sda"}, InstallerContext())
+
+    def test_partition_request_rejects_invalid_device_relationships(self):
+        context = InstallerContext()
+        with patch("kyth_installer.validation.disk._normal_device_path", return_value=None):
+            with self.assertRaisesRegex(InstallRequestError, "Invalid target"):
+                validate_partition_install_request(
+                    target_partition="bad", efi_partition="", hostname="kyth",
+                    timezone="UTC", username="", password="", context=context,
+                )
+
+        with (
+            patch("kyth_installer.validation.disk._normal_device_path", return_value="/dev/sda1"),
+            patch("kyth_installer.validation.disk._parent_disk", return_value=None),
+        ):
+            with self.assertRaisesRegex(InstallRequestError, "parent disk"):
+                validate_partition_install_request(
+                    target_partition="/dev/sda1", efi_partition="", hostname="kyth",
+                    timezone="UTC", username="", password="", context=context,
+                )
+
+        with (
+            patch("kyth_installer.validation.disk._normal_device_path", return_value="/dev/sda1"),
+            patch("kyth_installer.validation.disk._parent_disk", return_value="/dev/sda"),
+        ):
+            with self.assertRaisesRegex(InstallRequestError, "must be different"):
+                validate_partition_install_request(
+                    target_partition="/dev/sda1", efi_partition="/dev/sda1", hostname="kyth",
+                    timezone="UTC", username="", password="", context=context,
+                )
+
+    def test_partition_request_rejects_non_efi_and_incomplete_admin(self):
+        context = InstallerContext()
+        normal = lambda value: value
+        with (
+            patch("kyth_installer.validation.disk._normal_device_path", side_effect=normal),
+            patch("kyth_installer.validation.disk._parent_disk", return_value="/dev/sda"),
+            patch(
+                "kyth_installer.validation.disk.list_partitions",
+                return_value=[{"name": "/dev/sda2", "efi": False}],
+            ),
+        ):
+            with self.assertRaisesRegex(InstallRequestError, "not an EFI"):
+                validate_partition_install_request(
+                    target_partition="/dev/sda1", efi_partition="/dev/sda2", hostname="kyth",
+                    timezone="UTC", username="", password="", context=context,
+                )
+
+        with (
+            patch("kyth_installer.validation.disk._normal_device_path", side_effect=normal),
+            patch("kyth_installer.validation.disk._parent_disk", return_value="/dev/sda"),
+            patch("kyth_installer.validation._storage_state", return_value=({}, {})),
+            patch("kyth_installer.validation.system.list_timezones", return_value=["UTC"]),
+        ):
+            with self.assertRaisesRegex(InstallRequestError, "both be supplied"):
+                validate_partition_install_request(
+                    target_partition="/dev/sda1", efi_partition="", hostname="kyth",
+                    timezone="UTC", username="admin", password="", context=context,
+                )
 
     @patch("kyth_installer.execution.threading.Thread", ImmediateThread)
     def test_executor_owns_lifecycle_and_releases_lock(self):

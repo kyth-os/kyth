@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS automatic update check
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 
 [Timer]
 # Stagger the first fire by a random offset so all machines don't hit

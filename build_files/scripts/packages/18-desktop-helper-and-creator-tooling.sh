@@ -10,13 +10,17 @@ source "../lib/packages-helpers.sh"
 # use a batched fast path with individual fallback so a transient RPM/scriptlet
 # issue in a font or hardware utility does not block the image.
 dnf5 install -y --skip-unavailable \
-	python3-pyqt6 \
-	python3-pyqt6-webengine \
 	python3-pip \
 	python3-setuptools \
 	python3-defusedxml \
 	curl \
 	qt6-qtwayland \
+	xdg-desktop-portal \
+	xdg-desktop-portal-kde \
+	xdg-desktop-portal-gtk \
+	webkit2gtk4.1 \
+	gtk3 \
+	libsoup3 \
 	plymouth \
 	plymouth-plugin-script \
 	librsvg2-tools \
@@ -30,10 +34,23 @@ dnf5 install -y --skip-unavailable \
 	zsh \
 	openconnect \
 	vpnc \
+	ksshaskpass \
 	kde-connect \
 	plasma-browser-integration \
 	zoxide \
-	starship
+	starship \
+	eza \
+	bat \
+	git-delta \
+	direnv \
+	jq \
+	yq
+
+# gum (TUI menu builder used by interactive ujust recipes) lives in Terra, whose
+# repo file is written and then disabled by packages/12; enable it for just this
+# transaction. Kept as a real host binary so recipes don't spin up a container
+# per menu. --skip-unavailable keeps the build resilient if Terra is unreachable.
+dnf5 install -y --skip-unavailable --enablerepo=terra gum
 
 # Generic Distrobox wrapper — delegates to kyth-ai-dev container dynamically
 install -Dm 0755 /dev/stdin /usr/libexec/kyth-distrobox-wrapper <<'WRAPPEREOF'
@@ -48,28 +65,19 @@ declare -A descriptions=(
 	[gh]="GitHub CLI"
 	[hx]="Helix editor"
 	[zellij]="Zellij"
-	[bat]="bat syntax highlighter"
-	[eza]="eza ls replacement"
 	[fastfetch]="fastfetch system summary"
-	[zoxide]="zoxide directory navigator"
 	[evtest]="evtest input event monitor"
 	[sensors]="lm_sensors hardware monitor"
 	[i2cget]="i2cget I2C utility"
 	[i2cset]="i2cset I2C utility"
 	[i2cdetect]="i2cdetect I2C utility"
 	[v4l2-ctl]="v4l2-ctl Video4Linux utility"
-	[jq]="jq JSON processor"
-	[yq]="yq YAML processor"
 	[hyperfine]="hyperfine benchmarking tool"
 	[tmux]="tmux terminal multiplexer"
 	[rclone]="rclone cloud storage sync"
 	[flatpak-builder]="flatpak-builder package creator"
 	[pipx]="pipx Python application runner"
 	[uv]="uv fast Python package installer"
-	[starship]="starship prompt engine"
-	[direnv]="direnv environment loader"
-	[delta]="git-delta diff pager"
-	[gum]="gum TUI menu builder"
 	[7z]="7z archive extractor"
 	[7za]="7za archive extractor"
 	[cabextract]="cabextract archive utility"
@@ -99,10 +107,12 @@ kyth-ai-dev setup
 exec distrobox enter "${box}" -- "${tool}" "$@"
 WRAPPEREOF
 
-# Create host symlinks to the generic distrobox wrapper
-# zoxide/starship are host-native (dnf installed above) so shell init doesn't
-# require the container; keep them out of the wrapper loop.
-for tool in shellcheck shfmt gh hx zellij bat eza fastfetch evtest sensors i2cget i2cset i2cdetect v4l2-ctl jq yq hyperfine tmux rclone flatpak-builder pipx uv direnv delta gum 7z 7za cabextract readpst; do
+# Create host symlinks to the generic distrobox wrapper.
+# Interactive shell / prompt / pager tooling is host-native (dnf installed above)
+# so shell init, aliases (eza→ls, bat→cat), the git pager (delta), direnv hooks,
+# jq/yq pipes and gum menus never require the container. Only heavyweight or
+# occasionally-used dev tools stay containerized in the wrapper loop below.
+for tool in shellcheck shfmt gh hx zellij fastfetch evtest sensors i2cget i2cset i2cdetect v4l2-ctl hyperfine tmux rclone flatpak-builder pipx uv 7z 7za cabextract readpst; do
 	ln -sf /usr/libexec/kyth-distrobox-wrapper "/usr/bin/${tool}"
 done
 
@@ -172,3 +182,9 @@ install_available_optional_packages desktop "${optional_desktop_packages[@]}"
 #   manual CUPS configuration.
 # input-remapper is already installed in the gaming packages block
 # (packages/06-gaming-core.sh).
+# webkit2gtk4.1/gtk3/libsoup3: runtime deps for /usr/bin/kyth-hub-shell (the
+# React+Tauri Kyth Hub rewrite, src/kyth-hub-web — built in the hub-web-builder
+# stage of the top-level Dockerfile). Installed unconditionally since the
+# binary itself ships on every channel; kyth-welcome-launch requires this binary
+# and reports a clear failure if packaging is incomplete. dbus is not listed
+# here — it's already a hard dependency of the base Plasma desktop.

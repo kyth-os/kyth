@@ -69,7 +69,7 @@ Validation workflow with `python3 -m unittest discover -s tests`.
 
 Evidence:
 
-- `tests/test_kyth_welcome_parsers.py`
+- `tests/test_kyth_hub_web_actions.py`
 - `CONTRIBUTING.md` documents the test command.
 - `.github/workflows/validation.yml` runs the test suite.
 - `Justfile` provides `just test`.
@@ -93,15 +93,14 @@ Evidence:
 Recommended status: Unmet
 
 Recommended entry: The current automated test suite covers important pure
-parser/helper paths for System Hub and VPN behavior, and fuzzing covers related
-parser inputs, but it does not yet cover most project functionality. KythOS is
-expanding coverage as major behavior changes land; hardware, installer, live
-ISO, and full OS integration behavior still require manual or VM validation.
+parser/helper paths and System Hub action contracts, but it does not cover
+every project behavior. KythOS expands coverage as major behavior changes
+land; hardware, installer, live ISO, and full OS integration behavior still
+require manual or VM validation.
 
 Evidence:
 
-- `tests/test_kyth_welcome_parsers.py` covers selected parser/helper behavior.
-- `.github/workflows/fuzzing.yml` runs ClusterFuzzLite for parser fuzzing.
+- `tests/test_kyth_hub_web_actions.py` covers selected Hub action behavior.
 - `docs/daily-driver-validation.md` documents runtime validation that cannot be
   fully represented by unit tests.
 
@@ -112,14 +111,13 @@ Recommended status: Met
 Recommended entry: KythOS uses GitHub Actions CI. Pull requests and pushes to
 `main` and `testing` run the Validation workflow, including workflow checks,
 container linting, ShellCheck, Python syntax checks, unit tests, configuration
-parsing, systemd verification, and Justfile parsing. CodeQL and fuzzing also run
+parsing, systemd verification, and Justfile parsing. CodeQL analysis also runs
 through GitHub Actions.
 
 Evidence:
 
 - `.github/workflows/validation.yml`
 - `.github/workflows/codeql.yml`
-- `.github/workflows/fuzzing.yml`
 - `.github/workflows/build.yml`
 
 ## New Functionality Testing
@@ -149,7 +147,7 @@ tests or documenting why automation is not practical.
 
 Evidence:
 
-- `tests/test_kyth_welcome_parsers.py`
+- `tests/test_kyth_hub_web_actions.py`
 - `.github/workflows/validation.yml` unit test step.
 - `.github/pull_request_template.md` test checklist item.
 

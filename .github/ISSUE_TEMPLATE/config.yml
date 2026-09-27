@@ -1,9 +1,9 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/mrtrick37/kyth/security/advisories/new
+    url: https://github.com/kyth-os/kyth/security/advisories/new
     about: Report suspected vulnerabilities privately. Do not open a public issue.
   - name: Questions and community support
-    url: https://github.com/mrtrick37/kyth/discussions
+    url: https://github.com/kyth-os/kyth/discussions
     about: Ask setup questions or discuss ideas that are not yet actionable bug reports.
 

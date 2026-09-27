@@ -54,7 +54,7 @@ install-nvidia-driver:
 
     # ── Module already built — reboot to activate ─────────────────────────────
     if modinfo nvidia &>/dev/null; then
-        KARGS="rd.driver.blacklist=nouveau,nova_core modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1"
+        KARGS="rd.driver.blacklist=nouveau,nova_core modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1 nvidia-drm.fbdev=1"
         sudo grubby --update-kernel=ALL --args="${KARGS}" 2>/dev/null || \
             echo "  (grubby: non-fatal — kargs.d applies on next deployment)"
         echo "  Kernel module is already built. Reboot to activate the driver."

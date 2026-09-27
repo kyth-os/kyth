@@ -22,7 +22,7 @@ body:
     attributes:
       label: Current image
       description: Copy the image tag or digest from System Hub when possible.
-      placeholder: "ghcr.io/mrtrick37/kyth:testing@sha256:..."
+      placeholder: "ghcr.io/kyth-os/kyth:testing@sha256:..."
     validations:
       required: true
 

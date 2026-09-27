@@ -107,6 +107,16 @@ class DesktopPlasmaTests(unittest.TestCase):
     @mock.patch("kyth_shared.desktop.plasma.filter_available_launchers")
     @mock.patch("kyth_shared.desktop.plasma.get_qdbus_command")
     @mock.patch("kyth_shared.desktop.plasma.kreadconfig")
+    def test_apply_desktop_layout_skip_v3(self, mock_read, mock_qdbus, mock_filter, mock_write, mock_eval):
+        mock_read.side_effect = lambda f, g, k: "kyth-comfort-v3" if k == "KythComfortLayout" else None
+        self.assertEqual(plasma.apply_desktop_layout(), 0)
+        mock_write.assert_not_called()
+
+    @mock.patch("kyth_shared.desktop.plasma.evaluate_plasma_script")
+    @mock.patch("kyth_shared.desktop.plasma.kwriteconfig")
+    @mock.patch("kyth_shared.desktop.plasma.filter_available_launchers")
+    @mock.patch("kyth_shared.desktop.plasma.get_qdbus_command")
+    @mock.patch("kyth_shared.desktop.plasma.kreadconfig")
     def test_apply_desktop_layout_refuse(self, mock_read, mock_qdbus, mock_filter, mock_write, mock_eval):
         mock_read.return_value = None
         self.assertEqual(plasma.apply_desktop_layout(), 64)

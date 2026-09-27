@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-pipewire-gaming — pipewire-gaming.toml → wireplumber lua
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-pipewire-gaming "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.pipewire_gaming import load_pipewire_gaming,pipewire_gaming_status; c=load_pipewire_gaming(); print(f"profile={c[\"profile\"]} quantum={c[\"quantum\"]} active={pipewire_gaming_status()}")' ;;
-    gaming) need_root "$@"; python3 -c 'from kyth_shared.pipewire_gaming import load_pipewire_gaming,save_pipewire_gaming,generate_pipewire_gaming; c=load_pipewire_gaming(); c["profile"]="gaming"; save_pipewire_gaming(c); generate_pipewire_gaming(c)'; systemctl --user try-restart wireplumber 2>/dev/null || true; echo "pipewire gaming 128" ;;
-    balanced) need_root "$@"; python3 -c 'from kyth_shared.pipewire_gaming import load_pipewire_gaming,save_pipewire_gaming,generate_pipewire_gaming; c=load_pipewire_gaming(); c["profile"]="balanced"; save_pipewire_gaming(c); generate_pipewire_gaming(c)'; systemctl --user try-restart wireplumber 2>/dev/null || true; echo "pipewire balanced" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.pipewire_gaming import load_pipewire_gaming,generate_pipewire_gaming; generate_pipewire_gaming(load_pipewire_gaming())';;
-    *) echo "Usage: kyth-pipewire-gaming [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

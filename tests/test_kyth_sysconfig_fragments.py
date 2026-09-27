@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import pathlib
+import re
 import unittest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -10,6 +11,8 @@ FRAG_DIR = SCRIPTS / "sysconfig"
 RUNNER = SCRIPTS / "sysconfig-static.sh"
 SYSCTL_DATA = ROOT / "build_files" / "data" / "sysctl.d" / "99-kyth.conf"
 BRANDING_FRAG_DIR = SCRIPTS / "branding"
+FULL_UPDATE = ROOT / "build_files" / "kyth-full-update"
+UPGRADE_SUDOERS = FRAG_DIR / "systemd/35-sudoers-passwordless-safe-upgrade-firmware-operati.sh"
 
 
 class SysconfigFragmentTests(unittest.TestCase):
@@ -50,10 +53,34 @@ class SysconfigFragmentTests(unittest.TestCase):
         )
         self.assertIn("groupadd --system plugdev", guards)
         self.assertIn("Before=dbus.socket", guards)
+        self.assertIn("RemainAfterExit=yes", guards)
         self.assertIn("systemd-udevd.service", guards)
         self.assertIn("/etc/udev/rules.d/99-input-remapper.rules", guards)
         self.assertIn('TEST=="charge_control_start_threshold"', guards)
         self.assertNotIn('TEST{0002}!="/sys%p/charge_', guards)
+
+    def test_dxvk_defaults_do_not_enable_async(self):
+        body = (FRAG_DIR / "gaming" / "47-dxvk-async.sh").read_text(encoding="utf-8")
+        self.assertIn("DXVK_CONFIG_FILE=/etc/dxvk.conf", body)
+        self.assertIn("dxvk.numCompilerThreads = 0", body)
+        self.assertNotIn("dxvk.enableAsync", body)
+        self.assertNotIn("DXVK_ASYNC", body)
+        self.assertNotRegex(body, r"^DXVK_FRAME_RATE=", re.M)
+
+    def test_journald_cap_has_headroom_and_bounded_file_size(self):
+        """A tight cap with no per-file bound left normal growth sitting right at
+        the ceiling: systemd-journal-flush.service (stock, unavoidable, early in
+        every boot) then had to vacuum old journals back under the cap on every
+        boot, stalling all logging for ~30s under full boot I/O contention —
+        previously misread as a zram/udev-specific hang. Guard against
+        regressing back to a cap with no breathing room.
+        """
+        body = (FRAG_DIR / "systemd" / "28-journald-size-cap.sh").read_text(encoding="utf-8")
+        self.assertIn("SystemMaxFileSize=", body)
+        match = re.search(r"SystemMaxUse=(\d+)([MG])", body)
+        self.assertIsNotNone(match, "SystemMaxUse must be set with a M/G suffix")
+        size_mb = int(match.group(1)) * (1024 if match.group(2) == "G" else 1)
+        self.assertGreaterEqual(size_mb, 2048 - 1, "cap regressed back toward zero headroom")
 
     def test_openrgb_is_not_unconditionally_autostarted(self):
         body = (FRAG_DIR / "peripherals" / "39-openrgb-rgb-peripheral-control.sh").read_text(
@@ -81,7 +108,7 @@ class SysconfigFragmentTests(unittest.TestCase):
             / "splash"
             / "Splash.qml"
         ).read_text(encoding="utf-8")
-        polish = (ROOT / "build_files" / "kyth-user-polish").read_text(
+        polish = (ROOT / "src" / "kyth-shared-rs" / "src" / "user_polish_bin.rs").read_text(
             encoding="utf-8"
         )
         guard = (ROOT / "build_files" / "kyth-session-splash-guard").read_text(
@@ -97,26 +124,112 @@ class SysconfigFragmentTests(unittest.TestCase):
         )
         self.assertIn("--key Theme org.kythos.desktop", guard)
 
-    def test_antigravity_uses_desktop_safe_wrapper(self):
-        body = (SCRIPTS / "packages" / "20-google-antigravity-ide.sh").read_text(
-            encoding="utf-8"
+    def test_antigravity_host_wrapper_is_not_built(self):
+        self.assertFalse(
+            (SCRIPTS / "packages" / "20-google-antigravity-ide.sh").exists()
         )
-        self.assertIn("/usr/bin/antigravity", body)
-        self.assertIn("kyth-ai-dev", body)
 
-    def test_bootc_sudoers_allows_status_without_arguments(self):
-        body = (ROOT / "build_files" / "kyth-bootc-sudo").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("/usr/bin/bootc status,", body)
-        self.assertIn("/usr/sbin/bootc status,", body)
+    def test_bootc_sudoers_uses_only_fixed_guard_operations(self):
+        body = (
+            FRAG_DIR / "systemd/35-sudoers-passwordless-safe-upgrade-firmware-operati.sh"
+        ).read_text(encoding="utf-8")
+        for operation in (
+            "status",
+            "status-json",
+            "switch-latest",
+            "switch-testing",
+            "switch-latest-cachy",
+            "switch-testing-cachy",
+        ):
+            self.assertIn(f"/usr/bin/kyth-bootc-guard {operation}", body)
+        self.assertNotIn("NOPASSWD: /usr/bin/bootc", body)
+        self.assertIn("NOPASSWD: /usr/libexec/kyth-finalize-staged", body)
+        self.assertIn("NOPASSWD: /usr/libexec/kyth-finalize-staged reboot", body)
+        self.assertFalse((ROOT / "build_files/kyth-bootc-sudo").exists())
+        self.assertFalse((ROOT / "build_files/kyth-sched-sudo").exists())
+
+    def test_bootc_guard_finalizes_after_switch(self):
+        guard = (ROOT / "build_files" / "kyth-bootc-guard").read_text(encoding="utf-8")
+        self.assertIn("/usr/bin/bootc switch", guard)
+        self.assertIn("/usr/libexec/kyth-finalize-staged", guard)
+        self.assertNotIn("exec /usr/bin/bootc switch", guard)
+
+    def test_bootc_guard_fails_closed_on_unprepared_boot(self):
+        """A silent failed /boot remount must abort `bootc switch` before it
+        touches deployments, and the rpm-ostree text fallback must keep
+        bootc's exit code so no consumer mistakes it for bootc status.
+        """
+        guard = (ROOT / "build_files" / "kyth-bootc-guard").read_text(encoding="utf-8")
+        self.assertIn(".kyth-prep-write", guard)
+        self.assertIn("aborting before touching deployments", guard)
+        self.assertIn('return "${rc}"', guard)
+
+    def test_bootc_guard_prepares_boot_before_status(self):
+        """bootc status opens sysroot-relative `boot` and returns EPERM on the
+        Kyth read-only /boot bind until prepare-boot remounts it.
+        """
+        guard = (ROOT / "build_files" / "kyth-bootc-guard").read_text(encoding="utf-8")
+        self.assertIn("kyth-finalize-staged prepare-boot", guard)
+        self.assertIn("opendir(boot)", guard)
+        self.assertIn("/usr/bin/rpm-ostree status", guard)
+        self.assertNotIn("exec /usr/bin/bootc status", guard)
+
+    def test_upgrade_sudoers_never_grants_podman(self):
+        fragment = (
+            FRAG_DIR / "systemd/35-sudoers-passwordless-safe-upgrade-firmware-operati.sh"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("NOPASSWD: /usr/bin/podman", fragment)
+
+    def test_full_updaters_sudo_calls_have_a_matching_nopasswd_rule(self):
+        """kyth-full-update runs everything through `sudo -n`, which fails
+        silently (non-interactive, no prompt) the moment its argv drifts
+        from the exact NOPASSWD line in the sudoers fragment — this is what
+        broke `fwupdmgr refresh --force` when `--force` was added to the
+        call but not to the sudoers rule. Every `sudo -n /usr/bin/...`
+        invocation must have a byte-exact NOPASSWD counterpart.
+        """
+        update_body = FULL_UPDATE.read_text(encoding="utf-8")
+        sudoers_body = UPGRADE_SUDOERS.read_text(encoding="utf-8")
+        commands = re.findall(r"sudo -n (/usr/bin/\S.*)$", update_body, flags=re.MULTILINE)
+        self.assertTrue(commands, "expected at least one `sudo -n` call in kyth-full-update")
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertIn(f"NOPASSWD: {command}", sudoers_body)
+
+    def test_passwordless_sudo_rules_do_not_use_argument_globs(self):
+        for path in (ROOT / "build_files").rglob("*"):
+            if not path.is_file():
+                continue
+            try:
+                lines = path.read_text(encoding="utf-8").splitlines()
+            except UnicodeDecodeError:
+                continue
+            for line in lines:
+                if "NOPASSWD:" in line:
+                    with self.subTest(path=path.relative_to(ROOT), line=line):
+                        self.assertNotIn("*", line)
 
     def test_firstboot_missing_apps_is_a_successful_status(self):
-        body = (ROOT / "build_files" / "kyth-firstboot-app-status").read_text(
+        cargo = (ROOT / "src" / "kyth-shared-rs" / "Cargo.toml").read_text(
             encoding="utf-8"
         )
-        self.assertIn("check_firstboot_app_status", body)
-        self.assertTrue(body.rstrip().endswith("main()"))
+        binary = (ROOT / "src" / "kyth-shared-rs" / "src" / "firstboot_app_status_bin.rs")
+        self.assertIn('name = "kyth-firstboot-app-status"', cargo)
+        self.assertTrue(binary.is_file())
+        self.assertIn("write_app_status", binary.read_text(encoding="utf-8"))
+
+    def test_coredump_size_is_capped(self):
+        """Nothing else bounds systemd-coredump — a crash-looping game/Proton
+        process under gaming.slice can otherwise dump unbounded cores until
+        /var fills, cascading into unrelated journald/D-Bus/sddm failures
+        that look like random instability rather than a full disk.
+        """
+        path = FRAG_DIR / "systemd" / "29-coredump-size-cap.sh"
+        self.assertTrue(path.is_file())
+        body = path.read_text(encoding="utf-8")
+        self.assertIn("/etc/systemd/coredump.conf.d/99-kyth.conf", body)
+        for expected in ("ProcessSizeMax=", "ExternalSizeMax=", "MaxUse=", "KeepFree="):
+            self.assertIn(expected, body)
 
 
 class ConfigHelperTests(unittest.TestCase):

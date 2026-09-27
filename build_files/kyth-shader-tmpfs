@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-shader-tmpfs — shader-tmpfs.toml tmpfs for mesa cache
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-shader-tmpfs "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.shader_tmpfs import load_shader_tmpfs,shader_tmpfs_status; c=load_shader_tmpfs(); print(f"enabled={c[\"enabled\"]} size={c[\"size\"]} active={shader_tmpfs_status()}")' ;;
-    on) need_root "$@"; python3 -c 'from kyth_shared.shader_tmpfs import load_shader_tmpfs,save_shader_tmpfs,generate_shader_tmpfs; c=load_shader_tmpfs(); c["enabled"]=True; save_shader_tmpfs(c); generate_shader_tmpfs(c)'; systemctl daemon-reload 2>/dev/null || true; systemctl enable --now kyth-shader-tmpfs.service 2>/dev/null || true; echo "shader tmpfs on" ;;
-    off) need_root "$@"; python3 -c 'from kyth_shared.shader_tmpfs import load_shader_tmpfs,save_shader_tmpfs,generate_shader_tmpfs; c=load_shader_tmpfs(); c["enabled"]=False; save_shader_tmpfs(c); generate_shader_tmpfs(c)'; systemctl disable --now kyth-shader-tmpfs.service 2>/dev/null || true; echo "shader tmpfs off" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.shader_tmpfs import load_shader_tmpfs,generate_shader_tmpfs; generate_shader_tmpfs(load_shader_tmpfs())';;
-    *) echo "Usage: kyth-shader-tmpfs [status|on|off|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

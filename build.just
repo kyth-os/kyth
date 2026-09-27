@@ -3,18 +3,33 @@
 import "_vars.just"
 import "_internal.just"
 
+# Uses podman, not docker: CI's build.yml has its own independent docker
+# buildx pipeline and never calls these recipes, so this file only has to
+# work for local dev — and kyth ships podman, not docker, on the built OS
+# itself. Runs rootful (sudo) so the result lands directly in the same
+# containers-storage `bootc switch` reads (see `switch-local`), with no
+# rootless->rootful copy step needed afterward. The GHA/registry buildx
+# cache flags are dropped: podman/buildah's cache-from/cache-to take a
+# plain image reference, not BuildKit's `type=X,key=value` descriptor
+# syntax, and BuildKit's registry cache format isn't buildah-readable
+# anyway — local podman still reuses its own layer cache across repeated
+# runs, just not CI's remote one.
+
 # Build the base image from build_base/.
 [group('Build')]
-build-base base_image=default_base_image kernel_flavor="fedora":
+build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0":
     #!/usr/bin/env bash
-    if ! id -nG | grep -qw docker; then
-        if ! id -nG "$USER" | grep -qw docker; then
-            echo "Adding $USER to docker group (requires sudo)..."
-            sudo usermod -aG docker "$USER"
+    set -euo pipefail
+    PODMAN="./build_files/scripts/rootful-podman.sh"
+
+    resolve_version() {
+        local query="$1"
+        if [[ -x /run/host/usr/bin/distrobox-host-exec ]]; then
+            distrobox-host-exec python3 ./build_files/scripts/resolve-versions.py "${query}"
+        else
+            python3 ./build_files/scripts/resolve-versions.py "${query}"
         fi
-        echo "Activating docker group for this session via sg — re-running..."
-        exec sg docker -c "just build-base '{{ base_image }}' '{{ kernel_flavor }}'"
-    fi
+    }
 
     if command -v cosign &>/dev/null; then
         echo "Verifying base image signature with cosign..."
@@ -26,36 +41,49 @@ build-base base_image=default_base_image kernel_flavor="fedora":
     else
         echo "WARNING: cosign not found — skipping signature verification."
     fi
-    echo "Refreshing upstream base image {{ base_image }}..."
-    docker pull {{ base_image }}
+    if ! ${PODMAN} image exists {{ base_image }}; then
+        echo "Refreshing upstream base image {{ base_image }}..."
+        ${PODMAN} pull {{ base_image }}
+    fi
     CACHYOS_KERNEL_VER=unused
     if [[ "{{ kernel_flavor }}" != "fedora" ]]; then
-        CACHYOS_KERNEL_VER=$(python3 ./build_files/scripts/resolve-versions.py cachyos-kernel)
+        CACHYOS_KERNEL_VER=$(resolve_version cachyos-kernel)
     fi
     echo "CachyOS kernel: ${CACHYOS_KERNEL_VER}"
     echo "Kernel flavor: {{ kernel_flavor }}"
-    docker build \
+    echo "Enable NVIDIA: {{ enable_nvidia }}"
+    ${PODMAN} build \
+        --security-opt label=disable \
         --build-arg BASE_IMAGE={{ base_image }} \
         --build-arg KYTH_KERNEL_FLAVOR="{{ kernel_flavor }}" \
         --build-arg CACHYOS_KERNEL_VER="${CACHYOS_KERNEL_VER}" \
+        --build-arg ENABLE_NVIDIA="{{ enable_nvidia }}" \
         --tag localhost/kyth-base:stable \
         build_base/
+    if [[ "{{ enable_nvidia }}" == "1" ]]; then
+        ${PODMAN} tag localhost/kyth-base:stable localhost/kyth-base:stable-nvidia
+        echo "Tagged localhost/kyth-base:stable-nvidia"
+    fi
 
-# Build the full KythOS image.
+# Build the full KythOS image. See build-base for why this is podman, not docker.
 [group('Build')]
 build: build-base
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! id -nG | grep -qw docker; then
-        exec sg docker -c "just build"
-    fi
-    REGISTRY="${REGISTRY:-ghcr.io/mrtrick37/kyth}"
-    BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
-    CACHE_BRANCH=$([ "${BRANCH}" = "testing" ] && echo "testing" || echo "main")
+    PODMAN="./build_files/scripts/rootful-podman.sh"
 
-    PROTON_CACHYOS_VER=$(python3 ./build_files/scripts/resolve-versions.py proton-cachyos)
+    resolve_version() {
+        local query="$1"
+        if [[ -x /run/host/usr/bin/distrobox-host-exec ]]; then
+            distrobox-host-exec python3 ./build_files/scripts/resolve-versions.py "${query}"
+        else
+            python3 ./build_files/scripts/resolve-versions.py "${query}"
+        fi
+    }
+
+    PROTON_CACHYOS_VER=$(resolve_version proton-cachyos)
     [[ -n "${PROTON_CACHYOS_VER}" ]] || { echo "Unable to pin Proton-CachyOS" >&2; exit 1; }
-    UMU_VERSION=$(python3 ./build_files/scripts/resolve-versions.py thirdparty-versions)
+    UMU_VERSION=$(resolve_version thirdparty-versions)
     THIRDPARTY_VERSIONS_HASH=$(printf '%s' "${UMU_VERSION}" | sha256sum | cut -c1-16)
     echo "Pinned third-party release: umu=${UMU_VERSION}"
     MOK_SECRET_ARG=()
@@ -73,23 +101,44 @@ build: build-base
         fi
         SECUREBOOT_SIGNING_REQUESTED=1
     else
-        echo "Secure Boot: MOK key not set — signing skipped (set MOK_KEY_FILE to enable)"
+        echo "Secure Boot: MOK key not set — custom (CachyOS) kernels will FAIL the build"
+        echo "Secure Boot: unless KYTH_ALLOW_UNSIGNED_KERNEL=1 (local nosb/test image, never release it)"
     fi
-    docker buildx build \
-        --build-arg ENABLE_SCX="${ENABLE_SCX:-1}" \
+    ${PODMAN} build \
+        --security-opt label=disable \
+        --build-arg ENABLE_SCX="${ENABLE_SCX:-0}" \
         --build-arg ENABLE_GAMING_PERIPHERALS="${ENABLE_GAMING_PERIPHERALS:-0}" \
         --build-arg ENABLE_VIRTUALIZATION_HOST="${ENABLE_VIRTUALIZATION_HOST:-0}" \
         --build-arg ENABLE_KSM="${ENABLE_KSM:-0}" \
+        --build-arg KYTH_ALLOW_UNSIGNED_KERNEL="${KYTH_ALLOW_UNSIGNED_KERNEL:-0}" \
         --build-arg PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER}" \
         --build-arg UMU_VERSION="${UMU_VERSION}" \
         --build-arg THIRDPARTY_VERSIONS_HASH="${THIRDPARTY_VERSIONS_HASH}" \
+        --build-arg RPM_SET_HASH="$(./build_files/scripts/hash-rpm-set.sh)" \
+        --build-arg SYSCONFIG_HASH="$(./build_files/scripts/hash-sysconfig.sh)" \
+        --build-arg GAMING_VERSIONS_HASH="$(./build_files/scripts/hash-gaming-versions.sh --print)" \
         --build-arg BUILD_DATE="$(date +%Y-%m-%d)" \
         --build-arg SECUREBOOT_SIGNING_REQUESTED="${SECUREBOOT_SIGNING_REQUESTED}" \
         "${MOK_SECRET_ARG[@]}" \
-        --cache-from "type=registry,ref=${REGISTRY}:buildcache-final-${CACHE_BRANCH}-fedora" \
         --tag localhost/kyth:latest \
-        --load \
         .
+
+# Entirely local — no registry/CI round-trip. Requires a reboot afterward to
+# actually boot into it; `bootc rollback` undoes it if something's wrong.
+
+# Switch the running deployment to the image `build` just produced.
+[group('Build')]
+switch-local tag="latest":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! ./build_files/scripts/rootful-podman.sh image exists localhost/kyth:{{ tag }}; then
+        echo "localhost/kyth:{{ tag }} not found in root's container storage — run 'just build' first." >&2
+        exit 1
+    fi
+    sudo bootc switch --transport containers-storage localhost/kyth:{{ tag }}
+    echo
+    echo "Staged. Reboot to apply: sudo systemctl reboot"
+    echo "To go back to the tracked channel later: sudo bootc switch ghcr.io/kyth-os/kyth:testing"
 
 # Build a QCOW2 virtual machine image
 [group('Build Virtual Machine Image')]

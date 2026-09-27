@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-sched-autogroup — enabled 0 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-sched-autogroup "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.sched_autogroup import load_autogroup, autogroup_status; c=load_autogroup(); print(f\"profile={c['profile']} active={autogroup_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.sched_autogroup import load_autogroup,save_autogroup,generate_autogroup; c=load_autogroup(); c['profile']='gaming'; save_autogroup(c); generate_autogroup(c)"; sysctl --system >/dev/null 2>&1 || true; echo "autogroup gaming 0" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.sched_autogroup import load_autogroup,save_autogroup,generate_autogroup; c=load_autogroup(); c['profile']='balanced'; save_autogroup(c); generate_autogroup(c)"; echo "autogroup balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.sched_autogroup import load_autogroup,generate_autogroup; generate_autogroup(load_autogroup())" ;;
-    *) echo "Usage: kyth-sched-autogroup [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

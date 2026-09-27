@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import io
 import pathlib
+import stat
 import sys
 import tarfile
 import tempfile
@@ -96,8 +97,8 @@ class UpdaterTests(unittest.TestCase):
             checksums = td / "SHA256SUMS"
             checksums.write_text(f"{h1}  f1.txt\n{h2}  *f2.txt\n", encoding="utf-8")
 
-            # Should succeed silently
-            self.assertTrue(verify_checksum_file(checksums, td))
+            self.assertTrue(verify_checksum_file(checksums, f1))
+            self.assertTrue(verify_checksum_file(checksums, f2))
 
     def test_verify_checksum_file_mismatch(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -110,8 +111,39 @@ class UpdaterTests(unittest.TestCase):
             checksums.write_text(f"{h1}  f1.txt\n", encoding="utf-8")
 
             with self.assertRaises(ValueError) as context:
-                verify_checksum_file(checksums, td)
+                verify_checksum_file(checksums, f1)
             self.assertIn("Checksum mismatch", str(context.exception))
+
+    def test_verify_checksum_file_requires_exactly_one_target_entry(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = pathlib.Path(tmpdir)
+            target = td / "artifact.zip"
+            target.write_bytes(b"payload")
+            digest = hashlib.sha256(b"payload").hexdigest()
+            checksums = td / "SHA256SUMS"
+
+            for manifest in ("", f"{digest}  other.zip\n"):
+                checksums.write_text(manifest, encoding="utf-8")
+                with self.subTest(manifest=manifest), self.assertRaisesRegex(ValueError, "exactly one"):
+                    verify_checksum_file(checksums, target)
+
+            checksums.write_text(
+                f"{digest}  artifact.zip\n{digest}  artifact.zip\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "exactly one"):
+                verify_checksum_file(checksums, target)
+
+    def test_verify_checksum_file_rejects_malformed_and_unsafe_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = pathlib.Path(tmpdir)
+            target = td / "artifact.zip"
+            target.write_bytes(b"payload")
+            checksums = td / "SHA256SUMS"
+            for manifest in ("not-a-checksum\n", f"{'0' * 64}  ../artifact.zip\n", f"{'z' * 64}  artifact.zip\n"):
+                checksums.write_text(manifest, encoding="utf-8")
+                with self.subTest(manifest=manifest), self.assertRaises(ValueError):
+                    verify_checksum_file(checksums, target)
 
     def test_extract_archive_zip(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -153,6 +185,53 @@ class UpdaterTests(unittest.TestCase):
             with self.assertRaises(ValueError) as context:
                 extract_archive(tar_path, dest)
             self.assertIn("Directory traversal attempt", str(context.exception))
+
+    def test_extract_archive_rejects_tar_links(self) -> None:
+        for member_type in (tarfile.SYMTYPE, tarfile.LNKTYPE):
+            with self.subTest(member_type=member_type), tempfile.TemporaryDirectory() as tmpdir:
+                td = pathlib.Path(tmpdir)
+                tar_path = td / "test.tar"
+                with tarfile.open(tar_path, "w") as tar:
+                    info = tarfile.TarInfo(name="link")
+                    info.type = member_type
+                    info.linkname = "../../outside"
+                    tar.addfile(info)
+                with self.assertRaisesRegex(ValueError, "Unsupported archive member type"):
+                    extract_archive(tar_path, td / "extracted")
+
+    def test_extract_archive_rejects_zip_traversal_and_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = pathlib.Path(tmpdir)
+            traversal = td / "traversal.zip"
+            with zipfile.ZipFile(traversal, "w") as archive:
+                archive.writestr("../outside", "bad")
+            with self.assertRaisesRegex(ValueError, "Directory traversal"):
+                extract_archive(traversal, td / "dest-one")
+
+            symlink = td / "symlink.zip"
+            with zipfile.ZipFile(symlink, "w") as archive:
+                info = zipfile.ZipInfo("link")
+                info.create_system = 3
+                info.external_attr = (stat.S_IFLNK | 0o777) << 16
+                archive.writestr(info, "../../outside")
+            with self.assertRaisesRegex(ValueError, "Unsupported archive member type"):
+                extract_archive(symlink, td / "dest-two")
+
+    def test_extract_archive_rejects_preexisting_output_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = pathlib.Path(tmpdir)
+            zip_path = td / "archive.zip"
+            with zipfile.ZipFile(zip_path, "w") as archive:
+                archive.writestr("folder/payload", "new data")
+            destination = td / "destination"
+            destination.mkdir()
+            outside = td / "outside"
+            outside.mkdir()
+            (destination / "folder").symlink_to(outside, target_is_directory=True)
+
+            with self.assertRaises(ValueError):
+                extract_archive(zip_path, destination)
+            self.assertFalse((outside / "payload").exists())
 
 
 if __name__ == "__main__":

@@ -26,9 +26,17 @@ just build
 just rebuild-live-iso
 just run-live-iso-native
 
+# One-time: wire up the local git hooks (pre-commit, pre-push)
+just install-git-hooks
+
 # Lint and format shell scripts before pushing
 just lint
 just format
+
+# Run the full local validation suite (same gates as CI's validation job)
+just validate
+# Heaviest local gate: validation + changed-file quality + CodeQL-shaped checks
+just ci-preflight
 
 # Run Python unit tests
 python3 -m unittest discover -s tests
@@ -50,11 +58,16 @@ ENABLE_KSM=1 just build
 - **Packages**: justify why it belongs in a base OS image, not a Flatpak
 - **COPRs**: link to the COPR, explain the update cadence, note if it's a
   known-stable maintainer (e.g. `xxmitsu/mesa-git`)
-- **Scripts in `build_files/scripts/`**: must pass `shellcheck --severity=error`
-  and `shfmt -d` (run `just lint && just format` locally)
-- **Python**: must pass `python3 -c "import ast; ast.parse(open('file.py').read())"`
-  and `python3 -m unittest discover -s tests`; CodeQL runs on every PR for
-  security issues
+- **Scripts in `build_files/scripts/`**: must pass `shellcheck
+  --severity=warning` and `shfmt -d` (run `just lint && just format`
+  locally). The pre-commit hook enforces a `--severity=error` floor on
+  staged `.sh` files, but CI and `just validate` gate on warnings — fix
+  warnings before pushing, not after CI goes red.
+- **Python**: must pass `run-quality.sh` (ruff per `ruff.toml`, the
+  coverage-instrumented suite, and the critical-coverage floor) plus
+  `python3 -m unittest discover -s tests`; CodeQL runs on every PR for
+  security issues. On PRs CI runs quality changed-only; on push to
+  `main`/`testing` it runs the full suite.
 - **Dockerfiles**: must pass `hadolint --failure-threshold error`
 - **Tests**: major behavior changes must add or update automated tests. If a
   change cannot be tested automatically, explain why and include the manual
@@ -78,15 +91,41 @@ manual hardware or live ISO validation.
 
 ## CI Checks
 
-All PRs run:
+All PRs run the **Validation** workflow (5 jobs):
 
-- **Validation** — actionlint, hadolint, shellcheck, Python AST, TOML/JSON,
-  Python unit tests, systemd unit verify, Justfile parse
-- **Lint** — shellcheck on changed `.sh` files
-- **CodeQL** — static analysis of Python code
+- **validation** — actionlint, zizmor (auditor, medium+), hadolint, and the
+  full `validate.sh` suite (shellcheck at `--severity=warning`, Python
+  syntax, TOML/JSON, systemd unit verify, Justfile parse, optimization
+  budgets, gaming hash gate, full unit tests)
+- **quality (coverage and lint)** — `run-quality.sh`: ruff, blind-except
+  audit, coverage-instrumented suite plus the critical-coverage floor;
+  changed-only on PRs, full on push. Uploads the coverage report.
+- **hub-shell / installer-shell** — frontend + Tauri shell builds
+- **rust** — clippy (advisory while the warning burn-down is in progress)
+  plus `cargo test --locked`
 
-The build and supply-chain workflows run on merge to `main`/`testing`, not on PRs,
-to avoid burning CI minutes on draft work.
+Tool versions (actionlint, hadolint, just, shellcheck, zizmor, syft, grype)
+are pinned — validators in `validation.yml` via
+`build_files/scripts/install-validation-tools.sh`, scanners in their own
+workflows. **CodeQL** runs static analysis on Python in parallel and does
+not block image builds.
+
+The build, supply-chain, CVE-scan, and live-ISO workflows run on merge to
+`main`/`testing` (or on their dispatch chain), not on PRs, to avoid burning
+CI minutes on draft work.
+
+## Pre-push Gate
+
+With hooks installed (`just install-git-hooks`), every push runs:
+
+1. `validate.sh --fast` (lint, actionlint, zizmor, shell analysis,
+   syntax/secrets/systemd — unit tests stay in CI), and
+2. `run-quality.sh` **without** `--fast` — the coverage floor is a
+   mandatory local gate, including in fast mode.
+
+Set `KYTH_ALLOW_HEAVY_PRE_PUSH=1` to also run the full validation suite
+and the Hub headless smoke test. `KYTH_SKIP_PRE_PUSH_VALIDATION=1`
+bypasses the gate (emergencies only — CI still gates merge).
 
 ## Reporting Bugs
 

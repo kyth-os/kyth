@@ -1,0 +1,923 @@
+"""Partition journal — transaction queue with snapshot backup.
+
+Canonical after partition_ops 571 split; partition_ops.py re-exports for compat.
+"""
+from __future__ import annotations
+
+import logging
+import json
+import shutil
+import tempfile
+from pathlib import Path
+from typing import Optional
+
+_logger = logging.getLogger(__name__)
+
+# pylint: disable-next=unused-import
+from .config import BIOS_BOOT_BYTES, FILESYSTEM_OPTIONS, _FILESYSTEM  # noqa: F401 — re-exported for server.py
+from .disk import (
+    _normal_device_path, _safe_int,
+    _human_size, _latest_partition_on_disk,
+)
+# Patch-compat shims: tests mock.patch.object(partition_ops, "list_disks")
+# after split Journal lives here; delegate to the facade's patched helpers if present
+def _patched_parent_disk(partition: str) -> str | None:
+    try:
+        from . import partition_ops as _facade  # type: ignore
+        fn = getattr(_facade, "_parent_disk", None)
+        if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.disk":
+            return fn(partition)  # type: ignore
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim _parent_disk fallback: %s", exc, exc_info=True)
+    from .disk import _parent_disk as _orig
+    return _orig(partition)
+
+def _patched_list_disks():
+    try:
+        from . import partition_ops as _facade  # type: ignore
+        fn = getattr(_facade, "list_disks", None)
+        if fn is not None and fn.__module__ != "kyth_installer.disk":
+            return fn()
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim list_disks fallback: %s", exc, exc_info=True)
+    from .disk import list_disks as _orig
+    return _orig()
+
+def _patched_list_partitions(disk: str, *args, **kwargs):
+    try:
+        from . import partition_ops as _facade  # type: ignore
+        fn = getattr(_facade, "list_partitions", None)
+        if fn is not None and fn.__module__ != "kyth_installer.disk":
+            return fn(disk)
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim list_partitions fallback for %s: %s", disk, exc, exc_info=True)
+    from .disk import list_partitions as _orig
+    return _orig(disk, *args, **kwargs)
+
+# Keep names for internal calls — replaced by shims below
+_parent_disk = _patched_parent_disk  # type: ignore
+list_disks = _patched_list_disks  # type: ignore
+list_partitions = _patched_list_partitions  # type: ignore
+
+def _patched_partition_number(partition: str) -> int:
+    try:
+        from . import partition_ops as _facade  # type: ignore
+        fn = getattr(_facade, "_partition_number", None)
+        if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.disk":
+            return fn(partition)  # type: ignore
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim _partition_number fallback for %s: %s", partition, exc, exc_info=True)
+    from .disk import _partition_number as _orig
+    return _orig(partition)
+
+def _patched_partition_start_bytes(partition: str) -> int:
+    try:
+        from . import partition_ops as _facade  # type: ignore
+        fn = getattr(_facade, "_partition_start_bytes", None)
+        if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.disk":
+            return fn(partition)  # type: ignore
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim _partition_start_bytes fallback for %s: %s", partition, exc, exc_info=True)
+    from .disk import _partition_start_bytes as _orig
+    return _orig(partition)
+
+def _patched_shrink_filesystem(partition: str, fstype: str, new_size: int, log=None):
+    try:
+        from . import partition_ops as _facade  # type: ignore
+        fn = getattr(_facade, "shrink_filesystem", None)
+        if fn is not None and getattr(fn, "__module__", "") != "kyth_installer.fsresize":
+            return fn(partition, fstype, new_size, log)  # type: ignore
+    except (OSError, ValueError, AttributeError, ImportError, RuntimeError) as exc:
+        _logger.debug("shim shrink_filesystem fallback for %s: %s", partition, exc, exc_info=True)
+    from .fsresize import shrink_filesystem as _orig
+    return _orig(partition, fstype, new_size, log)
+
+_partition_number = _patched_partition_number  # type: ignore
+_partition_start_bytes = _patched_partition_start_bytes  # type: ignore
+shrink_filesystem = _patched_shrink_filesystem  # type: ignore
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .interfaces import DiskServiceProtocol
+    from .services.disk_service import DiskService as _DiskServiceConcrete
+
+
+def _require_sgdisk(log=None):
+    if not shutil.which("sgdisk"):
+        raise RuntimeError("sgdisk (gptfdisk) is required for partition table operations.")
+
+
+def _require_parted(log=None):
+    if not shutil.which("parted"):
+        raise RuntimeError("parted is required for partition operations.")
+
+
+def _require_mkfs(fstype: str, log=None):
+    info = _FILESYSTEM.get(fstype)
+    if not info:
+        raise RuntimeError(f"Unsupported filesystem type: {fstype}")
+    if not shutil.which(info["binary"]):
+        raise RuntimeError(
+            f"{info['binary']} is not available in the live environment. "
+            f"Cannot create {fstype} filesystems."
+        )
+
+
+class Journal:
+    """Transaction journal for partition operations on a single disk."""
+
+    def __init__(self, disk: str, disk_service: "DiskServiceProtocol | None" = None):
+        resolved = _normal_device_path(disk)
+        if not resolved:
+            raise RuntimeError("Invalid disk path for journal.")
+        self.disk: str = resolved
+        self.ops: list[dict] = []
+        self._snapshot_saved = False
+        self._committed = False
+        self._root_partition: Optional[str] = None
+        self._backup_dir: tempfile.TemporaryDirectory[str] | None = None
+        self.irreversible_completed = False
+        if disk_service is not None:
+            self._disk_service = disk_service
+        else:
+            # Lazy import to avoid cycle: partition_ops → services
+            from .services.disk_service import DiskService as _Concrete
+
+            self._disk_service = _Concrete()
+
+    @property
+    def committed(self) -> bool:
+        return self._committed
+
+    @property
+    def root_partition(self) -> Optional[str]:
+        return self._root_partition
+
+    def _save_snapshot(self) -> None:
+        if not self._disk_service.dry_run:
+            _require_sgdisk()
+        self._discard_snapshot()
+        # Keep TemporaryDirectory for Journal lifecycle, but delegate backup+fsync to guard
+        self._backup_dir = tempfile.TemporaryDirectory(prefix="kyth-partition-")
+        backup_path = Path(self._backup_dir.name) / "partition-table.backup"
+        backup = str(backup_path)
+        self._disk_service.backup_table(self.disk, backup)
+        self._snapshot_saved = True
+
+    def _restore_snapshot(self) -> None:
+        if not self._snapshot_saved:
+            return
+        if not self._disk_service.dry_run:
+            _require_sgdisk()
+        if self._backup_dir is None:
+            return
+        backup_path = Path(self._backup_dir.name) / "partition-table.backup"
+        backup = str(backup_path)
+        if not backup_path.exists() and not self._disk_service.dry_run:
+            self._discard_snapshot()
+            return
+        self._disk_service.restore_table(self.disk, backup)
+        self._discard_snapshot()
+
+    def _discard_snapshot(self) -> None:
+        if self._backup_dir is not None:
+            self._backup_dir.cleanup()
+            self._backup_dir = None
+        self._snapshot_saved = False
+
+    def add_op(self, kind: str, params: dict) -> dict:
+        op = {
+            "kind": kind,
+            "params": dict(params),
+            "index": len(self.ops),
+        }
+        self.ops.append(op)
+        return op
+
+    def remove_op(self, index: int) -> bool:
+        if 0 <= index < len(self.ops):
+            self.ops.pop(index)
+            return True
+        return False
+
+    def clear(self):
+        self.ops.clear()
+
+    def pending(self) -> list[dict]:
+        return list(self.ops)
+
+    def _last_mountpoint_op_index(self) -> dict[str, int]:
+        """Map partition -> index of the LAST set_mountpoint op targeting it.
+
+        add_op() always appends (see its docstring-equivalent comment there);
+        it never replaces an earlier pending set_mountpoint for the same
+        partition when the user changes a mountpoint choice before
+        committing — a completely normal flow the WebUI's "Set mount point"
+        control supports by calling this endpoint again. Both validate() and
+        _find_root_partition() must treat every set_mountpoint op except the
+        last one per partition as stale and ignore it entirely, or a
+        superseded choice (e.g. an earlier "/" that was changed to "/home")
+        still counts toward root-partition detection and validation —
+        letting a perfectly valid final layout fail validation, or worse,
+        letting commit() report the WRONG partition as root after the disk
+        has already been repartitioned.
+        """
+        last_index: dict[str, int] = {}
+        for op in self.ops:
+            if op["kind"] == "set_mountpoint":
+                partition = op["params"].get("partition")
+                if partition:
+                    last_index[partition] = op["index"]
+        return last_index
+
+    def _find_root_partition(self) -> Optional[str]:
+        # A partition created with mountpoint="/" in the same journal (the
+        # normal "Create Partition" dialog flow) records its resolved device
+        # name onto the create op's own params during commit() — check that
+        # first, since the partition doesn't exist for list_partitions() to
+        # match against until after the create op has actually run.
+        for op in self.ops:
+            if op["kind"] == "create" and op["params"].get("mountpoint") == "/":
+                name = op["params"].get("partition")
+                if name:
+                    return name
+        # Only each partition's LAST set_mountpoint op counts — see
+        # _last_mountpoint_op_index()'s docstring. This runs after commit()
+        # has already repartitioned the real disk, so getting this wrong
+        # doesn't just fail validation: it reports the WRONG partition as
+        # root to the caller that decides where the OS gets installed.
+        last_mountpoint_op_index = self._last_mountpoint_op_index()
+        for part in list_partitions(self.disk):
+            name = part.get("name")
+            for op in self.ops:
+                if op["kind"] != "set_mountpoint" or op["params"].get("mountpoint") != "/":
+                    continue
+                if op["params"].get("partition") != name:
+                    continue
+                if last_mountpoint_op_index.get(name) != op["index"]:
+                    continue
+                return name
+        return None
+
+    def _initial_table_state(self, current_parts: list[dict]) -> tuple[str, int, int]:
+        """Return (table_type, primary_count, disk_size_bytes) as the disk
+        stands before this journal's ops are applied — the starting point
+        validate() walks ops forward from, since a new_table op can replace
+        either mid-journal.
+
+        `current_parts` is validate()'s own already-fetched list_partitions()
+        result, passed in so this doesn't re-scan the same disk a second time
+        just to count primaries.
+
+        MBR (msdos) tables support at most 4 primary partitions, and this
+        installer does not create extended/logical partitions to work around
+        that limit — validate() fails closed on a 5th instead of letting it
+        hit parted's own cryptic error later."""
+        disks_by_name = {d["name"]: d for d in list_disks()}
+        disk_info = disks_by_name.get(self.disk, {})
+        table_type = (disk_info.get("partition_table") or "").lower()
+        primary_count = (
+            len([pt for pt in current_parts if pt.get("name")])
+            if table_type == "msdos" else 0
+        )
+        disk_size_bytes = _safe_int(disk_info.get("size_bytes"), -1)
+        return table_type, primary_count, disk_size_bytes
+
+    def _validate_not_in_use(self, current_parts: list[dict]) -> list[str]:
+        """Reject any op touching a partition the live disk scan shows as
+        currently mounted or carrying active LVM/LUKS mappings. A
+        set_mountpoint("/", name) op is checked too since it schedules an
+        eventual reformat at install time even without an explicit
+        format/delete/resize op staged for it here.
+
+        A staged new_table wipes the whole disk, so it is rejected when ANY
+        partition on the disk is mounted or in use — not just partitions
+        with their own delete/format/resize op.
+        """
+        errors = []
+        last_mountpoint_op_index = self._last_mountpoint_op_index()
+        wipes_table = any(
+            isinstance(op, dict) and op.get("kind") == "new_table"
+            for op in self.ops
+        )
+        for part in current_parts:
+            name = part.get("name")
+            if not name:
+                continue
+            if not (part.get("current") or part.get("in_use")):
+                continue
+            if wipes_table:
+                errors.append(
+                    f"Cannot create a new partition table on {self.disk} — "
+                    f"{name} is currently mounted or in use."
+                )
+                continue
+            for op in self.ops:
+                kind = op["kind"]
+                params = op["params"]
+                if kind in ("delete", "format", "resize") and params.get("partition") == name:
+                    errors.append(f"Cannot modify {name} — it is currently mounted or in use.")
+                    break
+                if (
+                    kind == "set_mountpoint" and params.get("partition") == name
+                    and params.get("mountpoint") == "/"
+                    and last_mountpoint_op_index.get(name) == op["index"]
+                ):
+                    errors.append(f"Cannot set {name} as the root partition — it is currently mounted or in use.")
+                    break
+        return errors
+
+    def validate(self) -> list[str]:
+        errors = []
+
+        if not self.ops:
+            errors.append("No partition operations have been added.")
+            return errors
+
+        root_count = 0
+        mountpoints: set[str] = set()
+        current_parts = list_partitions(self.disk)
+        allocated: dict[str, tuple[int, int, str]] = {}
+        last_mountpoint_op_index = self._last_mountpoint_op_index()
+        for part in current_parts:
+            name = part.get("name")
+            start = _safe_int(part.get("start_bytes"), -1)
+            size = _safe_int(part.get("size_bytes"), -1)
+            if name:
+                allocated[name] = (
+                    start,
+                    start + size if start >= 0 and size > 0 else -1,
+                    part.get("fstype") or "",
+                )
+        table_type, primary_count, disk_size_bytes = self._initial_table_state(current_parts)
+
+        rust_errors = self._rust_validate(current_parts, table_type, disk_size_bytes)
+        if rust_errors is not None:
+            return rust_errors
+
+        for op in self.ops:
+            kind = op["kind"]
+            p = op["params"]
+
+            if kind == "set_mountpoint":
+                partition_key = p.get("partition")
+                if partition_key and last_mountpoint_op_index.get(partition_key) != op["index"]:
+                    continue  # superseded by a later set_mountpoint for the same partition
+
+            if kind == "new_table":
+                allocated.clear()
+                root_count = 0
+                mountpoints.clear()
+                table_type = (p.get("table_type") or "gpt").lower()
+                primary_count = 0
+                if table_type == "gpt":
+                    allocated["automatic BIOS boot partition"] = (
+                        1024**2,
+                        1024**2 + BIOS_BOOT_BYTES,
+                        "bios_grub",
+                    )
+
+            elif kind == "create":
+                error = self._validate_create_op(p, table_type, primary_count, allocated, mountpoints)
+                if error:
+                    errors.append(error)
+                # Always update state to track root count and mountpoints for final validation
+                start = _safe_int(p.get("start_bytes"), -1)
+                size = _safe_int(p.get("size_bytes"), -1)
+                fs = (p.get("fs_type") or "").lower()
+                allocated[f"new:{op['index']}"] = (start, start + size, fs)
+                if table_type == "msdos":
+                    primary_count += 1
+                mount = (p.get("mountpoint") or "").lower()
+                if mount == "/":
+                    root_count += 1
+                if mount:
+                    mountpoints.add(mount)
+
+            elif kind in ("delete", "format", "resize", "set_mountpoint"):
+                error = self._validate_existing_partition_op(
+                    kind, p, allocated, mountpoints, table_type, disk_size_bytes
+                )
+                if error:
+                    errors.append(error)
+                else:
+                    # Update state after successful validation
+                    partition = _normal_device_path(p.get("partition"))
+                    if kind == "delete":
+                        allocated.pop(partition, None)
+                        if table_type == "msdos":
+                            primary_count = max(0, primary_count - 1)
+                    elif kind == "resize":
+                        start, _end, fs = allocated[partition]
+                        new_size = _safe_int(p.get("new_size_bytes"), -1)
+                        allocated[partition] = (start, start + new_size, fs)
+                    elif kind == "format":
+                        start, end, _fs = allocated[partition]
+                        allocated[partition] = (start, end, (p.get("fs_type") or "").lower())
+                    elif kind == "set_mountpoint":
+                        mount = str(p.get("mountpoint") or "").strip()
+                        if mount == "/":
+                            root_count += 1
+                        if mount:
+                            mountpoints.add(mount)
+
+        if root_count == 0:
+            errors.append("No root partition (/) configured. Mount at least one partition as '/' with Btrfs.")
+        elif root_count > 1:
+            errors.append("Exactly one root partition (/) must be configured.")
+
+        errors.extend(self._validate_not_in_use(current_parts))
+
+        return errors
+
+    def _rust_validate(
+        self, current_parts: list[dict], table_type: str, disk_size_bytes: int,
+    ) -> list[str] | None:
+        """Use the Rust journal validator when the native helper is installed.
+
+        Development environments without the native helper retain the Python
+        validator as a compatibility fallback. Once the helper is installed,
+        a missing operation, malformed response, or execution failure refuses
+        the commit rather than silently switching validators.
+        """
+        if not shutil.which("kyth-installer-exec"):
+            return None
+        from .runner import run_command
+        from .system import _as_root
+
+        payload = {
+            "journal": {
+                "disk": self.disk,
+                "ops": self.ops,
+                "committed": self._committed,
+                "root_partition": self._root_partition,
+                "irreversible_completed": self.irreversible_completed,
+            },
+            "current_parts": current_parts,
+            "table_type": table_type,
+            "disk_size_bytes": max(0, disk_size_bytes),
+        }
+        try:
+            result = run_command(
+                _as_root(["kyth-installer-exec", "--operation", "journal-validate"]),
+                input=json.dumps(payload, separators=(",", ":")),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            response = json.loads(result.stdout or "{}")
+            errors = response.get("errors")
+            valid = response.get("valid")
+            if (
+                not isinstance(valid, bool)
+                or not isinstance(errors, list)
+                or not all(isinstance(error, str) for error in errors)
+                or valid != (not errors)
+            ):
+                raise RuntimeError("Rust journal validator returned an invalid response")
+            return errors
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, TypeError) as exc:
+            _logger.error("Rust journal validation failed; refusing partition commit: %s", exc)
+            return ["Rust journal validation failed; refusing to commit partition changes."]
+
+    def rust_validate_target(self, partition: str) -> str | None:
+        """Validate a staged partition target through the native boundary.
+
+        The compatibility parent-disk probe remains available only when the
+        helper is absent. Once installed, malformed output or a failed helper
+        invocation fails closed instead of allowing Python to silently resume
+        target validation.
+        """
+        if not shutil.which("kyth-installer-exec"):
+            return None
+        from .runner import run_command
+        from .system import _as_root
+
+        try:
+            result = run_command(
+                _as_root(["kyth-installer-exec", "--operation", "journal-target"]),
+                input=json.dumps(
+                    {
+                        "disk": self.disk,
+                        "partition": partition,
+                    },
+                    separators=(",", ":"),
+                ),
+                text=True,
+                capture_output=True,
+                check=True,
+                timeout=30,
+            )
+            response = json.loads(result.stdout or "{}")
+            valid = response.get("valid")
+            error = response.get("error")
+            if not isinstance(valid, bool) or (error is not None and not isinstance(error, str)):
+                raise RuntimeError("Rust journal target validator returned an invalid response")
+            if valid:
+                return None
+            return error or "Partition target validation failed."
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError, TypeError) as exc:
+            _logger.error("Rust journal target validation failed: %s", exc)
+            return "Rust journal target validation failed; refusing to stage partition changes."
+
+    def _rust_commit(self, log, record=None) -> dict | None:
+        """Run the complete journal transaction in the native helper."""
+        if self._disk_service.dry_run or not shutil.which("kyth-installer-exec"):
+            return None
+        from .streaming import StreamingCommandRunner
+        from .system import _as_root
+        from .fsresize import validate_shrink_request
+
+        # Keep the last-moment power and encryption guard in the compatibility
+        # layer while Rust owns the actual filesystem and partition sequence.
+        # Run every guard before the first mutation so a later resize cannot
+        # discover that the machine was unplugged mid-transaction.
+        for operation in self.ops:
+            if operation.get("kind") != "resize":
+                continue
+            params = operation.get("params") or {}
+            partition = str(params.get("partition") or "")
+            current_parts = list_partitions(self.disk)
+            current = next(
+                (part for part in current_parts if part.get("name") == partition),
+                None,
+            )
+            if current is None:
+                raise RuntimeError(f"Resize: {partition} was not found on {self.disk}.")
+            validate_shrink_request(partition, str(current.get("fstype") or ""))
+
+        response: dict = {}
+
+        def consume(line: str) -> None:
+            stripped = line.strip()
+            try:
+                event = json.loads(stripped)
+            except (TypeError, ValueError):
+                if stripped:
+                    log(stripped)
+                return
+            if not isinstance(event, dict):
+                return
+            if event.get("event") == "step":
+                if record is not None:
+                    try:
+                        record(
+                            str(event.get("kind") or "partition"),
+                            str(event.get("status") or "started"),
+                            str(event.get("target") or self.disk),
+                        )
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+                        _logger.debug(
+                            "journal bookkeeping write failed for native step: %s",
+                            exc,
+                            exc_info=True,
+                        )
+            elif "ok" in event:
+                response.update(event)
+
+        command = _as_root(["kyth-installer-exec", "--operation", "journal-commit"])
+        runner = StreamingCommandRunner(rx_bytes=lambda: 0, publish=lambda _event: None)
+        runner.run(
+            command,
+            0,
+            0,
+            consume,
+            lambda _pct: None,
+            stall_timeout=3600,
+            absolute_timeout=3600,
+            stdin_data=json.dumps(
+                {
+                    "journal": {
+                        "disk": self.disk,
+                        "ops": self.ops,
+                        "committed": self._committed,
+                        "root_partition": self._root_partition,
+                        "irreversible_completed": self.irreversible_completed,
+                    }
+                },
+                separators=(",", ":"),
+            ),
+        )
+        if not response or not isinstance(response.get("ok"), bool):
+            raise RuntimeError("Rust journal executor returned no valid response")
+        journal_data = response.get("journal")
+        if journal_data is not None:
+            if not isinstance(journal_data, dict) or not isinstance(journal_data.get("ops"), list):
+                raise RuntimeError("Rust journal executor returned malformed journal metadata")
+            self.ops = journal_data["ops"]
+            self._committed = bool(journal_data.get("committed"))
+            self._root_partition = journal_data.get("root_partition")
+            self.irreversible_completed = bool(journal_data.get("irreversible_completed"))
+        return response
+
+    def _validate_create_op(self, p: dict, table_type: str, primary_count: int,
+                            allocated: dict[str, tuple[int, int, str]],
+                            mountpoints: set[str]) -> str | None:
+        """Validate a create partition operation. Returns error message or None."""
+        start = _safe_int(p.get("start_bytes"), -1)
+        size = _safe_int(p.get("size_bytes"), -1)
+        fs = (p.get("fs_type") or "").lower()
+        mount = (p.get("mountpoint") or "").lower()
+
+        if start < 0 or size < 0:
+            return "Create partition: invalid start or size."
+
+        end = start + size
+        for s, e, n in allocated.values():
+            if s >= 0 and e > s and start < e and end > s:
+                return f"New partition overlaps with existing region ({n})."
+
+        if table_type == "msdos" and primary_count >= 4:
+            return (
+                "MBR (msdos) partition tables support at most 4 primary "
+                "partitions, and this installer does not create extended/"
+                "logical partitions. Use a GPT table instead, or remove a "
+                "partition from this layout."
+            )
+
+        if mount == "/":
+            if fs != "btrfs":
+                return "Root partition (/) must use the Btrfs filesystem."
+
+        if mount == "/boot/efi" and fs != "fat32":
+            return "EFI System Partition (/boot/efi) must use FAT32."
+
+        if mount and mount in mountpoints:
+            return f"Mount point {mount} is assigned more than once."
+
+        return None
+
+    def _validate_existing_partition_op(self, kind: str, p: dict,
+                                        allocated: dict[str, tuple[int, int, str]],
+                                        mountpoints: set[str],
+                                        table_type: str,
+                                        disk_size_bytes: int = -1) -> str | None:
+        """Validate an operation on an existing partition. Returns error message or None."""
+        partition = _normal_device_path(p.get("partition"))
+        if not partition or _parent_disk(partition) != self.disk:
+            return f"{kind.replace('_', ' ').title()}: partition does not belong to {self.disk}."
+
+        if partition not in allocated:
+            return f"{kind.replace('_', ' ').title()}: {partition} is not present on {self.disk}."
+
+        if kind == "resize":
+            new_size = _safe_int(p.get("new_size_bytes"), -1)
+            if new_size <= 0:
+                return "Resize partition: invalid new size."
+            # A resize only moves this partition's own boundaries — it must
+            # not grow into a neighboring region or past the end of the
+            # disk. This is the same overlap invariant _validate_create_op
+            # enforces for brand-new partitions, kept here so the Journal
+            # itself is the safety gate regardless of which caller staged
+            # the resize op (the current UI only offers shrinking via
+            # InstallerService.resize_partition, but that's a caller-side
+            # restriction, not something this validator should rely on).
+            start, _end, _fs = allocated[partition]
+            new_end = start + new_size
+            if disk_size_bytes > 0 and new_end > disk_size_bytes:
+                return f"Resize partition: new size for {partition} extends past the end of {self.disk}."
+            for name, (other_start, other_end, _other_fs) in allocated.items():
+                if name == partition:
+                    continue
+                if other_start >= 0 and other_end > other_start and start < other_end and new_end > other_start:
+                    return f"Resize partition: new size for {partition} would overlap with existing region ({name})."
+
+        elif kind == "set_mountpoint":
+            mount = str(p.get("mountpoint") or "").strip()
+            fs = allocated[partition][2].lower()
+            if mount == "/":
+                if fs != "btrfs":
+                    return "Root partition (/) must use the Btrfs filesystem."
+            if mount == "/boot/efi" and fs not in ("fat", "fat32", "vfat"):
+                return "EFI System Partition (/boot/efi) must use FAT32."
+            if mount and mount in mountpoints:
+                return f"Mount point {mount} is assigned more than once."
+
+        return None
+
+    def _commit_new_table(self, p: dict, log) -> None:
+        table_type = p.get("table_type", "gpt")
+        log(f"Creating new {table_type.upper()} partition table on {self.disk}...")
+        self._disk_service.create_label(self.disk, table_type)
+        if table_type == "gpt":
+            before = set()
+            if not self._disk_service.dry_run:
+                before = {part["name"] for part in list_partitions(self.disk, strict=True) if part.get("name")}
+            log("Creating BIOS boot partition required by the KythOS boot image...")
+            self._disk_service.create_unformatted_partition(
+                self.disk, 1024**2, BIOS_BOOT_BYTES, "biosboot"
+            )
+            if self._disk_service.dry_run:
+                part_num = 99
+            else:
+                created = _latest_partition_on_disk(
+                    self.disk, before, start_bytes=1024**2, size_bytes=BIOS_BOOT_BYTES,
+                )
+                if not created:
+                    raise RuntimeError("Could not find the automatic BIOS boot partition.")
+                part_num = _partition_number(created)
+            self._disk_service.set_partition_flag(self.disk, part_num, "bios_grub")
+
+    def _commit_create(self, p: dict, log) -> None:
+        start = _safe_int(p.get("start_bytes"), 0)
+        size = _safe_int(p.get("size_bytes"), 0)
+        fs = p.get("fs_type", "btrfs")
+        label = p.get("label", "")
+
+        if start <= 0 or size <= 0:
+            raise RuntimeError(f"Create partition: invalid start {start} or size {size}.")
+
+        before = set()
+        if not self._disk_service.dry_run:
+            before = {pt["name"] for pt in list_partitions(self.disk, strict=True) if pt.get("name")}
+
+        log(f"Creating {_human_size(size)} partition ({fs}) at offset {start}...")
+        self._disk_service.create_partition(self.disk, start, size, fs, label)
+
+        if self._disk_service.dry_run:
+            created = f"{self.disk}p99"
+        else:
+            created = _latest_partition_on_disk(
+                self.disk, before, start_bytes=start, size_bytes=size,
+            )
+            if not created:
+                raise RuntimeError("Could not find the newly created partition.")
+        # Record the resolved device name back onto the op so
+        # _find_root_partition() (and anything else inspecting the
+        # journal after commit) can tell which real partition this
+        # create op produced.
+        p["partition"] = created
+        p["_created_this_journal"] = True
+
+        if fs != "linux-swap":
+            log(f"Formatting {created} as {fs}...")
+            self._disk_service.format_filesystem(created, fs, label)
+
+        if p.get("mountpoint") == "/boot/efi":
+            part_num = _partition_number(created) if not self._disk_service.dry_run else 99
+            log(f"Marking {created} as an EFI System Partition...")
+            self._disk_service.set_partition_flag(self.disk, part_num, "esp")
+
+        log(f"Created {created}")
+
+    def _commit_delete(self, p: dict, log) -> None:
+        part_name = p.get("partition", "")
+        if not part_name:
+            raise RuntimeError("Delete: no partition specified.")
+        part_num = _partition_number(part_name) if not self._disk_service.dry_run else 99
+        log(f"Deleting {part_name}...")
+        self._disk_service.delete_partition(self.disk, part_num)
+
+    def _commit_resize(self, p: dict, log) -> None:
+        part_name = p.get("partition", "")
+        new_size = _safe_int(p.get("new_size_bytes"), 0)
+        if not part_name or new_size <= 0:
+            raise RuntimeError(f"Resize: invalid partition {part_name} or size {new_size}.")
+        if not self._disk_service.dry_run:
+            # parted only moves the partition table boundary — it never
+            # touches the filesystem inside. Re-read the current fstype
+            # right before shrinking (not whatever it was when this op was
+            # staged) and shrink the filesystem itself first, or refuse for
+            # any type without a safe shrink path. Skipping this would
+            # silently corrupt whatever filesystem already lives here.
+            current = {pt["name"]: pt for pt in list_partitions(self.disk, strict=True)}
+            part_info = current.get(part_name)
+            if not part_info:
+                raise RuntimeError(f"Resize: {part_name} was not found on {self.disk}.")
+            fstype = (part_info.get("fstype") or "").lower()
+            log(f"Shrinking the {fstype or 'unknown'} filesystem on {part_name} "
+                "before moving the partition boundary...")
+            shrink_filesystem(part_name, fstype, new_size, log)
+        part_num = _partition_number(part_name) if not self._disk_service.dry_run else 99
+        start = _partition_start_bytes(part_name) if not self._disk_service.dry_run else 1024**2
+        log(f"Resizing {part_name} to {_human_size(new_size)}...")
+        self._disk_service.resize_partition(self.disk, part_num, start, new_size)
+
+    def _commit_format(self, p: dict, log) -> None:
+        part_name = p.get("partition", "")
+        fs = p.get("fs_type", "btrfs")
+        label = p.get("label", "")
+        if not part_name:
+            raise RuntimeError("Format: no partition specified.")
+        log(f"Formatting {part_name} as {fs}...")
+        self._disk_service.format_filesystem(part_name, fs, label)
+
+    def commit(self, log, record=None) -> str:
+        """Apply every staged op against the disk.
+
+        *record*, when supplied, is called as ``record(kind, status, target)``
+        immediately before and after each destructive op, with the caller
+        responsible for persisting it durably. The two calls bracket the
+        window where the disk and the journal disagree: a step left at
+        "started" is exactly the operation that was in flight when the machine
+        died, which is the only way a later recovery pass can tell a completed
+        wipe from a half-written partition table.
+        """
+        # Validate first, mutate never on failure: the service calls
+        # validate() separately, but that leaves a TOCTOU window (and direct
+        # commit() callers skip validation entirely). Re-running the pure
+        # checks here against a fresh live scan means a stale or hand-built
+        # journal can never reach the first destructive op.
+        errors = self.validate()
+        if errors:
+            raise RuntimeError(
+                "Partition validation failed: " + "; ".join(errors)
+            )
+        rust_response = self._rust_commit(log, record=record)
+        if rust_response is not None:
+            if not rust_response.get("ok"):
+                self._committed = False
+                self.irreversible_completed = bool(rust_response.get("irreversible"))
+                raise RuntimeError(
+                    str(rust_response.get("message") or "Rust journal commit failed.")
+                )
+            return str(rust_response.get("root_partition") or "")
+
+        if not self._disk_service.dry_run:
+            _require_parted()
+        from .storage_guard import DiskLease
+
+        def _note(kind: str, status: str, target: str) -> None:
+            if record is None:
+                return
+            try:
+                record(kind, status, target)
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
+                # A failed bookkeeping write must never abort a partition
+                # commit that is already mid-flight on the real disk.
+                _logger.debug("journal bookkeeping write failed for %s %s: %s", kind, target, exc, exc_info=True)
+
+        from .storage_guard import PartitionTableGuard
+
+        with DiskLease(self.disk, log, exclusive=True):
+            # Keep the journal snapshot for explicit rollback compatibility;
+            # the Rust disk helper owns backup-file and parent-directory sync.
+            self._save_snapshot()
+            with PartitionTableGuard(
+                self.disk, log, disk_service=self._disk_service,
+                should_restore=lambda: not self.irreversible_completed,
+            ):
+                for op in self.ops:
+                    kind = op["kind"]
+                    p = op["params"]
+
+                    # "set_mountpoint" ops are pure journal metadata (consumed by
+                    # _find_root_partition() below) — no disk operation of their
+                    # own, so they are not bracketed as destructive steps.
+                    if kind == "set_mountpoint":
+                        continue
+
+                    target = str(p.get("partition") or self.disk)
+                    _note(kind, "started", target)
+                    try:
+                        if kind == "new_table":
+                            self._commit_new_table(p, log)
+                        elif kind == "create":
+                            self._commit_create(p, log)
+                        elif kind == "delete":
+                            self._commit_delete(p, log)
+                        elif kind == "resize":
+                            self._commit_resize(p, log)
+                            self.irreversible_completed = True
+                        elif kind == "format":
+                            self._commit_format(p, log)
+                            created_here = {
+                                item["params"].get("partition")
+                                for item in self.ops
+                                if item["kind"] == "create"
+                                and item["params"].get("_created_this_journal")
+                            }
+                            if p.get("partition") not in created_here:
+                                self.irreversible_completed = True
+                    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
+                        # PartitionTableGuard restores the table unless an
+                        # irreversible filesystem op already completed.
+                        self._committed = False
+                        raise
+                    # _commit_create resolves the real device name onto the op, so
+                    # re-read it rather than reporting the pre-commit placeholder.
+                    _note(kind, "completed", str(p.get("partition") or self.disk))
+
+                self._root_partition = self._find_root_partition()
+                self._committed = True
+                log("Partition changes committed successfully.")
+                root = self._root_partition or ""
+                return root
+
+    def rollback(self, log) -> None:
+        if not self._snapshot_saved:
+            log("No partition snapshot to restore from.")
+            self.ops.clear()
+            return
+        log("Rolling back partition changes...")
+        self._restore_snapshot()
+        self.ops.clear()
+        self._committed = False
+        self._root_partition = None
+        log(
+            "Partition table restored to its pre-commit layout. "
+            "This restores the table only — filesystems already formatted or "
+            "shrunk by a partial commit were not rolled back."
+        )

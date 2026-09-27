@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-journal-tune — journal.toml → 99-kyth-perf.conf
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-journal-tune "$@"; }
-case "${1:-status}" in
-    status) python3 -c 'from kyth_shared.journal_tune import load_journal,journal_status; c=load_journal(); print(f"perf={c[\"perf\"]} SystemMaxUse={c[\"system_max_use\"]} RuntimeMaxUse={c[\"runtime_max_use\"]} active_dropin={journal_status()}")'; echo "base /etc/systemd/journald.conf.d/99-kyth.conf remains";;
-    on|enable) need_root "$@"; python3 -c 'from kyth_shared.journal_tune import load_journal,save_journal,generate_journal_conf; c=load_journal(); c["perf"]=True; c["system_max_use"]="200M"; c["runtime_max_use"]="64M"; save_journal(c); generate_journal_conf(c)'; systemctl restart systemd-journald 2>&1 | tail -n 5 || true; echo "journal perf enabled 200M/64M" ;;
-    off|disable) need_root "$@"; python3 -c 'from kyth_shared.journal_tune import load_journal,save_journal,generate_journal_conf; c=load_journal(); c["perf"]=False; save_journal(c); generate_journal_conf(c)'; systemctl restart systemd-journald 2>&1 | tail -n 5 || true; echo "journal perf disabled, base 500M/128M restored" ;;
-    apply) need_root "$@"; python3 -c 'from kyth_shared.journal_tune import load_journal,generate_journal_conf; generate_journal_conf(load_journal())';;
-    *) echo "Usage: kyth-journal-tune [status|on|off|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

@@ -1,0 +1,45 @@
+[package]
+name = "kyth-hub-shell"
+version = "0.1.0"
+description = "Native shell for the Kyth Hub web frontend"
+edition = "2021"
+rust-version = "1.82" # matches ../../kyth-shared-rs's MSRV (Option::is_none_or)
+
+[[bin]]
+name = "kyth-hub-shell"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-single-instance = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+url = "2"
+# Rust port of kyth_shared (see that crate's MIGRATION.md) — the four
+# bridge commands below call straight into it, no subprocess.
+kyth-shared = { path = "../../kyth-shared-rs", features = ["rusqlite"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[features]
+# Tauri picks dev-vs-production at compile time from this feature, not from
+# the cargo profile: tauri-macros' context.rs sets `dev: cfg!(not(feature =
+# "custom-protocol"))`, and a `dev` context throws away frontendDist and
+# points the webview at tauri.conf.json's devUrl instead. `tauri build`
+# passes the feature; the plain `cargo build --release` the image's
+# hub-web-builder stage runs does not, so it has to be a default here or the
+# shipped binary opens on "Could not connect to localhost: Connection
+# refused". `npm run tauri:dev` still gets the dev server — the Tauri CLI
+# builds with --no-default-features.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"

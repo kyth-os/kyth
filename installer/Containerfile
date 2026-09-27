@@ -4,19 +4,68 @@
 #
 # Build with:
 #   sudo podman build --cap-add SYS_ADMIN --security-opt label=disable \
-#     --build-arg BASE_IMAGE=ghcr.io/mrtrick37/kyth:latest \
+#     --build-arg BASE_IMAGE=ghcr.io/kyth-os/kyth:latest \
 #     --build-arg SOURCE_TAG=latest \
 #     -t kyth-live:build -f installer/Containerfile .
 
-ARG BASE_IMAGE=ghcr.io/mrtrick37/kyth:latest
+ARG BASE_IMAGE=ghcr.io/kyth-os/kyth:latest
+
+# ── Rust installer UI builder ────────────────────────────────────────────────
+# Keep Node/Rust/WebKit development dependencies out of the live image. The
+# resulting clients are unprivileged. The native installer daemon owns the
+# root-facing Unix socket and all destructive installer operations.
+FROM registry.fedoraproject.org/fedora:44@sha256:48628b48e6d033c1c5ed5adc7ce440b1d9906e349560ad9f57ef0b0beae78c84 AS installer-web-builder
+ARG INSTALLER_BUILD_HASH=unset
+RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
+        cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \
+        webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel gtk3-devel dbus-devel && \
+    dnf5 clean all
+# kyth-shared-rs is a sibling of kyth-installer-web (src/kyth-shared-rs, not
+# under src/kyth-installer-web) — src-tauri's Cargo.toml depends on it via a
+# `../../kyth-shared-rs` path dependency, so it needs copying to the same
+# relative position here, not folded into the kyth-installer-web COPY below.
+# (Mirrors the hub-web-builder stage in the top-level Dockerfile.)
+COPY src/kyth-shared-rs /build/kyth-shared-rs
+# system::app_suggestions embeds build_files/exe-handler-apps.json via
+# include_str!("../../../../build_files/exe-handler-apps.json"), a path
+# written relative to the crate's real position in the repo. Copied here one
+# level shallower (/build/kyth-shared-rs instead of
+# /build/src/kyth-shared-rs), that same four-level-up path resolves to
+# /build_files, not /build/build_files — copy the file there to match rather
+# than editing the crate. See the top-level Dockerfile's identical comment.
+COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
+COPY src/kyth-installer-web /build/kyth-installer-web
+# Bust the builder cache whenever installer inputs change: without this,
+# Docker/Podman reuses stale npm/cargo layers because the COPY cache keys
+# only cover the copied trees, not their content at this layer. (The ARG
+# must be re-declared in this stage; the pre-FROM scope does not propagate.)
+RUN : "cache-bust:installer-web=${INSTALLER_BUILD_HASH}"
+WORKDIR /build/kyth-installer-web
+RUN rm -f node_modules && npm ci && npm run build
+WORKDIR /build/kyth-installer-web/src-tauri
+RUN cargo build --release --locked && \
+    cargo build --release --locked --bin kyth-installer-native && \
+    cargo build --release --locked --bin kyth-installerd && \
+    cargo build --release --locked --bin kyth-installer-exec && \
+    cp target/release/kyth-installer-shell /build/kyth-installer-shell && \
+    cp target/release/kyth-installer-native /build/kyth-installer-native && \
+    cp target/release/kyth-installerd /build/kyth-installerd && \
+    cp target/release/kyth-installer-exec /build/kyth-installer-exec
+
 FROM ${BASE_IMAGE}
 ARG BASE_IMAGE
 ARG INSTALL_SOURCE_IMAGE=${BASE_IMAGE}
+ARG INSTALLER_BUILD_HASH=unset
 ARG SOURCE_TAG=latest
 
+COPY --from=installer-web-builder /build/kyth-installer-shell /usr/bin/kyth-installer-shell
+COPY --from=installer-web-builder /build/kyth-installer-native /usr/bin/kyth-installer-native
+COPY --from=installer-web-builder /build/kyth-installerd /usr/bin/kyth-installerd
+COPY --from=installer-web-builder /build/kyth-installer-exec /usr/bin/kyth-installer-exec
+
 # Replace inherited repo files with a minimal known-good set. Keep [updates]
-# enabled so live-only packages (notably Chromium, the installer's kiosk
-# browser) install with current security fixes, not the GA release version.
+# enabled so live-only WebKitGTK packages install with current security fixes,
+# not the GA release version.
 RUN mkdir -p /etc/yum.repos.d.bak && \
     mv /etc/yum.repos.d/*.repo /etc/yum.repos.d.bak/ 2>/dev/null || true && \
     printf '%s\n' \
@@ -39,12 +88,20 @@ RUN mkdir -p /etc/yum.repos.d.bak && \
         'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-fedora-$releasever-$basearch' \
         > /etc/yum.repos.d/fedora.repo
 
+ARG CALAMARES=0
+ARG INSTALLER_BUILD_HASH=unset
+# build.sh must fail this layer when IT fails: a trailing `; if ...; fi`
+# used to mask its exit code, committing half-built payloads (missing
+# /boot/efi, iso.yaml) that died later in Titanoboa instead of here.
 RUN --mount=type=bind,source=installer/build.sh,target=/src/installer/build.sh \
     --mount=type=bind,source=installer/iso.yaml,target=/src/installer/iso.yaml \
+    --mount=type=bind,source=installer/calamares,target=/src/installer/calamares \
     --mount=type=bind,source=build_files/scripts,target=/src/build_files/scripts \
-    --mount=type=bind,source=build_files/kyth-installer,target=/src/build_files/kyth-installer \
-    --mount=type=bind,source=build_files/kyth_shared,target=/src/build_files/kyth_shared \
     --mount=type=bind,source=build_files/kyth-launch-installer,target=/src/build_files/kyth-launch-installer \
+    --mount=type=bind,source=build_files/kyth-installerd.service,target=/src/build_files/kyth-installerd.service \
+    --mount=type=bind,source=build_files/kyth-vm-acceptance.service,target=/src/build_files/kyth-vm-acceptance.service \
+    : "cache-bust:installer=${INSTALLER_BUILD_HASH}" && \
     env BASE_IMAGE="${BASE_IMAGE}" INSTALL_SOURCE_IMAGE="${INSTALL_SOURCE_IMAGE}" \
-    SOURCE_TAG="${SOURCE_TAG}" \
-    bash /src/installer/build.sh
+    SOURCE_TAG="${SOURCE_TAG}" CALAMARES="${CALAMARES}" \
+    bash /src/installer/build.sh && \
+    if [ "${CALAMARES}" = "1" ]; then mkdir -p /etc/calamares/modules && cp -r /src/installer/calamares/* /etc/calamares/ 2>/dev/null || true; fi

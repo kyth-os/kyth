@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-dirty-expire — 100 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-dirty-expire "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.dirty_expire import load_dirty_expire, dirty_expire_status; c=load_dirty_expire(); print(f\"profile={c['profile']} active={dirty_expire_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.dirty_expire import load_dirty_expire,save_dirty_expire,generate_dirty_expire; c=load_dirty_expire(); c['profile']='gaming'; save_dirty_expire(c); generate_dirty_expire(c)"; sysctl --system >/dev/null 2>&1 || true; echo "dirty expire gaming 100" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.dirty_expire import load_dirty_expire,save_dirty_expire,generate_dirty_expire; c=load_dirty_expire(); c['profile']='balanced'; save_dirty_expire(c); generate_dirty_expire(c)"; echo "dirty expire balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.dirty_expire import load_dirty_expire,generate_dirty_expire; generate_dirty_expire(load_dirty_expire())" ;;
-    *) echo "Usage: kyth-dirty-expire [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

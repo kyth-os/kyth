@@ -60,6 +60,18 @@ class InstallerRunnerTests(unittest.TestCase):
         )
 
     @mock.patch("kyth_installer.runner.subprocess.Popen")
+    def test_spawn_command_accepts_tauri_installer_sudo_form(self, mock_popen):
+        command = [
+            "sudo", "-u", "liveuser", "env", "DISPLAY=:0",
+            "XDG_RUNTIME_DIR=/run/user/1000", "kyth-installer-shell",
+            "--bootstrap-token", "test-token", "--session-token", "session-token",
+        ]
+
+        spawn_command(command)
+
+        mock_popen.assert_called_once_with(command, shell=False)
+
+    @mock.patch("kyth_installer.runner.subprocess.Popen")
     def test_spawn_command_uses_the_same_validated_boundary(self, mock_popen):
         spawn_command(["echo", Path("message")], stdout=subprocess.PIPE)
 
@@ -101,7 +113,7 @@ class InstallerRunnerTests(unittest.TestCase):
         result = run_command(["false"])
 
         self.assertEqual(result.returncode, 1)
-        mock_run.assert_called_once_with(["false"], timeout=None, shell=False, check=False)
+        mock_run.assert_called_once_with(["false"], timeout=30, shell=False, check=False)
 
     @mock.patch("kyth_installer.runner.subprocess.run")
     def test_timeout_gets_context(self, mock_run):

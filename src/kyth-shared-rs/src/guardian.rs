@@ -1,0 +1,1331 @@
+//! Port of `kyth_shared.guardian`'s READ path — Guardian's own on-disk
+//! state (`~/.local/state/kyth/guardian.json`, written by
+//! `kyth-guardian.service` or a user-initiated repair) is what this
+//! reads; this module never writes it, and never runs `guardian.py`'s
+//! `collect_symptoms()`/`inspect()` live probe sweep (a dozen-plus
+//! subprocess calls across audio/network/bluetooth/portal/plasma/
+//! flatpak/storage/...). Same "read the cache, don't trigger fresh work"
+//! boundary as `system::probe`. The one exception is `execute_recipe`,
+//! which runs a repair the user explicitly asked for — under the same
+//! eligibility gate `guardian.py:execute_recipe` applies.
+
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use serde_json::Value;
+
+/// Global single-flight slot for user-initiated Guardian repairs.
+static RECIPE_SLOT: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+pub const SCHEMA_VERSION: u32 = 1;
+/// Same as `guardian.py`'s `NOTIFY_THROTTLE_S` — the window
+/// `pending_recommendations` considers "still relevant" for the mission
+/// bar / sidebar badge.
+pub const NOTIFY_THROTTLE_S: f64 = 6.0 * 3600.0;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ModelDecision {
+    pub recipe_id: String,
+    pub confidence: f64,
+    pub explanation: String,
+    pub probe_id: Option<String>,
+}
+
+/// Strict, read-only parser for a local-model Guardian suggestion. Callers
+/// still own model invocation and must apply the normal eligibility gate.
+pub fn parse_model_decision(
+    output: &str,
+    allowed: &[&str],
+    probes: &[&str],
+) -> Option<ModelDecision> {
+    let raw = output
+        .rsplit('{')
+        .next()?
+        .trim_end_matches(|c: char| c.is_whitespace() || c == '}');
+    let value: Value = serde_json::from_str(&format!("{{{raw}}}")).ok()?;
+    let object = value.as_object()?;
+    if object.len() != 4
+        || !["recipe_id", "confidence", "explanation", "probe_id"]
+            .iter()
+            .all(|key| object.contains_key(*key))
+    {
+        return None;
+    }
+    let recipe_id = object.get("recipe_id")?.as_str()?.to_string();
+    let confidence = object.get("confidence")?.as_f64()?;
+    let explanation = object
+        .get("explanation")?
+        .as_str()?
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(400)
+        .collect::<String>();
+    let probe_id = object.get("probe_id")?.as_str().map(str::to_string);
+    if !allowed.contains(&recipe_id.as_str())
+        || !recipes().iter().any(|recipe| recipe.id == recipe_id)
+        || !(0.0..=1.0).contains(&confidence)
+        || explanation.len() > 400
+        || probe_id
+            .as_deref()
+            .is_some_and(|probe| !probes.contains(&probe))
+    {
+        return None;
+    }
+    Some(ModelDecision {
+        recipe_id,
+        confidence,
+        explanation,
+        probe_id,
+    })
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Recipe {
+    pub id: &'static str,
+    pub title: &'static str,
+    pub component: &'static str,
+    /// Fixed argv `guardian.py` runs for this repair, empty for an advisory
+    /// recipe that only notifies. Static data, never built from input.
+    pub command: &'static [&'static str],
+    pub risk: &'static str,
+    pub requires_auth: bool,
+    pub automatic: bool,
+    pub cooldown: u32,
+    pub verification: &'static str,
+    pub recovery: &'static str,
+}
+
+/// Same table as `guardian.py`'s `RECIPES` — static policy data, not
+/// logic, so it's ported in full even though today's callers only read
+/// `title`/`risk`. This is what the rest of Guardian's migration builds
+/// on next (execution/cooldown/verification), so it stays faithful to the
+/// Python original rather than trimmed to current usage. Keep in sync by
+/// hand; `guardian.py`'s copy is still the source of truth for what
+/// actually gets executed.
+pub fn recipes() -> &'static [Recipe] {
+    &[
+        Recipe { id: "audio.restart", title: "Restart audio services", component: "audio", command: &["systemctl", "--user", "restart", "pipewire.service", "pipewire-pulse.service", "wireplumber.service"], risk: "safe", requires_auth: false, automatic: true, cooldown: 900, verification: "audio", recovery: "Open Hub > This PC > Repair and inspect the audio stack." },
+        Recipe { id: "network.restart-user", title: "Restart the NetworkManager user integration", component: "network", command: &["systemctl", "--user", "restart", "plasma-nm.service"], risk: "safe", requires_auth: false, automatic: true, cooldown: 900, verification: "network", recovery: "Open KDE Network Settings; saved connections are not changed." },
+        Recipe { id: "flatpak.refresh-metadata", title: "Refresh Flatpak metadata", component: "flatpak", command: &["flatpak", "update", "--appstream", "--user", "--noninteractive"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "flatpak", recovery: "Retry from Hub > Apps." },
+        Recipe { id: "flatpak.repair-user", title: "Repair user Flatpak data", component: "flatpak", command: &["flatpak", "repair", "--user"], risk: "confirm", requires_auth: false, automatic: false, cooldown: 3600, verification: "flatpak", recovery: "No apps are removed; retry the app from Hub." },
+        Recipe { id: "bluetooth.restart", title: "Restart Bluetooth", component: "bluetooth", command: &["sudo", "-A", "systemctl", "restart", "bluetooth.service"], risk: "confirm", requires_auth: true, automatic: false, cooldown: 1800, verification: "bluetooth", recovery: "Re-open Bluetooth Settings and reconnect the device." },
+        Recipe { id: "portal.restart-user", title: "Restart desktop portals", component: "portal", command: &["systemctl", "--user", "restart", "xdg-desktop-portal.service"], risk: "safe", requires_auth: false, automatic: true, cooldown: 900, verification: "portal", recovery: "If file pickers or screen sharing were blank, retry them now." },
+        Recipe { id: "plasma.restart-user", title: "Restart Plasma shell", component: "plasma", command: &["systemctl", "--user", "restart", "plasma-plasmashell.service"], risk: "safe", requires_auth: false, automatic: true, cooldown: 900, verification: "plasma", recovery: "If the panel or task manager vanished, it should reappear. Open windows are kept." },
+        Recipe { id: "disk.review", title: "Review storage usage", component: "storage", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 3600, verification: "storage", recovery: "Open Hub > This PC > Hardware > Storage; Guardian never deletes files." },
+        Recipe { id: "storage.maint", title: "Run storage maintenance", component: "storage", command: &["/usr/bin/kyth-btrfs-maint"], risk: "safe", requires_auth: false, automatic: false, cooldown: 86400, verification: "storage", recovery: "Gated btrfs scrub/balance (AC+idle+!gaming). Not a timer auto-fix — a scrub can outlive the 90s oneshot." },
+        Recipe { id: "firmware.refresh", title: "Refresh firmware metadata", component: "firmware", command: &["flock", "-w", "10", "/run/kyth-fwupd.lock", "fwupdmgr", "refresh", "--force"], risk: "safe", requires_auth: false, automatic: true, cooldown: 43200, verification: "firmware", recovery: "Refreshes LVFS metadata only; does not flash devices." },
+        Recipe { id: "display.reconfigure", title: "Re-apply display outputs", component: "display", command: &["systemctl", "--user", "restart", "plasma-kscreen.service"], risk: "safe", requires_auth: false, automatic: true, cooldown: 21600, verification: "display", recovery: "Restarts KScreen and enables connected outputs after dock/HDR change; no reboot." },
+        Recipe { id: "controller.repair", title: "Restart controller stack", component: "controller", command: &["sudo", "-A", "systemctl", "restart", "joycond.service"], risk: "confirm", requires_auth: true, automatic: false, cooldown: 21600, verification: "controller", recovery: "Restarts system joycond after suspend; may ask for permission. Re-pair if needed." },
+        Recipe { id: "network.captive-fix", title: "Re-toggle networking for captive portals", component: "network", command: &["nmcli", "networking", "off"], risk: "safe", requires_auth: false, automatic: false, cooldown: 1800, verification: "network", recovery: "Re-toggles NetworkManager to clear captive portal / local-only state; saved connections kept. Not an unattended auto-fix — a failed re-enable would leave networking off." },
+        Recipe { id: "audio.sink-fallback", title: "Restore default audio sink", component: "audio", command: &["pactl", "list", "short", "sinks"], risk: "safe", requires_auth: false, automatic: true, cooldown: 900, verification: "audio", recovery: "Falls back to the first real sink after HDMI/headset swap; no data changed." },
+        Recipe { id: "power.profile-fix", title: "Reset power profile to balanced", component: "power", command: &["powerprofilesctl", "set", "balanced"], risk: "safe", requires_auth: false, automatic: true, cooldown: 3600, verification: "power", recovery: "Resets stuck power profile after driver update; no reboot." },
+        Recipe { id: "thermal.notify", title: "Thermal throttling detected", component: "thermal", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 3600, verification: "thermal", recovery: "System is hot — close heavy tasks and check vents; Guardian resumes after cooldown." },
+        Recipe { id: "storage.smart-warn", title: "SMART disk health at risk", component: "storage", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 86400, verification: "storage", recovery: "SMART reports reallocated/pending sectors — back up and check Disks." },
+        Recipe { id: "memory.pressure-relief", title: "Memory pressure high", component: "memory", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 3600, verification: "memory", recovery: "High PSI / low MemAvailable — close heavy apps; Guardian pauses auto-fixes until pressure drops." },
+        Recipe { id: "network.vpn-fix", title: "Restart always-on VPN connection", component: "network", command: &["nmcli", "-t", "-f", "NAME,TYPE,AUTOCONNECT", "connection", "show"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "network", recovery: "Re-establishes an autoconnect VPN after a captive-portal hop; idle VPN profiles are left alone." },
+        Recipe { id: "network.vpn-dns-leak-check", title: "Check VPN DNS for leaks", component: "network", command: &["resolvectl", "status"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "network", recovery: "Reports non-tunnel resolvers while a VPN tunnel is up; never rewrites DNS on its own." },
+        Recipe { id: "network.vpn-dns-exclusive", title: "Pin VPN link to exclusive DNS", component: "network", command: &["resolvectl", "status"], risk: "confirm", requires_auth: true, automatic: false, cooldown: 3600, verification: "network", recovery: "Hub opt-in only (vpn_dns_exclusive): pins tunnel links to the VPN resolver with the ~. domain. Needs admin privilege for the resolvectl link rewrite." },
+        Recipe { id: "network.dns-flush", title: "Flush DNS cache", component: "network", command: &["resolvectl", "flush-caches"], risk: "safe", requires_auth: false, automatic: true, cooldown: 1800, verification: "network", recovery: "Flushes systemd-resolved cache after portal/DNS change." },
+        Recipe { id: "update.review-health", title: "Review update health", component: "updates", command: &[], risk: "advisory", requires_auth: false, automatic: false, cooldown: 3600, verification: "updates", recovery: "Run ujust update-health; rollback remains controlled by boot health." },
+    ]
+}
+
+pub fn recipe_title(recipe_id: &str) -> String {
+    recipes()
+        .iter()
+        .find(|r| r.id == recipe_id)
+        .map_or_else(|| recipe_id.to_string(), |r| r.title.to_string())
+}
+
+pub fn recipe_risk(recipe_id: &str) -> String {
+    recipes()
+        .iter()
+        .find(|r| r.id == recipe_id)
+        .map_or_else(|| "unknown".to_string(), |r| r.risk.to_string())
+}
+
+/// Recipe ids whose real work lives in `guardian_actions.py`'s
+/// `ACTION_EXECUTORS`, not in their `command` tuple. Running the tuple on
+/// its own would be wrong, not merely incomplete: `audio.sink-fallback`'s
+/// command is a read (`pactl list short sinks`) and `network.captive-fix`'s
+/// is only the "off" half of a toggle, so it would leave networking down.
+/// These are dispatched by `run_executor` below rather than by running the
+/// recipe's first argv.  Some recipes are deliberately multi-step.
+const EXECUTOR_ONLY: &[&str] = &[
+    "display.reconfigure",
+    "audio.sink-fallback",
+    "power.profile-fix",
+    "network.dns-flush",
+    "network.captive-fix",
+    "network.vpn-fix",
+    "network.vpn-dns-leak-check",
+    "network.vpn-dns-exclusive",
+    "controller.repair",
+    "portal.restart-user",
+    "firmware.refresh",
+    "storage.maint",
+];
+
+/// `guardian.py:execute_recipe`'s wording for anything that must not run.
+const NOT_ELIGIBLE: &str = "recipe is not eligible for automatic execution";
+
+fn run_command(argv: &[&str], timeout: Duration) -> Result<String, String> {
+    // Same shape as `system::printing::run_with_timeout`, but keeping stderr
+    // too — `guardian.py:_run` reports stderr first, and a failed systemctl
+    // says nothing on stdout.
+    let argv = argv
+        .iter()
+        .map(|arg| (*arg).to_string())
+        .collect::<Vec<_>>();
+    let out = crate::system::process::run_bounded(&argv, timeout).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::TimedOut {
+            "repair timed out".to_string()
+        } else {
+            "repair failed to start".to_string()
+        }
+    })?;
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    let mut detail = if stderr.is_empty() { stdout } else { stderr };
+    detail.truncate(400);
+    if out.status.success() {
+        Ok(if detail.is_empty() {
+            "done".to_string()
+        } else {
+            detail
+        })
+    } else {
+        Err(if detail.is_empty() {
+            "repair failed".to_string()
+        } else {
+            detail
+        })
+    }
+}
+
+fn run_ok(argv: &[&str], timeout: Duration) -> Result<(), String> {
+    run_command(argv, timeout).map(|_| ())
+}
+
+/// VPN tunnel link names from `resolvectl status` output: links whose name
+/// looks like a tunnel (`tun*`, `wg*`, `tailscale*`, `ppp*`). Pure and unit
+/// tested; the live check below feeds it real output.
+pub fn vpn_tunnel_links(status_output: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    for line in status_output.lines() {
+        let trimmed = line.trim();
+        // `resolvectl status` format: `Link <index> (<name>):` — the
+        // interface name is the parenthesized token, not the index.
+        if let Some(rest) = trimmed.strip_prefix("Link ") {
+            let name = rest.split(['(', ')']).nth(1).unwrap_or("").trim();
+            if name.starts_with("tun")
+                || name.starts_with("wg")
+                || name.starts_with("tailscale")
+                || name.starts_with("ppp")
+            {
+                links.push(name.to_string());
+            }
+        }
+    }
+    links.sort();
+    links.dedup();
+    links
+}
+
+/// Report-style VPN DNS leak check over one `resolvectl status` snapshot:
+/// `Ok` describes the clean state, `Err` names the leaking links. Pure.
+pub fn check_vpn_dns_leak_output(status_output: &str) -> Result<String, String> {
+    let links = vpn_tunnel_links(status_output);
+    if links.is_empty() {
+        return Ok("no VPN tunnel link up; nothing to leak".to_string());
+    }
+    let refs: Vec<&str> = links.iter().map(String::as_str).collect();
+    let leaks = crate::system::network_preset::vpn_dns_leaks(status_output, &refs);
+    if leaks.is_empty() {
+        Ok(format!("VPN DNS clean on {}", links.join(",")))
+    } else {
+        Err(format!(
+            "VPN DNS leak: non-tunnel resolvers in use: {}",
+            leaks
+                .iter()
+                .map(|(link, server)| format!("{link}={server}"))
+                .collect::<Vec<_>>()
+                .join(" ")
+        ))
+    }
+}
+
+/// Live `resolvectl`-backed VPN DNS leak check for the Guardian. Reports
+/// only — never rewrites link DNS on its own.
+pub fn check_vpn_dns_leak_live() -> Result<String, &'static str> {
+    let output = run_command(&["resolvectl", "status"], Duration::from_secs(6))
+        .map_err(|_| "resolvectl unavailable")?;
+    check_vpn_dns_leak_output(&output).map_err(|_| "VPN DNS leak detected")
+}
+
+/// Apply Hub-opted-in VPN DNS exclusivity: pins each tunnel link to the VPN
+/// resolver with the `~.` catch-all domain. Refuses unless
+/// `vpn_dns_exclusive` is set in `network.toml` — the Guardian never rewrites
+/// link DNS unasked.
+pub fn apply_vpn_dns_exclusive_live() -> Result<String, &'static str> {
+    use crate::system::network_preset::{
+        config_path, load, vpn_exclusive_dns_argv, vpn_exclusive_domain_argv,
+    };
+    let preset = load(config_path(None::<&std::path::Path>));
+    if !preset.vpn_dns_exclusive {
+        return Err("VPN DNS exclusivity is Hub opt-in; refusing to rewrite link DNS unasked");
+    }
+    let output = run_command(&["resolvectl", "status"], Duration::from_secs(6))
+        .map_err(|_| "resolvectl unavailable")?;
+    let links = vpn_tunnel_links(&output);
+    if links.is_empty() {
+        return Err("no VPN tunnel link found");
+    }
+    let vpn_dns = crate::system::network_preset::dns_ip(&preset);
+    if vpn_dns.is_empty() {
+        return Err("DNS preset is off; nothing to pin");
+    }
+    for link in &links {
+        for argv in [
+            vpn_exclusive_dns_argv(&preset, link, vpn_dns),
+            vpn_exclusive_domain_argv(&preset, link),
+        ] {
+            let args: Vec<&str> = argv.iter().map(String::as_str).collect();
+            // Honest failure, not a bare "update failed": per-link
+            // `resolvectl dns/domain` rewrites need admin privilege, and an
+            // unprivileged run must say so instead of looking like a
+            // resolved malfunction.
+            run_ok(&args, Duration::from_secs(6)).map_err(|_| {
+                "resolvectl link update failed; pinning VPN DNS needs admin privilege — run with authentication"
+            })?;
+        }
+    }
+    Ok(format!("VPN DNS pinned on {}", links.join(",")))
+}
+
+/// Rust equivalent of guardian_actions.py's bounded executors. Every command
+/// remains an argv invocation; no user-controlled text reaches a shell.
+fn run_executor(id: &str) -> Result<String, String> {
+    match id {
+        "display.reconfigure" => {
+            let _ = run_ok(
+                &["systemctl", "--user", "restart", "plasma-kscreen.service"],
+                Duration::from_secs(10),
+            );
+            run_ok(&["kscreen-doctor", "-o"], Duration::from_secs(8))
+                .map(|_| "display outputs refreshed".to_string())
+        }
+        "audio.sink-fallback" => {
+            let output = run_command(&["pactl", "list", "short", "sinks"], Duration::from_secs(6))?;
+            let sink = output
+                .lines()
+                .filter_map(|line| line.split_whitespace().nth(1))
+                .find(|name| !name.contains("auto_null") && *name != "@DEFAULT_SINK@");
+            let Some(sink) = sink else {
+                return Err("no usable audio sink".to_string());
+            };
+            run_ok(&["pactl", "set-default-sink", sink], Duration::from_secs(6))?;
+            Ok(format!("default sink set to {sink}"))
+        }
+        "power.profile-fix" => {
+            run_ok(
+                &["powerprofilesctl", "set", "balanced"],
+                Duration::from_secs(6),
+            )?;
+            Ok("power profile set to balanced".to_string())
+        }
+        "network.dns-flush" => {
+            if run_ok(&["resolvectl", "flush-caches"], Duration::from_secs(6)).is_ok()
+                || run_ok(
+                    &["systemd-resolve", "--flush-caches"],
+                    Duration::from_secs(6),
+                )
+                .is_ok()
+            {
+                Ok("flushed DNS caches".to_string())
+            } else {
+                Err("DNS cache flush unavailable".to_string())
+            }
+        }
+        "network.captive-fix" => {
+            run_ok(&["nmcli", "networking", "off"], Duration::from_secs(8))?;
+            std::thread::sleep(Duration::from_secs(2));
+            let result = run_ok(&["nmcli", "networking", "on"], Duration::from_secs(8));
+            if result.is_ok() {
+                Ok("networking re-toggled".to_string())
+            } else {
+                let _ = run_ok(&["nmcli", "networking", "on"], Duration::from_secs(8));
+                Err("failed to re-enable networking".to_string())
+            }
+        }
+        "network.vpn-fix" => {
+            let listed = run_command(
+                &[
+                    "nmcli",
+                    "-t",
+                    "-f",
+                    "NAME,TYPE,AUTOCONNECT",
+                    "connection",
+                    "show",
+                ],
+                Duration::from_secs(6),
+            )?;
+            for line in listed.lines() {
+                let mut parts = line.rsplitn(3, ':');
+                let auto = parts.next().unwrap_or("");
+                let kind = parts.next().unwrap_or("");
+                let name = parts.next().unwrap_or("");
+                if kind == "vpn" && auto == "yes" && !name.is_empty() {
+                    run_ok(
+                        &["nmcli", "connection", "up", name],
+                        Duration::from_secs(15),
+                    )?;
+                    return Ok(format!("brought up VPN {name}"));
+                }
+            }
+            Err("no always-on VPN needed reconnecting".to_string())
+        }
+        "network.vpn-dns-leak-check" => check_vpn_dns_leak_live().map_err(str::to_string),
+        "network.vpn-dns-exclusive" => apply_vpn_dns_exclusive_live().map_err(str::to_string),
+        "controller.repair" => {
+            run_ok(
+                &["sudo", "-A", "systemctl", "restart", "joycond.service"],
+                Duration::from_secs(20),
+            )?;
+            Ok("joycond restarted".to_string())
+        }
+        "portal.restart-user" => {
+            run_ok(
+                &[
+                    "systemctl",
+                    "--user",
+                    "restart",
+                    "xdg-desktop-portal.service",
+                ],
+                Duration::from_secs(15),
+            )?;
+            let _ = run_ok(
+                &[
+                    "systemctl",
+                    "--user",
+                    "restart",
+                    "plasma-xdg-desktop-portal-kde.service",
+                ],
+                Duration::from_secs(15),
+            );
+            Ok("desktop portals restarted".to_string())
+        }
+        "firmware.refresh" => {
+            if run_ok(
+                &[
+                    "flock",
+                    "-w",
+                    "10",
+                    "/run/kyth-fwupd.lock",
+                    "fwupdmgr",
+                    "refresh",
+                    "--force",
+                ],
+                Duration::from_secs(30),
+            )
+            .is_err()
+            {
+                run_ok(&["fwupdmgr", "refresh", "--force"], Duration::from_secs(30))?;
+            }
+            Ok("firmware metadata refreshed".to_string())
+        }
+        "storage.maint" => {
+            run_ok(&["/usr/bin/kyth-btrfs-maint"], Duration::from_secs(3600))?;
+            Ok("storage maintenance started".to_string())
+        }
+        _ => Err(NOT_ELIGIBLE.to_string()),
+    }
+}
+
+#[cfg(test)]
+fn executor_supported(id: &str) -> bool {
+    matches!(
+        id,
+        "display.reconfigure"
+            | "audio.sink-fallback"
+            | "power.profile-fix"
+            | "network.dns-flush"
+            | "network.captive-fix"
+            | "network.vpn-fix"
+            | "network.vpn-dns-leak-check"
+            | "network.vpn-dns-exclusive"
+            | "controller.repair"
+            | "portal.restart-user"
+            | "firmware.refresh"
+            | "storage.maint"
+    )
+}
+
+/// Persist Guardian state for the native service and the Tauri command path.
+///
+/// Writers (timer service vs. Hub-initiated repairs) serialize on an
+/// exclusive flock of the state file itself, so overlapping runs never
+/// interleave a torn write; the payload still lands via an atomic rename,
+/// so a concurrent Hub read sees either the previous state or the complete
+/// new state.
+pub fn save_state(state: &Value) -> Result<(), String> {
+    save_state_to(state, &state_path())
+}
+
+/// `save_state` against an explicit path — same "explicit path for tests"
+/// shape as `load_state_from`.
+pub fn save_state_to(state: &Value, path: &Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "invalid Guardian state path".to_string())?;
+    std::fs::create_dir_all(parent)
+        .map_err(|_| "could not create Guardian state directory".to_string())?;
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(path)
+        .map_err(|_| "could not lock Guardian state".to_string())?;
+    rustix::fs::flock(&lock, rustix::fs::FlockOperation::LockExclusive)
+        .map_err(|_| "could not lock Guardian state".to_string())?;
+    let result = save_state_locked(state, path);
+    drop(lock);
+    result
+}
+
+/// Sibling temporary name that is unique per process and instant, so two
+/// writers racing in the same directory never share a staging file.
+pub fn temp_state_name(stem: &str, pid: u32, nonce: u128) -> String {
+    format!(".{stem}.tmp-{pid}-{nonce}")
+}
+
+fn save_state_locked(state: &Value, path: &Path) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "invalid Guardian state path".to_string())?;
+    let mut normalized = state.clone();
+    if let Some(history) = normalized.get_mut("history").and_then(Value::as_array_mut) {
+        coalesce_recommendations(history);
+        if history.len() > 200 {
+            let keep_from = history.len() - 200;
+            history.drain(0..keep_from);
+        }
+    }
+    let bytes = serde_json::to_vec_pretty(&normalized)
+        .map_err(|_| "could not encode Guardian state".to_string())?;
+    let stem = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("guardian.json");
+    // `create_new` retries on collision: pid + nanos is unique in practice,
+    // but two saves in the same tick must not truncate each other's stage.
+    let temp = (0..8)
+        .find_map(|_| {
+            let nonce = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|span| span.as_nanos())
+                .unwrap_or(0);
+            let candidate = parent.join(temp_state_name(stem, std::process::id(), nonce));
+            std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&candidate)
+                .ok()
+                .map(|_| candidate)
+        })
+        .ok_or_else(|| "could not stage Guardian state".to_string())?;
+    let staged = (|| {
+        std::fs::write(&temp, &bytes).map_err(|_| "could not write Guardian state".to_string())?;
+        // fsync the payload before the rename so a crash never leaves a
+        // torn state file behind.
+        std::fs::File::open(&temp)
+            .and_then(|file| file.sync_all())
+            .map_err(|_| "could not sync Guardian state".to_string())?;
+        std::fs::rename(&temp, path).map_err(|_| "could not commit Guardian state".to_string())?;
+        if let Ok(directory) = std::fs::File::open(parent) {
+            let _ = directory.sync_all();
+        }
+        Ok::<(), String>(())
+    })();
+    if staged.is_err() {
+        let _ = std::fs::remove_file(&temp);
+    }
+    staged
+}
+
+fn coalesce_recommendations(history: &mut Vec<Value>) {
+    let mut active = std::collections::HashMap::<String, usize>::new();
+    let mut compact = Vec::with_capacity(history.len());
+    for item in history.drain(..) {
+        let recipe_id = item.get("recipe_id").and_then(Value::as_str).unwrap_or("");
+        if !recipe_id.is_empty()
+            && item.get("action").and_then(Value::as_str) == Some("recommended")
+        {
+            if let Some(previous) = active.get(recipe_id) {
+                compact[*previous] = item;
+                continue;
+            }
+            active.insert(recipe_id.to_string(), compact.len());
+        } else if !recipe_id.is_empty() {
+            active.remove(recipe_id);
+        }
+        compact.push(item);
+    }
+    *history = compact;
+}
+
+fn append_history_record(history: &mut Vec<Value>, record: Value) {
+    let recipe_id = record.get("recipe_id").and_then(Value::as_str);
+    if record.get("action").and_then(Value::as_str) == Some("recommended") {
+        if let Some(recipe_id) = recipe_id {
+            for previous in history.iter_mut().rev() {
+                if previous.get("recipe_id").and_then(Value::as_str) != Some(recipe_id) {
+                    continue;
+                }
+                if previous.get("action").and_then(Value::as_str) == Some("recommended") {
+                    *previous = record;
+                    return;
+                }
+                break;
+            }
+        }
+    }
+    history.push(record);
+}
+
+/// Record a native service check using the same history shape consumed by the
+/// Hub's pending-recommendation projection.
+pub fn record_service_check(symptoms: &[Value], decisions: &[Value]) -> Result<Value, String> {
+    let mut state = load_state();
+    let occurrences = state
+        .get_mut("occurrences")
+        .and_then(Value::as_object_mut)
+        .ok_or_else(|| "Guardian occurrences are unavailable".to_string())?;
+    let active = symptoms
+        .iter()
+        .filter_map(|symptom| symptom.get("component").and_then(Value::as_str))
+        .collect::<std::collections::HashSet<_>>();
+    for recipe in recipes() {
+        let count = if active.contains(recipe.component) {
+            occurrences
+                .get(recipe.component)
+                .and_then(Value::as_i64)
+                .unwrap_or(0)
+                .saturating_add(1)
+        } else {
+            0
+        };
+        occurrences.insert(recipe.component.to_string(), Value::from(count));
+    }
+    let history = state
+        .get_mut("history")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| "Guardian history is unavailable".to_string())?;
+    for decision in decisions.iter().cloned() {
+        append_history_record(history, decision);
+    }
+    coalesce_recommendations(history);
+    if history.len() > 200 {
+        let keep_from = history.len() - 200;
+        history.drain(0..keep_from);
+    }
+    state["last_check"] = Value::from(now_unix());
+    save_state(&state)?;
+    Ok(state)
+}
+
+fn cooldown_active(state: &Value, recipe: &Recipe) -> bool {
+    let now = now_unix();
+    state
+        .get("history")
+        .and_then(Value::as_array)
+        .is_some_and(|history| {
+            history.iter().any(|item| {
+                item.get("recipe_id").and_then(Value::as_str) == Some(recipe.id)
+                    && item.get("action").and_then(Value::as_str) == Some("executed")
+                    && item.get("verified").and_then(Value::as_bool) != Some(false)
+                    && now - item.get("timestamp").and_then(Value::as_f64).unwrap_or(0.0)
+                        < recipe.cooldown as f64
+            })
+        })
+}
+
+/// Run a repair the user asked for, porting the `user_initiated=True` path
+/// of `guardian.py:execute_recipe`.
+///
+/// The gate is the point of this function. The Hub used to hand `recipe_id`
+/// to `just_run`, which meant two wrong things at once: a dotted id is not
+/// a just recipe so nothing ever ran, and the spawn still "succeeded", so
+/// the Hub reported every repair as launched. Advisory recipes
+/// (`thermal.notify`, `storage.smart-warn`) have no command in `guardian.py`
+/// either — they are notifications, and must stay one click away from
+/// nothing at all.
+pub fn execute_recipe(recipe_id: &str) -> Result<String, String> {
+    let Some(recipe) = recipes().iter().find(|r| r.id == recipe_id) else {
+        return Err(NOT_ELIGIBLE.to_string());
+    };
+    if recipe.command.is_empty() || !matches!(recipe.risk, "safe" | "confirm") {
+        return Err(NOT_ELIGIBLE.to_string());
+    }
+    // Single-flight: the cooldown check reads history that is only written
+    // when a run FINISHES, so a double-click (or a retry while the first run
+    // is still in its 30s command + verification) used to launch two
+    // concurrent mutating repairs — e.g. two interleaved
+    // `nmcli networking off/on` captive fixes that can leave networking off.
+    // Hold one global slot for the whole run.
+    let _slot = match RECIPE_SLOT.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err("another Guardian repair is already running".to_string());
+        }
+        // A poisoned slot means a previous run panicked; the slot itself
+        // holds no data, so it is safe to reclaim.
+        Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+    };
+    let state = load_state();
+    if cooldown_active(&state, recipe) {
+        return Err("repair cooldown is active".to_string());
+    }
+    if recipe.requires_auth && std::env::var_os("SUDO_ASKPASS").is_none() {
+        // The command is `sudo -A …`; with no askpass helper in the session
+        // it can only fail, and it would fail with sudo's wording rather
+        // than something a user can act on.
+        return Err(format!(
+            "{} needs an administrator password, and this session has no askpass helper — run it from a terminal",
+            recipe.title,
+        ));
+    }
+    let result = if EXECUTOR_ONLY.contains(&recipe.id) {
+        run_executor(recipe.id)
+    } else {
+        run_command(recipe.command, Duration::from_secs(30))
+    };
+    let (ok, detail) = match result {
+        Ok(detail) => (true, detail),
+        Err(detail) => (false, detail),
+    };
+    let verified = ok && verify_recipe(recipe.id);
+    let mut next = state;
+    if let Some(history) = next.get_mut("history").and_then(Value::as_array_mut) {
+        history.push(serde_json::json!({"timestamp": now_unix(), "recipe_id": recipe.id, "source": "hub", "action": "executed", "verified": verified, "detail": detail}));
+        if history.len() > 200 {
+            let keep_from = history.len() - 200;
+            history.drain(0..keep_from);
+        }
+    }
+    let _ = save_state(&next);
+    if ok && verified {
+        Ok(detail)
+    } else if ok {
+        Err(format!("{detail}; post-repair verification failed"))
+    } else {
+        Err(detail)
+    }
+}
+
+fn verify_recipe(recipe_id: &str) -> bool {
+    match recipe_id {
+        "audio.sink-fallback" => {
+            run_ok(&["pactl", "get-default-sink"], Duration::from_secs(4)).is_ok()
+        }
+        "network.captive-fix" | "network.vpn-fix" | "network.dns-flush" => run_ok(
+            &["nmcli", "-t", "-f", "STATE", "general"],
+            Duration::from_secs(5),
+        )
+        .is_ok(),
+        "controller.repair" => run_ok(
+            &["systemctl", "is-active", "--quiet", "joycond.service"],
+            Duration::from_secs(5),
+        )
+        .is_ok(),
+        "portal.restart-user" => run_ok(
+            &[
+                "systemctl",
+                "--user",
+                "is-active",
+                "--quiet",
+                "xdg-desktop-portal.service",
+            ],
+            Duration::from_secs(5),
+        )
+        .is_ok(),
+        "firmware.refresh" => run_ok(&["fwupdmgr", "get-updates"], Duration::from_secs(8)).is_ok(),
+        "power.profile-fix" => run_ok(&["powerprofilesctl", "get"], Duration::from_secs(4)).is_ok(),
+        "display.reconfigure" => run_ok(&["kscreen-doctor", "-o"], Duration::from_secs(5)).is_ok(),
+        "storage.maint" => crate::system::storage_maintenance::maint_verified(),
+        _ => run_ok(
+            &[
+                "systemctl",
+                "--user",
+                "is-active",
+                "--quiet",
+                "pipewire.service",
+            ],
+            Duration::from_secs(5),
+        )
+        .is_ok(),
+    }
+}
+
+fn state_dir() -> PathBuf {
+    let base = std::env::var("XDG_STATE_HOME").unwrap_or_else(|_| {
+        let home = std::env::var("HOME").unwrap_or_default();
+        format!("{home}/.local/state")
+    });
+    PathBuf::from(base).join("kyth")
+}
+
+fn state_path() -> PathBuf {
+    state_dir().join("guardian.json")
+}
+
+fn empty_state() -> Value {
+    serde_json::json!({ "schema_version": SCHEMA_VERSION, "history": [], "occurrences": {} })
+}
+
+/// Port of `guardian.py`'s `load_state()` from an explicit path — `path`
+/// overrides `state_path()`, same "explicit path for tests" shape as
+/// `system::probe::read_section_in`.
+///
+/// Reads take a shared flock so they never observe a half-renamed write.
+/// Corrupt JSON is never silently reset: the payload is preserved at
+/// `guardian.json.corrupt` and the corruption is logged, then an empty
+/// state is returned.
+pub fn load_state_from(path: &Path) -> Value {
+    let mut file = match std::fs::OpenOptions::new().read(true).open(path) {
+        Ok(file) => file,
+        Err(_) => return empty_state(),
+    };
+    let _ = rustix::fs::flock(&file, rustix::fs::FlockOperation::LockShared);
+    let mut raw = String::new();
+    if std::io::Read::read_to_string(&mut file, &mut raw).is_err() {
+        return empty_state();
+    }
+    drop(file);
+    match serde_json::from_str::<Value>(&raw) {
+        Ok(value) if value.is_object() && value.get("history").is_some_and(Value::is_array) => {
+            value
+        }
+        _ => {
+            let backup = path.with_extension("json.corrupt");
+            let _ = std::fs::write(&backup, raw.as_bytes());
+            eprintln!(
+                "kyth-guardian: corrupt state at {} backed up to {}; starting fresh",
+                path.display(),
+                backup.display()
+            );
+            empty_state()
+        }
+    }
+}
+
+/// Wall-clock budget left for one slow probe under a shared collection
+/// deadline: the probe runs with `min(nominal, remaining)`, and is skipped
+/// (`None`) once the deadline has passed. Keeps the serial tail of
+/// `guardian_bin::collect_symptoms` bounded however many slow probes pile
+/// up; see the concurrent spawn there.
+pub fn shared_probe_timeout(deadline: std::time::Instant, nominal: Duration) -> Option<Duration> {
+    let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+    if remaining.is_zero() {
+        return None;
+    }
+    Some(remaining.min(nominal))
+}
+
+/// `load_state_from` against the real on-disk `state_path()` — what every
+/// non-test caller wants.
+pub fn load_state() -> Value {
+    load_state_from(&state_path())
+}
+
+fn now_unix() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct PendingItem {
+    pub recipe_id: String,
+    pub detail: String,
+}
+
+/// Port of `guardian.py`'s `pending_recommendations(state, now=None,
+/// window=NOTIFY_THROTTLE_S)` — same "latest history entry per recipe_id
+/// inside the window, still `action == "recommended"`" logic. This is the
+/// exact same list Hub's own mission bar / sidebar badge is built from.
+pub fn pending_recommendations(state: &Value) -> Vec<PendingItem> {
+    let now = now_unix();
+    let mut latest: std::collections::HashMap<String, (f64, Value)> =
+        std::collections::HashMap::new();
+    let Some(history) = state.get("history").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    for item in history {
+        let Some(obj) = item.as_object() else {
+            continue;
+        };
+        let Some(recipe_id) = obj.get("recipe_id").and_then(Value::as_str) else {
+            continue;
+        };
+        let Some(timestamp) = obj.get("timestamp").and_then(Value::as_f64) else {
+            continue;
+        };
+        // No `age < 0` guard here — matches guardian.py exactly, which
+        // only skips entries *older* than the window, not future-dated
+        // ones (clock skew), unlike system::probe::read_section_in.
+        if now - timestamp > NOTIFY_THROTTLE_S {
+            continue;
+        }
+        let replace = latest
+            .get(recipe_id)
+            .is_none_or(|(prev_ts, _)| timestamp >= *prev_ts);
+        if replace {
+            latest.insert(recipe_id.to_string(), (timestamp, item.clone()));
+        }
+    }
+    latest
+        .into_values()
+        .filter(|(_, item)| item.get("action").and_then(Value::as_str) == Some("recommended"))
+        .map(|(_, item)| PendingItem {
+            recipe_id: item
+                .get("recipe_id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            detail: item
+                .get("detail")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HistoryItem {
+    pub timestamp: f64,
+    pub recipe_id: Option<String>,
+    pub detail: String,
+    pub action: String,
+    pub verified: Option<bool>,
+}
+
+/// Most-recent-first, capped to `limit`, entries without a timestamp
+/// dropped — mirrors what the retired Python `guardian_bridge.py`
+/// computed for its "history" field before this port replaced it.
+pub fn recent_history(state: &Value, limit: usize) -> Vec<HistoryItem> {
+    let Some(history) = state.get("history").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut items: Vec<HistoryItem> = history
+        .iter()
+        .filter_map(|item| {
+            let obj = item.as_object()?;
+            let timestamp = obj.get("timestamp").and_then(Value::as_f64)?;
+            Some(HistoryItem {
+                timestamp,
+                recipe_id: obj
+                    .get("recipe_id")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                detail: obj
+                    .get("detail")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string(),
+                action: obj
+                    .get("action")
+                    .and_then(Value::as_str)
+                    .unwrap_or("executed")
+                    .to_string(),
+                verified: obj.get("verified").and_then(Value::as_bool),
+            })
+        })
+        .collect();
+    items.sort_by(|a, b| {
+        b.timestamp
+            .partial_cmp(&a.timestamp)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    items.truncate(limit);
+    items
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn concurrent_repair_is_refused_while_slot_is_held() {
+        // Simulate a repair in flight by holding the slot; a second
+        // eligible recipe must be refused as "already running" before it
+        // reads state, checks cooldown, or runs anything.
+        let _held = RECIPE_SLOT.lock().unwrap_or_else(|p| p.into_inner());
+        let error = execute_recipe("audio.restart").unwrap_err();
+        assert!(error.contains("already running"), "{error}");
+    }
+
+    #[test]
+    fn ineligible_recipe_is_rejected_before_taking_the_slot() {
+        // Unknown ids never contend for the slot (no false "already running").
+        let _held = RECIPE_SLOT.lock().unwrap_or_else(|p| p.into_inner());
+        assert_eq!(execute_recipe("no.such-recipe").unwrap_err(), NOT_ELIGIBLE);
+    }
+    #[test]
+    fn model_decision_requires_exact_allowed_shape() {
+        let allowed = ["audio.restart"];
+        let probes = ["audio"];
+        let valid = r#"note {"recipe_id":"audio.restart","confidence":0.8,"explanation":"restart audio","probe_id":"audio"}"#;
+        assert_eq!(
+            parse_model_decision(valid, &allowed, &probes)
+                .unwrap()
+                .recipe_id,
+            "audio.restart"
+        );
+        assert!(parse_model_decision(
+            r#"{"recipe_id":"bad","confidence":1.0,"explanation":"x","probe_id":"audio"}"#,
+            &allowed,
+            &probes
+        )
+        .is_none());
+        assert!(parse_model_decision("not json", &allowed, &probes).is_none());
+    }
+    use serde_json::json;
+
+    #[test]
+    fn missing_state_file_is_empty_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = load_state_from(&dir.path().join("guardian.json"));
+        assert_eq!(state, empty_state());
+        assert!(!dir.path().join("guardian.json.corrupt").exists());
+    }
+
+    #[test]
+    fn corrupt_state_is_backed_up_not_silently_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guardian.json");
+        std::fs::write(&path, "{ torn json").unwrap();
+        let state = load_state_from(&path);
+        assert_eq!(state, empty_state());
+        let backup = dir.path().join("guardian.json.corrupt");
+        assert_eq!(std::fs::read_to_string(backup).unwrap(), "{ torn json");
+    }
+
+    #[test]
+    fn wrong_shaped_state_is_backed_up_not_silently_reset() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guardian.json");
+        std::fs::write(&path, r#"{"history": {}}"#).unwrap();
+        assert_eq!(load_state_from(&path), empty_state());
+        assert!(dir.path().join("guardian.json.corrupt").is_file());
+    }
+
+    #[test]
+    fn save_state_to_roundtrips_and_leaves_no_staging_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guardian.json");
+        let state = serde_json::json!({ "schema_version": 1, "history": [], "occurrences": {} });
+        save_state_to(&state, &path).unwrap();
+        save_state_to(&state, &path).unwrap();
+        assert_eq!(load_state_from(&path), state);
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .flatten()
+            .filter(|entry| entry.file_name().to_string_lossy().contains(".tmp-"))
+            .collect();
+        assert!(leftovers.is_empty(), "{leftovers:?}");
+    }
+
+    #[test]
+    fn temp_names_carry_pid_and_instant() {
+        let name = temp_state_name("guardian.json", 4242, 123456789);
+        assert!(name.starts_with(".guardian.json.tmp-"));
+        assert!(name.contains("4242"));
+        assert!(name.contains("123456789"));
+        assert_ne!(
+            temp_state_name("guardian.json", 4242, 1),
+            temp_state_name("guardian.json", 4242, 2)
+        );
+    }
+
+    #[test]
+    fn shared_probe_timeout_clamps_to_the_deadline() {
+        let generous = std::time::Instant::now() + Duration::from_secs(60);
+        assert_eq!(
+            shared_probe_timeout(generous, Duration::from_secs(10)),
+            Some(Duration::from_secs(10))
+        );
+        let tight = std::time::Instant::now() + Duration::from_millis(100);
+        let budget = shared_probe_timeout(tight, Duration::from_secs(10)).unwrap();
+        assert!(budget <= Duration::from_secs(10));
+        let past = std::time::Instant::now() - Duration::from_secs(1);
+        assert_eq!(shared_probe_timeout(past, Duration::from_secs(10)), None);
+    }
+
+    /// Advisory recipes are notifications: `guardian.py` gives them an empty
+    /// command tuple and refuses to execute them. Before this gate, the Hub
+    /// handed the id straight to `just_run` and reported "launched".
+    #[test]
+    fn advisory_recipes_never_execute() {
+        for id in [
+            "thermal.notify",
+            "storage.smart-warn",
+            "memory.pressure-relief",
+            "disk.review",
+            "update.review-health",
+        ] {
+            assert_eq!(execute_recipe(id), Err(NOT_ELIGIBLE.to_string()), "{id}");
+        }
+    }
+
+    #[test]
+    fn unknown_recipe_ids_never_execute() {
+        assert_eq!(
+            execute_recipe("not.a.real.recipe"),
+            Err(NOT_ELIGIBLE.to_string())
+        );
+        assert_eq!(execute_recipe(""), Err(NOT_ELIGIBLE.to_string()));
+    }
+
+    /// Every executor-backed recipe has an explicit Rust implementation; this
+    /// test is static so the suite never runs mutating system commands.
+    #[test]
+    fn executor_backed_recipes_are_implemented() {
+        for id in EXECUTOR_ONLY {
+            assert!(executor_supported(id), "{id} has no Rust executor");
+        }
+    }
+
+    /// Every executable recipe carries the argv `guardian.py` runs; an empty
+    /// one would fall through `run_command` and index out of bounds.
+    #[test]
+    fn executable_recipes_have_a_command() {
+        for recipe in recipes() {
+            if matches!(recipe.risk, "safe" | "confirm") && !EXECUTOR_ONLY.contains(&recipe.id) {
+                assert!(!recipe.command.is_empty(), "{}", recipe.id);
+            }
+        }
+    }
+
+    #[test]
+    fn recipe_lookup_knows_a_real_recipe() {
+        assert_eq!(recipe_title("audio.restart"), "Restart audio services");
+        assert_eq!(recipe_risk("audio.restart"), "safe");
+    }
+
+    #[test]
+    fn recipe_lookup_falls_back_gracefully_for_an_unknown_id() {
+        assert_eq!(recipe_title("not.a.real.recipe"), "not.a.real.recipe");
+        assert_eq!(recipe_risk("not.a.real.recipe"), "unknown");
+    }
+
+    #[test]
+    fn pending_recommendation_is_the_latest_entry_for_its_recipe() {
+        let now = now_unix();
+        let state = json!({
+            "schema_version": 1,
+            "history": [
+                { "timestamp": now - 100.0, "recipe_id": "audio.restart", "action": "recommended", "detail": "old" },
+                { "timestamp": now, "recipe_id": "audio.restart", "action": "recommended", "detail": "new" },
+            ],
+            "occurrences": {},
+        });
+        let pending = pending_recommendations(&state);
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].detail, "new");
+    }
+
+    #[test]
+    fn repeated_recommendation_replaces_current_event() {
+        let mut history = vec![json!({
+            "timestamp": 1.0,
+            "recipe_id": "storage.maint",
+            "action": "recommended",
+            "detail": "old",
+        })];
+        append_history_record(
+            &mut history,
+            json!({
+                "timestamp": 2.0,
+                "recipe_id": "storage.maint",
+                "action": "recommended",
+                "detail": "new",
+            }),
+        );
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0]["detail"], "new");
+    }
+
+    #[test]
+    fn recommendation_after_terminal_event_starts_new_event() {
+        let mut history = vec![
+            json!({ "timestamp": 1.0, "recipe_id": "storage.maint", "action": "recommended" }),
+            json!({ "timestamp": 2.0, "recipe_id": "storage.maint", "action": "dismissed" }),
+        ];
+        append_history_record(
+            &mut history,
+            json!({ "timestamp": 3.0, "recipe_id": "storage.maint", "action": "recommended" }),
+        );
+        assert_eq!(history.len(), 3);
+    }
+
+    #[test]
+    fn legacy_recommendation_duplicates_are_compacted() {
+        let mut history = vec![
+            json!({ "timestamp": 1.0, "recipe_id": "storage.maint", "action": "recommended", "detail": "old" }),
+            json!({ "timestamp": 2.0, "recipe_id": "thermal.notify", "action": "recommended" }),
+            json!({ "timestamp": 3.0, "recipe_id": "storage.maint", "action": "recommended", "detail": "new" }),
+        ];
+        coalesce_recommendations(&mut history);
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0]["detail"], "new");
+    }
+
+    #[test]
+    fn resolved_recipe_is_not_pending() {
+        let now = now_unix();
+        let state = json!({
+            "schema_version": 1,
+            "history": [
+                { "timestamp": now, "recipe_id": "audio.restart", "action": "executed", "detail": "fixed" },
+            ],
+            "occurrences": {},
+        });
+        assert_eq!(pending_recommendations(&state), Vec::new());
+    }
+
+    #[test]
+    fn old_recommendation_outside_the_notify_window_is_not_pending() {
+        let old = now_unix() - NOTIFY_THROTTLE_S - 10.0;
+        let state = json!({
+            "schema_version": 1,
+            "history": [
+                { "timestamp": old, "recipe_id": "audio.restart", "action": "recommended", "detail": "stale" },
+            ],
+            "occurrences": {},
+        });
+        assert_eq!(pending_recommendations(&state), Vec::new());
+    }
+
+    #[test]
+    fn recent_history_is_most_recent_first_and_capped() {
+        let now = now_unix();
+        let history: Vec<Value> = (0..12)
+            .map(|i| json!({ "timestamp": now - i as f64, "recipe_id": "audio.restart", "action": "executed", "detail": format!("run {i}") }))
+            .collect();
+        let state = json!({ "schema_version": 1, "history": history, "occurrences": {} });
+        let items = recent_history(&state, 8);
+        assert_eq!(items.len(), 8);
+        assert_eq!(items[0].detail, "run 0"); // most recent (smallest i => largest timestamp) first
+    }
+
+    #[test]
+    fn recent_history_drops_entries_without_a_timestamp() {
+        let state = json!({
+            "schema_version": 1,
+            "history": [ { "recipe_id": "audio.restart", "action": "executed", "detail": "no timestamp" } ],
+            "occurrences": {},
+        });
+        assert_eq!(recent_history(&state, 8), Vec::new());
+    }
+}
+
+/// Is `recipe_id` currently a pending recommendation?
+///
+/// The authorization gate for acting on a Guardian recommendation: only a
+/// recipe Guardian is *currently recommending* may be executed, so a
+/// caller can't be talked into running an arbitrary recipe id by whatever
+/// hands it the string. Kept here next to the list it derives from; the
+/// explicit execution path applies this gate before dispatching a fixed
+/// recipe command.
+pub fn is_pending_recipe(state: &Value, recipe_id: &str) -> bool {
+    pending_recommendations(state)
+        .iter()
+        .any(|p| p.recipe_id == recipe_id)
+}
+
+/// Dismiss a current recommendation without running its repair. Record the
+/// dismissal as the newest per-recipe history item so the existing pending
+/// projection stops surfacing it across the Hub and notifications.
+pub fn dismiss_recommendation(recipe_id: &str) -> Result<String, String> {
+    let mut state = load_state();
+    if !is_pending_recipe(&state, recipe_id) {
+        return Err("recommendation is no longer pending".to_string());
+    }
+    let history = state
+        .get_mut("history")
+        .and_then(Value::as_array_mut)
+        .ok_or_else(|| "Guardian history is unavailable".to_string())?;
+    history.push(serde_json::json!({
+        "timestamp": now_unix(),
+        "recipe_id": recipe_id,
+        "source": "hub",
+        "action": "dismissed",
+        "verified": null,
+        "detail": "Dismissed from the Home screen.",
+    }));
+    save_state(&state)?;
+    Ok(format!("Dismissed {}.", recipe_title(recipe_id)))
+}
+
+#[cfg(test)]
+mod pending_gate_tests {
+    use super::{check_vpn_dns_leak_output, is_pending_recipe, now_unix, vpn_tunnel_links};
+    use serde_json::json;
+
+    fn state_with(action: &str) -> serde_json::Value {
+        json!({
+            "schema_version": 1,
+            "history": [
+                { "timestamp": now_unix(), "recipe_id": "audio.restart", "action": action, "detail": "d" }
+            ],
+            "occurrences": {},
+        })
+    }
+
+    #[test]
+    fn allows_a_currently_recommended_recipe() {
+        assert!(is_pending_recipe(
+            &state_with("recommended"),
+            "audio.restart"
+        ));
+    }
+
+    #[test]
+    fn rejects_a_recipe_that_is_not_recommended() {
+        assert!(!is_pending_recipe(&state_with("executed"), "audio.restart"));
+    }
+
+    #[test]
+    fn rejects_an_unknown_or_empty_recipe_id() {
+        let state = state_with("recommended");
+        for id in ["", "network.reset", "audio.restart\n", "../../etc/passwd"] {
+            assert!(
+                !is_pending_recipe(&state, id),
+                "{id:?} must not pass the gate"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_everything_when_there_is_no_history() {
+        let empty = json!({ "schema_version": 1, "history": [], "occurrences": {} });
+        assert!(!is_pending_recipe(&empty, "audio.restart"));
+    }
+
+    #[test]
+    fn vpn_dns_leak_check_flags_off_tunnel_resolvers() {
+        assert_eq!(
+            vpn_tunnel_links("Link 2 (wlp0s0):\nLink 5 (tun0):\n"),
+            vec!["tun0".to_string()]
+        );
+        assert!(vpn_tunnel_links("Link 2 (wlp0s0):\n").is_empty());
+        assert!(check_vpn_dns_leak_output("Link 2 (wlp0s0):\n").is_ok());
+        assert!(check_vpn_dns_leak_output("Link 5 (tun0):\n  DNS Servers: 10.8.0.1\n").is_ok());
+        let leaking = "Link 2 (wlp0s0):\n  DNS Servers: 192.168.1.1\nLink 5 (tun0):\n  DNS Servers: 10.8.0.1\n";
+        let error = check_vpn_dns_leak_output(leaking).unwrap_err();
+        assert!(error.contains("192.168.1.1"), "{error}");
+    }
+}

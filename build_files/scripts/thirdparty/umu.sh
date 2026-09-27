@@ -27,13 +27,14 @@ install_umu() {
 			curl -fsSL "${CURL_COMMON_ARGS[@]}" "${UMU_URL}" -o "${TMPDIR_UMU}/${UMU_TARBALL}"
 			verify_release_asset "${release_json}" "${TMPDIR_UMU}/${UMU_TARBALL}" \
 				"${UMU_TARBALL}" "${TMPDIR_UMU}"
-			tar -xf "${TMPDIR_UMU}/${UMU_TARBALL}" -C "${TMPDIR_UMU}/"
+			local UMU_EXTRACT_DIR="${TMPDIR_UMU}/extracted"
+			safe_extract_tar "${TMPDIR_UMU}/${UMU_TARBALL}" "${UMU_EXTRACT_DIR}"
 			local UMU_BIN
-			UMU_BIN=$(find "${TMPDIR_UMU}" -name 'umu-run' -type f | head -n1)
+			UMU_BIN=$(find "${UMU_EXTRACT_DIR}" -name 'umu-run' -type f | head -n1)
 			if [[ -n "${UMU_BIN}" ]]; then
 				install -m 0755 "${UMU_BIN}" /usr/bin/umu-run
 				local UMU_PKGDIR
-				UMU_PKGDIR=$(find "${TMPDIR_UMU}" -maxdepth 3 -name 'umu' -type d | grep -v '__pycache__' | head -n1)
+				UMU_PKGDIR=$(find "${UMU_EXTRACT_DIR}" -maxdepth 3 -name 'umu' -type d | grep -v '__pycache__' | head -n1)
 				if [[ "${UMU_TARBALL}" != *-zipapp.tar && -n "${UMU_PKGDIR}" ]]; then
 					local PY_SITEPKG
 					PY_SITEPKG=$(python3 -c "import sysconfig; print(sysconfig.get_paths()['purelib'])")

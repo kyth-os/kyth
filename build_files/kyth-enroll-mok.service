@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS Secure Boot MOK enrollment
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=local-fs.target
 ConditionPathExists=!/var/lib/kyth/mok-enrolled
 
@@ -8,8 +8,26 @@ ConditionPathExists=!/var/lib/kyth/mok-enrolled
 Type=oneshot
 ExecStart=/usr/bin/kyth-enroll-mok
 RemainAfterExit=yes
+StateDirectory=kyth
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ReadWritePaths=-/sys/firmware/efi/efivars
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
 StandardOutput=journal
 StandardError=journal
+# Runs once ever (marker-gated), at boot — deprioritized so it never
+# competes with early login/session startup for cycles.
+Nice=15
+IOSchedulingClass=idle
+MemoryMax=384M
 
 [Install]
 WantedBy=multi-user.target

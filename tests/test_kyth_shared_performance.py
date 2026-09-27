@@ -10,7 +10,6 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.performance import (
-    flush_page_caches,
     get_amd_ccd0_cpus,
     get_cpu_topology,
     get_current_epp,
@@ -33,9 +32,14 @@ class PerformanceTests(unittest.TestCase):
             self.assertEqual(model, "AMD Ryzen 7 7800X3D 8-Core Processor")
 
     def test_has_3d_vcache(self) -> None:
-        cpuinfo = "flags\t: fpu vme de pse tsc msr pae mce cx8 apic sep mtrr pge mca cmov pat pse36 clflush mmx fxsr sse sse2 ht syscall nx mmxext fxsr_opt pdpe1gb rdtscp lm 3dnowprefetch...\n"
+        cpuinfo = "model name : AMD Ryzen 7 7800X3D 8-Core Processor\nflags : fpu sse 3dnowprefetch\n"
         with mock.patch("builtins.open", mock.mock_open(read_data=cpuinfo)):
             self.assertTrue(has_3d_vcache())
+
+    def test_3dnow_cpu_flag_is_not_3d_vcache(self) -> None:
+        cpuinfo = "vendor_id : AuthenticAMD\nmodel name : AMD Athlon(tm) 64 X2 Dual Core Processor 5000+\nflags : fpu sse 3dnow 3dnowprefetch\n"
+        with mock.patch("builtins.open", mock.mock_open(read_data=cpuinfo)), mock.patch("shutil.which", return_value=None):
+            self.assertFalse(has_3d_vcache())
 
     @mock.patch("pathlib.Path.is_file")
     @mock.patch("pathlib.Path.read_text")
@@ -66,6 +70,7 @@ class PerformanceTests(unittest.TestCase):
             ["sudo", "-n", "/usr/bin/kyth-set-epp", "performance"],
             capture_output=True,
             check=False,
+            timeout=30,
         )
 
     @mock.patch("pathlib.Path.is_file")
@@ -90,15 +95,6 @@ class PerformanceTests(unittest.TestCase):
         self.assertEqual(get_power_profile(), "performance")
 
     @mock.patch("os.access")
-    @mock.patch("os.sync")
-    def test_flush_page_caches(self, mock_sync, mock_access) -> None:
-        mock_access.return_value = True
-        with mock.patch("pathlib.Path.write_text") as mock_write:
-            flush_page_caches()
-            mock_sync.assert_called_once()
-            mock_write.assert_called_once_with("3\n", encoding="utf-8")
-
-    @mock.patch("os.access")
     def test_set_transparent_hugepages(self, mock_access) -> None:
         mock_access.return_value = True
         with mock.patch("pathlib.Path.write_text") as mock_write:
@@ -114,6 +110,7 @@ class PerformanceTests(unittest.TestCase):
             ["sudo", "-n", "/usr/bin/kyth-scx", "set", "rusty"],
             capture_output=True,
             check=False,
+            timeout=30,
         )
 
     @mock.patch("shutil.which")

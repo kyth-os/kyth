@@ -12,7 +12,7 @@ Please do not open a public issue for a suspected vulnerability.
 
 Use GitHub's private vulnerability reporting form:
 
-https://github.com/mrtrick37/kyth/security/advisories/new
+https://github.com/kyth-os/kyth/security/advisories/new
 
 Include the affected KythOS image or ISO version, reproduction steps, expected
 impact, and any proof-of-concept material that is safe to share privately. Do
@@ -48,7 +48,7 @@ section.
 
 Use GitHub private vulnerability reporting for security issues:
 
-https://github.com/mrtrick37/kyth/security/advisories/new
+https://github.com/kyth-os/kyth/security/advisories/new
 
 For non-sensitive defects, use public GitHub issues.
 

@@ -10,9 +10,11 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 from kyth_shared.user_polish import (
     OperationStatus,
     _run_operation,
+    apply_desktop_layout_step,
     apply_foundation,
     apply_places,
     cleanup_autostart,
+    should_refresh_pulse_desktop_shortcut,
 )
 
 
@@ -28,6 +30,34 @@ class UserPolishTests(unittest.TestCase):
             self.assertTrue((Path(tmp) / "Templates/Plain Text.txt").is_file())
             self.assertEqual(first[0].status, OperationStatus.APPLIED)
             self.assertEqual(second[0].status, OperationStatus.APPLIED)
+            self.assertEqual(first[-1].name, "legacy-virt-gl")
+            self.assertEqual(first[-1].status, OperationStatus.SKIPPED)
+            self.assertEqual(first[-2].name, "session-wayland")
+            self.assertEqual(first[-2].status, OperationStatus.SKIPPED)
+
+    def test_foundation_removes_legacy_virt_software_gl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch(
+            "kyth_shared.user_polish.shutil.which", return_value=None
+        ):
+            env_dir = Path(tmp) / ".config/plasma-workspace/env"
+            env_dir.mkdir(parents=True)
+            legacy = env_dir / "10-kyth-qemu-safe.sh"
+            legacy.write_text("if systemd-detect-virt -q; then export LIBGL_ALWAYS_SOFTWARE=1; fi\n")
+            results = apply_foundation(tmp)
+            self.assertFalse(legacy.exists())
+            self.assertEqual(results[-1].name, "legacy-virt-gl")
+            self.assertEqual(results[-1].status, OperationStatus.APPLIED)
+
+    def test_foundation_rewrites_x11_dmrc(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp, mock.patch(
+            "kyth_shared.user_polish.shutil.which", return_value=None
+        ):
+            dmrc = Path(tmp) / ".dmrc"
+            dmrc.write_text("[Desktop]\nSession=plasmax11.desktop\n")
+            results = apply_foundation(tmp)
+            by_name = {item.name: item for item in results}
+            self.assertEqual(by_name["session-wayland"].status, OperationStatus.APPLIED)
+            self.assertEqual(dmrc.read_text(encoding="utf-8"), "[Desktop]\nSession=plasma.desktop\n")
 
     def test_partial_failure_does_not_stop_later_operations(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch(
@@ -90,6 +120,45 @@ class UserPolishTests(unittest.TestCase):
             self.assertEqual(first.status, OperationStatus.APPLIED)
             self.assertEqual(second.status, OperationStatus.SKIPPED)
             self.assertTrue(unrelated.exists())
+
+    def test_layout_step_skips_when_helper_missing(self):
+        with mock.patch("kyth_shared.user_polish.shutil.which", return_value=None):
+            result = apply_desktop_layout_step(force=False, first_polish=True)
+        self.assertEqual(result.status, OperationStatus.UNAVAILABLE)
+
+    def test_layout_step_failure_is_not_success(self):
+        failed = mock.Mock(returncode=1)
+        with mock.patch(
+            "kyth_shared.user_polish.shutil.which",
+            return_value="/usr/bin/kyth-apply-desktop-layout",
+        ), mock.patch("kyth_shared.user_polish.run_command", return_value=failed):
+            result = apply_desktop_layout_step(force=False, first_polish=True)
+        self.assertEqual(result.status, OperationStatus.FAILED)
+        self.assertIn("exit 1", result.detail)
+
+    def test_layout_step_skips_when_already_polished(self):
+        with mock.patch(
+            "kyth_shared.user_polish.shutil.which",
+            return_value="/usr/bin/kyth-apply-desktop-layout",
+        ), mock.patch("kyth_shared.user_polish.run_command") as run:
+            result = apply_desktop_layout_step(force=False, first_polish=False)
+        self.assertEqual(result.status, OperationStatus.SKIPPED)
+        run.assert_not_called()
+
+    def test_stale_system_hub_desktop_shortcut_is_refreshed(self):
+        stale = "[Desktop Entry]\nName=KythOS System Hub\nComment=Helper\nExec=/usr/bin/kyth-welcome-launch\n"
+        leftover_pulse = "[Desktop Entry]\nName=Kyth Pulse\nGenericName=System Hub\nComment=Health, games, apps, and this PC\nExec=/usr/bin/kyth-welcome-launch\n"
+        shipped = "[Desktop Entry]\nName=Kyth Hub\nGenericName=System Hub\nComment=Health, games, apps, and this PC\nExec=/usr/bin/kyth-welcome-launch\n"
+        self.assertTrue(should_refresh_pulse_desktop_shortcut(stale, shipped))
+        self.assertTrue(should_refresh_pulse_desktop_shortcut(leftover_pulse, shipped))
+        self.assertFalse(should_refresh_pulse_desktop_shortcut(shipped, shipped))
+        self.assertFalse(should_refresh_pulse_desktop_shortcut("", shipped))
+        self.assertFalse(
+            should_refresh_pulse_desktop_shortcut(
+                "[Desktop Entry]\nName=Notes\nExec=kate\n",
+                shipped,
+            )
+        )
 
 
 if __name__ == "__main__":

@@ -8,44 +8,63 @@ SOURCE_TAG="${SOURCE_TAG:-latest}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${KYTH_ISO_OUTPUT:-${REPO_ROOT}/output/live-iso}"
-BASE_IMAGE="${INSTALLER_BASE_IMAGE:-ghcr.io/mrtrick37/kyth:${SOURCE_TAG}}"
+BASE_IMAGE="${INSTALLER_BASE_IMAGE:-ghcr.io/kyth-os/kyth:${SOURCE_TAG}}"
 INSTALL_SOURCE_IMAGE="${BASE_IMAGE}"
+IS_LOCAL_IMAGE=false
+if [[ "${BASE_IMAGE}" == localhost/* || "${BASE_IMAGE}" == localhost:*/* ]]; then
+	IS_LOCAL_IMAGE=true
+fi
 LIVE_TAG="${KYTH_LIVE_TAG:-localhost/kyth-live:${SOURCE_TAG}}"
 TITANOBOA_REF="7737f4748458252ac827dca14b3d6dd09298472a"
 TITANOBOA_DIR="${TITANOBOA_DIR:-${XDG_CACHE_HOME:-${HOME}/.cache}/kyth/titanoboa}"
 
-for cmd in git podman sudo; do
+for cmd in git podman sudo unshare; do
 	command -v "${cmd}" >/dev/null || {
 		echo "ERROR: missing required command: ${cmd}" >&2
 		exit 1
 	}
 done
 
-if [[ "${BASE_IMAGE}" == localhost/* ]] &&
-	! sudo podman image exists "${BASE_IMAGE}" &&
+ROOTFUL_PODMAN="${REPO_ROOT}/build_files/scripts/rootful-podman.sh"
+mkdir -p "${OUTPUT_DIR}"
+build_volume_args=()
+INSTALLER_BUILD_HASH="${INSTALLER_BUILD_HASH:-$(sha256sum \
+	installer/build.sh \
+	build_files/kyth_shared/kyth_shared/vm_acceptance.py \
+	build_files/kyth-vm-acceptance.service | sha256sum | awk '{print $1}')}"
+
+if [[ "${IS_LOCAL_IMAGE}" == true ]] &&
+	! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}" &&
 	command -v docker >/dev/null &&
 	docker image inspect "${BASE_IMAGE}" >/dev/null 2>&1; then
 	echo "==> Importing Docker image into rootful Podman: ${BASE_IMAGE}"
-	docker save "${BASE_IMAGE}" | sudo podman load
+	docker save "${BASE_IMAGE}" | "${ROOTFUL_PODMAN}" load
 fi
 
-# installer/build.sh always bakes KYTH_SOURCE_IMAGE=ghcr.io/mrtrick37/kyth:${SOURCE_TAG}
-# into the live ISO, regardless of where the live payload itself was built from.
-# The booted live VM is a separate environment with no access to this host's
-# local image storage, so a local BASE_IMAGE must be published under that exact
-# ref or the installer's `bootc install` will fail with "manifest unknown".
-#
-# Pushed with `docker`, not `podman`: this image shares many blobs with the
-# public ghcr.io/ublue-os/kinoite-main base it's built FROM, and podman's push
-# reproducibly fails those blobs with "trying to reuse blob ... 403 Forbidden"
-# — a cross-repository blob-mount that GHCR rejects and podman doesn't fall
-# back from. `docker push` uploads them directly and does not hit this.
-if [[ "${BASE_IMAGE}" == localhost/* ]] && command -v docker >/dev/null; then
-	GHCR_REF="ghcr.io/mrtrick37/kyth:${SOURCE_TAG}"
-	echo "==> Publishing local build to ${GHCR_REF} so the installer can fetch it from inside the live VM"
-	docker tag "${BASE_IMAGE}" "${GHCR_REF}"
-	docker push "${GHCR_REF}"
-	INSTALL_SOURCE_IMAGE="${GHCR_REF}"
+# The live VM cannot access the host's local image storage, so the installer
+# builder embeds the local image into the ISO through the OCI layout.  Keep the
+# public registry reference as the update target, but never publish a local
+# test image as a side effect of a local ISO build.
+if [[ "${IS_LOCAL_IMAGE}" == true ]]; then
+	if ! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}"; then
+		echo "ERROR: local installer image is unavailable to Podman: ${BASE_IMAGE}" >&2
+		exit 1
+	fi
+	LOCAL_IMAGE_DIR="${OUTPUT_DIR}/.kyth-installer-image"
+	mkdir -p "${LOCAL_IMAGE_DIR}"
+	if [[ -n "${CONTAINER_ID:-}" ]] && command -v distrobox-host-exec >/dev/null 2>&1; then
+		SKOPEO=(distrobox-host-exec skopeo)
+	else
+		SKOPEO=(skopeo)
+	fi
+	echo "==> Exporting ${BASE_IMAGE} to a local OCI layout for the installer builder"
+	"${SKOPEO[@]}" copy --retry-times 3 \
+		"containers-storage:${BASE_IMAGE}" \
+		"oci:${LOCAL_IMAGE_DIR}:latest"
+	# Podman build containers have their own containers-storage namespace. Mount
+	# the exported layout into the build and use the OCI transport from there.
+	INSTALL_SOURCE_IMAGE="oci:/src/kyth-installer-image:latest"
+	build_volume_args+=(--volume "${LOCAL_IMAGE_DIR}:/src/kyth-installer-image:ro")
 fi
 
 echo "==> Fetching Titanoboa (background) and building KythOS live payload (foreground) in parallel"
@@ -76,14 +95,16 @@ _titanoboa_ok="/tmp/kyth-titanoboa-ok.$$"
 # localhost/* images, which are loaded from Docker above and have no registry.
 echo "==> Building KythOS live payload from ${BASE_IMAGE}"
 pull_flag=(--pull=newer)
-[[ "${BASE_IMAGE}" == localhost/* ]] && pull_flag=()
-sudo podman build \
+[[ "${IS_LOCAL_IMAGE}" == true ]] && pull_flag=()
+"${ROOTFUL_PODMAN}" build \
 	"${pull_flag[@]}" \
 	--cap-add SYS_ADMIN \
 	--security-opt label=disable \
 	--network host \
+	"${build_volume_args[@]}" \
 	--build-arg "BASE_IMAGE=${BASE_IMAGE}" \
 	--build-arg "INSTALL_SOURCE_IMAGE=${INSTALL_SOURCE_IMAGE}" \
+	--build-arg "INSTALLER_BUILD_HASH=${INSTALLER_BUILD_HASH}" \
 	--build-arg "SOURCE_TAG=${SOURCE_TAG}" \
 	--tag "${LIVE_TAG}" \
 	-f installer/Containerfile \
@@ -96,17 +117,21 @@ if [[ ! -f "${_titanoboa_ok}" ]]; then
 fi
 rm -f "${_titanoboa_ok}"
 
-mkdir -p "${OUTPUT_DIR}"
-WORK="$(mktemp -d -p "${TMPDIR:-/var/tmp}" kyth-titanoboa.XXXXXXXXXX)"
+# The build runs through host-user Podman when this checkout is inside
+# Distrobox. /tmp and /var/tmp are container-local there, so a temporary
+# directory under the shared checkout is visible to the host Podman mount.
+WORK="$(mktemp -d -p "${OUTPUT_DIR}" kyth-titanoboa.XXXXXXXXXX)"
 # Rootful podman writes root-owned files into ${WORK} — an unprivileged rm
 # would fail silently and leak multi-GB dirs in /var/tmp.
 trap 'sudo rm -rf "${WORK}"' EXIT
 
 echo "==> Assembling ISO with Titanoboa"
-sudo podman run --rm -i \
+"${ROOTFUL_PODMAN}" run --rm -i \
 	--network host \
 	--cap-add sys_admin --security-opt label=disable \
-	-v "${TITANOBOA_DIR}/build_iso.sh:/src/build_iso.sh:ro" \
+	-v "${TITANOBOA_DIR}/build_iso.sh:/src/titanoboa-build_iso.sh:ro" \
+	-v "${REPO_ROOT}/build_files/scripts/titanoboa-iso-wrapper.sh:/src/build_iso.sh:ro" \
+	-v "${REPO_ROOT}/installer/iso.yaml:/kyth/iso.yaml:ro" \
 	--mount type=image,source="${LIVE_TAG}",dst=/rootfs \
 	-v "${WORK}:/output" \
 	quay.io/fedora/fedora:44 /src/build_iso.sh
@@ -114,4 +139,12 @@ mv "${WORK}/KYTHOS-44-LIVE.iso" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 sudo chown "$(id -u):$(id -g)" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 test -r "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 test -w "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
+# 8.5 GiB hard ceiling, matching the CI gate in build-live-iso.yml.
+iso_size="$(stat -c%s "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso")"
+iso_limit=$((8 * 1024 * 1024 * 1024 + 512 * 1024 * 1024))
+echo "==> ISO size: $((iso_size / 1024 / 1024)) MiB (limit $((iso_limit / 1024 / 1024)) MiB)"
+if ((iso_size > iso_limit)); then
+	echo "ERROR: ISO exceeds the 8.5 GiB ceiling by $(((iso_size - iso_limit) / 1024 / 1024)) MiB" >&2
+	exit 1
+fi
 echo "==> KythOS live ISO ready: ${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"

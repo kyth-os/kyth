@@ -6,7 +6,6 @@ import unittest
 from unittest.mock import mock_open, patch
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "build_files" / "kyth-welcome"))
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.system.bootc import (  # noqa: E402
@@ -80,6 +79,17 @@ class BootcHelpersTests(unittest.TestCase):
             bootc_query.image_reference_from_status(status),
             f"{REGISTRY}:testing",
         )
+
+    def test_root_status_commands_skip_sudo(self):
+        with patch("kyth_shared.system.bootc_query.os.geteuid", return_value=0):
+            cmds = bootc_query._status_commands(json_mode=True)
+        self.assertEqual(cmds[0], ["/usr/bin/kyth-bootc-guard", "status-json"])
+        self.assertTrue(all(cmd[0] != "sudo" for cmd in cmds))
+
+    def test_unprivileged_status_commands_use_sudo_guard(self):
+        with patch("kyth_shared.system.bootc_query.os.geteuid", return_value=1000):
+            cmds = bootc_query._status_commands(json_mode=False)
+        self.assertEqual(cmds[0], ["sudo", "-n", "/usr/bin/kyth-bootc-guard", "status"])
 
     def test_policy_layer_computes_kernel_target_without_probing(self):
         self.assertEqual(
@@ -350,6 +360,57 @@ class RegistrySharedTests(unittest.TestCase):
             inspect_runner=runner,
         )
         self.assertEqual(result.state, "available")
+
+
+class BootcQueryLockTests(unittest.TestCase):
+    def test_status_probes_are_skipped_during_upgrade(self):
+        with patch.object(bootc_query, "active_operation", return_value="/usr/bin/bootc upgrade"):
+            with patch.object(bootc_query, "run_command") as run:
+                self.assertEqual(bootc_query.fetch_status_text(), "")
+                self.assertIsNone(bootc_query.fetch_status_data())
+                run.assert_not_called()
+
+    def test_holds_sysroot_lock_matches_upgrade_and_finalize(self):
+        self.assertTrue(bootc_query.holds_sysroot_lock("/usr/bin/bootc upgrade"))
+        self.assertTrue(bootc_query.holds_sysroot_lock("111908 /usr/bin/bootc upgrade"))
+        self.assertTrue(bootc_query.holds_sysroot_lock("sudo -n bootc upgrade"))
+        self.assertTrue(
+            bootc_query.holds_sysroot_lock("/usr/bin/ostree admin finalize-staged --hold")
+        )
+        self.assertTrue(
+            bootc_query.holds_sysroot_lock("113198 /usr/bin/ostree admin finalize-staged")
+        )
+        self.assertFalse(bootc_query.holds_sysroot_lock("/usr/bin/bootc status --json"))
+        self.assertFalse(bootc_query.holds_sysroot_lock("/usr/bin/ostree admin status"))
+        self.assertFalse(bootc_query.holds_sysroot_lock("kyth-bootc-guard status-json"))
+
+    def test_search_commands_containing_upgrade_text_are_not_active(self):
+        self.assertFalse(bootc_query.holds_sysroot_lock("rg -n 'bootc upgrade' src tests"))
+        self.assertFalse(bootc_query.holds_sysroot_lock("python3 -c 'print(\\\"bootc upgrade\\\")'"))
+
+    def test_active_operation_uses_the_executable_not_search_arguments(self):
+        ps = subprocess.CompletedProcess(
+            ["ps"],
+            0,
+            stdout=(
+                "123 rg -n 'bootc upgrade' src tests\n"
+                "456 /usr/bin/bootc upgrade\n"
+            ),
+            stderr="",
+        )
+        with patch.object(bootc_query, "run_command", return_value=ps):
+            self.assertEqual(bootc_query.active_operation(), "456 /usr/bin/bootc upgrade")
+
+    def test_status_probes_are_skipped_during_finalize(self):
+        with patch.object(
+            bootc_query,
+            "active_operation",
+            return_value="/usr/bin/ostree admin finalize-staged",
+        ):
+            with patch.object(bootc_query, "run_command") as run:
+                self.assertEqual(bootc_query.fetch_status_text(), "")
+                self.assertIsNone(bootc_query.fetch_status_data())
+                run.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -2,10 +2,12 @@
 # Based directly on Bazzite's installer/build.sh
 # Ref: https://github.com/ublue-os/bazzite/blob/main/installer/build.sh
 
-set -exo pipefail
+set -euxo pipefail
 
 # shellcheck source=build_files/scripts/lib/plymouth-initrd-checks.sh disable=SC1091
 source /src/build_files/scripts/lib/plymouth-initrd-checks.sh
+# shellcheck source=build_files/scripts/lib/dracut-modules.sh disable=SC1091
+source /src/build_files/scripts/lib/dracut-modules.sh
 
 # Tools required by the live installer's NTFS shrink-and-install path.
 if command -v dnf5 >/dev/null 2>&1; then
@@ -15,6 +17,10 @@ else
 	dnf install -y ntfs-3g parted btrfs-progs gdisk
 	dnf clean all
 fi
+# Reproducibility anchor: these payload tools float on upstream (no EVR
+# pins — old Fedora builds are dropped, so pins would rot). Record exactly
+# what resolved so an NTFS-shrink behavior change bisects to a NEVRA.
+rpm -q --queryformat '%{NAME}-%{EPOCH}:%{VERSION}-%{RELEASE}.%{ARCH}\n' ntfs-3g parted btrfs-progs gdisk
 
 SOURCE_TAG=${SOURCE_TAG:?}
 BASE_IMAGE=${BASE_IMAGE:?}
@@ -23,24 +29,11 @@ INSTALL_SOURCE_IMAGE=${INSTALL_SOURCE_IMAGE:-${BASE_IMAGE}}
 # bwrap tries to write /proc/sys/user/max_user_namespaces which is mounted as ro
 mount -o remount,rw /proc/sys
 
-# ── KythOS installer Python packages ──────────────────────────────────────────
-# Install through their package metadata so entry points, dependencies, and
-# package data are verified by the same mechanism used by development builds.
-# /src is a read-only BuildKit bind mount, while setuptools writes build
-# metadata beside local projects. Stage both sources in writable temporary
-# storage before invoking pip.
-installer_package_root="$(mktemp -d /tmp/kyth-installer-packages.XXXXXX)"
-cp -a /src/build_files/kyth_shared "${installer_package_root}/kyth_shared"
-cp -a /src/build_files/kyth-installer "${installer_package_root}/kyth-installer"
-python3 -m pip install \
-	--no-cache-dir \
-	--no-deps \
-	--no-build-isolation \
-	--prefix=/usr \
-	"${installer_package_root}/kyth_shared" \
-	"${installer_package_root}/kyth-installer"
-rm -rf "${installer_package_root}"
+# ── Native installer runtime ──────────────────────────────────────────────────
+# The Containerfile supplies the Rust shell, daemon, and typed execution
+# helper. No Python installer package is installed into the live image.
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
+install -Dm644 /src/build_files/kyth-installerd.service /usr/lib/systemd/system/kyth-installerd.service
 install -Dm755 /src/build_files/scripts/plymouth-branding-guard.sh \
 	/usr/libexec/kyth-plymouth-branding-guard
 
@@ -60,8 +53,28 @@ EOF
 # registry reference for future bootc updates. Optional kernel variants remain
 # registry-backed because they are separate images.
 mkdir -p /usr/share/kyth/image
+skopeo_source_args=()
+source_imgref="${INSTALL_SOURCE_IMAGE}"
+case "${source_imgref}" in
+	containers-storage:*|oci:*|dir:*|ostree:*)
+		;;
+	docker://*)
+		source_imgref="docker://${source_imgref#docker://}"
+		;;
+	*)
+		source_imgref="docker://${source_imgref}"
+		;;
+esac
+case "${source_imgref#docker://}" in
+	localhost:*|127.0.0.1:*|\[::1\]:*)
+		# Local test registries are intentionally HTTP-only. Keep normal
+		# registry pulls TLS-verified; relax verification only for loopback.
+		skopeo_source_args+=(--src-tls-verify=false)
+		;;
+esac
 skopeo copy --retry-times 3 \
-	"docker://${INSTALL_SOURCE_IMAGE#docker://}" \
+	"${skopeo_source_args[@]}" \
+	"${source_imgref}" \
 	"oci:/usr/share/kyth/image:latest"
 embedded_digest="$(skopeo inspect --format '{{.Digest}}' 'oci:/usr/share/kyth/image:latest')"
 case "${embedded_digest}" in
@@ -74,18 +87,107 @@ esac
 expected_digest="${INSTALL_SOURCE_IMAGE##*@}"
 release_digest="${embedded_digest}"
 [[ "${expected_digest}" == sha256:* ]] && release_digest="${expected_digest}"
-target_image="ghcr.io/mrtrick37/kyth:${SOURCE_TAG}"
-printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\n' \
+target_image="ghcr.io/kyth-os/kyth:${SOURCE_TAG}"
+
+# ── Registry signature gate: cosign-verify at ISO build time ─────────────────
+# The installer daemon re-verifies this digest AND the embedded signature
+# bundle before any bootc install. Loopback registries and non-registry
+# transports are unsigned dev inputs: recorded explicitly as "local", never
+# as verified.
+signature_bundle="/usr/share/kyth/image.sig.bundle.json"
+signature_state="local"
+signature_digest=""
+cosign_registry_ref=""
+case "${source_imgref}" in
+	docker://localhost:*|docker://127.0.0.1:*|docker://\[::1\]*)
+		echo "NOTE: live installer source is a loopback test registry; skipping cosign verification (recorded as unsigned local source)." >&2
+		;;
+	docker://*)
+		cosign_registry_ref="${source_imgref#docker://}"
+		cosign_registry_ref="${cosign_registry_ref%@*}"
+		;;
+	*)
+		echo "NOTE: live installer source is a non-registry transport (${source_imgref%%:*}); skipping cosign verification (recorded as unsigned local source)." >&2
+		;;
+esac
+if [ -n "${cosign_registry_ref}" ]; then
+	# The signer (supply-chain.yml via setup-cosign) uses cosign v2.6.1,
+	# which stores signatures as .sig tags. The verifier must speak the
+	# same format: distro-packaged cosign is v3 (bundle/referrers only),
+	# which cannot see v2 .sig tags, so a distro install fails
+	# every build at this gate. Always install the pinned v2 binary to
+	# /usr/local/bin (ahead of /usr/bin in PATH) and remove it below so
+	# it never lands in the live image.
+	cosign_transient="yes"
+	cosign_version="2.6.1"
+	cosign_sha256="064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a"
+	curl -sfL "https://github.com/sigstore/cosign/releases/download/v${cosign_version}/cosign-linux-amd64" -o /tmp/kyth-cosign
+	echo "${cosign_sha256}  /tmp/kyth-cosign" | sha256sum -c -
+	install -D -m 0755 /tmp/kyth-cosign /usr/local/bin/cosign
+	rm -f /tmp/kyth-cosign
+	hash -r
+	cosign_identity="${KYTH_COSIGN_IDENTITY:-^https://github.com/.+/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$}"
+	cosign_issuer="https://token.actions.githubusercontent.com"
+	# cosign's TUF client bootstraps its cache with a plain mkdir of the
+	# cache root: with HOME=/root (which already exists in bootc payload
+	# images) that fatals as "mkdir /root: file exists" before any network
+	# happens, so no ISO build could ever pass this gate. Point TUF at a
+	# fresh directory; verification itself is unchanged.
+	export TUF_ROOT="${TUF_ROOT:-/tmp/kyth-sigstore-tuf}"
+	mkdir -p "${TUF_ROOT}"
+	# The TUF root refresh and registry reads flake on shared runners; retry a
+	# few times before failing. The gate itself stays hard — after retries it
+	# still exits 1, never records "verified" without a real verification.
+	cosign_verified=""
+	for cosign_attempt in 1 2 3; do
+		if cosign verify \
+			--certificate-identity-regexp "${cosign_identity}" \
+			--certificate-oidc-issuer "${cosign_issuer}" \
+			"${cosign_registry_ref}@${embedded_digest}"; then
+			cosign_verified="yes"
+			break
+		fi
+		echo "WARNING: cosign verification attempt ${cosign_attempt}/3 failed; retrying in 15s" >&2
+		sleep 15
+	done
+	[ -n "${cosign_verified}" ] \
+		|| { echo "ERROR: cosign verification failed for ${cosign_registry_ref}@${embedded_digest} after 3 attempts" >&2; exit 1; }
+	signatures=""
+	for cosign_attempt in 1 2 3; do
+		if signatures="$(cosign download signature "${cosign_registry_ref}@${embedded_digest}")" && [ -n "${signatures}" ]; then
+			break
+		fi
+		echo "WARNING: signature bundle download attempt ${cosign_attempt}/3 failed or empty; retrying in 15s" >&2
+		sleep 15
+	done
+	[ -n "${signatures}" ] \
+		|| { echo "ERROR: could not download signature bundle for ${cosign_registry_ref}@${embedded_digest} after 3 attempts" >&2; exit 1; }
+	signatures_json="$(printf '%s\n' "${signatures}" | sed -e 's/^/"/' -e 's/$/"/' | paste -sd, -)"
+	printf '{"schema_version":1,"digest":"%s","release_digest":"%s","source_image":"%s","identity":"%s","issuer":"%s","signatures":[%s]}\n' \
+		"${embedded_digest}" "${release_digest}" "${INSTALL_SOURCE_IMAGE}" \
+		"${cosign_identity}" "${cosign_issuer}" "${signatures_json}" \
+		>"${signature_bundle}"
+	chmod 0644 "${signature_bundle}"
+	signature_digest="sha256:$(sha256sum "${signature_bundle}" | awk '{print $1}')"
+	signature_state="verified"
+	if [ -n "${cosign_transient}" ]; then
+		rm -f /usr/local/bin/cosign
+		hash -r
+	fi
+fi
+printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\nKYTH_INSTALLER_SOCKET=/run/kyth-installer/api.sock\nKYTH_INSTALLER_SOCKET_GROUP=liveuser\nKYTH_INSTALLER_TOKEN_FILE=/run/kyth-installer/session-token\n' \
 	"${target_image}" "${embedded_digest}" >/etc/kyth-installer.env
-printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"%s","source_image":"%s"}\n' \
+printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"%s","source_image":"%s","signature":"%s","signature_digest":"%s"}\n' \
 	"${embedded_digest}" "${release_digest}" "${target_image}" "${INSTALL_SOURCE_IMAGE}" \
+	"${signature_state}" "${signature_digest}" \
 	>/usr/share/kyth/image-source.json
 
 # Install live-only packages in one transaction so dependency solving and
 # repository metadata work happen once. Browsers from the installed image are
 # intentionally deferred to Flatpak first-boot setup.
 dnf install -y \
-	chromium \
+	webkit2gtk4.1 \
+	gtk3 \
 	dracut-live \
 	grub2-efi-x64-cdboot \
 	livesys-scripts
@@ -170,6 +272,7 @@ export LIBGL_ALWAYS_SOFTWARE=1
 export GALLIUM_DRIVER=llvmpipe
 export MESA_LOADER_DRIVER_OVERRIDE=llvmpipe
 export QT_QUICK_BACKEND=software
+export KWIN_COMPOSE=Q
 EOF
 chmod +x /etc/skel/.config/plasma-workspace/env/live.sh
 
@@ -199,6 +302,21 @@ chown liveuser:liveuser \
     /home/liveuser/.config/kscreenlockerrc
 [ -f /home/liveuser/Desktop/install-kyth.desktop ] && \
     chmod +x /home/liveuser/Desktop/install-kyth.desktop
+# Live-session ephemerality notice: the live desktop runs on an in-memory
+# overlay, so files, settings, and installed apps vanish on reboot. This
+# runs only on live boots (livesys-session-extra never executes on an
+# installed system), so the notice cannot leak onto installed machines.
+mkdir -p /etc/motd.d /etc/issue.d
+cat > /etc/motd.d/kyth-live-session <<'MOTDEOF'
+*******************************************************************************
+ KythOS live session — everything here is ephemeral.
+ Files, settings, and installed apps are lost on reboot.
+ To keep anything, install KythOS to this computer first.
+*******************************************************************************
+MOTDEOF
+printf '%s\n' '' 'KythOS live session — ephemeral: all changes are lost on reboot.' '' \
+    > /etc/issue.d/kyth-live-session.conf
+chmod 0644 /etc/motd.d/kyth-live-session /etc/issue.d/kyth-live-session.conf
 EOF
 chmod +x /var/lib/livesys/livesys-session-extra
 
@@ -250,7 +368,7 @@ install -m 0644 /usr/share/plymouth/plymouthd.defaults \
 install -m 0644 /usr/share/kyth/branding/transparent-watermark.png \
 	"${kyth_plymouth_include_root}/usr/share/pixmaps/system-logo-white.png"
 DRACUT_NO_XATTR=1 dracut -v --force --zstd --no-hostonly \
-	--add "kyth-plymouth plymouth dmsquash-live dmsquash-live-autooverlay" \
+	--add "${KYTH_DRACUT_MODULES} ${KYTH_DRACUT_LIVE_EXTRA}" \
 	--include "${kyth_plymouth_include_root}" / \
 	"/usr/lib/modules/${kernel}/initramfs.img" "${kernel}"
 rm -rf "${kyth_plymouth_include_root}"
@@ -311,22 +429,23 @@ sed -i 's/^livesys_session=.*/livesys_session="kde"/' /etc/sysconfig/livesys
 systemctl enable livesys.service livesys-late.service
 
 # ── Log straight into the live desktop ────────────────────────────────────────
-# Unlike the installed system (kyth-configure-session picks Wayland on bare
-# metal, X11 only inside VMs), the live session always forces X11 + llvmpipe
-# software rendering (see the plasma-workspace/env/live.sh skel above). Live
-# media boots on hardware that has never run this OS and whose GPU/DRM/KMS
-# support is unverified, so we trade rendering performance/theme fidelity for
-# a login that is guaranteed to come up everywhere. This is intentional, not
-# an oversight.
-mkdir -p /etc/sddm.conf.d
-cat >/etc/sddm.conf.d/20-kyth-live-autologin.conf <<'EOF'
+# Live media boots on hardware that has never run this OS. Autologin follows
+# DefaultSession (Plasma Wayland) plus live.sh llvmpipe/QPainter, including the
+# ISO's nomodeset / Basic Graphics entry. Do not pin Session= here.
+mkdir -p /etc/plasmalogin.conf.d
+cat >/etc/plasmalogin.conf.d/20-kyth-live-autologin.conf <<'EOF'
 [Autologin]
 User=liveuser
-Session=plasmax11.desktop
 Relogin=false
 EOF
 
 # ── Disable services inappropriate for live ───────────────────────────────────
+# Live-only differences are scoped to the live kernel cmdline (kyth.live=1,
+# see installer/iso.yaml): the live payload image IS the installed system,
+# so a hard mask (ln -sf /dev/null) would persist into installed systems and
+# block those units there forever. Each unit instead gets a drop-in that
+# skips it only on live boots; installed boots follow normal enablement.
+# `disable` keeps them from auto-starting anywhere by default.
 for unit in \
 	ostree-remount.service \
 	rpm-ostree-countme.service rpm-ostree-countme.timer \
@@ -336,12 +455,30 @@ for unit in \
 	kyth-proton-cachyos-update.service kyth-proton-cachyos-update.timer \
 	kyth-hw-setup.service kyth-local-bin-migrate.service \
 	kyth-duperemove.service kyth-duperemove.timer \
-	kyth-enroll-mok.service plasmalogin.service akmods.service \
+	kyth-enroll-mok.service sddm.service akmods.service \
 	plasma-setup.service scxd.service \
 	fwupd.service fwupd-refresh.service fwupd-refresh.timer; do
 	systemctl disable "${unit}" 2>/dev/null || true
-	ln -sf /dev/null "/etc/systemd/system/${unit}"
+	mkdir -p "/etc/systemd/system/${unit}.d"
+	printf '%s\n' '[Unit]' 'ConditionKernelCommandLine=!kyth.live=1' \
+		>"/etc/systemd/system/${unit}.d/kyth-live-only.conf"
 done
+
+# The acceptance unit is intentionally present in the installed image. Keep
+# its enablement explicit after the live-image service masking above so the
+# QEMU qualification guest starts automatically at graphical.target.
+install -m 0644 /src/build_files/kyth-vm-acceptance.service \
+	/usr/lib/systemd/system/kyth-vm-acceptance.service
+systemctl enable kyth-vm-acceptance.service
+
+# Live-session presets may remove target wants links at first boot. Tie the
+# acceptance guest directly to the live-session late setup service as well,
+# so QEMU qualification remains runnable without relying on those links.
+mkdir -p /etc/systemd/system/livesys-late.service.d
+cat >/etc/systemd/system/livesys-late.service.d/kyth-vm-acceptance.conf <<'EOF'
+[Unit]
+Wants=kyth-vm-acceptance.service
+EOF
 
 # ── Larger /var/tmp for bootc install to-disk ─────────────────────────────────
 rm -rf /var/tmp
@@ -362,59 +499,18 @@ EOF
 systemctl enable var-tmp.mount
 
 # ── Scoped sudo for liveuser (least-privilege) ───────────────────────────────
-# Installer needs root for partitioning, bootc, and mounts. Restrict the
-# live account to the installer entry points and a minimal allowlist so a
-# compromised renderer (chromium --no-sandbox) cannot sudo to arbitrary
-# commands.
+# The packaged installer is the sole privileged entry point. It validates the
+# installation request before invoking partitioning/bootc tools as its own root
+# children. Do not grant those general-purpose tools separately: many of them
+# are direct arbitrary-file-write or command-execution primitives.
+#
+# The empty sudoers argument string means only an argument-free graphical
+# launch is passwordless. Headless/answer-file invocations require normal sudo
+# authentication. Preserve only the display and image-selection environment
+# needed by the native Rust shell and root-owned daemon.
 install -Dm440 /dev/stdin /etc/sudoers.d/liveuser-live <<'EOF'
-liveuser ALL=(root) NOPASSWD: /usr/bin/kyth-installer
-liveuser ALL=(root) NOPASSWD: /usr/bin/kyth-launch-installer
-liveuser ALL=(root) NOPASSWD: /usr/libexec/kyth-plymouth-branding-guard
-liveuser ALL=(root) NOPASSWD: /usr/bin/chromium
-liveuser ALL=(root) NOPASSWD: /usr/bin/chromium-browser
-liveuser ALL=(root) NOPASSWD: /usr/bin/chromium-bin
-# Explicit tool allowlist mirroring runner._ALLOWED_EXECUTABLES (partition +
-# system helpers). Full ALL is intentionally not granted.
-liveuser ALL=(root) NOPASSWD: /usr/sbin/parted
-liveuser ALL=(root) NOPASSWD: /usr/bin/parted
-liveuser ALL=(root) NOPASSWD: /usr/sbin/sgdisk
-liveuser ALL=(root) NOPASSWD: /usr/bin/sgdisk
-liveuser ALL=(root) NOPASSWD: /usr/bin/mkfs.btrfs
-liveuser ALL=(root) NOPASSWD: /usr/bin/mkfs.ext4
-liveuser ALL=(root) NOPASSWD: /usr/bin/mkfs.fat
-liveuser ALL=(root) NOPASSWD: /usr/bin/mkfs.xfs
-liveuser ALL=(root) NOPASSWD: /usr/bin/mkswap
-liveuser ALL=(root) NOPASSWD: /usr/bin/btrfs
-liveuser ALL=(root) NOPASSWD: /usr/bin/mount
-liveuser ALL=(root) NOPASSWD: /usr/bin/umount
-liveuser ALL=(root) NOPASSWD: /usr/bin/findmnt
-liveuser ALL=(root) NOPASSWD: /usr/bin/lsblk
-liveuser ALL=(root) NOPASSWD: /usr/bin/blkid
-liveuser ALL=(root) NOPASSWD: /usr/bin/blockdev
-liveuser ALL=(root) NOPASSWD: /usr/bin/partprobe
-liveuser ALL=(root) NOPASSWD: /usr/sbin/partprobe
-liveuser ALL=(root) NOPASSWD: /usr/bin/udevadm
-liveuser ALL=(root) NOPASSWD: /usr/bin/ntfsresize
-liveuser ALL=(root) NOPASSWD: /usr/bin/resize2fs
-liveuser ALL=(root) NOPASSWD: /usr/sbin/e2fsck
-liveuser ALL=(root) NOPASSWD: /usr/bin/e2fsck
-liveuser ALL=(root) NOPASSWD: /usr/bin/bootc
-liveuser ALL=(root) NOPASSWD: /usr/bin/mokutil
-liveuser ALL=(root) NOPASSWD: /usr/bin/systemctl
-liveuser ALL=(root) NOPASSWD: /usr/bin/efibootmgr
-liveuser ALL=(root) NOPASSWD: /usr/bin/openssl
-liveuser ALL=(root) NOPASSWD: /usr/bin/sync
-liveuser ALL=(root) NOPASSWD: /usr/bin/tee
-liveuser ALL=(root) NOPASSWD: /usr/bin/cat
-liveuser ALL=(root) NOPASSWD: /usr/bin/mkdir
-liveuser ALL=(root) NOPASSWD: /usr/bin/chmod
-liveuser ALL=(root) NOPASSWD: /usr/bin/chown
-liveuser ALL=(root) NOPASSWD: /usr/bin/ln
-liveuser ALL=(root) NOPASSWD: /usr/bin/cp
-liveuser ALL=(root) NOPASSWD: /usr/bin/restorecon
-liveuser ALL=(root) NOPASSWD: /usr/bin/useradd
-liveuser ALL=(root) NOPASSWD: /usr/bin/timedatectl
-liveuser ALL=(root) NOPASSWD: /usr/bin/ip
+Defaults:liveuser env_keep += "DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS XDG_SESSION_TYPE LIBGL_ALWAYS_SOFTWARE GALLIUM_DRIVER MESA_LOADER_DRIVER_OVERRIDE QT_QUICK_BACKEND"
+liveuser ALL=(root) NOPASSWD: /usr/bin/kyth-launch-installer ""
 EOF
 # Validate sudoers syntax — fail the ISO build instead of shipping a broken file.
 visudo -c -f /etc/sudoers.d/liveuser-live
@@ -430,7 +526,8 @@ cp -av /usr/lib/efi/*/*/EFI /boot/efi/
 cp -v /boot/efi/EFI/fedora/grubx64.efi /boot/efi/EFI/BOOT/fbx64.efi || true
 
 # ── iso.yaml for the GRUB menu ────────────────────────────────────────────────
-mkdir -p /usr/lib/bootc-image-builder
+mkdir -p /usr/lib/bootc-image-builder /etc/kyth
 cp /src/installer/iso.yaml /usr/lib/bootc-image-builder/iso.yaml
+cp /src/installer/iso.yaml /etc/kyth/iso.yaml
 
 dnf clean all

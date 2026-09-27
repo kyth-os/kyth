@@ -4,6 +4,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(git -C "${SCRIPT_DIR}/../.." rev-parse --show-toplevel)"
 
 usage() {
 	cat <<'EOF'
@@ -111,13 +112,17 @@ QEMU_ARGS=(
 	-nodefaults
 	-no-user-config
 	-device virtio-vga
-	-display none
+	-display "spice-app"
+	-spice "unix=on,addr=${ARTIFACTS}/spice.sock,disable-ticketing=on,disable-copy-paste=off,disable-agent-file-xfer=off"
 	-device virtio-rng-pci
 	-device ich9-ahci,id=ahci
 	-drive "if=none,id=liveiso,format=raw,media=cdrom,readonly=on,file=${ISO}"
-	-device ide-cd,bus=ahci.0,drive=liveiso,bootindex=1
+	# `-boot once=d` selects the ISO for the initial live boot. Keep the
+	# installed disk first in the persistent device order so a guest reboot
+	# after installation enters the installed system instead of reinstalling.
+	-device ide-cd,bus=ahci.0,drive=liveiso,bootindex=2
 	-drive "if=none,id=systemdisk,file=${DISK},format=qcow2,cache=writeback"
-	-device virtio-blk-pci,drive=systemdisk,serial=KYTH_ACCEPT,bootindex=2
+	-device virtio-blk-pci,drive=systemdisk,serial=KYTH_ACCEPT,bootindex=1
 	-netdev user,id=net0
 	-device virtio-net-pci,netdev=net0
 	-serial "file:${SERIAL_LOG}"
@@ -232,6 +237,14 @@ QUALIFICATION_ARGS=(
 if [[ -n "${UPDATE_REF}" ]]; then
 	QUALIFICATION_ARGS+=(--update-required)
 fi
-PYTHONPATH="${SCRIPT_DIR}/../kyth_shared${PYTHONPATH:+:${PYTHONPATH}}" \
-	python3 -m kyth_shared.qualification "${QUALIFICATION_ARGS[@]}"
+if [[ -x /usr/bin/kyth-qualify ]]; then
+	qualification_cmd=(/usr/bin/kyth-qualify)
+elif [[ -x "${REPO_ROOT}/src/kyth-shared-rs/target/release/kyth-qualify" ]]; then
+	qualification_cmd=("${REPO_ROOT}/src/kyth-shared-rs/target/release/kyth-qualify")
+elif [[ -x "${REPO_ROOT}/src/kyth-shared-rs/target/debug/kyth-qualify" ]]; then
+	qualification_cmd=("${REPO_ROOT}/src/kyth-shared-rs/target/debug/kyth-qualify")
+else
+	qualification_cmd=(cargo run --quiet --manifest-path "${REPO_ROOT}/src/kyth-shared-rs/Cargo.toml" --bin kyth-qualify --)
+fi
+"${qualification_cmd[@]}" "${QUALIFICATION_ARGS[@]}"
 echo "KythOS VM acceptance passed"

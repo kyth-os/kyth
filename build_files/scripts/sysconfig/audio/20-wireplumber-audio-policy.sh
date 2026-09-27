@@ -34,12 +34,13 @@ monitor.bluez.rules = [
       }
     }
   }
+  {
+    matches = [{ node.name = "~bluez_output.*" }]
+    actions = { update-props = { priority.session = 200 } }
+  }
 ]
 
-# Device session priority: Bluetooth (200) > USB audio (150) > built-in (100).
-# When WirePlumber has no saved default for a session, the highest-priority
-# available device wins — so plugging in a USB headset or Bluetooth headphones
-# makes them the active output without opening the volume mixer.
+# Device session priority: USB audio (150) > built-in (100).
 monitor.alsa.rules = [
   {
     matches = [{ device.name = "~alsa_card.usb*" }]
@@ -48,13 +49,6 @@ monitor.alsa.rules = [
   {
     matches = [{ device.name = "~alsa_card.pci*" }]
     actions = { update-props = { priority.session = 100 } }
-  }
-]
-
-monitor.bluez.rules = [
-  {
-    matches = [{ node.name = "~bluez_output.*" }]
-    actions = { update-props = { priority.session = 200 } }
   }
 ]
 WPEOF

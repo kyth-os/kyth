@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-aio-max — 1048576 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-aio-max "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.aio_max import load_aio_max, aio_max_status; c=load_aio_max(); print(f\"profile={c['profile']} active={aio_max_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.aio_max import load_aio_max,save_aio_max,generate_aio_max; c=load_aio_max(); c['profile']='gaming'; save_aio_max(c); generate_aio_max(c)"; sysctl --system >/dev/null 2>&1 || true; echo "aio max gaming 1048576" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.aio_max import load_aio_max,save_aio_max,generate_aio_max; c=load_aio_max(); c['profile']='balanced'; save_aio_max(c); generate_aio_max(c)"; echo "aio max balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.aio_max import load_aio_max,generate_aio_max; generate_aio_max(load_aio_max())" ;;
-    *) echo "Usage: kyth-aio-max [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

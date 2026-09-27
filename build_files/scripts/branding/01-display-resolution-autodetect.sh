@@ -13,7 +13,9 @@ Hidden=false
 NoDisplay=true
 RESEOF
 
-install -m 0755 /ctx/kyth-set-resolution /usr/bin/kyth-set-resolution
+if [[ ! -x /usr/bin/kyth-set-resolution ]]; then
+	install -m 0755 /ctx/kyth-set-resolution /usr/bin/kyth-set-resolution
+fi
 
 write_kyth_os_release() {
 	local target=$1
@@ -25,9 +27,9 @@ VERSION="44"
 VERSION_ID="44"
 ANSI_COLOR="0;34"
 LOGO=kyth
-HOME_URL="https://github.com/mrtrick37/kyth"
-SUPPORT_URL="https://github.com/mrtrick37/kyth/discussions"
-BUG_REPORT_URL="https://github.com/mrtrick37/kyth/issues"
+HOME_URL="https://github.com/kyth-os/kyth"
+SUPPORT_URL="https://github.com/kyth-os/kyth/discussions"
+BUG_REPORT_URL="https://github.com/kyth-os/kyth/issues"
 EOF
 }
 

@@ -13,6 +13,10 @@
 # FileNotFoundError if any are missing, even before the update service has run
 # for the first time.
 mkdir -p /var/lib/kyth/proton-cachyos
-chmod 1777 /var/lib/kyth/proton-cachyos
-write_line 'd /var/lib/kyth/proton-cachyos 1777 root root - -' /usr/lib/tmpfiles.d/kyth-proton-cachyos.conf
+# 1777 was world-writable (any local user could plant a trojaned Proton).
+# Use 0755 root-root; STEAM_EXTRA_COMPAT_TOOLS_PATHS scan only needs
+# the directory to exist, not be writable. Per-user prefixes stay in
+# ~/.local/share/Steam/steamapps/compatdata (see drives.py).
+chmod 0755 /var/lib/kyth/proton-cachyos
+write_line 'd /var/lib/kyth/proton-cachyos 0755 root root - -' /usr/lib/tmpfiles.d/kyth-proton-cachyos.conf
 write_line 'STEAM_EXTRA_COMPAT_TOOLS_PATHS=/var/lib/kyth/proton-cachyos' /etc/environment.d/proton-cachyos.conf

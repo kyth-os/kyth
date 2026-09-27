@@ -67,6 +67,18 @@ class BuildProfileTests(unittest.TestCase):
         self.assertIn("/tags/${PROTON_CACHYOS_VER}", proton)
         self.assertIn("PROTON_CACHYOS_VER must be an exact release tag", proton)
 
+    def test_third_party_archives_use_exact_checksums_and_safe_extraction(self):
+        common = _read("build_files/scripts/lib/thirdparty-common.sh")
+        umu = _read("build_files/scripts/thirdparty/umu.sh")
+        proton = _read("build_files/scripts/proton-cachyos.sh")
+
+        self.assertIn("Expected exactly one checksum entry", common)
+        self.assertNotIn("expected_hash=$(awk", common)
+        self.assertIn("tarfile.data_filter", common)
+        for installer in (umu, proton):
+            self.assertIn("safe_extract_tar", installer)
+            self.assertNotRegex(installer, r"\btar\s+-[A-Za-z]*x")
+
     def test_ci_passes_and_records_exact_third_party_versions(self):
         workflow = _read(".github/workflows/build.yml")
         self.assertIn("--build-arg UMU_VERSION=", workflow)
@@ -85,6 +97,13 @@ class BuildProfileTests(unittest.TestCase):
         self.assertIn('^scx_[a-z0-9_]+$', loader)
         self.assertIn("StartLimitIntervalSec=60", service)
         self.assertIn("StartLimitBurst=3", service)
+
+    def test_gamescope_shaders_optional_until_f44_copr(self):
+        gaming = _read("build_files/scripts/packages/06-gaming-core.sh")
+        self.assertIn("gamescope-shaders", gaming)
+        required = gaming.split("required_gaming_rpms=(")[1].split(")")[0]
+        self.assertIn("gamescope\n", required)
+        self.assertNotIn("gamescope-shaders", required)
 
     def test_dependent_workflows_require_successful_image_build(self):
         workflow = _read(".github/workflows/build.yml")

@@ -1,7 +1,1 @@
-#!/usr/bin/env bash
-# kyth-gaming-audit — perf audit 46-70 + systemd-analyze + Budget
-set -euo pipefail
-case "${1:-}" in
-    --json) python3 -c 'import json; from kyth_shared.perf_audit import collect_audit; print(json.dumps(collect_audit(), indent=2))' ;;
-    *) python3 -c 'from kyth_shared.perf_audit import collect_audit,format_audit; print(format_audit(collect_audit()), end="")'; echo "---"; python3 build_files/scripts/optimization-report.py --check 2>&1 | grep -E "system_hub|installer|probe_collector" | tail -n 10; echo "Budget 215 intact" ;;
-esac
+kyth-tunable

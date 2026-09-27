@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-tcp-sack — 1 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-sack "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.tcp_sack import load_tcp_sack, tcp_sack_status; c=load_tcp_sack(); print(f\"profile={c['profile']} active={tcp_sack_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_sack import load_tcp_sack,save_tcp_sack,generate_tcp_sack; c=load_tcp_sack(); c['profile']='gaming'; save_tcp_sack(c); generate_tcp_sack(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp sack gaming 1" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_sack import load_tcp_sack,save_tcp_sack,generate_tcp_sack; c=load_tcp_sack(); c['profile']='balanced'; save_tcp_sack(c); generate_tcp_sack(c)"; echo "tcp sack balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_sack import load_tcp_sack,generate_tcp_sack; generate_tcp_sack(load_tcp_sack())" ;;
-    *) echo "Usage: kyth-tcp-sack [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

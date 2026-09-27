@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-thp-collapse — thp-collapse.toml defrag 0 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-thp-collapse "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.thp_collapse import load_thp_collapse, thp_collapse_status; c=load_thp_collapse(); print(f\"profile={c['profile']} active={thp_collapse_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.thp_collapse import load_thp_collapse,save_thp_collapse,generate_thp_collapse; c=load_thp_collapse(); c['profile']='gaming'; save_thp_collapse(c); generate_thp_collapse(c)"; sysctl --system >/dev/null 2>&1 || true; echo "thp collapse gaming 0" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.thp_collapse import load_thp_collapse,save_thp_collapse,generate_thp_collapse; c=load_thp_collapse(); c['profile']='balanced'; save_thp_collapse(c); generate_thp_collapse(c)"; echo "thp collapse balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.thp_collapse import load_thp_collapse,generate_thp_collapse; generate_thp_collapse(load_thp_collapse())" ;;
-    *) echo "Usage: kyth-thp-collapse [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

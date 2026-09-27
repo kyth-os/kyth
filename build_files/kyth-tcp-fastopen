@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-tcp-fastopen — 3 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-fastopen "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.tcp_fastopen import load_tcp_fastopen, tcp_fastopen_status; c=load_tcp_fastopen(); print(f\"profile={c['profile']} active={tcp_fastopen_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_fastopen import load_tcp_fastopen,save_tcp_fastopen,generate_tcp_fastopen; c=load_tcp_fastopen(); c['profile']='gaming'; save_tcp_fastopen(c); generate_tcp_fastopen(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp fastopen gaming 3" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_fastopen import load_tcp_fastopen,save_tcp_fastopen,generate_tcp_fastopen; c=load_tcp_fastopen(); c['profile']='balanced'; save_tcp_fastopen(c); generate_tcp_fastopen(c)"; echo "tcp fastopen balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_fastopen import load_tcp_fastopen,generate_tcp_fastopen; generate_tcp_fastopen(load_tcp_fastopen())" ;;
-    *) echo "Usage: kyth-tcp-fastopen [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

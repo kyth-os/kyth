@@ -1,0 +1,396 @@
+[package]
+name = "kyth-shared"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82" # Option::is_none_or
+description = "Rust port of src/kyth_shared — Hub-facing reads and explicitly gated actions; see MIGRATION.md for scope."
+
+[[bin]]
+name = "release-identity"
+path = "src/release_identity_bin.rs"
+
+[[bin]]
+name = "kyth-probe"
+path = "src/probe_bin.rs"
+
+[[bin]]
+name = "kyth-guardian"
+path = "src/guardian_bin.rs"
+
+[[bin]]
+name = "kyth-update-watcher"
+path = "src/update_watcher_bin.rs"
+
+[[bin]]
+name = "kyth-network-share"
+path = "src/network_share_bin.rs"
+
+[[bin]]
+name = "kyth-telem"
+path = "src/telemetry_writer_bin.rs"
+required-features = ["telemetry-writer"]
+
+[[bin]]
+name = "kyth-privileged"
+path = "src/privileged_bin.rs"
+
+[[bin]]
+name = "kyth-post-update-check"
+path = "src/post_update_check_bin.rs"
+
+[[bin]]
+name = "kyth-firstboot-app-status"
+path = "src/firstboot_app_status_bin.rs"
+
+[[bin]]
+name = "kyth-steam-game-export"
+path = "src/steam_game_export_bin.rs"
+
+[[bin]]
+name = "kyth-hub-desktop-entries"
+path = "src/hub_desktop_entries_bin.rs"
+
+[[bin]]
+name = "kyth-welcome-launch"
+path = "src/hub_launcher_bin.rs"
+
+[[bin]]
+name = "kyth-safe-upgrade"
+path = "src/safe_upgrade_bin.rs"
+
+[[bin]]
+name = "kyth-bootc-guard"
+path = "src/bootc_guard_bin.rs"
+
+[[bin]]
+name = "kyth-finalize-staged"
+path = "src/finalize_staged_bin.rs"
+
+[[bin]]
+name = "kyth-btrfs-maint"
+path = "src/storage_maintenance_bin.rs"
+
+[[bin]]
+name = "kyth-ai-perfd"
+path = "src/ai_perf_daemon_bin.rs"
+
+[[bin]]
+name = "kyth-perf-gate-rs"
+path = "src/perf_gate_bin.rs"
+
+[[bin]]
+name = "kyth-doctor"
+path = "src/doctor_bin.rs"
+
+[[bin]]
+name = "kyth-health-check"
+path = "src/health_check_bin.rs"
+
+[[bin]]
+name = "kyth-smoke-check"
+path = "src/smoke_check_bin.rs"
+
+[[bin]]
+name = "kyth-resume-check"
+path = "src/resume_check_bin.rs"
+
+[[bin]]
+name = "kyth-nvidia-status"
+path = "src/nvidia_status_bin.rs"
+
+[[bin]]
+name = "kyth-controller-check"
+path = "src/controller_check_bin.rs"
+
+[[bin]]
+name = "kyth-creator-check"
+path = "src/creator_check_bin.rs"
+
+[[bin]]
+name = "kyth-exe-compat"
+path = "src/exe_compat_bin.rs"
+
+[[bin]]
+name = "kyth-snapshot-timeline"
+path = "src/snapshot_timeline_bin.rs"
+
+[[bin]]
+name = "kyth-print-check"
+path = "src/print_check_bin.rs"
+
+[[bin]]
+name = "kyth-vm-acceptance-guest"
+path = "src/vm_acceptance_guest_bin.rs"
+
+[[bin]]
+name = "kyth-game-boost"
+path = "src/game_boost_bin.rs"
+
+[[bin]]
+name = "kyth-tunable-rs"
+path = "src/tunable_bin.rs"
+
+[[bin]]
+name = "kyth-configure-session"
+path = "src/configure_session_bin.rs"
+
+[[bin]]
+name = "kyth-set-resolution"
+path = "src/set_resolution_bin.rs"
+
+[[bin]]
+name = "kyth-set-kickoff-icon"
+path = "src/set_kickoff_icon_bin.rs"
+
+[[bin]]
+name = "kyth-greeter-compositor"
+path = "src/greeter_compositor_bin.rs"
+
+[[bin]]
+name = "kyth-config-apply"
+path = "src/config_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-scx-preset"
+path = "src/apply_scx_preset_bin.rs"
+
+[[bin]]
+name = "kyth-apply-explorer"
+path = "src/explorer_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-desktop-layout"
+path = "src/desktop_layout_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-display-hdr"
+path = "src/display_hdr_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-input"
+path = "src/input_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-network"
+path = "src/network_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-pipewire-latency"
+path = "src/pipewire_latency_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-plasma"
+path = "src/plasma_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-quicksettings"
+path = "src/quicksettings_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-rgb"
+path = "src/rgb_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-role-preset"
+path = "src/role_preset_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-scaling"
+path = "src/scaling_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-tailscale"
+path = "src/tailscale_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-vrr"
+path = "src/vrr_apply_bin.rs"
+
+[[bin]]
+name = "kyth-apply-window-snap"
+path = "src/window_snap_apply_bin.rs"
+
+[[bin]]
+name = "kyth-driver-switch"
+path = "src/driver_switch_bin.rs"
+
+[[bin]]
+name = "kyth-kali-desktop-fixup"
+path = "src/kali_fixup_bin.rs"
+
+[[bin]]
+name = "kyth-ntfs-repair"
+path = "src/ntfs_repair_bin.rs"
+
+[[bin]]
+name = "kyth-performance-mode"
+path = "src/performance_mode_bin.rs"
+
+[[bin]]
+name = "kyth-refresh-boot-splash-initramfs"
+path = "src/boot_splash_refresh_bin.rs"
+
+[[bin]]
+name = "kyth-refresh-taskbar-pins"
+path = "src/taskbar_pins_refresh_bin.rs"
+
+[[bin]]
+name = "kyth-report-issue"
+path = "src/report_issue_bin.rs"
+
+[[bin]]
+name = "kyth-session-snapshot"
+path = "src/session_snapshot_bin.rs"
+
+[[bin]]
+name = "kyth-setup-devcontainer"
+path = "src/setup_devcontainer_bin.rs"
+
+[[bin]]
+name = "kyth-setup-transfer"
+path = "src/setup_transfer_bin.rs"
+
+[[bin]]
+name = "kyth-vscode-wallet"
+path = "src/vscode_wallet_bin.rs"
+
+[[bin]]
+name = "kyth-web-app-categorize"
+path = "src/web_app_categorize_bin.rs"
+
+[[bin]]
+name = "kyth-storage-sense"
+path = "src/storage_sense_bin.rs"
+
+[[bin]]
+name = "kyth-duperemove"
+path = "src/duperemove_bin.rs"
+
+[[bin]]
+name = "kyth-batteryd"
+path = "src/batteryd_bin.rs"
+
+[[bin]]
+name = "kyth-cloud-mount"
+path = "src/cloud_mount_bin.rs"
+
+[[bin]]
+name = "kyth-save-sync"
+path = "src/save_sync_bin.rs"
+
+[[bin]]
+name = "kyth-backup"
+path = "src/backup_bin.rs"
+
+[[bin]]
+name = "kyth-game-launch"
+path = "src/game_launch_bin.rs"
+
+[[bin]]
+name = "kyth-dynamic-lock"
+path = "src/dynamic_lock_bin.rs"
+
+[[bin]]
+name = "kyth-proton-cachyos-update"
+path = "src/proton_cachyos_update_bin.rs"
+
+[[bin]]
+name = "kyth-rclone-update"
+path = "src/rclone_update_bin.rs"
+
+[[bin]]
+name = "kyth-sched"
+path = "src/sched_bin.rs"
+
+[[bin]]
+name = "kyth-user-polish"
+path = "src/user_polish_bin.rs"
+
+[[bin]]
+name = "kyth-exe-handler"
+path = "src/exe_handler_bin.rs"
+
+[[bin]]
+name = "kyth-runtime"
+path = "src/runtime_bin.rs"
+
+[[bin]]
+name = "kyth-build-support"
+path = "src/build_support_bin.rs"
+
+[[bin]]
+name = "kyth-ai-dev"
+path = "src/ai_dev_bin.rs"
+
+[[bin]]
+name = "kyth-boot-health"
+path = "src/boot_health_bin.rs"
+
+[[bin]]
+name = "kyth-hardware-policy"
+path = "src/hardware_policy_bin.rs"
+
+[[bin]]
+name = "kyth-qualify"
+path = "src/qualification_bin.rs"
+
+[[bin]]
+name = "kyth-memory-tune"
+path = "src/memory_tune_bin.rs"
+
+[[bin]]
+name = "kyth-sysctl-compose"
+path = "src/sysctl_compose_bin.rs"
+
+[[bin]]
+name = "kyth-migrate-display-manager"
+path = "src/migrate_display_manager_bin.rs"
+
+[[bin]]
+name = "kyth-nxm-handler"
+path = "src/nxm_handler_bin.rs"
+
+[[bin]]
+name = "kyth-enable-bluetooth"
+path = "src/enable_bluetooth_bin.rs"
+
+[[bin]]
+name = "kyth-fix-system-accounts"
+path = "src/fix_system_accounts_bin.rs"
+
+[[bin]]
+name = "kyth-network-fallback"
+path = "src/network_fallback_bin.rs"
+
+[[bin]]
+name = "kyth-selinux-relabel-home"
+path = "src/selinux_relabel_home_bin.rs"
+
+[[bin]]
+name = "kyth-selinux-relabel-home-full"
+path = "src/selinux_relabel_home_full_bin.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+regex = "1"
+sha2 = "0.10"
+tempfile = "3"
+toml = "0.8"
+rusqlite = { version = "0.31", features = ["bundled"], optional = true }
+rustix = { version = "0.38", features = ["fs", "process"] }
+libc = "0.2"
+
+[features]
+rusqlite = ["dep:rusqlite"]
+telemetry-writer = ["rusqlite"]
+
+# Release tuning for the ~70 small helper binaries: strip symbols, favor
+# size over speed (these are bounded launchers, not hot loops), and share
+# one codegen unit so LTO can actually inline across crates. Keeps the
+# bootc layer delta small on every rebuild.
+[profile.release]
+strip = true
+lto = true
+opt-level = "z"
+codegen-units = 1

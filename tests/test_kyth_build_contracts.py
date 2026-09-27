@@ -16,7 +16,13 @@ BUILD_FILES = ROOT / "build_files"
 
 def _all_build_text() -> str:
     parts = []
-    for path in BUILD_FILES.rglob("*"):
+    build_sources = [
+        ROOT / "Dockerfile",
+        ROOT / "installer" / "Containerfile",
+        ROOT / "installer" / "build.sh",
+        *BUILD_FILES.rglob("*"),
+    ]
+    for path in build_sources:
         if path.is_file() and path.suffix in {"", ".sh", ".py"}:
             try:
                 parts.append(path.read_text(encoding="utf-8"))
@@ -43,6 +49,21 @@ class ShippedCommandContracts(unittest.TestCase):
     def setUpClass(cls):
         cls.build_text = _all_build_text()
         cls.source_names = {path.name for path in BUILD_FILES.rglob("*") if path.is_file()}
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        cls.source_names.update(
+            re.findall(r"(?:/build|/usr/bin)/(kyth-[A-Za-z0-9-]+)", dockerfile)
+        )
+        # Rust-built commands do not have a source file in build_files. Treat
+        # declared Cargo binaries as staged source names; the build-text
+        # assertion below still requires the image assembly to install them.
+        for manifest in ROOT.glob("src/**/Cargo.toml"):
+            cls.source_names.update(
+                re.findall(
+                    r'^name\s*=\s*"(kyth-[A-Za-z0-9-]+)"',
+                    manifest.read_text(encoding="utf-8"),
+                    re.MULTILINE,
+                )
+            )
 
     def _assert_kyth_target_is_staged(self, target: str, source: Path) -> None:
         name = Path(target).name
@@ -80,6 +101,50 @@ class ShippedCommandContracts(unittest.TestCase):
                 with self.subTest(desktop=desktop.relative_to(ROOT), icon=icon):
                     self.assertIn(f"{icon}.svg", icon_installer)
 
+    def test_hub_launcher_desktop_name(self):
+        desktop = ROOT / "src/kyth-hub-web/src/data/kyth-welcome.desktop"
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        parser.read(desktop, encoding="utf-8")
+        self.assertEqual(parser["Desktop Entry"]["Name"], "Kyth Hub")
+        self.assertEqual(parser["Desktop Entry"]["GenericName"], "System Hub")
+        keywords = parser["Desktop Entry"]["Keywords"].lower()
+        self.assertIn("hub", keywords)
+        self.assertNotIn("pulse", keywords)
+
+    def test_hub_desktop_entries_match_tauri_app_id(self):
+        # Regression pin: the Hub window is a Tauri/WebKitGTK window whose
+        # Wayland app-id is the bundle identifier. Every desktop entry that
+        # launches it must declare that id as StartupWMClass, or Plasma
+        # cannot group the window under the Hub icon and shows a generic
+        # Wayland icon instead.
+        import json
+
+        tauri_conf = ROOT / "src/kyth-hub-web/src-tauri/tauri.conf.json"
+        app_id = json.loads(tauri_conf.read_text(encoding="utf-8"))["identifier"]
+        self.assertTrue(app_id, "tauri.conf.json must define an identifier")
+        desktop = ROOT / "src/kyth-hub-web/src/data/kyth-welcome.desktop"
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        parser.read(desktop, encoding="utf-8")
+        self.assertEqual(parser["Desktop Entry"]["StartupWMClass"], app_id)
+        installer = (
+            BUILD_FILES / "scripts/branding/23-kyth-helper-ctx-installs.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(f"StartupWMClass={app_id}", installer)
+        stale: list[str] = []
+        for path in [ROOT / "src", BUILD_FILES, ROOT / "installer"]:
+            for candidate in path.rglob("*"):
+                if not candidate.is_file() or candidate.suffix in {
+                    ".pyc", ".png", ".svg", ".ico",
+                }:
+                    continue
+                try:
+                    text = candidate.read_text(encoding="utf-8")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                if "StartupWMClass=kyth-welcome" in text:
+                    stale.append(str(candidate.relative_to(ROOT)))
+        self.assertEqual(stale, [], "stale hub StartupWMClass declarations remain")
+
 
 class BuildAssemblyContracts(unittest.TestCase):
     def test_package_install_sources_do_not_pin_literal_rpm_nvrs(self):
@@ -115,6 +180,16 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertIn("update_fedora_kernel", dockerfile[daily_upgrade:daily_upgrade + 2500])
         for hold in ("--exclude='gamescope*'", "--exclude='akmod-*'", "--exclude='kmod-*'"):
             self.assertNotIn(hold, dockerfile)
+
+    def test_hub_web_builder_copies_compile_time_embedded_catalogs(self):
+        """The isolated Hub builder must contain every include_str! asset."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        builder = dockerfile[:dockerfile.index("# Base Image")]
+        self.assertIn("COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json", builder)
+        self.assertIn("COPY src/kyth-hub-web /build/kyth-hub-web", builder)
+        self.assertNotIn("COPY src/kyth-welcome", builder)
+        self.assertNotIn("source=src/kyth-welcome", builder)
+        self.assertIn("src/data/compat_games.json", builder)
 
     def test_fedora_nvidia_devel_tracks_coordinated_latest_kernel(self):
         script = (BUILD_FILES / "scripts/lib/fedora-kernel.sh").read_text(encoding="utf-8")
@@ -202,13 +277,88 @@ class BuildAssemblyContracts(unittest.TestCase):
                 self.assertIn('SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"', body)
                 self.assertNotRegex(body, r'^\s*source\s+["\']lib/',)
 
-    def test_packaged_installer_is_the_only_installation_entry_point(self):
+    def test_kernel_repair_usr_lib_kernel_fallback_is_version_qualified(self):
+        # The /boot lookup already searches "vmlinuz-${KVER}"; the /usr/lib/kernel
+        # fallback below it must match the same exact kernel version rather than
+        # grabbing the first vmlinuz* file it finds, or a repair could staple a
+        # mismatched vmlinuz onto this KVER's modules/headers and ship it silently.
+        script = (BUILD_FILES / "scripts/kernel-repair.sh").read_text(encoding="utf-8")
+        self.assertIn('find /usr/lib/kernel -name "vmlinuz-${KVER}"', script)
+
+    def test_builder_stage_bases_are_digest_pinned(self):
+        """Builder stages must not float on a moving tag: an upstream base
+        shift silently changes the installer/ISO toolchain and breaks
+        reproducibility. Bump the digest deliberately, never by drift.
+        """
+        for dockerfile in (ROOT / "Dockerfile", ROOT / "installer" / "Containerfile"):
+            for line in dockerfile.read_text(encoding="utf-8").splitlines():
+                if line.startswith("FROM registry.fedoraproject.org/"):
+                    self.assertRegex(
+                        line,
+                        r"@sha256:[0-9a-f]{64} AS ",
+                        f"{dockerfile.name} builder base must be digest-pinned: {line}",
+                    )
+
+    def test_cherry_pick_run_steps_mount_every_sourced_lib(self):
+        # RUN steps that bind individual files (not all of build_files) must
+        # mount every lib/ helper the invoked script sources, or the build
+        # dies mid-image (kernel-repair.sh + missing dracut-modules.sh).
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        sourced = re.findall(
+            r'source\s+"?\$\{SCRIPT_DIR\}/(lib/[^"\s]+)"?',
+            (BUILD_FILES / "scripts/kernel-repair.sh").read_text(encoding="utf-8"),
+        )
+        self.assertTrue(sourced)
+        for lib in sourced:
+            self.assertIn(
+                f"source=build_files/scripts/{lib},target=/ctx/{lib}",
+                dockerfile,
+                f"RUN step invoking kernel-repair.sh must bind-mount {lib}",
+            )
+
+    def test_native_installer_is_the_only_installed_entry_point(self):
         self.assertFalse((BUILD_FILES / "kyth-install.sh").exists())
         self.assertFalse((BUILD_FILES / "kyth-manual-install.sh").exists())
-        installer = BUILD_FILES / "kyth-installer/pyproject.toml"
         launcher = BUILD_FILES / "kyth-launch-installer"
-        self.assertIn('kyth-installer = "kyth_installer.app:main"', installer.read_text())
-        self.assertIn("/usr/bin/kyth-installer", launcher.read_text())
+        self.assertIn("kyth-installerd.service", (ROOT / "installer/build.sh").read_text())
+        self.assertIn("/usr/bin/kyth-installer-shell", (ROOT / "installer/Containerfile").read_text())
+        self.assertIn("/usr/bin/kyth-launch-installer", launcher.read_text())
+        self.assertNotIn("/usr/bin/kyth-installer \"$@\"", launcher.read_text())
+        self.assertNotIn("chromium", launcher.read_text().lower())
+
+    def test_live_installer_sudo_is_single_argument_free_entry_point(self):
+        build = (ROOT / "installer/build.sh").read_text(encoding="utf-8")
+        policy = build.split("/etc/sudoers.d/liveuser-live <<'EOF'", 1)[1].split("\nEOF", 1)[0]
+        grants = [line for line in policy.splitlines() if "NOPASSWD:" in line]
+        self.assertEqual(grants, ['liveuser ALL=(root) NOPASSWD: /usr/bin/kyth-launch-installer ""'])
+        for dangerous in ("/usr/bin/cp", "/usr/bin/tee", "/usr/bin/systemctl", "/usr/bin/podman"):
+            self.assertNotIn(dangerous, policy)
+
+        launcher = (BUILD_FILES / "kyth-launch-installer").read_text(encoding="utf-8")
+        self.assertIn("/usr/bin/sudo -n -- /usr/bin/kyth-launch-installer", launcher)
+        self.assertNotIn("/usr/bin/kyth-installer \"$@\"", launcher)
+        self.assertNotIn("sudo -n env", launcher)
+
+    def test_webengine_no_sandbox_is_scoped_to_live_installer(self):
+        installed_roots = (
+            BUILD_FILES / "kyth_shared/kyth_shared",
+            BUILD_FILES / "kyth-welcome/kyth_welcome",
+        )
+        forbidden = (
+            "QTWEBENGINE_DISABLE_SANDBOX",
+            "QTWEBENGINE_CHROMIUM_FLAGS",
+            "--no-sandbox",
+        )
+        for root in installed_roots:
+            for source in root.rglob("*.py"):
+                body = source.read_text(encoding="utf-8")
+                for setting in forbidden:
+                    self.assertNotIn(setting, body, source)
+
+        live_installer = (
+            BUILD_FILES / "kyth-installer/kyth_installer/app.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"--no-sandbox"', live_installer)
 
     def test_installer_web_assets_referenced_by_html_and_server_exist(self):
         webui = BUILD_FILES / "kyth-installer/kyth_installer/webui"
@@ -245,6 +395,45 @@ class BuildAssemblyContracts(unittest.TestCase):
                 self.assertIn(f"ARG {argument}=", dockerfile)
                 self.assertIn(f"${{{argument}}}", dockerfile)
                 self.assertIn(consumer, dockerfile)
+
+    def test_mesa_git_layer_stamps_a_bisect_anchor(self):
+        """Upstream mesa-git snapshots move hourly and cannot be EVR-pinned,
+        so the layer must stamp exactly what shipped for regression triage.
+        """
+        script = (BUILD_FILES / "scripts/mesa-git.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/share/kyth/mesa-git.evr", script)
+        self.assertIn("mesa_dri_drivers_evr=", script)
+        self.assertIn("mesa_layer_date=", script)
+
+    def test_lutris_recipes_use_flatpak_form(self):
+        """Lutris ships as a Flatpak only: a bare `lutris` binary does not
+        exist, so every one-click launcher recipe must probe and launch via
+        `flatpak run net.lutris.Lutris`.
+        """
+        body = (ROOT / "build_files/just/kyth/gaming/games.just").read_text(encoding="utf-8")
+        self.assertNotIn("command -v lutris", body)
+        self.assertEqual(body.count("flatpak info net.lutris.Lutris"), 4)
+        self.assertEqual(body.count("flatpak run net.lutris.Lutris"), 4)
+
+    def test_compat_seed_is_shaped_for_the_offline_db(self):
+        """The seed ships as /usr/share/kyth/compat.json: keys must be
+        lowercase normalised stems (or 12-hex hash prefixes) with a valid
+        status and runner, or every verdict falls back to guesswork.
+        """
+        import json as jsonlib
+        import re as relib
+        seed = jsonlib.loads((ROOT / "build_files/config/compat-seed.json").read_text(encoding="utf-8"))
+        entries = seed["entries"]
+        self.assertTrue(entries)
+        statuses = {"Works", "Likely", "Unknown", "Blocked"}
+        for key, value in entries.items():
+            with self.subTest(key=key):
+                self.assertEqual(key, key.lower())
+                self.assertRegex(key, r"^(?:[0-9a-f]{12}|[a-z0-9][a-z0-9-]*)$")
+                self.assertIn(value["status"], statuses)
+                self.assertTrue(value["runner"])
+        script = (BUILD_FILES / "scripts/branding/25-installer-mime-interception.sh").read_text(encoding="utf-8")
+        self.assertIn("/usr/share/kyth/compat.json", script)
 
     def test_branch_to_image_channel_mapping_is_explicit(self):
         build = (ROOT / ".github/workflows/build.yml").read_text()
@@ -296,6 +485,46 @@ class BuildAssemblyContracts(unittest.TestCase):
                     token = line.strip().rstrip("\\").strip()
                     if token == "cups-browsed" and script.name != cleanup.name:
                         self.fail(f"{script.relative_to(ROOT)} re-installs purged cups-browsed")
+
+
+    def test_payload_build_sh_failure_fails_the_image_layer(self):
+        # A trailing `; if ...; fi` once masked build.sh's exit code: the
+        # layer committed a half-built payload (cosign gate failed, so
+        # /boot/efi and iso.yaml were never written) that died later in
+        # Titanoboa. build.sh must fail the RUN when IT fails.
+        containerfile = (ROOT / "installer" / "Containerfile").read_text(encoding="utf-8")
+        self.assertIn("bash /src/installer/build.sh &&", containerfile)
+        self.assertNotIn("bash /src/installer/build.sh;", containerfile)
+
+    def test_cosign_gate_retries_transients_but_stays_hard(self):
+        # Shared-runner network flakes (TUF root refresh, registry reads)
+        # must not nuke a 25-minute payload build on one blip — but the
+        # signature gate must never soften to a warning either.
+        build = (ROOT / "installer" / "build.sh").read_text(encoding="utf-8")
+        self.assertIn("for cosign_attempt in 1 2 3", build)
+        self.assertIn("after 3 attempts", build)
+        self.assertIn('signature_state="verified"', build)
+        # cosign's TUF client mkdir-fatals when HOME exists (bootc payload
+        # images ship a real /root): TUF_ROOT must point at a fresh dir or
+        # no ISO build can ever pass this gate.
+        self.assertIn("TUF_ROOT", build)
+        self.assertIn('mkdir -p "${TUF_ROOT}"', build)
+        # Signer (supply-chain.yml) uses cosign v2 (.sig tags); distro
+        # cosign v3 (bundle-only) cannot see them, so the verifier must be
+        # the pinned v2 binary, never dnf.
+        self.assertIn('cosign_version="2.6.1"', build)
+        self.assertIn("cosign_sha256=", build)
+        self.assertIn("sha256sum -c", build)
+        self.assertIn(
+            "install -D -m 0755 /tmp/kyth-cosign /usr/local/bin/cosign",
+            build,
+        )
+        self.assertNotIn("dnf5 install -y cosign", build)
+        self.assertNotIn("dnf install -y cosign", build)
+        # No silent pass: every failure path in the cosign block exits 1.
+        gate = build.split("Registry signature gate", 1)[1].split("KYTH_SOURCE_IMAGE=oci", 1)[0]
+        self.assertNotIn("exit 0", gate)
+        self.assertIn("exit 1", gate)
 
 
 if __name__ == "__main__":

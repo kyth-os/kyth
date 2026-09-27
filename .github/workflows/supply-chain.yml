@@ -68,7 +68,8 @@ jobs:
           [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ -z "${SOURCE_GITHUB_SHA}" || "${SOURCE_GITHUB_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${ORIGINAL_EVENT}" =~ ^[a-z_]*$ ]]
-          [[ "${ORIGINAL_ACTOR}" =~ ^[A-Za-z0-9-]*$ ]]
+          # GitHub Apps report as name[bot] (cursor[bot], dependabot[bot], …).
+          [[ "${ORIGINAL_ACTOR}" =~ ^([A-Za-z0-9-]+(\[bot\])?)?$ ]]
 
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -241,6 +242,7 @@ jobs:
         with:
           tool: grype
           version: 0.88.0
+          sha256: 7a7e1bf0caf88350eeb7433f41ce6e7b69d1eed57ce67abf24eae62562f38948
 
       - name: Scan current SBOM with Grype
         id: grype_current
@@ -535,11 +537,12 @@ jobs:
           fi
 
       - name: Trigger CVE scan
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
-        run: |
-          gh workflow run cve-scan.yml \
-            --ref "${GITHUB_REF_NAME}" \
-            --field "source_tag=${SOURCE_TAG}"
+        uses: ./.github/actions/dispatch-workflow
+        with:
+          workflow: cve-scan.yml
+          ref: ${{ github.ref_name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fields-json: |
+            {
+              "source_tag": ${{ toJSON(inputs.source_tag) }}
+            }

@@ -17,9 +17,8 @@ set -euo pipefail
 # libdrm: Direct Rendering Manager userspace library.
 # mesa-dri-drivers: OpenGL/DRI Gallium drivers, also provides radeonsi_drv_video.so
 #   (AMD VA-API decode backend used by libva).
-# xorg-x11-drv-amdgpu: X11 DDX driver for AMD. Required for SDDM X11 greeter
-#   and Xwayland; relies on the in-kernel amdgpu KMS driver.
-# xorg-x11-drv-ati: fallback DDX for older Radeon GPUs.
+# Classic Xorg DDX drivers are not installed: the greeter and Plasma session
+# are Wayland. XWayland talks GBM/EGL, not those DDX drivers.
 #
 # ── QEMU/KVM guest ────────────────────────────────────────────────────────────
 # qemu-guest-agent: graceful shutdown, snapshot freeze, guest state queries.
@@ -34,8 +33,6 @@ dnf5 install -y --skip-unavailable \
 	mesa-dri-drivers \
 	mesa-libgbm \
 	libdrm \
-	xorg-x11-drv-amdgpu \
-	xorg-x11-drv-ati \
 	radeontop \
 	nvtop \
 	libclc \
@@ -48,7 +45,12 @@ rpm -q --whatprovides mesa-va-drivers
 rpm -q --whatprovides /usr/lib64/dri/radeonsi_drv_video.so
 test -e /usr/lib64/dri/radeonsi_drv_video.so
 
-# qemu-guest-agent is socket-activated on Fedora but the socket is only
-# created when running inside a VM. Enable it unconditionally — systemd
-# no-ops it on bare metal when the virtio-serial device is absent.
+# qemu-ga's Fedora unit is not conditioned on virtualization. Enabling
+# it unconditionally makes qemu-ga fail on bare metal (no virtio-serial).
+# Restrict the unit to VMs; keep it enabled so guests still get it.
+install -d /usr/lib/systemd/system/qemu-guest-agent.service.d
+cat > /usr/lib/systemd/system/qemu-guest-agent.service.d/10-kyth-vm-only.conf <<'QEMUGA'
+[Unit]
+ConditionVirtualization=vm
+QEMUGA
 systemctl enable qemu-guest-agent.service 2>/dev/null || true

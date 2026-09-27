@@ -6,8 +6,13 @@ file follows the same Handler.__new__() construction pattern for GET.
 """
 import io
 import json
+import os
+import socket
+import stat
+import struct
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 from pathlib import Path
@@ -23,11 +28,13 @@ from kyth_installer import config, server  # noqa: E402
 from kyth_installer.context import InstallerContext  # noqa: E402
 
 
-def _make_handler(path: str, *, host: str | None = None, cookie: str = "") -> server.Handler:
+def _make_handler(path: str, *, host: str | None = None, cookie: str = "", authorization: str = "") -> server.Handler:
     handler = server.Handler.__new__(server.Handler)
     headers = {"Cookie": cookie}
     if host is not None:
         headers["Host"] = host
+    if authorization:
+        headers["Authorization"] = authorization
     handler.headers = headers
     handler.rfile = io.BytesIO(b"")
     handler.wfile = io.BytesIO()
@@ -45,6 +52,106 @@ class ParseCookieAndRouteTests(unittest.TestCase):
         cookies = server._parse_cookie_header("a=1; no-value; b = two ")
         self.assertEqual(cookies, {"a": "1", "b": "two"})
         self.assertEqual(server._parse_cookie_header(""), {})
+
+    def test_peer_uid_decodes_linux_socket_credentials(self):
+        test_case = self
+
+        class Peer:
+            def getsockopt(self, level, option, size):
+                test_case.assertEqual(level, socket.SOL_SOCKET)
+                test_case.assertEqual(option, socket.SO_PEERCRED)
+                test_case.assertEqual(size, struct.calcsize("3i"))
+                return struct.pack("3i", 123, 456, 789)
+
+        self.assertEqual(server._peer_uid(Peer()), 456)
+
+    def test_peer_uid_fails_closed_when_credentials_are_unavailable(self):
+        class Peer:
+            def getsockopt(self, *_args):
+                raise OSError("not a Unix socket")
+
+        self.assertIsNone(server._peer_uid(Peer()))
+
+
+class UnixSocketServerTests(unittest.TestCase):
+    def _make_unix_server(self, path, *args, **kwargs):
+        try:
+            return server.UnixSocketServer(path, *args, **kwargs)
+        except OSError as exc:
+            # AF_UNIX is blocked by the managed validation sandbox, but these
+            # tests remain required on the desktop and in CI.
+            self.skipTest(f"Unix socket unavailable in this environment: {exc}")
+
+    @staticmethod
+    def _request(path: Path, request: bytes) -> bytes:
+        client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        try:
+            client.settimeout(3)
+            client.connect(str(path))
+            client.sendall(request)
+            chunks = []
+            while True:
+                try:
+                    chunk = client.recv(65536)
+                except socket.timeout:
+                    break
+                if not chunk:
+                    break
+                chunks.append(chunk)
+            return b"".join(chunks)
+        finally:
+            client.close()
+
+    def test_requires_absolute_socket_path(self):
+        with self.assertRaisesRegex(ValueError, "absolute"):
+            server.UnixSocketServer("relative.sock", server.Handler)
+
+    def test_rejects_existing_non_socket_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api.sock"
+            path.write_text("not a socket")
+            with self.assertRaisesRegex(RuntimeError, "not a socket"):
+                server.UnixSocketServer(path, server.Handler)
+
+    def test_socket_is_restricted_and_removed_on_close(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api.sock"
+            unix_server = self._make_unix_server(path, server.Handler)
+            try:
+                self.assertTrue(stat.S_ISSOCK(path.stat().st_mode))
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            finally:
+                unix_server.server_close()
+            self.assertFalse(os.path.lexists(path))
+
+    def test_socket_mutations_require_expected_peer_uid(self):
+        handler = _make_handler("/api/config", host="ignored")
+        handler.server = SimpleNamespace(transport="unix", peer_uid=456, context=InstallerContext())
+        handler.connection = object()
+        with patch.object(server, "_peer_uid", return_value=123):
+            self.assertFalse(handler._require_same_origin_context())
+        handler.send_error.assert_called_once_with(403, "Forbidden")
+
+    def test_authenticated_http_route_works_over_unix_socket(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "api.sock"
+            context = InstallerContext()
+            unix_server = self._make_unix_server(path, server.Handler, context=context)
+            thread = threading.Thread(target=unix_server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                request = (
+                    b"GET /api/disk/filesystems HTTP/1.0\r\n"
+                    b"X-Kyth-Session-Token: " + config.SESSION_TOKEN.encode("ascii") + b"\r\n\r\n"
+                )
+                response = self._request(path, request)
+                header, body = response.split(b"\r\n\r\n", 1)
+                self.assertIn(b"200", header.splitlines()[0])
+                self.assertEqual(json.loads(body), server.FILESYSTEM_OPTIONS)
+            finally:
+                unix_server.shutdown()
+                unix_server.server_close()
+                thread.join(timeout=3)
 
 
 class ServerIndexTests(unittest.TestCase):
@@ -98,6 +205,65 @@ class ServerIndexTests(unittest.TestCase):
         handler = _make_handler("/", host="evil.example:1234")
         handler.do_GET()
         handler.send_error.assert_called_once_with(403, "Forbidden")
+
+
+class ServerTransportAuthTests(unittest.TestCase):
+    def test_end_headers_emits_cors_headers_for_tauri_origin(self):
+        handler = _make_handler("/api/config")
+        handler.headers["Origin"] = "http://tauri.localhost"
+        with patch.object(server.BaseHTTPRequestHandler, "end_headers") as parent_end_headers:
+            server.Handler.end_headers(handler)
+        names = [call.args[0] for call in handler.send_header.call_args_list]
+        self.assertIn("Access-Control-Allow-Origin", names)
+        parent_end_headers.assert_called_once()
+
+    def test_options_accepts_tauri_origin_and_rejects_other_origins(self):
+        allowed = _make_handler("/", host=f"127.0.0.1:{config.PORT}")
+        allowed.headers["Origin"] = "http://tauri.localhost"
+        allowed.do_OPTIONS()
+        allowed.send_response.assert_called_once_with(204)
+
+        rejected = _make_handler("/", host=f"127.0.0.1:{config.PORT}")
+        rejected.headers["Origin"] = "https://evil.example"
+        rejected.do_OPTIONS()
+        rejected.send_error.assert_called_once_with(403, "Forbidden")
+
+    def test_stream_query_token_rejected_and_unix_peer_authenticate(self):
+        # Tokens must never travel in the query string (URLs land in logs
+        # and history) — the stream authenticates via the bootstrap cookie.
+        stream = _make_handler(f"/api/stream?session_token={config.SESSION_TOKEN}")
+        self.assertFalse(stream._require_auth())
+
+        peer = _make_handler("/api/config")
+        peer.server = SimpleNamespace(transport="unix", peer_uid=456, context=InstallerContext())
+        peer.connection = object()
+        with patch.object(server, "_peer_uid", return_value=456):
+            self.assertTrue(peer._require_same_origin_context())
+
+    def test_trusted_local_url_requires_exact_loopback_port(self):
+        self.assertTrue(server.Handler._is_trusted_local_url(f"http://127.0.0.1:{config.PORT}/"))
+        self.assertFalse(server.Handler._is_trusted_local_url("https://127.0.0.1:7777/"))
+        self.assertFalse(server.Handler._is_trusted_local_url("not a URL"))
+
+    def test_locale_timezone_keymap_and_rescue_routes_dispatch(self):
+        routes = (
+            ("/api/timezones", "list_timezones"),
+            ("/api/locales", "list_locales"),
+            ("/api/keymaps", "list_keymaps"),
+        )
+        for path, function_name in routes:
+            with self.subTest(path=path):
+                handler = _make_handler(path, host=f"127.0.0.1:{config.PORT}")
+                handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+                with patch.object(server, function_name, return_value=[path]):
+                    handler.do_GET()
+                self.assertEqual(json.loads(handler.wfile.getvalue()), [path])
+
+        rescue = _make_handler("/api/rescue/probe", host=f"127.0.0.1:{config.PORT}")
+        rescue.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+        with patch.object(rescue, "_rescue_probe", return_value={"read_only": True}):
+            rescue.do_GET()
+        self.assertEqual(json.loads(rescue.wfile.getvalue()), {"read_only": True})
 
 
 class ServerStaticAssetTests(unittest.TestCase):
@@ -239,6 +405,62 @@ class ServerSseTests(unittest.TestCase):
         self.assertIn("id: 1", body)
 
 
+class ServerHardeningTests(unittest.TestCase):
+    """POST body caps, log symlink refusal, and SSE concurrency bounds."""
+
+    def _post_handler(self, body: bytes, content_length) -> server.Handler:
+        handler = _make_handler("/api/config", host=f"127.0.0.1:{config.PORT}")
+        handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+        handler.headers["Content-Length"] = content_length
+        handler.rfile = io.BytesIO(body)
+        return handler
+
+    def test_post_rejects_absurd_body_length(self):
+        handler = self._post_handler(b"{}", 256 * 1024 * 1024)
+        with mock.patch.object(server.Handler, "_require_same_origin_context", return_value=True):
+            handler.do_POST()
+        handler.send_error.assert_called_once_with(413, "Request body too large")
+
+    def test_post_rejects_negative_body_length(self):
+        handler = self._post_handler(b"{}", -5)
+        with mock.patch.object(server.Handler, "_require_same_origin_context", return_value=True):
+            handler.do_POST()
+        handler.send_error.assert_called_once_with(413, "Request body too large")
+
+    def test_post_rejects_malformed_content_length(self):
+        handler = self._post_handler(b"{}", "many")
+        with mock.patch.object(server.Handler, "_require_same_origin_context", return_value=True):
+            handler.do_POST()
+        handler.send_error.assert_called_once_with(400, "Invalid Content-Length")
+
+    def test_log_route_refuses_symlink(self):
+        handler = _make_handler("/api/log", host=f"127.0.0.1:{config.PORT}")
+        handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+        with tempfile.TemporaryDirectory() as tmp:
+            real = Path(tmp) / "real.log"
+            real.write_text("secret")
+            link = Path(tmp) / "installer.log"
+            try:
+                link.symlink_to(real)
+            except OSError:
+                self.skipTest("symlinks unavailable")
+            with patch.object(server, "LOG_FILE", link):
+                handler.do_GET()
+        handler.send_error.assert_called_once_with(403, "Refusing to serve a symlinked log")
+
+    def test_stream_refused_past_concurrency_cap(self):
+        slots = [server._SSE_SLOTS.acquire(blocking=False) for _ in range(8)]
+        self.assertTrue(all(slots))
+        try:
+            handler = _make_handler("/api/stream", host=f"127.0.0.1:{config.PORT}")
+            handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN
+            handler.do_GET()
+            handler.send_error.assert_called_once_with(503, "Too many event streams")
+        finally:
+            for _ in range(8):
+                server._SSE_SLOTS.release()
+
+
 class ServerConstructionTests(unittest.TestCase):
     def test_server_defaults_to_a_fresh_context_when_none_given(self):
         # Construction semantics do not require a real listening socket. Keep
@@ -249,6 +471,99 @@ class ServerConstructionTests(unittest.TestCase):
             srv = server._Server(("127.0.0.1", 0), server.Handler)
         self.assertIsInstance(srv.context, InstallerContext)
         parent_init.assert_called_once_with(("127.0.0.1", 0), server.Handler)
+
+
+
+class ServerBootstrapHeaderTests(unittest.TestCase):
+    """The bootstrap token travels in an Authorization header, never the URL."""
+
+    def setUp(self):
+        config._bootstrap_token = None
+
+    def tearDown(self):
+        config._bootstrap_token = None
+
+    def test_index_accepts_bearer_bootstrap_and_consumes_one_shot(self):
+        config._bootstrap_token = 'header-token'
+        handler = _make_handler('/', host=f'127.0.0.1:{config.PORT}', authorization='Bearer header-token')
+        handler.do_GET()
+        handler.send_error.assert_not_called()
+        handler.send_response.assert_called_once_with(200)
+        self.assertIsNone(config._bootstrap_token)
+
+    def test_index_rejects_wrong_bearer_bootstrap(self):
+        config._bootstrap_token = 'header-token'
+        handler = _make_handler('/', host=f'127.0.0.1:{config.PORT}', authorization='Bearer wrong')
+        handler.do_GET()
+        handler.send_error.assert_called_once_with(403, 'Forbidden')
+        self.assertEqual(config._bootstrap_token, 'header-token')
+
+    def test_index_rejects_bare_url_without_any_credential(self):
+        config._bootstrap_token = 'header-token'
+        handler = _make_handler('/', host=f'127.0.0.1:{config.PORT}')
+        handler.do_GET()
+        handler.send_error.assert_called_once_with(403, 'Forbidden')
+
+
+class ServerSlowLorisTests(unittest.TestCase):
+    def test_stalled_connections_do_not_starve_legit_requests(self):
+        import socket as _socket
+        import threading as _threading
+        srv = server._Server(('127.0.0.1', 0), server.Handler)
+        self.assertTrue(srv.daemon_threads)
+        self.assertEqual(srv.timeout, 10)
+        port = srv.server_address[1]
+        thread = _threading.Thread(target=srv.serve_forever, kwargs={'poll_interval': 0.05}, daemon=True)
+        thread.start()
+        self.addCleanup(srv.shutdown)
+        self.addCleanup(srv.server_close)
+        # Saturate every handler slot with stalled connections, then some.
+        stalls = []
+        try:
+            for _ in range(server._Server._MAX_HANDLERS + 5):
+                sock = _socket.create_connection(('127.0.0.1', port), timeout=5)
+                sock.sendall(b"GET /api/config HTTP/1.1\r\nHost: x\r\n")
+                stalls.append(sock)
+            # Over capacity, the next connection is refused FAST (reset or
+            # EOF) — never queued behind 37 stalled handlers for 10s each.
+            import time as _t0
+            started = _t0.monotonic()
+            probe = _socket.create_connection(('127.0.0.1', port), timeout=5)
+            try:
+                probe.settimeout(5)
+                probe.sendall(b'GET /api/config HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n')
+                try:
+                    while probe.recv(64):
+                        pass
+                except (ConnectionResetError, BrokenPipeError):
+                    pass
+            finally:
+                probe.close()
+            self.assertLess(_t0.monotonic() - started, 5)
+        finally:
+            for sock in stalls:
+                try:
+                    sock.close()
+                except OSError:
+                    pass
+        # Once the stalls drain, a legit request is served again.
+        import time as _time
+        deadline = _time.monotonic() + 15
+        answered = b""
+        while _time.monotonic() < deadline:
+            try:
+                probe = _socket.create_connection(('127.0.0.1', port), timeout=5)
+                try:
+                    probe.settimeout(5)
+                    probe.sendall(b'GET /api/config HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n')
+                    answered = probe.recv(64)
+                finally:
+                    probe.close()
+                if answered.startswith(b"HTTP/"):
+                    break
+            except OSError:
+                _time.sleep(0.2)
+        self.assertTrue(answered.startswith(b"HTTP/"))
 
 
 if __name__ == "__main__":

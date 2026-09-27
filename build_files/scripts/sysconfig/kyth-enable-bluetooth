@@ -1,6 +1,40 @@
 #!/usr/bin/bash
 set -uo pipefail
 
+# Only power bluetooth on when no explicit user block exists. An rfkill
+# soft-block restored by systemd-rfkill.service means the user ran
+# `rfkill block bluetooth` (or toggled it off in the desktop); touching the
+# persisted state or powering back on would override that choice. The
+# kyth-bluetooth-enable.service unit additionally guards with an ExecCondition
+# so this script never runs in the blocked case — these checks are defense in
+# depth for manual invocations.
+
+if command -v rfkill >/dev/null 2>&1; then
+    if rfkill list bluetooth 2>/dev/null | grep -q 'Soft blocked: yes'; then
+        exit 0
+    fi
+fi
+
+# A BlueZ-persisted Powered=false on every known adapter is the same explicit
+# off. Check the stored settings first and stay off when all of them say off.
+if command -v bluetoothctl >/dev/null 2>&1; then
+    _powered_on_found=0
+    _settings_found=0
+    for _settings in /var/lib/bluetooth/*/*/settings /var/lib/bluetooth/*/settings; do
+        [[ -f "${_settings}" ]] || continue
+        _settings_found=1
+        if grep -qiE '^[[:space:]]*Powered[[:space:]]*=[[:space:]]*true' "${_settings}"; then
+            _powered_on_found=1
+            break
+        fi
+    done
+    if [[ "${_settings_found}" -eq 1 && "${_powered_on_found}" -eq 0 ]]; then
+        exit 0
+    fi
+fi
+
+# Past this point no explicit user block exists: stale rfkill persistence (e.g.
+# carried over from the installer environment) is safe to drop.
 find /var/lib/systemd/rfkill -name "*bluetooth*" -delete 2>/dev/null || true
 
 _wifi_was_soft_blocked=0

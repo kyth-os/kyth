@@ -2,7 +2,7 @@
   "status": {
     "booted": {
       "image": {
-        "reference": "ghcr.io/mrtrick37/kyth:testing",
+        "reference": "ghcr.io/kyth-os/kyth:testing",
         "imageDigest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
       }
     },

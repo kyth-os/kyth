@@ -1,10 +1,30 @@
 [Unit]
 Description=Update Proton-CachyOS compatibility layer
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=network-online.target
 
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-proton-cachyos-update
+StateDirectory=kyth/proton-cachyos
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
 Nice=10
 IOSchedulingClass=idle
+MemoryHigh=256M
+MemoryMax=384M
+TimeoutStartSec=600

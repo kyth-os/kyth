@@ -14,19 +14,21 @@ write_config /usr/lib/systemd/system/kyth-first-boot-message.service <<'FIRSTBOO
 Description=KythOS first-boot splash message
 DefaultDependencies=no
 After=plymouth-start.service local-fs.target
-Before=sddm.service
+Before=plasmalogin.service
 ConditionPathExists=!/var/lib/kyth/.first-boot-complete
 
 [Service]
 Type=oneshot
-# Only send the message if the Plymouth daemon is actually listening.
-# On fast boots SDDM may already have started and stopped Plymouth before
-# this service runs; "plymouth message" would then exit non-zero and the
-# sentinel file would never be written, causing a retry on every boot.
-ExecCondition=/usr/bin/plymouth --ping
-ExecStart=/usr/bin/plymouth message --text="Running first boot setup, this may take a few moments..."
-ExecStart=/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/.first-boot-complete'
 RemainAfterExit=yes
+StateDirectory=kyth
+# Write the sentinel first. ExecCondition=plymouth --ping skipped the
+# whole unit (and the stamp) whenever Plymouth had already quit, so
+# this retried on every later boot. '-' keeps a missing daemon from
+# failing the unit.
+ExecStart=/bin/bash -c 'mkdir -p /var/lib/kyth && touch /var/lib/kyth/.first-boot-complete'
+ExecStart=-/usr/bin/plymouth --ping
+ExecStart=-/usr/bin/plymouth message --text="Running first boot setup, this may take a few moments..."
+ExecStart=-/usr/bin/plymouth message --text="After login, open Kyth Hub to finish installing your preferred software."
 
 [Install]
 WantedBy=multi-user.target

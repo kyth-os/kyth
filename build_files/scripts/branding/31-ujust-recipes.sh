@@ -1,6 +1,20 @@
 # shellcheck shell=bash
 # ── ujust recipes ─────────────────────────────────────────────────────────────
 # Install KythOS-specific ujust recipes so users can run e.g. "ujust rebase kyth:stable".
+# Neutralize Universal Blue's `update` recipe *before* copying Kyth's just
+# files. Upstream 10-update.just runs `rpm-ostree update` and always prints
+# "Completed rpm-ostree update", even when rpm-ostreed dies mid-pull
+# ("Bus owner changed"). That path also uses ostree-unverified-registry and
+# skips Kyth quarantine/rollout. After this rename, `alias upgrade := update`
+# in the ublue file resolves to Kyth's `update` in 75-kyth.just.
+for ublue_update in \
+	/usr/share/ublue-os/just/10-update.just \
+	/usr/share/ublue-os/just/update.just; do
+	[[ -f "${ublue_update}" ]] || continue
+	sed -i -E \
+		-e 's/^update( VERB_LEVEL=|:)/ublue-legacy-update\1/' \
+		"${ublue_update}"
+done
 mkdir -p /usr/share/ublue-os/just
 cp /ctx/just/kyth.just /usr/share/ublue-os/just/75-kyth.just
 # kyth.just imports its per-domain recipe files from kyth/ next to itself
@@ -19,10 +33,15 @@ install -m 0644 /ctx/kyth-scx-loader.service /usr/lib/systemd/system/scx_loader.
 systemctl enable kyth-local-bin-migrate.service 2>/dev/null || true
 systemctl enable kyth-duperemove.timer 2>/dev/null || true
 systemctl --global enable kyth-proton-cachyos-update.timer 2>/dev/null || true
-# Without wait-online, network-online.target is reached instantly and the
-# flatpak units below race DNS at boot and fail. Enabling it only delays
-# units ordered After=network-online.target, not the rest of boot.
-systemctl enable NetworkManager-wait-online.service 2>/dev/null || true
+# No NetworkManager-wait-online.service here on purpose: it stalls every boot
+# up to its timeout on metered/slow/offline links, and every Kyth network
+# waiter already skips cleanly offline (flathub-setup exits 0 with no default
+# route; default-flatpaks gates on the flathub-setup ExecCondition;
+# update-watcher/probe timers retry). Those units carry Wants= (not After=)
+# on network-online.target so an unreached target never marks them failed.
+# Do NOT re-add a wait-online enable here or in sysconfig.sh; the two would
+# silently fight over the same unit depending on layer order.
+systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl enable kyth-flathub-setup.service 2>/dev/null || true
 systemctl enable kyth-default-flatpaks.service 2>/dev/null || true
 systemctl enable kyth-hw-setup.service 2>/dev/null || true
@@ -34,4 +53,4 @@ fi
 systemctl --global enable kyth-telem.service 2>/dev/null || true
 systemctl --global enable kyth-probe.timer 2>/dev/null || true
 systemctl --global enable kyth-guardian.timer 2>/dev/null || true
-systemctl --global enable kyth-guardian.path 2>/dev/null || true
+# kyth-guardian.path removed (probe-cache check storm); timer only.

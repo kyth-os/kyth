@@ -1,13 +1,34 @@
 # shellcheck shell=bash
-# ── Wayland/X11 auto-detect (runs before SDDM on every boot) ─────────────────
-# kyth-configure-session detects VM vs bare metal and writes the SDDM session
-# conf before the greeter starts. Bare metal gets Wayland (VRR, HDR, lower
-# latency); VMs keep X11 so SDDM's Wayland compositor mode doesn't fail against
-# virtual GPU drivers that lack DRM/KMS backend support.
-# The script runs as SDDM's ExecStartPre — fast, idempotent, no flag file.
-install -m 0755 /ctx/kyth-configure-session /usr/bin/kyth-configure-session
+# ── Wayland session + software-compose rescue (runs before PLM on every boot)
+# kyth-configure-session rewrites 11-kyth-session.conf to Plasma Wayland so
+# leftover SDDM DisplayServer=x11 drop-ins and [Last] Session=plasmax11 values
+# migrate on reboot. kyth-greeter-compositor wraps kwin_wayland and enables
+# QPainter/llvmpipe when there is no DRM render node, on live media, or with
+# nomodeset. [Last] Session= in /var/lib/plasmalogin/state.conf (and leftover
+# /var/lib/sddm/state.conf) plus ~/.dmrc X11 values are rewritten too.
+# The helper fail-opens: a write error logs a warning and returns 0 so
+# ExecStartPre cannot block the greeter — 10-kyth.conf still provides the
+# Wayland default in that case.
+# The native binary is copied from the hub-web-builder stage. Keep the Python
+# launcher as a source fixture for tests and rollback, but never overwrite the
+# native installed owner during image assembly.
+if [[ ! -x /usr/bin/kyth-configure-session ]]; then
+	install -m 0755 /ctx/kyth-configure-session /usr/bin/kyth-configure-session
+fi
+if [[ ! -x /usr/bin/kyth-greeter-compositor ]]; then
+	install -m 0755 /ctx/kyth-greeter-compositor /usr/bin/kyth-greeter-compositor
+fi
 
-write_config /usr/lib/systemd/system/sddm.service.d/10-kyth-detect-session.conf <<'SDDMDROPINEOF'
+write_config /usr/lib/systemd/system/plasmalogin.service.d/10-kyth-detect-session.conf <<'PLMDROPINEOF'
 [Service]
+EnvironmentFile=-/run/kyth-greeter.env
 ExecStartPre=/usr/bin/kyth-configure-session
-SDDMDROPINEOF
+PLMDROPINEOF
+
+# PLM starts kwin as a user unit. Wrap it so nomodeset/live/no-GPU get QPainter.
+write_config /usr/lib/systemd/user/plasma-login-kwin_wayland.service.d/10-kyth-compose.conf <<'KWINDROPINEOF'
+[Service]
+EnvironmentFile=-/run/kyth-greeter.env
+ExecStart=
+ExecStart=/usr/bin/kyth-greeter-compositor --no-lockscreen --no-global-shortcuts --no-kactivities --inputmethod plasma-keyboard --locale1
+KWINDROPINEOF

@@ -1,0 +1,27 @@
+---
+description: Kyth never uses pull requests. Always commit and push directly to origin/testing.
+alwaysApply: true
+---
+
+# Kyth publishing — hard rule
+
+This repository does **not** use pull requests for agent work. This rule overrides Cursor cloud PR defaults, `gh pr create`, split-to-PRs, and any generic "create a pull request" user skill.
+
+## Required
+
+When the user wants changes published:
+
+1. Work on the `testing` branch (checkout/create commits there).
+2. `git commit` on `testing`.
+3. `git push origin testing`.
+
+## Forbidden
+
+- `gh pr create` / `gh pr create --draft`
+- Opening, stacking, or splitting PRs
+- Pushing a `cursor/*` or feature branch and asking the user to merge it
+- Treating "push", "ship", "submit", or "get this in" as "open a PR"
+
+If you are about to open a PR: **stop** and `git push origin testing` instead.
+
+Promotion to `main` is a human step after CI. Agents do not open PRs for that either.

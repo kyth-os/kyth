@@ -1,6 +1,7 @@
 import sys
 import json
 import os
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,17 @@ class TestInstallerService(unittest.TestCase):
     def setUp(self):
         self.context = InstallerContext()
         self.service = InstallerService(self.context)
+        # Hardware isolation: journal commit-time validation reads the probe
+        # layer. These tests stage ops on a fake /dev/sda, so report an
+        # empty disk — otherwise results depend on whether the host happens
+        # to have a real mounted /dev/sda (CI runners do).
+        for target in (
+            "kyth_installer.partition_ops_journal.list_partitions",
+            "kyth_installer.disk.list_partitions",
+        ):
+            patcher = patch(target, return_value=[])
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     @patch("kyth_installer.disk.list_disks")
     def test_new_table(self, mock_list_disks):
@@ -37,6 +49,11 @@ class TestInstallerService(unittest.TestCase):
         body_invalid = {"disk": "/dev/sdb", "table_type": "gpt"}
         res_invalid = self.service.new_table(body_invalid)
         self.assertFalse(res_invalid.get("ok"))
+
+        self.assertFalse(self.service.new_table({})["ok"])
+        self.assertFalse(
+            self.service.new_table({"disk": "/dev/sda", "table_type": "invalid"})["ok"]
+        )
 
     @patch("kyth_installer.disk.list_disks")
     @patch("kyth_installer.system.list_timezones")
@@ -105,6 +122,17 @@ class InstallerServiceCrudTests(unittest.TestCase):
     def setUp(self):
         self.context = InstallerContext()
         self.service = InstallerService(self.context)
+        # Hardware isolation: journal commit-time validation reads the probe
+        # layer. These tests stage ops on a fake /dev/sda, so report an
+        # empty disk — otherwise results depend on whether the host happens
+        # to have a real mounted /dev/sda (CI runners do).
+        for target in (
+            "kyth_installer.partition_ops_journal.list_partitions",
+            "kyth_installer.disk.list_partitions",
+        ):
+            patcher = patch(target, return_value=[])
+            patcher.start()
+            self.addCleanup(patcher.stop)
 
     def _new_table(self, mock_list_disks):
         mock_list_disks.return_value = [{"name": "/dev/sda"}]
@@ -128,6 +156,14 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self._new_table(mock_list_disks)
         res = self.service.delete_partition({"disk": "/dev/sda"})
         self.assertFalse(res.get("ok"))
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_partition_for_propagates_native_target_validation_error(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        journal = partition_ops.get_journal(self.context)
+        journal.rust_validate_target = MagicMock(return_value="native target rejected")
+        result = self.service._partition_for({"disk": "/dev/sda", "partition": "/dev/sda1"})
+        self.assertEqual(result[3], {"ok": False, "message": "native target rejected"})
 
     @patch("kyth_installer.disk._parent_disk")
     @patch("kyth_installer.disk.list_disks")
@@ -323,7 +359,7 @@ class InstallerServiceCrudTests(unittest.TestCase):
     @patch("kyth_installer.disk.list_disks")
     def test_commit_partitions_reports_validation_errors(self, mock_list_disks):
         self._new_table(mock_list_disks)  # no create op -> no root partition
-        res = self.service.commit_partitions({"disk": "/dev/sda"})
+        res = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("message"), "Validation failed.")
         self.assertTrue(res.get("errors"))
@@ -332,7 +368,7 @@ class InstallerServiceCrudTests(unittest.TestCase):
     def test_commit_partitions_success_transitions_back_to_idle(self, mock_list_disks):
         journal = self._committable_journal(mock_list_disks)
         with patch.object(journal, "commit", return_value="/dev/sda1") as mock_commit:
-            res = self.service.commit_partitions({"disk": "/dev/sda"})
+            res = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
         self.assertTrue(res.get("ok"))
         self.assertEqual(res.get("root_partition"), "/dev/sda1")
         mock_commit.assert_called_once()
@@ -343,11 +379,76 @@ class InstallerServiceCrudTests(unittest.TestCase):
         journal = self._committable_journal(mock_list_disks)
         with patch.object(journal, "commit", side_effect=RuntimeError("sgdisk failed")), \
              patch.object(journal, "rollback") as mock_rollback:
-            res = self.service.commit_partitions({"disk": "/dev/sda"})
+            res = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("message"), "sgdisk failed")
         mock_rollback.assert_called_once()
+        # IDLE, not FAILED: journal.rollback() already restored the partition
+        # table, so nothing unsafe remains and the WebUI's Commit button (which
+        # the frontend re-enables on this exact error path) must be able to
+        # retry — see test_commit_partitions_can_be_retried_after_a_failure.
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_can_be_retried_after_a_failure(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "commit", side_effect=RuntimeError("sgdisk failed")), \
+             patch.object(journal, "rollback"):
+            failed = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
+        self.assertFalse(failed.get("ok"))
+
+        # The frontend re-enables its Commit button on exactly this failure
+        # and expects a retry (e.g. of a transient sgdisk hiccup) to actually
+        # attempt the commit again, not bounce off an internal FSM error.
+        with patch.object(journal, "commit", return_value="/dev/sda1") as mock_commit:
+            retried = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
+        self.assertTrue(retried.get("ok"), retried.get("message"))
+        self.assertEqual(retried.get("root_partition"), "/dev/sda1")
+        mock_commit.assert_called_once()
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_fails_closed_after_irreversible_op(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        journal.irreversible_completed = True
+        with patch.object(journal, "commit", side_effect=RuntimeError("mkfs of later op failed")), \
+             patch.object(journal, "rollback") as mock_rollback:
+            res = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
+        self.assertFalse(res.get("ok"))
+        self.assertTrue(res.get("irreversible"))
+        self.assertIn("would not restore files", res.get("message"))
+        mock_rollback.assert_not_called()
         self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.FAILED)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_requires_confirmations_for_destructive_ops(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)  # new_table + create
+        with patch.object(journal, "commit") as mock_commit:
+            res = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+        self.assertIn("acknowledgements", res.get("message", ""))
+        mock_commit.assert_not_called()
+
+        # Only one of the two acknowledgements is still a refusal.
+        with patch.object(journal, "commit") as mock_commit:
+            res = self.service.commit_partitions(
+                {"disk": "/dev/sda", "confirm_erase": True}
+            )
+        self.assertFalse(res.get("ok"))
+        mock_commit.assert_not_called()
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_allows_nondestructive_journal_without_confirmations(
+        self, mock_list_disks,
+    ):
+        journal = self._committable_journal(mock_list_disks)
+        journal.ops[:] = [op for op in journal.ops if op["kind"] != "new_table"]
+        self.assertTrue(journal.ops)
+        with patch.object(journal, "validate", return_value=[]), \
+             patch.object(journal, "commit", return_value="/dev/sda1") as mock_commit:
+            res = self.service.commit_partitions({"disk": "/dev/sda"})
+        self.assertTrue(res.get("ok"), res.get("message"))
+        mock_commit.assert_called_once()
 
     @patch("kyth_installer.disk.list_disks")
     def test_rollback_partitions_success_resets_the_journal(self, mock_list_disks):
@@ -366,6 +467,79 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("message"), "sgdisk restore failed")
 
+    def test_partition_actions_return_missing_journal_error_consistently(self):
+        body = {"disk": "/dev/sda", "partition": "/dev/sda1"}
+        for action in (
+            self.service.resize_partition,
+            self.service.format_partition,
+            self.service.remove_pending,
+            self.service.set_mountpoint,
+            self.service.commit_partitions,
+            self.service.rollback_partitions,
+        ):
+            with self.subTest(action=action.__name__):
+                result = action(body)
+                self.assertFalse(result["ok"])
+                self.assertIn("No active partition journal", result["message"])
+
+    def test_install_busy_and_cancel_outcomes(self):
+        with patch(
+            "kyth_installer.services.installer_service.validation.validate_install_request",
+            return_value={},
+        ), patch(
+            "kyth_installer.services.installer_service.execution.start_installation",
+            return_value=False,
+        ):
+            self.assertIn("already running", self.service.start_install({})["message"])
+
+        with patch(
+            "kyth_installer.services.installer_service.validation.validate_install_request",
+            return_value={},
+        ), patch(
+            "kyth_installer.services.installer_service.execution.start_installation",
+            return_value=True,
+        ):
+            self.assertTrue(self.service.start_install({})["started"])
+
+        # A rejected slot transition (e.g. mid-partition state) surfaces as
+        # a verdict, not a dead connection — and the slot stays free.
+        with patch(
+            "kyth_installer.services.installer_service.validation.validate_install_request",
+            return_value={},
+        ), patch(
+            "kyth_installer.services.installer_service.execution.start_installation",
+            side_effect=RuntimeError("Invalid installer lifecycle transition"),
+        ):
+            res = self.service.start_install({})
+            self.assertFalse(res["started"])
+            self.assertIn("transition", res["message"])
+
+        with patch(
+            "kyth_installer.services.installer_service.execution.request_cancel",
+            side_effect=[True, False],
+        ):
+            self.assertTrue(self.service.cancel_install({})["ok"])
+            self.assertFalse(self.service.cancel_install({})["ok"])
+
+    def test_preview_plan_reports_runtime_error_and_success(self):
+        with patch(
+            "kyth_installer.plan.validate_plan_state", side_effect=RuntimeError("unsafe disk")
+        ):
+            failed = self.service.preview_plan({})
+        self.assertFalse(failed["valid"])
+        self.assertEqual(failed["errors"], ("unsafe disk",))
+
+        report = MagicMock(
+            valid=True, mode="wipe", disk="/dev/sda", target_partition="/dev/sda1",
+            efi_partition=None, will_create_partition=True,
+            will_shrink_filesystem=False, needs_bios_boot=False,
+            errors=(), warnings=("backup",),
+        )
+        with patch("kyth_installer.plan.validate_plan_state", return_value=report):
+            success = self.service.preview_plan({})
+        self.assertTrue(success["ok"])
+        self.assertEqual(success["warnings"], ("backup",))
+
     # ── reboot ───────────────────────────────────────────────────────
 
     def test_reboot_success(self):
@@ -383,6 +557,42 @@ class InstallerServiceCrudTests(unittest.TestCase):
 
 
 class AnswerFileTests(unittest.TestCase):
+    def test_answer_file_rejects_symlink_wrong_owner_and_oversize(self):
+        fd, path = tempfile.mkstemp()
+        os.write(fd, b"{}")
+        os.close(fd)
+        try:
+            real = os.lstat(path)
+            for mode, uid, size, message in (
+                (stat.S_IFLNK | 0o600, real.st_uid, 2, "regular file"),
+                (real.st_mode, real.st_uid + 1, 2, "owned by"),
+                (real.st_mode, real.st_uid, 65 * 1024, "too large"),
+            ):
+                fake = MagicMock(spec=real)
+                fake.st_mode = mode
+                fake.st_uid = uid
+                fake.st_size = size
+                with patch("kyth_installer.app.os.lstat", return_value=fake):
+                    with self.assertRaisesRegex(ValueError, message):
+                        _load_answer_file(path)
+        finally:
+            os.unlink(path)
+
+    def test_answer_file_requires_json_object(self):
+        fd, path = tempfile.mkstemp()
+        try:
+            os.write(fd, b"[]")
+            os.close(fd)
+            os.chmod(path, 0o600)
+            with self.assertRaisesRegex(ValueError, "one JSON object"):
+                _load_answer_file(path)
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+            os.unlink(path)
+
     def test_secure_answer_file_loads_supported_fields(self):
         fd, path = tempfile.mkstemp()
         try:

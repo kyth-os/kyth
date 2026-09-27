@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-overcommit-memory — 1 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-overcommit-memory "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.overcommit_memory import load_overcommit_memory, overcommit_memory_status; c=load_overcommit_memory(); print(f\"profile={c['profile']} active={overcommit_memory_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.overcommit_memory import load_overcommit_memory,save_overcommit_memory,generate_overcommit_memory; c=load_overcommit_memory(); c['profile']='gaming'; save_overcommit_memory(c); generate_overcommit_memory(c)"; sysctl --system >/dev/null 2>&1 || true; echo "overcommit memory gaming 1" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.overcommit_memory import load_overcommit_memory,save_overcommit_memory,generate_overcommit_memory; c=load_overcommit_memory(); c['profile']='balanced'; save_overcommit_memory(c); generate_overcommit_memory(c)"; echo "overcommit memory balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.overcommit_memory import load_overcommit_memory,generate_overcommit_memory; generate_overcommit_memory(load_overcommit_memory())" ;;
-    *) echo "Usage: kyth-overcommit-memory [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable

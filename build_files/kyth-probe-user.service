@@ -1,6 +1,6 @@
 [Unit]
 Description=KythOS user probe cache refresh (oneshot)
-Documentation=https://github.com/mrtrick37/kyth
+Documentation=https://github.com/kyth-os/kyth
 After=graphical-session-pre.target
 PartOf=graphical-session.target
 
@@ -12,7 +12,29 @@ StandardError=journal
 SyslogIdentifier=kyth-probe
 Nice=10
 IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=384M
+MemoryMax=512M
 TimeoutStartSec=120
+PrivateTmp=yes
+# NoNewPrivileges deliberately absent: the native Rust bootc collector may
+# use the existing bounded, non-interactive guard for a per-user status read.
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+CacheDirectory=kyth
+CacheDirectoryMode=0700
 
 [Install]
 WantedBy=graphical-session.target

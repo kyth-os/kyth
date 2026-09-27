@@ -48,6 +48,8 @@ GHCR and GitHub releases are authoritative release channels. Cloudflare R2 is a
 download mirror for ISO artifacts. Users should verify checksums, Cosign bundles,
 and GitHub attestations as documented in `README.md`.
 
+All external fetches (ublue-os base, RPMFusion/Terra/COPR, `umu`/`proton-cachyos` via `resolve-versions.py`) are digest-pinned by CI; `cosign verify` on the base image and Syft/Grype SBOM scans run on every build. Local `podman` builds reuse only layer cache, not CI remote cache — CI `build.yml` is the source of truth for supply-chain pinning.
+
 ### Live Installer
 
 The installer serves a local web UI on `127.0.0.1`. It uses a session token for

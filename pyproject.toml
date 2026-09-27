@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+pythonpath = [
+    "src/kyth_shared",
+    "src/kyth-installer",
+    "build_files/kyth_shared",
+    "build_files/kyth-installer",
+]
+testpaths = ["tests"]

@@ -1,11 +1,1 @@
-#!/usr/bin/env bash
-# kyth-tcp-slow-start — after_idle 0 gaming
-set -euo pipefail
-need_root(){ [[ $EUID -eq 0 ]] || exec sudo -A /usr/bin/kyth-tcp-slow-start "$@"; }
-case "${1:-status}" in
-    status) python3 -c "from kyth_shared.tcp_slow_start import load_tcp_slow_start, tcp_slow_start_status; c=load_tcp_slow_start(); print(f\"profile={c['profile']} active={tcp_slow_start_status()}\")" ;;
-    gaming) need_root "$@"; python3 -c "from kyth_shared.tcp_slow_start import load_tcp_slow_start,save_tcp_slow_start,generate_tcp_slow_start; c=load_tcp_slow_start(); c['profile']='gaming'; save_tcp_slow_start(c); generate_tcp_slow_start(c)"; sysctl --system >/dev/null 2>&1 || true; echo "tcp slow start gaming 0" ;;
-    balanced) need_root "$@"; python3 -c "from kyth_shared.tcp_slow_start import load_tcp_slow_start,save_tcp_slow_start,generate_tcp_slow_start; c=load_tcp_slow_start(); c['profile']='balanced'; save_tcp_slow_start(c); generate_tcp_slow_start(c)"; echo "tcp slow start balanced" ;;
-    apply) need_root "$@"; python3 -c "from kyth_shared.tcp_slow_start import load_tcp_slow_start,generate_tcp_slow_start; generate_tcp_slow_start(load_tcp_slow_start())" ;;
-    *) echo "Usage: kyth-tcp-slow-start [status|gaming|balanced|apply]" >&2; exit 1 ;;
-esac
+kyth-tunable
