@@ -112,16 +112,22 @@ class ShippedCommandContracts(unittest.TestCase):
         self.assertNotIn("pulse", keywords)
 
     def test_hub_desktop_entries_match_tauri_app_id(self):
-        # Regression pin: the Hub window is a Tauri/WebKitGTK window whose
-        # Wayland app-id is the bundle identifier. Every desktop entry that
-        # launches it must declare that id as StartupWMClass, or Plasma
-        # cannot group the window under the Hub icon and shows a generic
-        # Wayland icon instead.
+        # Regression pin: Tauri defaults enableGTKAppId to false, which leaves
+        # the Hub without its own GTK/Wayland app-id. Enable it and keep every
+        # launching desktop entry matched to that id, or Plasma creates a
+        # separate generic Wayland taskbar item instead of grouping the pinned
+        # Hub launcher.
         import json
 
         tauri_conf = ROOT / "src/kyth-hub-web/src-tauri/tauri.conf.json"
-        app_id = json.loads(tauri_conf.read_text(encoding="utf-8"))["identifier"]
+        tauri_config = json.loads(tauri_conf.read_text(encoding="utf-8"))
+        app_id = tauri_config["identifier"]
         self.assertTrue(app_id, "tauri.conf.json must define an identifier")
+        self.assertIs(
+            tauri_config["app"].get("enableGTKAppId"),
+            True,
+            "Tauri must publish its identifier as the GTK/Wayland app-id",
+        )
         desktop = ROOT / "src/kyth-hub-web/src/data/kyth-welcome.desktop"
         parser = configparser.ConfigParser(interpolation=None, strict=False)
         parser.read(desktop, encoding="utf-8")
