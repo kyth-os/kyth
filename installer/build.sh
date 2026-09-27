@@ -115,17 +115,15 @@ if [ -n "${cosign_registry_ref}" ]; then
 	# which stores signatures as .sig tags. The verifier must speak the
 	# same format: distro-packaged cosign is v3 (bundle/referrers only),
 	# which cannot see v2 .sig tags, so a distro install fails
-	# every build at this gate. Always install the pinned v2 binary to
-	# /usr/local/bin (ahead of /usr/bin in PATH) and remove it below so
-	# it never lands in the live image.
+	# every build at this gate. Keep the pinned v2 binary in /tmp and invoke
+	# it by absolute path: some base images have a non-directory /usr/local.
 	cosign_transient="yes"
 	cosign_version="2.6.1"
 	cosign_sha256="064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a"
-	curl -sfL "https://github.com/sigstore/cosign/releases/download/v${cosign_version}/cosign-linux-amd64" -o /tmp/kyth-cosign
-	echo "${cosign_sha256}  /tmp/kyth-cosign" | sha256sum -c -
-	install -D -m 0755 /tmp/kyth-cosign /usr/local/bin/cosign
-	rm -f /tmp/kyth-cosign
-	hash -r
+	cosign_bin="/tmp/kyth-cosign"
+	curl -sfL "https://github.com/sigstore/cosign/releases/download/v${cosign_version}/cosign-linux-amd64" -o "${cosign_bin}"
+	echo "${cosign_sha256}  ${cosign_bin}" | sha256sum -c -
+	chmod 0755 "${cosign_bin}"
 	cosign_identity="${KYTH_COSIGN_IDENTITY:-^https://github.com/.+/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$}"
 	cosign_issuer="https://token.actions.githubusercontent.com"
 	# cosign's TUF client bootstraps its cache with a plain mkdir of the
@@ -140,7 +138,7 @@ if [ -n "${cosign_registry_ref}" ]; then
 	# still exits 1, never records "verified" without a real verification.
 	cosign_verified=""
 	for cosign_attempt in 1 2 3; do
-		if cosign verify \
+		if "${cosign_bin}" verify \
 			--certificate-identity-regexp "${cosign_identity}" \
 			--certificate-oidc-issuer "${cosign_issuer}" \
 			"${cosign_registry_ref}@${embedded_digest}"; then
@@ -154,7 +152,7 @@ if [ -n "${cosign_registry_ref}" ]; then
 		|| { echo "ERROR: cosign verification failed for ${cosign_registry_ref}@${embedded_digest} after 3 attempts" >&2; exit 1; }
 	signatures=""
 	for cosign_attempt in 1 2 3; do
-		if signatures="$(cosign download signature "${cosign_registry_ref}@${embedded_digest}")" && [ -n "${signatures}" ]; then
+		if signatures="$("${cosign_bin}" download signature "${cosign_registry_ref}@${embedded_digest}")" && [ -n "${signatures}" ]; then
 			break
 		fi
 		echo "WARNING: signature bundle download attempt ${cosign_attempt}/3 failed or empty; retrying in 15s" >&2
@@ -171,8 +169,7 @@ if [ -n "${cosign_registry_ref}" ]; then
 	signature_digest="sha256:$(sha256sum "${signature_bundle}" | awk '{print $1}')"
 	signature_state="verified"
 	if [ -n "${cosign_transient}" ]; then
-		rm -f /usr/local/bin/cosign
-		hash -r
+		rm -f "${cosign_bin}"
 	fi
 fi
 printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\nKYTH_INSTALLER_SOCKET=/run/kyth-installer/api.sock\nKYTH_INSTALLER_SOCKET_GROUP=liveuser\nKYTH_INSTALLER_TOKEN_FILE=/run/kyth-installer/session-token\n' \
