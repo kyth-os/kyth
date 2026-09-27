@@ -515,6 +515,10 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertIn('cosign_version="2.6.1"', build)
         self.assertIn("cosign_sha256=", build)
         self.assertIn("sha256sum -c", build)
+        self.assertIn(
+            "install -D -m 0755 /tmp/kyth-cosign /usr/local/bin/cosign",
+            build,
+        )
         self.assertNotIn("dnf5 install -y cosign", build)
         self.assertNotIn("dnf install -y cosign", build)
         # No silent pass: every failure path in the cosign block exits 1.

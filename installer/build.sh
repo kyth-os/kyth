@@ -123,7 +123,7 @@ if [ -n "${cosign_registry_ref}" ]; then
 	cosign_sha256="064954c5d8c7e3b28188eee5b1727b31c411550bc5fefd41aa672d3c761d103a"
 	curl -sfL "https://github.com/sigstore/cosign/releases/download/v${cosign_version}/cosign-linux-amd64" -o /tmp/kyth-cosign
 	echo "${cosign_sha256}  /tmp/kyth-cosign" | sha256sum -c -
-	install -m 0755 /tmp/kyth-cosign /usr/local/bin/cosign
+	install -D -m 0755 /tmp/kyth-cosign /usr/local/bin/cosign
 	rm -f /tmp/kyth-cosign
 	hash -r
 	cosign_identity="${KYTH_COSIGN_IDENTITY:-^https://github.com/.+/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$}"
