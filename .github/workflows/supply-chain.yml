@@ -49,7 +49,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
-      contents: read
+      contents: write
       packages: read
     concurrency:
       group: supply-chain-prepare-${{ inputs.source_tag }}
@@ -315,6 +315,35 @@ jobs:
             --output "${NOTES}"
           echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
 
+      # The channel tag becomes available before the signature/attestation
+      # approval gate. Publish its digest-bound notes during preparation so
+      # users checking for that image never race the later gated publish job.
+      - name: Publish image changelog release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.image.outputs.current_version }}
+          SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
+          NOTES: ${{ steps.changelog.outputs.path }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          RELEASE_TAG="image-${VERSION//./-}"
+          TITLE="Kyth Image - ${VERSION}"
+          PRERELEASE=""
+          if [[ "${SOURCE_TAG}" != "latest" ]]; then
+            PRERELEASE="--prerelease"
+          fi
+
+          if gh release view "${RELEASE_TAG}" &>/dev/null; then
+            gh release edit "${RELEASE_TAG}" --title "${TITLE}" --notes-file "${NOTES}" ${PRERELEASE}
+          else
+            gh release create "${RELEASE_TAG}" \
+              --target "${SOURCE_SHA}" \
+              --title "${TITLE}" \
+              --notes-file "${NOTES}" \
+              ${PRERELEASE}
+          fi
+
       - name: Package publish inputs
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
@@ -509,32 +538,6 @@ jobs:
           done
           echo "::error::Build provenance could not be verified for ${IMAGE}@${DIGEST}"
           exit 1
-
-      - name: Publish image changelog release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          VERSION: ${{ steps.meta.outputs.version }}
-          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
-          NOTES: output/supply-chain/${{ steps.meta.outputs.notes }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
-        run: |
-          RELEASE_TAG="image-${VERSION//./-}"
-          TITLE="Kyth Image - ${VERSION}"
-          PRERELEASE=""
-          if [[ "${SOURCE_TAG}" != "latest" ]]; then
-            PRERELEASE="--prerelease"
-          fi
-
-          if gh release view "${RELEASE_TAG}" &>/dev/null; then
-            gh release edit "${RELEASE_TAG}" --title "${TITLE}" --notes-file "${NOTES}" ${PRERELEASE}
-          else
-            gh release create "${RELEASE_TAG}" \
-              --target "${SOURCE_SHA}" \
-              --title "${TITLE}" \
-              --notes-file "${NOTES}" \
-              ${PRERELEASE}
-          fi
 
       - name: Trigger CVE scan
         uses: ./.github/actions/dispatch-workflow

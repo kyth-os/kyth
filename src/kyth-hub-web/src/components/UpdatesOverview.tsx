@@ -28,6 +28,9 @@ const updatePhases: { id: UpdatePhase; label: string }[] = [
   { id: "finalize", label: "Ready" },
 ];
 
+const RELEASE_SUMMARY_RETRY_DELAY_MS = 30_000;
+const RELEASE_SUMMARY_MAX_ATTEMPTS = 20;
+
 function updatePhaseIndex(phase: string | undefined): number {
   const index = updatePhases.findIndex((item) => item.id === phase);
   return index < 0 ? 1 : index;
@@ -99,6 +102,7 @@ export function UpdatesOverview() {
   const [releaseSummaryLoading, setReleaseSummaryLoading] = useState(false);
   const [releaseSummaryUnavailable, setReleaseSummaryUnavailable] = useState(false);
   const releaseSummaryRequest = useRef(0);
+  const [lastAvailableDigest, setLastAvailableDigest] = useState<string | null>(null);
 
   // While a stage runs, poll the live byte/layer progress for the
   // determinate bar. The backend-tracked job survives a frontend reload
@@ -309,9 +313,15 @@ export function UpdatesOverview() {
   const stagedEffective = staged || stagedLatch;
   const systemUpdateAvailable = updateStatus?.check_state === "available" && !stagedEffective;
   const updateDigest = updateStatus?.remote_digest ?? null;
+  const releaseDigest = updateDigest ?? lastAvailableDigest;
   useEffect(() => {
-    if (!systemUpdateAvailable || !updateDigest) {
-      if (systemUpdateAvailable && !updateDigest) {
+    if (systemUpdateAvailable && updateDigest) setLastAvailableDigest(updateDigest);
+  }, [systemUpdateAvailable, updateDigest]);
+  useEffect(() => {
+    const updateInProgress = stagedEffective || busy === "stage" || updateTracked || updateStatus?.check_state === "busy";
+    const shouldResolveReleaseSummary = Boolean(releaseDigest) && (systemUpdateAvailable || updateInProgress);
+    if (!shouldResolveReleaseSummary || !releaseDigest) {
+      if (systemUpdateAvailable && !releaseDigest) {
         setReleaseSummaryLoading(false);
         setReleaseSummaryUnavailable(true);
       }
@@ -322,6 +332,7 @@ export function UpdatesOverview() {
         setReleaseSummary(null);
         setReleaseSummaryLoading(false);
         setReleaseSummaryUnavailable(false);
+        setLastAvailableDigest(null);
       }
       return;
     }
@@ -329,15 +340,38 @@ export function UpdatesOverview() {
     setReleaseSummary(null);
     setReleaseSummaryLoading(true);
     setReleaseSummaryUnavailable(false);
-    void fetchUpdateReleaseSummary(updateDigest).then((summary) => {
-      if (releaseSummaryRequest.current === requestId) {
-        setReleaseSummary(summary);
-        setReleaseSummaryLoading(false);
-        setReleaseSummaryUnavailable(summary === null);
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    let attempts = 0;
+    const requestSummary = async (): Promise<void> => {
+      try {
+        const summary = await fetchUpdateReleaseSummary(releaseDigest);
+        if (cancelled || releaseSummaryRequest.current !== requestId) return;
+        if (summary) {
+          setReleaseSummary(summary);
+          setReleaseSummaryLoading(false);
+          setReleaseSummaryUnavailable(false);
+          return;
+        }
+      } catch {
+        if (cancelled || releaseSummaryRequest.current !== requestId) return;
       }
-    });
-    return undefined;
-  }, [systemUpdateAvailable, updateDigest, stagedEffective, busy, updateTracked]);
+      attempts += 1;
+      if (attempts < RELEASE_SUMMARY_MAX_ATTEMPTS) {
+        setReleaseSummaryLoading(true);
+        setReleaseSummaryUnavailable(false);
+        retryTimer = window.setTimeout(() => void requestSummary(), RELEASE_SUMMARY_RETRY_DELAY_MS);
+      } else {
+        setReleaseSummaryLoading(false);
+        setReleaseSummaryUnavailable(true);
+      }
+    };
+    void requestSummary();
+    return () => {
+      cancelled = true;
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer);
+    };
+  }, [systemUpdateAvailable, releaseDigest, stagedEffective, busy, updateTracked, updateStatus?.check_state]);
   // "blocked" (e.g. a quarantined update held back for safety) and "busy"
   // (a mutating operation in flight) are backend states, not read failures:
   // neither may render as up-to-date nor as a connection error.

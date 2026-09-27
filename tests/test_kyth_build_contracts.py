@@ -147,6 +147,22 @@ class ShippedCommandContracts(unittest.TestCase):
 
 
 class BuildAssemblyContracts(unittest.TestCase):
+    def test_rust_desktop_stack_has_scheduled_coordinated_freshness_check(self):
+        workflow = (
+            ROOT / ".github" / "workflows" / "rust-desktop-stack-freshness.yml"
+        ).read_text(encoding="utf-8")
+        checker = (
+            BUILD_FILES / "scripts" / "check-rust-desktop-stack-freshness.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("schedule:", workflow)
+        self.assertIn(
+            "python3 build_files/scripts/check-rust-desktop-stack-freshness.py",
+            workflow,
+        )
+        self.assertIn("src/kyth-hub-web/src-tauri/Cargo.toml", checker)
+        self.assertIn("src/kyth-installer-web/src-tauri/Cargo.toml", checker)
+        self.assertNotIn("pull-requests: write", workflow)
+
     def test_package_install_sources_do_not_pin_literal_rpm_nvrs(self):
         """Kyth resolves current RPMs at build time; manifests record results."""
         sources = [ROOT / "Dockerfile"]

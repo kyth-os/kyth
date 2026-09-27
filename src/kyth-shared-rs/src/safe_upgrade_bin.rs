@@ -457,8 +457,12 @@ fn classify_bootc_fragment(fragment: &str, state: &mut StageProgress) -> Option<
 }
 
 fn emit_stage_phase(pct: u8, phase: &str, detail: &str) {
-    println!("KYTH_STAGE_PROGRESS pct={pct} phase={phase} detail={detail}");
+    println!("{}", stage_phase_marker(pct, phase, detail));
     let _ = std::io::Write::flush(&mut std::io::stdout());
+}
+
+fn stage_phase_marker(pct: u8, phase: &str, detail: &str) -> String {
+    format!("KYTH_STAGE_PROGRESS pct={pct} phase={phase} detail={detail}")
 }
 
 /// Run `bootc upgrade` as its own process group so termination reaches
@@ -544,15 +548,18 @@ fn run_upgrade() -> Result<String, String> {
     check_free("/sysroot", REQUIRED_FREE_BYTES)?;
     check_free("/boot", BOOT_FREE_MIN_BYTES)?;
     check_free("/var/tmp", REQUIRED_FREE_BYTES)?;
-    kyth_shared::system::bootc_guard::with_bootc_lock(|| match run_bootc_child() {
-        Ok(output) if output.status.success() => Ok(output_text(&output)),
-        Ok(output) => {
-            scrub_dracut_scratch();
-            Err(output_text(&output))
-        }
-        Err(error) => {
-            scrub_dracut_scratch();
-            Err(error)
+    kyth_shared::system::bootc_guard::with_bootc_lock(|| {
+        emit_stage_phase(1, "download", "Starting image download");
+        match run_bootc_child() {
+            Ok(output) if output.status.success() => Ok(output_text(&output)),
+            Ok(output) => {
+                scrub_dracut_scratch();
+                Err(output_text(&output))
+            }
+            Err(error) => {
+                scrub_dracut_scratch();
+                Err(error)
+            }
         }
     })
 }
@@ -706,6 +713,14 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn download_phase_marker_uses_the_frontend_progress_contract() {
+        assert_eq!(
+            stage_phase_marker(1, "download", "Starting image download"),
+            "KYTH_STAGE_PROGRESS pct=1 phase=download detail=Starting image download"
+        );
+    }
 
     #[test]
     fn space_minimums_match_policy() {
