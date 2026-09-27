@@ -186,7 +186,7 @@ impl NativeInstallRequest {
                     source_imgref: text(
                         "source_imgref",
                         &std::env::var("KYTH_SOURCE_IMAGE")
-                            .unwrap_or_else(|_| "oci:/usr/share/kyth/image:latest".to_string()),
+                            .unwrap_or_else(|_| "ghcr.io/kyth-os/kyth:latest".to_string()),
                     ),
                     target_imgref: text(
                         "target_imgref",

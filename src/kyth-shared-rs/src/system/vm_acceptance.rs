@@ -275,7 +275,7 @@ fn install_from_live_iso() -> io::Result<()> {
             "install".into(),
             "to-disk".into(),
             "--source-imgref".into(),
-            "oci:/usr/share/kyth/image:latest".into(),
+            "ghcr.io/kyth-os/kyth:latest".into(),
             "--target-imgref".into(),
             target_ref.clone(),
             "--filesystem".into(),

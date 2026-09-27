@@ -41,18 +41,45 @@ class VmAcceptanceTests(unittest.TestCase):
             "HUB_PRIVILEGED_FAILURE_OK",
         ):
             self.assertIn(phase, text)
-        self.assertIn("oci:/usr/share/kyth/image:latest", text)
+        self.assertIn("source_ref = _installer_source_ref()", text)
+        self.assertIn("KYTH_SOURCE_IMAGE=", text)
         self.assertIn("virtio-KYTH_ACCEPT", text)
 
-    def test_live_build_bundles_the_installer_image(self):
+    def test_live_acceptance_uses_pinned_registry_source_from_image_config(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = pathlib.Path(tmpdir) / "kyth-installer.env"
+            env_file.write_text(
+                "KYTH_SOURCE_IMAGE=ghcr.io/kyth-os/kyth@sha256:abc123\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(vm_acceptance, "INSTALLER_ENV_FILE", env_file):
+                self.assertEqual(
+                    vm_acceptance._installer_source_ref(),
+                    "ghcr.io/kyth-os/kyth@sha256:abc123",
+                )
+
+    def test_live_acceptance_fails_closed_when_registry_source_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            env_file = pathlib.Path(tmpdir) / "missing-installer.env"
+            with (
+                mock.patch.object(vm_acceptance, "INSTALLER_ENV_FILE", env_file),
+                mock.patch("kyth_shared.vm_acceptance.fail", side_effect=SystemExit(1)) as fail,
+            ):
+                with self.assertRaises(SystemExit):
+                    vm_acceptance._installer_source_ref()
+        fail.assert_called_once_with("pinned installer source is missing from live image")
+
+    def test_live_build_uses_the_pinned_network_image_without_embedding_it(self):
         build = (ROOT / "installer" / "build.sh").read_text(encoding="utf-8")
         containerfile = (ROOT / "installer" / "Containerfile").read_text(encoding="utf-8")
 
-        self.assertIn('"oci:/usr/share/kyth/image:latest"', build)
-        self.assertIn("skopeo copy --retry-times 3", build)
+        self.assertNotIn("skopeo copy", build)
+        self.assertNotIn("/usr/share/kyth/image:latest", build)
+        self.assertIn("skopeo inspect --format", build)
         self.assertIn('source_imgref="${INSTALL_SOURCE_IMAGE}"', build)
-        self.assertIn("containers-storage:*|oci:*|dir:*|ostree:*)", build)
-        self.assertIn("KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest", build)
+        self.assertIn("KYTH_SOURCE_IMAGE=%s", build)
+        self.assertIn("KYTH_SOURCE_DIGEST=%s", build)
+        self.assertIn("${source_imgref#docker://}", build)
         self.assertIn("INSTALL_SOURCE_IMAGE", containerfile)
 
     def test_update_reference_policy(self):
@@ -163,8 +190,11 @@ class HubAcceptanceHelpersTests(unittest.TestCase):
                 mock.patch("kyth_shared.vm_acceptance.wait_for_desktop", return_value=True),
                 mock.patch("kyth_shared.vm_acceptance.run_smoke_check"),
                 mock.patch("kyth_shared.vm_acceptance.TARGET_BY_ID", target),
-                mock.patch("kyth_shared.vm_acceptance.Path.is_dir", return_value=True),
                 mock.patch("kyth_shared.vm_acceptance.LOG_FILE", log_file),
+                mock.patch(
+                    "kyth_shared.vm_acceptance._installer_source_ref",
+                    return_value="ghcr.io/kyth-os/kyth@sha256:abc123",
+                ),
                 mock.patch("kyth_shared.vm_acceptance._installer_target_ref", return_value="ghcr.io/example/kyth:testing"),
                 mock.patch("kyth_shared.vm_acceptance.read_update_ref", return_value=""),
                 mock.patch("kyth_shared.vm_acceptance.run", return_value=_completed(0)),

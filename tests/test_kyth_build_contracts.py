@@ -542,9 +542,18 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertNotIn("dnf5 install -y cosign", build)
         self.assertNotIn("dnf install -y cosign", build)
         # No silent pass: every failure path in the cosign block exits 1.
-        gate = build.split("Registry signature gate", 1)[1].split("KYTH_SOURCE_IMAGE=oci", 1)[0]
+        gate = build.split("Registry signature gate", 1)[1].split("KYTH_SOURCE_IMAGE=", 1)[0]
         self.assertNotIn("exit 0", gate)
         self.assertIn("exit 1", gate)
+
+    def test_live_iso_does_not_embed_the_full_install_image(self):
+        build = (ROOT / "installer" / "build.sh").read_text(encoding="utf-8")
+        iso_workflow = (ROOT / ".github/workflows/build-live-iso.yml").read_text(encoding="utf-8")
+        self.assertNotIn("skopeo copy", build)
+        self.assertIn("KYTH_SOURCE_IMAGE=%s", build)
+        self.assertIn("KYTH_SOURCE_DIGEST=%s", build)
+        self.assertIn("Gate ISO size (8.5 GiB max)", iso_workflow)
+        self.assertIn('"${cosign_bin}" verify', build)
 
 
 if __name__ == "__main__":

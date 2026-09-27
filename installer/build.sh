@@ -48,68 +48,56 @@ Type=Application
 Categories=System;
 EOF
 
-# Bundle the exact image used for this live payload. The default Fedora install
-# can then complete without a network connection while retaining the public
-# registry reference for future bootc updates. Optional kernel variants remain
-# registry-backed because they are separate images.
-mkdir -p /usr/share/kyth/image
-skopeo_source_args=()
+# Keep the live ISO small: the installer image is about 8.5 GiB compressed and
+# must be fetched from its signed registry source during installation. Never
+# copy its layers into the ISO payload.
 source_imgref="${INSTALL_SOURCE_IMAGE}"
 case "${source_imgref}" in
-	containers-storage:*|oci:*|dir:*|ostree:*)
-		;;
 	docker://*)
 		source_imgref="docker://${source_imgref#docker://}"
+		;;
+	containers-storage:*|oci:*|dir:*|ostree:*)
+		echo "ERROR: live ISO installer source must be a registry image reference." >&2
+		exit 1
 		;;
 	*)
 		source_imgref="docker://${source_imgref}"
 		;;
 esac
+registry_image="${source_imgref#docker://}"
 case "${source_imgref#docker://}" in
 	localhost:*|127.0.0.1:*|\[::1\]:*)
-		# Local test registries are intentionally HTTP-only. Keep normal
-		# registry pulls TLS-verified; relax verification only for loopback.
-		skopeo_source_args+=(--src-tls-verify=false)
+		echo "ERROR: live ISO installer source must be reachable from the booted live system; loopback registries are not supported." >&2
+		exit 1
 		;;
 esac
-skopeo copy --retry-times 3 \
-	"${skopeo_source_args[@]}" \
-	"${source_imgref}" \
-	"oci:/usr/share/kyth/image:latest"
-embedded_digest="$(skopeo inspect --format '{{.Digest}}' 'oci:/usr/share/kyth/image:latest')"
-case "${embedded_digest}" in
+source_digest="$(skopeo inspect --format '{{.Digest}}' "${source_imgref}")"
+case "${source_digest}" in
 	sha256:[0-9a-f][0-9a-f]*) ;;
 	*)
-		echo "ERROR: embedded installer image has no valid sha256 digest: ${embedded_digest}" >&2
+		echo "ERROR: registry installer image has no valid sha256 digest: ${source_digest}" >&2
 		exit 1
 		;;
 esac
 expected_digest="${INSTALL_SOURCE_IMAGE##*@}"
-release_digest="${embedded_digest}"
-[[ "${expected_digest}" == sha256:* ]] && release_digest="${expected_digest}"
+if [[ "${expected_digest}" != sha256:* ]]; then
+	echo "ERROR: live ISO installer source must be pinned by digest: ${INSTALL_SOURCE_IMAGE}" >&2
+	exit 1
+fi
+if [[ "${expected_digest}" != "${source_digest}" ]]; then
+	echo "ERROR: installer source digest mismatch: expected ${expected_digest}, registry reports ${source_digest}" >&2
+	exit 1
+fi
+release_digest="${source_digest}"
 target_image="ghcr.io/kyth-os/kyth:${SOURCE_TAG}"
 
 # ── Registry signature gate: cosign-verify at ISO build time ─────────────────
-# The installer daemon re-verifies this digest AND the embedded signature
-# bundle before any bootc install. Loopback registries and non-registry
-# transports are unsigned dev inputs: recorded explicitly as "local", never
-# as verified.
+# The installer daemon re-verifies this digest and signature bundle before
+# any bootc install.
 signature_bundle="/usr/share/kyth/image.sig.bundle.json"
 signature_state="local"
 signature_digest=""
-cosign_registry_ref=""
-case "${source_imgref}" in
-	docker://localhost:*|docker://127.0.0.1:*|docker://\[::1\]*)
-		echo "NOTE: live installer source is a loopback test registry; skipping cosign verification (recorded as unsigned local source)." >&2
-		;;
-	docker://*)
-		cosign_registry_ref="${source_imgref#docker://}"
-		cosign_registry_ref="${cosign_registry_ref%@*}"
-		;;
-	*)
-		echo "NOTE: live installer source is a non-registry transport (${source_imgref%%:*}); skipping cosign verification (recorded as unsigned local source)." >&2
-		;;
-esac
+cosign_registry_ref="${registry_image%@*}"
 if [ -n "${cosign_registry_ref}" ]; then
 	# The signer (supply-chain.yml via setup-cosign) uses cosign v2.6.1,
 	# which stores signatures as .sig tags. The verifier must speak the
@@ -141,7 +129,7 @@ if [ -n "${cosign_registry_ref}" ]; then
 		if "${cosign_bin}" verify \
 			--certificate-identity-regexp "${cosign_identity}" \
 			--certificate-oidc-issuer "${cosign_issuer}" \
-			"${cosign_registry_ref}@${embedded_digest}"; then
+			"${cosign_registry_ref}@${source_digest}"; then
 			cosign_verified="yes"
 			break
 		fi
@@ -149,20 +137,20 @@ if [ -n "${cosign_registry_ref}" ]; then
 		sleep 15
 	done
 	[ -n "${cosign_verified}" ] \
-		|| { echo "ERROR: cosign verification failed for ${cosign_registry_ref}@${embedded_digest} after 3 attempts" >&2; exit 1; }
+		|| { echo "ERROR: cosign verification failed for ${cosign_registry_ref}@${source_digest} after 3 attempts" >&2; exit 1; }
 	signatures=""
 	for cosign_attempt in 1 2 3; do
-		if signatures="$("${cosign_bin}" download signature "${cosign_registry_ref}@${embedded_digest}")" && [ -n "${signatures}" ]; then
+		if signatures="$("${cosign_bin}" download signature "${cosign_registry_ref}@${source_digest}")" && [ -n "${signatures}" ]; then
 			break
 		fi
 		echo "WARNING: signature bundle download attempt ${cosign_attempt}/3 failed or empty; retrying in 15s" >&2
 		sleep 15
 	done
 	[ -n "${signatures}" ] \
-		|| { echo "ERROR: could not download signature bundle for ${cosign_registry_ref}@${embedded_digest} after 3 attempts" >&2; exit 1; }
+		|| { echo "ERROR: could not download signature bundle for ${cosign_registry_ref}@${source_digest} after 3 attempts" >&2; exit 1; }
 	signatures_json="$(printf '%s\n' "${signatures}" | sed -e 's/^/"/' -e 's/$/"/' | paste -sd, -)"
 	printf '{"schema_version":1,"digest":"%s","release_digest":"%s","source_image":"%s","identity":"%s","issuer":"%s","signatures":[%s]}\n' \
-		"${embedded_digest}" "${release_digest}" "${INSTALL_SOURCE_IMAGE}" \
+		"${source_digest}" "${release_digest}" "${INSTALL_SOURCE_IMAGE}" \
 		"${cosign_identity}" "${cosign_issuer}" "${signatures_json}" \
 		>"${signature_bundle}"
 	chmod 0644 "${signature_bundle}"
@@ -172,10 +160,10 @@ if [ -n "${cosign_registry_ref}" ]; then
 		rm -f "${cosign_bin}"
 	fi
 fi
-printf 'KYTH_SOURCE_IMAGE=oci:/usr/share/kyth/image:latest\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\nKYTH_INSTALLER_SOCKET=/run/kyth-installer/api.sock\nKYTH_INSTALLER_SOCKET_GROUP=liveuser\nKYTH_INSTALLER_TOKEN_FILE=/run/kyth-installer/session-token\n' \
-	"${target_image}" "${embedded_digest}" >/etc/kyth-installer.env
+printf 'KYTH_SOURCE_IMAGE=%s@%s\nKYTH_TARGET_IMAGE=%s\nKYTH_SOURCE_DIGEST=%s\nKYTH_INSTALLER_SOCKET=/run/kyth-installer/api.sock\nKYTH_INSTALLER_SOCKET_GROUP=liveuser\nKYTH_INSTALLER_TOKEN_FILE=/run/kyth-installer/session-token\n' \
+	"${registry_image%@*}" "${source_digest}" "${target_image}" "${source_digest}" >/etc/kyth-installer.env
 printf '{"schema_version":1,"digest":"%s","release_digest":"%s","target_image":"%s","source_image":"%s","signature":"%s","signature_digest":"%s"}\n' \
-	"${embedded_digest}" "${release_digest}" "${target_image}" "${INSTALL_SOURCE_IMAGE}" \
+	"${source_digest}" "${release_digest}" "${target_image}" "${INSTALL_SOURCE_IMAGE}" \
 	"${signature_state}" "${signature_digest}" \
 	>/usr/share/kyth/image-source.json
 
