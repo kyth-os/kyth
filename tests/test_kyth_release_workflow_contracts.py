@@ -131,6 +131,27 @@ class ReleaseChainingContracts(unittest.TestCase):
         self.assertIn("Wait for source image SBOM", workflow)
         self.assertIn("Fail if source image has no SBOM", workflow)
 
+    def test_iso_dispatch_waits_for_verified_container_signature(self):
+        """The live ISO must not race the serialized supply-chain signer."""
+        workflow = (
+            ROOT / ".github/workflows/supply-chain.yml"
+        ).read_text(encoding="utf-8")
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        publish = workflow.split("  publish:", 1)[1]
+        verify_at = publish.index(
+            "- name: Verify published signatures and build provenance"
+        )
+        dispatch_at = publish.index(
+            "- name: Dispatch Live ISO after image verification"
+        )
+        self.assertLess(verify_at, dispatch_at)
+        dispatch_inputs = workflow.split("  workflow_dispatch:", 1)[1].split(
+            "permissions:", 1
+        )[0]
+        self.assertIn("dispatch_iso", dispatch_inputs)
+        self.assertIn('"dispatch_iso": "true"', build)
+        self.assertIn("inputs.dispatch_iso", publish)
+
 
 if __name__ == "__main__":
     unittest.main()

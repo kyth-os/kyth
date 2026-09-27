@@ -775,6 +775,8 @@ jobs:
       # runs only against the Fedora-flavor image and needs the immutable
       # digest, so it is dispatched explicitly instead of using a workflow_run
       # trigger — workflow_run events carry no inputs and cannot pin the digest.
+      # ISO dispatch is deliberately owned by supply-chain.yml after its signed
+      # image verification; starting both here races its serialized publish job.
       - name: Dispatch supply chain metadata
         if: matrix.kernel_flavor == 'fedora'
         uses: ./.github/actions/dispatch-workflow
@@ -788,25 +790,7 @@ jobs:
               "source_digest": ${{ toJSON(steps.image.outputs.digest) }},
               "source_sha": ${{ toJSON(steps.image.outputs.source_sha) }},
               "source_github_sha": ${{ toJSON(steps.image.outputs.github_sha) }},
+              "dispatch_iso": "true",
               "original_event": ${{ toJSON(github.event_name) }},
               "original_actor": ${{ toJSON(github.actor) }}
-            }
-
-      # Live ISO is dispatched explicitly with the pinned Fedora digest so it
-      # runs automatically after the Fedora container build succeeds — independent
-      # of the cachy flavor outcome (workflow_run overall success would otherwise
-      # block ISO when cachy fails due to fail-fast: false + aggregate result).
-      - name: Dispatch Live ISO
-        if: matrix.kernel_flavor == 'fedora'
-        uses: ./.github/actions/dispatch-workflow
-        with:
-          workflow: build-live-iso.yml
-          ref: ${{ matrix.branch }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          fields-json: |
-            {
-              "source_tag": ${{ toJSON(steps.prep.outputs.tag) }},
-              "source_digest": ${{ toJSON(steps.image.outputs.digest) }},
-              "source_sha": ${{ toJSON(steps.image.outputs.source_sha) }},
-              "run_acceptance": "false"
             }

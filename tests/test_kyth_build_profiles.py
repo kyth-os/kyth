@@ -117,14 +117,16 @@ class BuildProfileTests(unittest.TestCase):
             or "needs.build_push.result != 'skipped'" in workflow,
             "finalize must gate on build_push result",
         )
-        # Container -> ISO chain must be explicit with pinned digest, via the
-        # shared dispatch-workflow composite action (not an inline gh call —
-        # that would drift from the identical supply-chain dispatch again).
+        # The ISO may only start after supply-chain signing and verification;
+        # dispatching it beside supply-chain metadata creates a signature race.
         dispatch_action = _read(".github/actions/dispatch-workflow/action.yml")
-        self.assertIn("Dispatch Live ISO", workflow)
         self.assertIn("./.github/actions/dispatch-workflow", workflow)
-        self.assertIn("build-live-iso.yml", workflow)
-        self.assertIn("source_digest", workflow)
+        self.assertNotIn("Dispatch Live ISO", workflow)
+        supply_chain = _read(".github/workflows/supply-chain.yml")
+        self.assertIn("dispatch_iso", workflow)
+        self.assertIn("Dispatch Live ISO after image verification", supply_chain)
+        self.assertIn("build-live-iso.yml", supply_chain)
+        self.assertIn("source_digest", supply_chain)
         self.assertIn("gh workflow run", dispatch_action)
         # And the ISO workflow must not silently publish without a source image
         self.assertIn("source_tag", iso)

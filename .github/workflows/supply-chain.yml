@@ -19,6 +19,11 @@ on:
         description: Immutable image digest to process (required for manual runs)
         required: true
         type: string
+      dispatch_iso:
+        description: Dispatch the live ISO build after the image signature and provenance verify
+        required: false
+        default: false
+        type: boolean
       source_sha:
         description: Source commit recorded in the image (required for manual runs)
         required: true
@@ -538,6 +543,21 @@ jobs:
           done
           echo "::error::Build provenance could not be verified for ${IMAGE}@${DIGEST}"
           exit 1
+
+      - name: Dispatch Live ISO after image verification
+        if: inputs.dispatch_iso == 'true' || inputs.dispatch_iso == true
+        uses: ./.github/actions/dispatch-workflow
+        with:
+          workflow: build-live-iso.yml
+          ref: ${{ github.ref_name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fields-json: |
+            {
+              "source_tag": ${{ toJSON(inputs.source_tag) }},
+              "source_digest": ${{ toJSON(inputs.source_digest) }},
+              "source_sha": ${{ toJSON(inputs.source_sha) }},
+              "run_acceptance": "false"
+            }
 
       - name: Trigger CVE scan
         uses: ./.github/actions/dispatch-workflow

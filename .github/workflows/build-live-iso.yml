@@ -3,9 +3,9 @@ run-name: "Build Live ISO - ${{ inputs.source_tag || github.ref_name || 'testing
 
 on:
   # Separate from container build — ISO failures no longer hide successful
-  # container publishes. build.yml's finalize job dispatches this explicitly
-  # (workflow_dispatch, pinned digest) once the Fedora image actually
-  # publishes. There is deliberately no workflow_run trigger here: a
+  # container publishes. Supply Chain Metadata dispatches this explicitly
+  # (workflow_dispatch, pinned digest) after signing and verifying the exact
+  # Fedora image. There is deliberately no workflow_run trigger here: a
   # workflow_run listener cannot tell a skipped/gated image run from a real
   # publish, and previously fired a doomed ISO build racing the actual one.
   # The explicit dispatch only ever fires from the leg that did real work.
@@ -212,9 +212,8 @@ jobs:
       - name: Mount compressed Podman storage
         uses: ./.github/actions/setup-compressed-storage
 
-      # finalize dispatches this workflow with an explicit source_digest, so
-      # in practice this step only ever runs for a manual workflow_dispatch
-      # that left source_digest blank — fall back to this run's own artifact
+      # Supply Chain Metadata dispatches this workflow with an explicit
+      # source_digest. Manual dispatches may omit it; fall back to this run's artifact
       # (present when called via workflow_call) before resolving the moving
       # tag downstream.
       - name: Load build metadata from this run
