@@ -195,6 +195,17 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertFalse(res.get("ok"))
         self.assertIn("Unsupported filesystem", res.get("message", ""))
 
+    @patch("kyth_installer.disk.list_disks")
+    def test_create_partition_rejects_unsafe_mountpoint(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.create_partition({
+            "disk": "/dev/sda", "start_bytes": 4 * 1024**2,
+            "size_bytes": 10 * 1024**3, "fs_type": "btrfs",
+            "mountpoint": "/home/../../etc",
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("traversal", res.get("message", ""))
+
     # ── delete_partition ─────────────────────────────────────────────
 
     @patch("kyth_installer.disk.list_partitions")
@@ -322,6 +333,18 @@ class InstallerServiceCrudTests(unittest.TestCase):
         })
         self.assertFalse(res.get("ok"))
         self.assertIn("absolute path", res.get("message", ""))
+
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_set_mountpoint_rejects_traversal(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.set_mountpoint({
+            "disk": "/dev/sda", "partition": "/dev/sda1",
+            "mountpoint": "/home/../../etc",
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("traversal", res.get("message", ""))
 
     @patch("kyth_installer.disk._parent_disk")
     @patch("kyth_installer.disk.list_disks")

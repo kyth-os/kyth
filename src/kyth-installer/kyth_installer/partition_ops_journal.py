@@ -623,6 +623,13 @@ class Journal:
         fs = (p.get("fs_type") or "").lower()
         mount = (p.get("mountpoint") or "").lower()
 
+        try:
+            from .mountpoint import normalize_manual_mountpoint
+
+            normalize_manual_mountpoint(p.get("mountpoint", ""))
+        except ValueError:
+            return "Create partition: mount point must be an absolute safe path."
+
         if start < 0 or size < 0:
             return "Create partition: invalid start or size."
 
@@ -688,6 +695,12 @@ class Journal:
 
         elif kind == "set_mountpoint":
             mount = str(p.get("mountpoint") or "").strip()
+            try:
+                from .mountpoint import normalize_manual_mountpoint
+
+                normalize_manual_mountpoint(mount)
+            except ValueError:
+                return "Set mount point: mount point must be an absolute safe path."
             fs = allocated[partition][2].lower()
             if mount == "/":
                 if fs != "btrfs":

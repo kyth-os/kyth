@@ -19,13 +19,13 @@ from kyth_installer.validation import InstallRequestError  # noqa: E402
 
 
 class PartitionCliCoverageTests(unittest.TestCase):
-    def test_identity_defaults_skip_password_and_reject_mismatch(self):
+    def test_identity_requires_username_and_rejects_password_mismatch(self):
         with mock.patch.dict(os.environ, {"KYTH_HOSTNAME": "default-host", "KYTH_TIMEZONE": "Etc/UTC"}):
             answers = iter(["", "", ""])
-            identity = partition_cli._prompt_identity(
-                input_fn=lambda _prompt: next(answers), password_fn=mock.MagicMock()
-            )
-        self.assertEqual(identity, ("default-host", "Etc/UTC", "", ""))
+            with self.assertRaisesRegex(InstallRequestError, "username is required"):
+                partition_cli._prompt_identity(
+                    input_fn=lambda _prompt: next(answers), password_fn=mock.MagicMock()
+                )
 
         answers = iter(["host", "UTC", "alice"])
         passwords = iter(["first", "second"])
@@ -70,19 +70,19 @@ class PartitionCliCoverageTests(unittest.TestCase):
             mock.patch.object(partition_cli, "_describe_target", return_value=("/dev/sda2", "/dev/sda", "")),
             mock.patch.object(partition_cli, "_print_plan"),
         ]
-        answers = lambda: iter([partition_cli.CONFIRMATION, "host", "UTC", ""])
+        answers = lambda: iter([partition_cli.CONFIRMATION, "host", "UTC", "admin"])
         with common[0], common[1], common[2], mock.patch.object(
             partition_cli, "validate_partition_install_request", side_effect=InstallRequestError("bad request")
         ), mock.patch("sys.stderr"):
             it = answers()
-            self.assertEqual(partition_cli.run(["/dev/sda2"], input_fn=lambda _p: next(it)), 2)
+            self.assertEqual(partition_cli.run(["/dev/sda2"], input_fn=lambda _p: next(it), password_fn=lambda _p: "secret"), 2)
         with mock.patch.object(partition_cli.system, "require_root", side_effect=OSError("not root")), mock.patch("sys.stderr"):
             self.assertEqual(partition_cli.run(["/dev/sda2"]), 1)
         with common[0], common[1], common[2], mock.patch.object(
             partition_cli, "validate_partition_install_request", return_value={}
         ), mock.patch.object(partition_cli, "start_installation", return_value=False), mock.patch("sys.stderr"):
             it = answers()
-            self.assertEqual(partition_cli.run(["/dev/sda2"], input_fn=lambda _p: next(it)), 1)
+            self.assertEqual(partition_cli.run(["/dev/sda2"], input_fn=lambda _p: next(it), password_fn=lambda _p: "secret"), 1)
 
     def test_main_exits_with_run_result(self):
         with mock.patch.object(partition_cli, "run", return_value=7):

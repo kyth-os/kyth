@@ -25,7 +25,10 @@ def _kill_tree(proc: subprocess.Popen) -> None:
     reaped at all — never hang teardown on it.
     """
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        # start_new_session=True makes the child PID its process-group ID.
+        # Use it directly so descendants are still reachable after the group
+        # leader has exited and os.getpgid(proc.pid) would fail.
+        os.killpg(proc.pid, signal.SIGKILL)
     except Exception:  # noqa: BLE001 -- broad: best-effort teardown, pid may be gone or mocked
         pass
     try:
@@ -139,6 +142,7 @@ class StreamingCommandRunner:
         last_rx = self._rx_bytes()
         pending = ""
         last_line: str | None = None
+        cancellation_after_exit = False
         decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
 
         def emit_line(line: str) -> None:
@@ -178,19 +182,31 @@ class StreamingCommandRunner:
         try:
             fd = proc.stdout.fileno()
             while True:
-                if cancel_event is not None and cancel_event.is_set():
-                    log("Cancellation requested — terminating install command...")
-                    if proc.poll() is None:
+                if (
+                    cancel_event is not None
+                    and cancel_event.is_set()
+                    and not cancellation_after_exit
+                ):
+                    if proc.poll() is not None:
+                        # The command won the race and completed before the
+                        # cancellation request. Drain and report its real exit
+                        # status instead of calling a completed write cancelled.
+                        cancellation_after_exit = True
+                    else:
+                        log("Cancellation requested — terminating install command...")
                         proc.terminate()
                         try:
                             proc.wait(timeout=5)
-                        except Exception:  # noqa: BLE001 -- broad: proc.wait timeout can be TimeoutExpired or generic Exception in tests
-                            _kill_tree(proc)
-                    from .execution import InstallCancelled
+                        except Exception:  # noqa: BLE001 -- timeout or mocked wait failure
+                            pass
+                        # Always kill the process group: a helper may exit on
+                        # SIGTERM while a forked disk writer keeps running.
+                        _kill_tree(proc)
+                        from .execution import InstallCancelled
 
-                    raise InstallCancelled(
-                        "Installation cancelled by user. Disk changes may have already started."
-                    )
+                        raise InstallCancelled(
+                            "Installation cancelled by user. Disk changes may have already started."
+                        )
                 ready, _, _ = select.select([fd], [], [], 1)
                 if ready:
                     chunk = os.read(fd, 64 * 1024)

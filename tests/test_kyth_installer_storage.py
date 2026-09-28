@@ -655,7 +655,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "shrink_filesystem") as mock_shrink, \
              patch.object(self.plan, "DiskService", mock_disk_service_cls), \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
-             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 192 * 1024**3]), \
+             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 256 * 1024**3, 192 * 1024**3]), \
              patch.object(self.plan, "_partition_number", return_value=3), \
              patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
              patch.object(self.plan, "_block_size_bytes", return_value=512), \
@@ -729,7 +729,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "shrink_filesystem"), \
              patch.object(self.plan, "DiskService", mock_disk_service_cls), \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
-             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 192 * 1024**3]), \
+             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 256 * 1024**3, 192 * 1024**3]), \
              patch.object(self.plan, "_partition_number", return_value=3), \
              patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
              patch.object(self.plan, "_block_size_bytes", return_value=512), \

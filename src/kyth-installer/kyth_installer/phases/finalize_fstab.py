@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from .compat import phase_dependency
+from ..mountpoint import normalize_manual_mountpoint
 
 
 def fsck_pass_for(fstype: str) -> int:
@@ -67,7 +68,7 @@ def configure_manual_mounts(
     get_manual_mounts = phase_dependency("_get_manual_mounts")
     for mount in get_manual_mounts(context):
         part = mount["partition"]
-        mountpoint = mount["mountpoint"]
+        mountpoint = normalize_manual_mountpoint(mount["mountpoint"])
         fstype = mount["fstype"]
         try:
             uuid_out = uuid_lookup(part, log)

@@ -188,6 +188,20 @@ class PlanQueryTests(unittest.TestCase):
                 list_partitions=lambda _d: [{"name": "/dev/sda2"}],
             )
 
+    def test_manual_mounts_reject_unsafe_committed_path(self):
+        committed = SimpleNamespace(
+            committed=True,
+            disk="/dev/sda",
+            ops=[{"kind": "set_mountpoint", "params": {
+                "partition": "/dev/sda2", "mountpoint": "/home/../../etc",
+            }}],
+        )
+        with self.assertRaisesRegex(RuntimeError, "unsafe mount point"):
+            plan_query.get_manual_mounts(
+                object(), get_journal=lambda _context: committed,
+                list_partitions=lambda _disk: [{"name": "/dev/sda2"}],
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

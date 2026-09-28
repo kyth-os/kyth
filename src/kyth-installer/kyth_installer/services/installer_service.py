@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from kyth_installer import context as context_module
 from kyth_installer import disk, execution, partition_ops, runner, system, validation
+from kyth_installer.mountpoint import normalize_manual_mountpoint
 
 if TYPE_CHECKING:
     from kyth_installer.context import InstallerContext
@@ -72,12 +73,16 @@ class InstallerService:
         fs_error = _validate_fs_type(fs_type)
         if fs_error:
             return fs_error
+        try:
+            mountpoint = normalize_manual_mountpoint(body.get("mountpoint", ""))
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
         journal.add_op("create", {
             "start_bytes": start,
             "size_bytes": size,
             "fs_type": fs_type,
             "label": body.get("label", ""),
-            "mountpoint": body.get("mountpoint", ""),
+            "mountpoint": mountpoint,
         })
         errors = journal.validate()
         return {"ok": not errors, "pending": len(journal.ops), "errors": errors}
@@ -137,7 +142,10 @@ class InstallerService:
         _disk, journal, partition, error = self._partition_for(body)
         if error:
             return error
-        mountpoint = body.get("mountpoint", "").strip()
+        try:
+            mountpoint = normalize_manual_mountpoint(body.get("mountpoint", ""))
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
         if mountpoint and mountpoint != "swap" and not mountpoint.startswith("/"):
             return {"ok": False, "message": "Mount point must be an absolute path (e.g. /, /home)."}
         journal.add_op("set_mountpoint", {"partition": partition, "mountpoint": mountpoint})

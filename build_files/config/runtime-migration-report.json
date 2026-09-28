@@ -214,6 +214,15 @@
     },
     {
       "migration_priority": 3,
+      "name": "mountpoint",
+      "owner": "fixture::src/kyth-installer/kyth_installer/mountpoint.py",
+      "path": "src/kyth-installer/kyth_installer/mountpoint.py",
+      "runtime_authority": "source-only",
+      "runtime_scope": "test-fixture",
+      "status": "explicitly-not-ported"
+    },
+    {
+      "migration_priority": 3,
       "name": "orchestration",
       "owner": "fixture::src/kyth-installer/kyth_installer/orchestration.py",
       "path": "src/kyth-installer/kyth_installer/orchestration.py",
@@ -1648,7 +1657,7 @@
     },
     "active_entries": 191,
     "active_python_entries": 0,
-    "entries": 771,
+    "entries": 772,
     "p0_open_entries": 0,
     "status_by_active_entry": {
       "done-native": 191

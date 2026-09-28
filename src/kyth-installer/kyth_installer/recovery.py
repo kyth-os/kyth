@@ -56,10 +56,18 @@ def cleanup_registered_mounts(context: InstallerContext, *, run: RunCommand) -> 
     for mountpoint in reversed(context.cleanup_mounts.copy()):
         from .system import unmount_filesystem
 
-        result = unmount_filesystem(
-            mountpoint, recursive=True, lazy=True,
-            run=run, as_root=_as_root, check=False, capture_output=True,
-        )
+        try:
+            result = unmount_filesystem(
+                mountpoint, recursive=True, lazy=True,
+                run=run, as_root=_as_root, check=False, capture_output=True,
+            )
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+            _logger.warning(
+                "could not unmount registered installer mount %s (%s); keeping it registered",
+                mountpoint,
+                exc,
+            )
+            continue
         # Keep failed unmounts registered so a later cleanup/retry can still
         # see the live mount instead of treating it as released.
         returncode = getattr(result, "returncode", 0)

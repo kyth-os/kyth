@@ -18,28 +18,28 @@ class ShrinkFilesystemDispatchTests(unittest.TestCase):
     happens. Getting this dispatch wrong silently corrupts data."""
 
     def test_ntfs_dispatches_to_shrink_ntfs(self):
-        with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
+        with patch.object(fsresize, "validate_shrink_request"), patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda1", "ntfs", 10 * 1024**3, lambda _m: None)
         mock_shrink.assert_called_once_with("/dev/sda1", 10 * 1024**3, unittest.mock.ANY, cancel_event=None)
 
     def test_ntfs3_dispatches_to_shrink_ntfs(self):
-        with patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
+        with patch.object(fsresize, "validate_shrink_request"), patch.object(fsresize, "_shrink_ntfs") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda1", "NTFS3", 10 * 1024**3, lambda _m: None)
         mock_shrink.assert_called_once()
 
     def test_ext4_dispatches_to_shrink_ext(self):
-        with patch.object(fsresize, "_shrink_ext") as mock_shrink:
+        with patch.object(fsresize, "validate_shrink_request"), patch.object(fsresize, "_shrink_ext") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda2", "ext4", 5 * 1024**3, lambda _m: None)
         mock_shrink.assert_called_once_with("/dev/sda2", 5 * 1024**3, unittest.mock.ANY, cancel_event=None)
 
     def test_ext2_and_ext3_also_dispatch_to_shrink_ext(self):
         for fstype in ("ext2", "ext3"):
-            with self.subTest(fstype=fstype), patch.object(fsresize, "_shrink_ext") as mock_shrink:
+            with self.subTest(fstype=fstype), patch.object(fsresize, "validate_shrink_request"), patch.object(fsresize, "_shrink_ext") as mock_shrink:
                 fsresize.shrink_filesystem("/dev/sda2", fstype, 5 * 1024**3, lambda _m: None)
             mock_shrink.assert_called_once()
 
     def test_btrfs_dispatches_to_shrink_btrfs(self):
-        with patch.object(fsresize, "_shrink_btrfs") as mock_shrink:
+        with patch.object(fsresize, "validate_shrink_request"), patch.object(fsresize, "_shrink_btrfs") as mock_shrink:
             fsresize.shrink_filesystem("/dev/sda3", "btrfs", 20 * 1024**3, lambda _m: None)
         mock_shrink.assert_called_once_with("/dev/sda3", 20 * 1024**3, unittest.mock.ANY, cancel_event=None, register_mount=None, release_mount=None)
 

@@ -254,7 +254,7 @@ class ConfigureSystemTests(unittest.TestCase):
             mock.patch("kyth_installer.install.run_command") as run,
             mock.patch("kyth_installer.install.find_deploy_etc", return_value=None),
             mock.patch("kyth_installer.install.ensure_system_accounts"),
-            mock.patch.object(finalize, "unmount_configuration") as unmount,
+            mock.patch.object(finalize, "unmount_configuration", return_value=("/config",)) as unmount,
         ):
             with self.assertRaisesRegex(RuntimeError, "deployment could not be located"):
                 finalize._configure_installed_system(
@@ -304,7 +304,7 @@ class ConfigureSystemTests(unittest.TestCase):
             mock.patch.object(finalize, "_create_installer_user"),
             mock.patch.object(finalize, "validate_installed_target", return_value=[]),
             mock.patch.object(finalize, "_persist_artifacts_to_target"),
-            mock.patch.object(finalize, "unmount_configuration"),
+            mock.patch.object(finalize, "unmount_configuration", return_value=("/alongside",)),
         ):
             finalize._configure_installed_system(
                 "/dev/sda3", "/dev/sda3", "/dev/sda", "fedora", "alongside",

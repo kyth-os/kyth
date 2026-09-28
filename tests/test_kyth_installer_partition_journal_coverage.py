@@ -34,6 +34,15 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         with mock.patch.object(journal_mod, "_normal_device_path", side_effect=lambda value: value):
             return journal_mod.Journal("/dev/sda", disk_service=service)
 
+    def test_journal_validation_rejects_unsafe_manual_mountpoint(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/home/../../etc",
+        })
+        errors = journal.validate()
+        self.assertTrue(any("absolute safe path" in error for error in errors))
+
     def test_journal_rejects_invalid_disk_and_exposes_queue_safely(self):
         with mock.patch.object(journal_mod, "_normal_device_path", return_value=None):
             with self.assertRaisesRegex(RuntimeError, "Invalid disk path"):

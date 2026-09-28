@@ -343,10 +343,10 @@ def validate_partition_install_request(
     _require_valid_hostname(hostname)
     if timezone not in set(system.list_timezones()):
         raise InstallRequestError(f"Invalid timezone: {timezone}")
-    _require_valid_username(username, required=False)
-    if bool(username) != bool(password):
+    _require_valid_username(username)
+    if not password:
         raise InstallRequestError(
-            "An admin username and password must either both be supplied or both be blank."
+            "An admin username and password must both be supplied to create a login account."
         )
     password_hash = _hash_password_for_request(password, allow_blank=True)
 

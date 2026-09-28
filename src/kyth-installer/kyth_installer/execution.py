@@ -55,6 +55,19 @@ def start_installation(
                 write_failure_summary(FAILURE_SUMMARY_FILE, context=context, message=str(exc))
             except (OSError, ValueError, RuntimeError):  # noqa: BLE001 -- narrow: failure summary persistence is best-effort
                 pass
+        except Exception as exc:  # noqa: BLE001 -- worker boundary must always publish terminal state
+            # Phase workers handle expected operational errors themselves, but
+            # an unexpected exception must not strand the UI in INSTALLING
+            # after the slot is released.
+            try:
+                if context.lifecycle not in (InstallLifecycle.DONE, InstallLifecycle.FAILED):
+                    context.transition(InstallLifecycle.FAILED)
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
+                pass
+            context.events.publish({
+                "type": "error",
+                "message": f"Unexpected installer failure: {exc}",
+            })
         finally:
             context.install_lock.release()
             context.cancel_requested.clear()

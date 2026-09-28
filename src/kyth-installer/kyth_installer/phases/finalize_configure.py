@@ -79,10 +79,15 @@ def configure_installed_system(
         raise
     finally:
         progress(99)
-        unmount_configuration(config_root, alongside_mount, run=run_command)
-        if alongside_mount:
+        unmounted = unmount_configuration(config_root, alongside_mount, run=run_command)
+        # Leave failed/unverified mounts registered for the worker's final
+        # cleanup retry. A successful recursive parent unmount covers every
+        # registered child beneath that mount.
+        if isinstance(unmounted, (tuple, list, set, frozenset)):
+            successful = set(unmounted)
             for mountpoint in list(context.cleanup_mounts):
-                if mountpoint == alongside_mount or mountpoint.startswith(f"{alongside_mount}/"):
+                if mountpoint in successful or any(
+                    root and mountpoint.startswith(f"{root}/")
+                    for root in successful
+                ):
                     context.release_mount(mountpoint)
-        else:
-            context.release_mount(config_root)

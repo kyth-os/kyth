@@ -15022,6 +15022,30 @@
     },
     {
       "current_implementation": "python",
+      "cutover": "replace installed mountpoint entry point after parity gates",
+      "function_inventory": [],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "mountpoint",
+      "owner": "fixture::src/kyth-installer/kyth_installer/mountpoint.py",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "src/kyth-installer/kyth_installer/mountpoint.py",
+      "priority": 1,
+      "reason": "retired Python/Qt Hub source retained only for compatibility fixtures; not installed in the supported image",
+      "resolved_target": "src/kyth-installer/kyth_installer/mountpoint.py",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "user-session-writer",
+      "rollback": "restore previous installed mountpoint entry point",
+      "runtime_active": false,
+      "runtime_authority": "source-only",
+      "runtime_scope": "test-fixture",
+      "status": "explicitly-not-ported",
+      "surface": "installer-runtime"
+    },
+    {
+      "current_implementation": "python",
       "cutover": "replace installed orchestration entry point after parity gates",
       "function_inventory": [],
       "installed_implementation": "not-installed",

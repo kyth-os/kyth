@@ -13,9 +13,43 @@ from kyth_installer.validation import (
     InstallRequestError,
     validate_partition_install_request,
 )
+from kyth_installer import validation
 
 
 class PartitionInstallValidationTests(unittest.TestCase):
+    def test_optional_username_and_blank_password_helpers_keep_skip_semantics(self):
+        validation._require_valid_username("", required=False)
+        self.assertEqual(validation._hash_password_for_request("", allow_blank=True), "")
+
+    def test_request_accepts_valid_required_account(self):
+        with mock.patch.object(validation.disk, "_normal_device_path", side_effect=lambda value: value), \
+             mock.patch.object(validation.disk, "_parent_disk", return_value="/dev/sda"), \
+             mock.patch.object(validation.disk, "list_disks", return_value=[{"name": "/dev/sda", "current": False}]), \
+             mock.patch.object(validation.disk, "list_partitions", return_value=[{"name": "/dev/sda2"}]), \
+             mock.patch.object(validation.disk, "find_efi_partition", return_value="/dev/sda1"), \
+             mock.patch.object(validation.system, "list_timezones", return_value=["UTC"]), \
+             mock.patch.object(validation.system, "_hash_password", return_value="hashed"), \
+             mock.patch.object(validation.plan, "_validate_storage_intent"):
+            request = validate_partition_install_request(
+                target_partition="/dev/sda2", efi_partition="", hostname="kyth",
+                timezone="UTC", username="admin", password="secret", context=InstallerContext(),
+            )
+        self.assertEqual(request.password_hash, "hashed")
+
+    def test_request_rejects_blank_password_for_required_account(self):
+        with mock.patch.object(validation.disk, "_normal_device_path", side_effect=lambda value: value), \
+             mock.patch.object(validation.disk, "_parent_disk", return_value="/dev/sda"), \
+             mock.patch.object(validation.disk, "list_disks", return_value=[{"name": "/dev/sda", "current": False}]), \
+             mock.patch.object(validation.disk, "list_partitions", return_value=[{"name": "/dev/sda2"}]), \
+             mock.patch.object(validation.disk, "find_efi_partition", return_value="/dev/sda1"), \
+             mock.patch.object(validation.system, "list_timezones", return_value=["UTC"]), \
+             mock.patch.object(validation.plan, "_validate_storage_intent"):
+            with self.assertRaisesRegex(InstallRequestError, "both be supplied"):
+                validate_partition_install_request(
+                    target_partition="/dev/sda2", efi_partition="", hostname="kyth",
+                    timezone="UTC", username="admin", password="", context=InstallerContext(),
+                )
+
     @mock.patch("kyth_installer.validation.plan._validate_storage_intent")
     @mock.patch("kyth_installer.validation.system._hash_password", return_value="hashed")
     @mock.patch(
@@ -41,7 +75,7 @@ class PartitionInstallValidationTests(unittest.TestCase):
         "kyth_installer.validation.disk._normal_device_path",
         side_effect=lambda path: path,
     )
-    def test_request_uses_alongside_policy_and_allows_skipping_user(
+    def test_request_rejects_missing_login_user_before_install(
         self,
         _normal_device,
         _parent_disk,
@@ -51,20 +85,16 @@ class PartitionInstallValidationTests(unittest.TestCase):
         hash_password,
         validate_storage,
     ):
-        state = validate_partition_install_request(
-            target_partition="/dev/sda2",
-            efi_partition="/dev/sda1",
-            hostname="kyth",
-            timezone="UTC",
-            username="",
-            password="",
-            context=InstallerContext(),
-        )
-        self.assertEqual(state["install_mode"], "alongside")
-        self.assertEqual(state["disk"], "/dev/sda")
-        self.assertEqual(state["target_partition"], "/dev/sda2")
-        self.assertEqual(state["efi_partition"], "/dev/sda1")
-        self.assertEqual(state["password_hash"], "")
+        with self.assertRaisesRegex(InstallRequestError, "Invalid username"):
+            validate_partition_install_request(
+                target_partition="/dev/sda2",
+                efi_partition="/dev/sda1",
+                hostname="kyth",
+                timezone="UTC",
+                username="",
+                password="",
+                context=InstallerContext(),
+            )
         hash_password.assert_not_called()
         validate_storage.assert_called_once()
 
@@ -149,11 +179,12 @@ class PartitionInstallCliTests(unittest.TestCase):
         state = {"disk": "/dev/sda", "install_mode": "alongside"}
         validate_request.return_value = state
         start_installation.return_value = True
-        answers = iter(["install kythos", "host", "UTC", ""])
+        answers = iter(["install kythos", "host", "UTC", "pat"])
 
         result = partition_cli.run(
             ["/dev/sda2", "/dev/sda1"],
             input_fn=lambda _prompt: next(answers),
+            password_fn=lambda _prompt: "secret",
         )
 
         self.assertEqual(result, 0)

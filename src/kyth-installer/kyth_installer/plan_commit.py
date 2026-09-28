@@ -364,9 +364,29 @@ def prepare_ntfs_resize_target(
     old_end = start + current_size - sector
     new_end = start + new_ntfs_size - sector
 
-    shrink_filesystem_guarded(partition, new_ntfs_size, shrink_bytes, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
-
     def shrink_partition_boundary() -> None:
+        # This callback runs inside commit_partition's exclusive DiskLease.
+        # Recheck the exact target geometry under that lock before shrinking
+        # the filesystem; the previous flow performed ntfsresize before the
+        # lock and could race another partition editor or installer.
+        live_disk, live_partition, live_shrink = validate_target(config)
+        if (
+            (live_disk, live_partition) != selected_target
+            or live_shrink != shrink_bytes
+        ):
+            raise RuntimeError(
+                "The NTFS target changed before the disk lock was acquired; no filesystem was shrunk."
+            )
+        if partition_size(partition) != current_size or partition_start(partition) != start:
+            raise RuntimeError(
+                "The NTFS partition geometry changed before the disk lock was acquired; "
+                "no filesystem was shrunk. Re-scan the disk and retry."
+            )
+        shrink_filesystem_guarded(
+            partition, new_ntfs_size, shrink_bytes, log,
+            cancel_event=cancel_event, register_mount=register_mount,
+            release_mount=release_mount,
+        )
         log("Shrinking partition boundary...")
         if resize_partition is None:
             # Compatibility fallback for injected legacy test dependencies.
