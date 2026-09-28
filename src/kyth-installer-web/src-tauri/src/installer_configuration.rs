@@ -559,8 +559,7 @@ mod tests {
         let etc = directory.path().join("etc");
         std::fs::create_dir(&etc).expect("etc directory");
         let path = etc.join("fstab");
-        std::fs::write(&path, b"UUID=OLD /old ext4 defaults 0 2")
-            .expect("initial fstab");
+        std::fs::write(&path, b"UUID=OLD /old ext4 defaults 0 2").expect("initial fstab");
         append_fstab(FstabAppendInput {
             path: path.to_string_lossy().into_owned(),
             line: "UUID=NEW /new ext4 defaults 0 2\n".into(),

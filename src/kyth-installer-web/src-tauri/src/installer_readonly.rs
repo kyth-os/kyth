@@ -163,7 +163,8 @@ fn registry_signed_source(source_image: &str) -> bool {
         .rsplit_once('@')
         .map_or(authority, |(_, host)| host);
     let host = if host.starts_with('[') {
-        host.split_once(']').map(|(host, _)| host.trim_start_matches('['))
+        host.split_once(']')
+            .map(|(host, _)| host.trim_start_matches('['))
     } else {
         Some(host.split(':').next().unwrap_or_default())
     }
@@ -709,10 +710,7 @@ mod tests {
         ] {
             assert!(!registry_signed_source(local), "{local}");
         }
-        for remote in [
-            "127.0.0.1.evil/kyth:dev",
-            "localhost.evil/kyth:dev",
-        ] {
+        for remote in ["127.0.0.1.evil/kyth:dev", "localhost.evil/kyth:dev"] {
             assert!(registry_signed_source(remote), "{remote}");
         }
     }

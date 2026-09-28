@@ -169,11 +169,10 @@ pub(crate) fn apply(input: ManualMountsInput) -> Result<ManualMountsResult, Stri
     let mut seen_partitions = HashSet::new();
     for mount in input.mounts {
         let device = safe_device(&mount.partition)?;
-        let detected_uuid = crate::installer_probe::lookup_uuid(
-            crate::installer_probe::UuidInput {
+        let detected_uuid =
+            crate::installer_probe::lookup_uuid(crate::installer_probe::UuidInput {
                 device: device.clone(),
-            },
-        )?;
+            })?;
         let uuid = verified_uuid(&mount.uuid, &detected_uuid)?;
         let fs = normalized_fs(&mount.fstype)?;
         let mountpoint = normalized_mountpoint(&mount.mountpoint, fs)?;
@@ -343,15 +342,10 @@ mod tests {
     fn rejects_home_alias_collision_with_var_home() {
         let mut mountpoints = HashSet::new();
         let mut partitions = HashSet::new();
-        claim_assignment("/var/home", "/dev/sda2", &mut mountpoints, &mut partitions)
-            .unwrap();
-        assert!(claim_assignment(
-            "/var/home",
-            "/dev/sda3",
-            &mut mountpoints,
-            &mut partitions
-        )
-        .is_err());
+        claim_assignment("/var/home", "/dev/sda2", &mut mountpoints, &mut partitions).unwrap();
+        assert!(
+            claim_assignment("/var/home", "/dev/sda3", &mut mountpoints, &mut partitions).is_err()
+        );
     }
 
     #[test]
