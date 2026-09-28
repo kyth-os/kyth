@@ -706,16 +706,13 @@ class FstabConfigurationTests(unittest.TestCase):
         fstab_log = next(line for line in log_lines if line.startswith("Fstab updated"))
         self.assertIn("none swap defaults 0 0", fstab_log)
 
-    def test_manual_mount_skips_entry_when_uuid_lookup_fails(self):
-        log_lines = []
+    def test_manual_mount_fails_when_uuid_lookup_fails(self):
         with mock.patch.object(install, "run_command", side_effect=RuntimeError("blkid missing")), \
              mock.patch.object(install, "_get_manual_mounts", return_value=[
                  {"partition": "/dev/sda6", "mountpoint": "/extra", "fstype": "ext4"},
              ]):
-            install._configure_manual_mounts("/tmp/cfgroot", "/tmp/cfgroot/etc", log_lines.append, context=None)
-
-        self.assertFalse(any(line.startswith("Fstab updated") for line in log_lines))
-        self.assertTrue(any("skipping fstab entry" in line for line in log_lines))
+            with self.assertRaisesRegex(RuntimeError, "Could not read the UUID"):
+                install._configure_manual_mounts("/tmp/cfgroot", "/tmp/cfgroot/etc", lambda _line: None, context=None)
 
 
 class EfiBootEntrySnapshotTests(unittest.TestCase):

@@ -486,6 +486,14 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertFalse(res.get("ok"))
         mock_commit.assert_not_called()
 
+        # JSON strings are truthy but are not checkbox confirmations.
+        with patch.object(journal, "commit") as mock_commit:
+            res = self.service.commit_partitions({
+                "disk": "/dev/sda", "confirm_erase": "false", "confirm_backup": "false",
+            })
+        self.assertFalse(res.get("ok"))
+        mock_commit.assert_not_called()
+
     @patch("kyth_installer.disk.list_disks")
     def test_commit_partitions_allows_nondestructive_journal_without_confirmations(
         self, mock_list_disks,

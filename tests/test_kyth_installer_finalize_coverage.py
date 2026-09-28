@@ -114,7 +114,7 @@ class FstabFailureTests(unittest.TestCase):
                 ):
                     self.assertFalse(finalize._append_fstab_line("/target/etc", "line\n", log, "data"))
 
-    def test_alongside_without_uuid_skips_fstab(self):
+    def test_alongside_without_uuid_fails_configuration(self):
         with (
             mock.patch("kyth_installer.install.run_command"),
             mock.patch("kyth_installer.install._as_root", side_effect=lambda cmd: cmd),
@@ -122,7 +122,8 @@ class FstabFailureTests(unittest.TestCase):
             mock.patch.object(finalize, "_blkid_uuid", return_value=None),
             mock.patch.object(finalize, "_append_fstab_line") as append,
         ):
-            finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", mock.Mock())
+            with self.assertRaisesRegex(RuntimeError, "Could not read the UUID"):
+                finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", mock.Mock())
         append.assert_not_called()
 
     def test_native_alongside_mount_reports_success_and_failure(self):
@@ -146,22 +147,22 @@ class FstabFailureTests(unittest.TestCase):
             mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"fstab_written": false}')),
             mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
         ):
-            finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", log)
-        self.assertTrue(any("fstab update failed" in call.args[0] for call in log.call_args_list))
+            with self.assertRaisesRegex(RuntimeError, "did not write the @home fstab entry"):
+                finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", log)
 
-    def test_native_manual_mounts_collects_uuids_and_reports_skips(self):
+    def test_native_manual_mounts_fails_if_requested_uuid_is_missing(self):
         context = InstallerContext()
         mounts = [{"partition": "/dev/sda2", "mountpoint": "/home"}, {"partition": "/dev/sda3", "mountpoint": "swap"}]
         with (
             mock.patch("kyth_installer.install._get_manual_mounts", return_value=mounts),
             mock.patch.object(finalize, "_blkid_uuid", side_effect=["uuid-home", None]),
             mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
-            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"skipped": 1}')) as run,
+            mock.patch("kyth_installer.install.run_command") as run,
             mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
         ):
-            finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), context)
-        payload = json.loads(run.call_args.kwargs["input"])
-        self.assertEqual(payload["mounts"][0]["uuid"], "uuid-home")
+            with self.assertRaisesRegex(RuntimeError, "Could not read the UUID"):
+                finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), context)
+        run.assert_not_called()
 
     def test_native_manual_mounts_failure_is_reported(self):
         with (
@@ -175,13 +176,42 @@ class FstabFailureTests(unittest.TestCase):
         with (
             mock.patch("kyth_installer.install._get_manual_mounts", return_value=[]),
             mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
-            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout="{}")),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"configured": 0, "skipped": 0}')),
             mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
         ):
             finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), InstallerContext())
 
+    def test_native_manual_mounts_rejects_incomplete_result(self):
+        with (
+            mock.patch("kyth_installer.install._get_manual_mounts", return_value=[{"partition": "/dev/sda2", "mountpoint": "/data"}]),
+            mock.patch.object(finalize, "_blkid_uuid", return_value="uuid-data"),
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"configured": 0, "skipped": 1}')),
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "did not configure every requested mount"):
+                finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), InstallerContext())
+
 
 class UserCreationTests(unittest.TestCase):
+    def test_alongside_fstab_fails_if_uuid_or_fstab_write_is_missing(self):
+        log = mock.Mock()
+        dependencies = (
+            mock.patch("kyth_installer.install.ensure_directory"),
+            mock.patch("kyth_installer.install._safe_umount"),
+            mock.patch("kyth_installer.install.mount_filesystem"),
+        )
+        with dependencies[0], dependencies[1], dependencies[2], self.assertRaisesRegex(RuntimeError, "Could not read the UUID"):
+            finalize.configure_alongside_fstab(
+                "/target", "/dev/sda3", "/target/etc", log,
+                uuid_lookup=lambda _part, _log: None, append_line=mock.Mock(),
+            )
+        with dependencies[0], dependencies[1], dependencies[2], self.assertRaisesRegex(RuntimeError, "Could not write the fstab entry"):
+            finalize.configure_alongside_fstab(
+                "/target", "/dev/sda3", "/target/etc", log,
+                uuid_lookup=lambda _part, _log: "uuid-root", append_line=mock.Mock(return_value=False),
+            )
+
     def test_user_creation_relocks_accounts_and_reports_progress(self):
         progress = mock.Mock()
         with (

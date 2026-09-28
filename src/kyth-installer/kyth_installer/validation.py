@@ -206,22 +206,27 @@ def _is_answer_file_request(body: dict) -> bool:
 
 def validate_install_request(body: dict, context: InstallerContext, *, strict_locale: bool = True) -> InstallRequest:
     """Validate a start request and return an immutable normalized request."""
+    for field in (
+        "password", "username", "hostname", "timezone", "mok_password",
+        "locale", "keymap", "kernel",
+    ):
+        if field in body and not isinstance(body[field], str):
+            raise InstallRequestError(f"{field.replace('_', ' ').capitalize()} must be text.")
     state, disk_info = _storage_state(body, context)
     current_ok = (
         state["install_mode"] == "alongside"
         or not disk_info.get("current")
-        or bool(body.get("confirm_current"))
+        or body.get("confirm_current") is True
     )
     # Canonical acknowledgement: "acknowledged-irreversible" (kebab, matching
     # the native shell wire key). Legacy "confirm_backup" answer files keep
     # working so existing media is not bricked, but new clients must send the
     # explicit irreversible acknowledgement.
-    acknowledged = (
-        body.get("acknowledged-irreversible")
-        or body.get("acknowledged_irreversible")
-        or body.get("confirm_backup")
+    acknowledged = any(
+        body.get(key) is True
+        for key in ("acknowledged-irreversible", "acknowledged_irreversible", "confirm_backup")
     )
-    if not (acknowledged and body.get("confirm_erase") and current_ok):
+    if not (acknowledged and body.get("confirm_erase") is True and current_ok):
         raise InstallRequestError(
             "This installation cannot be undone. Please acknowledge the "
             "on-screen irreversible-action confirmation before starting the install."

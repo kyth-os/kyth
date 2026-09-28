@@ -179,12 +179,11 @@ class InstallerService:
         # Canonical acknowledgement: "acknowledged-irreversible" (kebab,
         # matching the native shell wire key and start_install). Legacy
         # "confirm_backup" answer files keep working.
-        acknowledged = (
-            body.get("acknowledged-irreversible")
-            or body.get("acknowledged_irreversible")
-            or body.get("confirm_backup")
+        acknowledged = any(
+            body.get(key) is True
+            for key in ("acknowledged-irreversible", "acknowledged_irreversible", "confirm_backup")
         )
-        if destructive and not (body.get("confirm_erase") and acknowledged):
+        if destructive and not (body.get("confirm_erase") is True and acknowledged):
             return {
                 "ok": False,
                 "message": "Please confirm the on-screen acknowledgements before starting the install.",

@@ -158,7 +158,7 @@ class FinalizePhaseCoverageTests(unittest.TestCase):
         with mock.patch("kyth_installer.install.run_command", side_effect=RuntimeError("write")):
             self.assertFalse(finalize._append_fstab_line("/etc", "line\n", log, "root"))
 
-    def test_manual_mounts_handle_swap_home_and_missing_uuid(self):
+    def test_manual_mounts_fail_if_any_requested_uuid_is_missing(self):
         mounts = [
             {"partition": "/dev/sda2", "mountpoint": "/home", "fstype": "btrfs"},
             {"partition": "/dev/sda3", "mountpoint": "swap", "fstype": "linux-swap"},
@@ -172,7 +172,8 @@ class FinalizePhaseCoverageTests(unittest.TestCase):
         ), mock.patch("kyth_installer.install._as_root", side_effect=lambda argv: argv), mock.patch(
             "kyth_installer.install._safe_umount"
         ):
-            finalize._configure_manual_mounts("/target", "/etc", mock.Mock(), context)
+            with self.assertRaisesRegex(RuntimeError, "Could not read the UUID"):
+                finalize._configure_manual_mounts("/target", "/etc", mock.Mock(), context)
         self.assertEqual(append.call_count, 2)
         self.assertIn("/var/home", append.call_args_list[0].args[1])
         self.assertIn(" none swap ", append.call_args_list[1].args[1])
