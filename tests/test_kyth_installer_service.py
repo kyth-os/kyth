@@ -35,6 +35,15 @@ class TestInstallerService(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
+    def test_record_partition_step_persists_context_and_transaction(self):
+        with patch.object(self.context, "record_partition_step") as record_step, patch(
+            "kyth_installer.phases.common._record_transaction"
+        ) as record_transaction:
+            self.service._record_partition_step("format", "started", "/dev/sda2")
+
+        record_step.assert_called_once_with("format", "started", "/dev/sda2")
+        record_transaction.assert_called_once_with(self.context, "partitioning")
+
     @patch("kyth_installer.disk.list_disks")
     def test_new_table(self, mock_list_disks):
         mock_list_disks.return_value = [{"name": "/dev/sda"}]

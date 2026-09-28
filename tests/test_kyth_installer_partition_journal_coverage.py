@@ -235,6 +235,36 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
             errors = journal.validate()
         self.assertTrue(any("currently mounted or in use" in error for error in errors))
 
+    def test_incomplete_partition_probe_rows_are_ignored_by_in_use_guard(self):
+        journal = self._journal()
+        self.assertEqual(
+            journal._validate_not_in_use([{"current": True, "in_use": True}]),
+            [],
+        )
+
+    def test_native_journal_validator_accepts_consistent_success_response(self):
+        journal = self._journal(dry_run=False)
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch(
+                "kyth_installer.runner.run_command",
+                return_value=SimpleNamespace(stdout='{"valid": true, "errors": []}'),
+            ),
+            mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+        ):
+            self.assertEqual(journal._rust_validate([], "gpt", 128 * 1024**3), [])
+
+    def test_validate_returns_native_validator_errors_without_python_fallback(self):
+        journal = self._journal()
+        journal.add_op("new_table", {"table_type": "gpt"})
+        native_errors = ["native validator rejected journal"]
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(journal_mod, "list_disks", return_value=[]),
+            mock.patch.object(journal, "_rust_validate", return_value=native_errors),
+        ):
+            self.assertIs(journal.validate(), native_errors)
+
     def test_commit_create_dry_run_records_root_and_skips_swap_format(self):
         journal = self._journal()
         params = {
