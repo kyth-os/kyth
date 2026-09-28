@@ -85,6 +85,12 @@ class InstallerImageSourceTests(unittest.TestCase):
         self.assertEqual(src, f"docker://{tgt}")
         run_command.assert_not_called()
 
+    def test_cachy_tag_derivation_preserves_registry_port(self):
+        with mock.patch.object(imagesrc, "TARGET_IMAGE", "registry.example:5000/kyth-os/kyth"):
+            source, target = imagesrc._install_images("cachy")
+        self.assertEqual(source, "docker://registry.example:5000/kyth-os/kyth:latest-cachy")
+        self.assertEqual(target, "registry.example:5000/kyth-os/kyth:latest-cachy")
+
     def test_source_imgref_empty_input_uses_default_source_image(self):
         self.assertEqual(imagesrc._source_imgref(""), imagesrc.SOURCE_IMAGE)
 
@@ -219,6 +225,7 @@ class SignatureBundleUnitTests(unittest.TestCase):
         self.assertFalse(signed("docker://localhost:5000/kyth:dev"))
         self.assertFalse(signed("localhost/kyth:testing"))
         self.assertFalse(signed("127.0.0.1:5000/kyth:testing"))
+        self.assertTrue(signed("127.0.0.1.evil/kyth:testing"))
         self.assertFalse(signed("[::1]:5000/kyth:testing"))
         self.assertTrue(signed("docker://ghcr.io/kyth-os/kyth:testing"))
         self.assertTrue(signed("ghcr.io/kyth-os/kyth:testing"))

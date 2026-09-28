@@ -73,6 +73,14 @@ fn safe_uuid(value: &str) -> Result<String, String> {
     Ok(value.to_owned())
 }
 
+fn verified_uuid(supplied: &str, detected: &str) -> Result<String, String> {
+    let detected = safe_uuid(detected)?;
+    if !supplied.trim().is_empty() && safe_uuid(supplied)? != detected {
+        return Err("manual filesystem UUID does not match its selected partition".into());
+    }
+    Ok(detected)
+}
+
 fn normalized_fs(value: &str) -> Result<&'static str, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "btrfs" => Ok("btrfs"),
@@ -161,26 +169,25 @@ pub(crate) fn apply(input: ManualMountsInput) -> Result<ManualMountsResult, Stri
     let mut seen_partitions = HashSet::new();
     for mount in input.mounts {
         let device = safe_device(&mount.partition)?;
-        let uuid = if mount.uuid.trim().is_empty() {
-            crate::installer_probe::lookup_uuid(crate::installer_probe::UuidInput {
+        let detected_uuid = crate::installer_probe::lookup_uuid(
+            crate::installer_probe::UuidInput {
                 device: device.clone(),
-            })?
-        } else {
-            safe_uuid(&mount.uuid)?
-        };
+            },
+        )?;
+        let uuid = verified_uuid(&mount.uuid, &detected_uuid)?;
         let fs = normalized_fs(&mount.fstype)?;
         let mountpoint = normalized_mountpoint(&mount.mountpoint, fs)?;
-        claim_assignment(
-            &mountpoint,
-            &device,
-            &mut seen_mountpoints,
-            &mut seen_partitions,
-        )?;
         let fstab_mountpoint = if mountpoint == "/home" {
             "/var/home"
         } else {
             mountpoint.as_str()
         };
+        claim_assignment(
+            fstab_mountpoint,
+            &device,
+            &mut seen_mountpoints,
+            &mut seen_partitions,
+        )?;
         let pass = if fs == "linux-swap" {
             "0"
         } else if fs == "btrfs" {
@@ -330,5 +337,29 @@ mod tests {
             "/home"
         );
         assert!(safe_path("/home/./data", "mount point").is_err());
+    }
+
+    #[test]
+    fn rejects_home_alias_collision_with_var_home() {
+        let mut mountpoints = HashSet::new();
+        let mut partitions = HashSet::new();
+        claim_assignment("/var/home", "/dev/sda2", &mut mountpoints, &mut partitions)
+            .unwrap();
+        assert!(claim_assignment(
+            "/var/home",
+            "/dev/sda3",
+            &mut mountpoints,
+            &mut partitions
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn rejects_supplied_uuid_that_does_not_belong_to_selected_partition() {
+        assert_eq!(
+            verified_uuid("ABCD-1234", "ABCD-1234").unwrap(),
+            "ABCD-1234"
+        );
+        assert!(verified_uuid("ABCD-9999", "ABCD-1234").is_err());
     }
 }

@@ -3,6 +3,7 @@ reachability preflight, and kernel-flavor image derivation.
 """
 
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -30,11 +31,13 @@ def _registry_signed_source(source_image: str) -> bool:
     image = source_image.removeprefix("docker://")
     if image.startswith(("oci:", "containers-storage:", "dir:", "ostree:")):
         return False
-    return not (
-        image.startswith(("localhost:", "localhost/"))
-        or image.startswith("127.0.0.1")
-        or image.startswith("[::1]")
-    )
+    authority = image.split("/", 1)[0].split("@", 1)[-1]
+    host = urlsplit(f"https://{authority}").hostname or ""
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host.lower() == "localhost"
+    return not loopback
 
 
 def _valid_base64_signature(value: object) -> bool:
@@ -317,8 +320,10 @@ def _install_images(kernel: str) -> tuple[str, str]:
     if kernel == "fedora":
         return _source_imgref(SOURCE_IMAGE), TARGET_IMAGE
     # Derive registry and base tag from TARGET_IMAGE, stripping any existing suffix.
-    if ":" in TARGET_IMAGE:
-        registry, tag = TARGET_IMAGE.rsplit(":", 1)
+    final_component = TARGET_IMAGE.rsplit("/", 1)[-1]
+    if ":" in final_component:
+        tag = final_component.rsplit(":", 1)[1]
+        registry = TARGET_IMAGE.rsplit(":", 1)[0]
     else:
         registry, tag = TARGET_IMAGE, "latest"
     if tag.endswith("-cachy"):

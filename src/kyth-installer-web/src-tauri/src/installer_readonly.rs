@@ -158,10 +158,21 @@ fn registry_signed_source(source_image: &str) -> bool {
     {
         return false;
     }
-    !(image.starts_with("localhost:")
-        || image.starts_with("localhost/")
-        || image.starts_with("127.0.0.1")
-        || image.starts_with("[::1]"))
+    let authority = image.split('/').next().unwrap_or_default();
+    let host = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, host)| host);
+    let host = if host.starts_with('[') {
+        host.split_once(']').map(|(host, _)| host.trim_start_matches('['))
+    } else {
+        Some(host.split(':').next().unwrap_or_default())
+    }
+    .unwrap_or_default();
+    let local = host.eq_ignore_ascii_case("localhost")
+        || host
+            .parse::<std::net::IpAddr>()
+            .is_ok_and(|address| address.is_loopback());
+    !local
 }
 
 fn valid_base64_signature(value: &str) -> bool {
@@ -379,12 +390,15 @@ fn embedded_digest_with_paths(
         );
     }
     verify_embedded_signature(&metadata, digest, release_digest, bundle_path)?;
-    if let Some(metadata_target) = metadata.get("target_image").and_then(Value::as_str) {
-        if !metadata_target.is_empty() && metadata_target != target {
-            return Err(
-                "embedded-image metadata does not match the configured update target".to_string(),
-            );
-        }
+    let metadata_target = metadata
+        .get("target_image")
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "embedded-image metadata has no configured update target".to_string())?;
+    if metadata_target != target {
+        return Err(
+            "embedded-image metadata does not match the configured update target".to_string(),
+        );
     }
     Ok(digest.to_string())
 }
@@ -635,6 +649,24 @@ mod tests {
     }
 
     #[test]
+    fn embedded_digest_rejects_missing_update_target_metadata() {
+        let fixture = embedded_fixture("ghcr.io/kyth-os/kyth:testing");
+        let mut metadata: Value =
+            serde_json::from_slice(&fs::read(&fixture.metadata_path).expect("fixture metadata"))
+                .expect("fixture metadata JSON");
+        metadata.as_object_mut().unwrap().remove("target_image");
+        fs::write(&fixture.metadata_path, metadata.to_string()).expect("fixture metadata");
+        let error = embedded_digest_with_paths(
+            &fixture.reference,
+            "ghcr.io/kyth-os/kyth:testing",
+            &fixture.metadata_path,
+            &fixture.bundle_path,
+        )
+        .expect_err("missing target must fail closed");
+        assert!(error.contains("no configured update target"), "{error}");
+    }
+
+    #[test]
     fn embedded_digest_accepts_unsigned_local_dev_source_only() {
         let fixture = embedded_fixture("docker://localhost:5000/kyth:dev");
         let mut metadata: Value =
@@ -666,5 +698,22 @@ mod tests {
         )
         .expect_err("registry image claiming local must fail closed");
         assert!(error.contains("unsigned local"), "{error}");
+    }
+
+    #[test]
+    fn loopback_source_matching_uses_the_complete_host() {
+        for local in [
+            "localhost:5000/kyth:dev",
+            "127.0.0.1:5000/kyth:dev",
+            "[::1]:5000/kyth:dev",
+        ] {
+            assert!(!registry_signed_source(local), "{local}");
+        }
+        for remote in [
+            "127.0.0.1.evil/kyth:dev",
+            "localhost.evil/kyth:dev",
+        ] {
+            assert!(registry_signed_source(remote), "{remote}");
+        }
     }
 }

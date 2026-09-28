@@ -363,12 +363,32 @@ pub(crate) fn append_fstab(input: FstabAppendInput) -> Result<(), String> {
     validate_fstab_line(&input.line)?;
     let mut file = OpenOptions::new();
     file.create(true)
+        .read(true)
         .append(true)
         .custom_flags(libc::O_NOFOLLOW)
         .mode(0o644);
     let mut file = file
         .open(&path)
         .map_err(|error| format!("could not open installed fstab: {error}"))?;
+    let length = file
+        .metadata()
+        .map_err(|error| format!("could not inspect installed fstab: {error}"))?
+        .len();
+    if length > 0 {
+        let mut last = [0u8; 1];
+        use std::os::unix::fs::FileExt;
+        if file
+            .read_at(&mut last, length - 1)
+            .map_err(|error| format!("could not inspect installed fstab ending: {error}"))?
+            != 1
+        {
+            return Err("could not inspect installed fstab ending".to_string());
+        }
+        if last[0] != b'\n' {
+            file.write_all(b"\n")
+                .map_err(|error| format!("could not separate installed fstab entries: {error}"))?;
+        }
+    }
     file.write_all(input.line.as_bytes())
         .map_err(|error| format!("could not append installed fstab: {error}"))?;
     file.flush()
@@ -531,6 +551,25 @@ mod tests {
             line: "UUID=ABCD /data ext4 defaults 0 2\n".into(),
         })
         .is_err());
+    }
+
+    #[test]
+    fn append_separates_entries_when_existing_fstab_has_no_final_newline() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let etc = directory.path().join("etc");
+        std::fs::create_dir(&etc).expect("etc directory");
+        let path = etc.join("fstab");
+        std::fs::write(&path, b"UUID=OLD /old ext4 defaults 0 2")
+            .expect("initial fstab");
+        append_fstab(FstabAppendInput {
+            path: path.to_string_lossy().into_owned(),
+            line: "UUID=NEW /new ext4 defaults 0 2\n".into(),
+        })
+        .expect("entry should append on a new line");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"UUID=OLD /old ext4 defaults 0 2\nUUID=NEW /new ext4 defaults 0 2\n"
+        );
     }
 
     #[test]

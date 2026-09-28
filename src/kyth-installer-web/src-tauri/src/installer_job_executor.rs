@@ -942,6 +942,8 @@ impl NativePhaseExecutor {
         phase: Phase,
         cancellation: &CancellationToken,
     ) -> Result<(), NativePhaseError> {
+        let _disk_lock = crate::installer_guard::acquire_disk_lock(&self.storage_plan.disk)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
         self.verify_install_source(phase)?;
         self.check_storage_preflight(phase)?;
         if self.storage_plan.mode == "wipe" {
@@ -1188,6 +1190,10 @@ impl NativePhaseExecutor {
         phase: Phase,
         body: impl FnOnce() -> Result<T, NativePhaseError>,
     ) -> Result<T, NativePhaseError> {
+        let _disk_lock = crate::installer_guard::acquire_disk_lock(&self.storage_plan.disk)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        crate::installer_guard::validate_target_disk(&self.storage_plan.disk)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
         let directory = tempfile::Builder::new()
             .prefix("kyth-partition-")
             .tempdir()
@@ -1462,6 +1468,10 @@ impl NativePhaseExecutor {
         cancellation: &CancellationToken,
         target: &str,
     ) -> Result<(), NativePhaseError> {
+        let _disk_lock = crate::installer_guard::acquire_disk_lock(&self.storage_plan.disk)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        crate::installer_guard::validate_target_disk(&self.storage_plan.disk)
+            .map_err(|message| NativePhaseError::Execution { phase, message })?;
         self.execute_disk_helper(
             phase,
             cancellation,
