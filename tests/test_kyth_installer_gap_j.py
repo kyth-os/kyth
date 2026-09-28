@@ -31,6 +31,13 @@ class ValidationGapJTests(unittest.TestCase):
             with self.subTest(field=field), self.assertRaisesRegex(InstallRequestError, "must be text"):
                 validate_install_request(_base_body(**{field: []}), InstallerContext())
 
+        for field in ("disk", "install_mode", "target_partition", "resize_partition", "efi_partition"):
+            with self.subTest(field=field), self.assertRaisesRegex(InstallRequestError, "must be text"):
+                validate_install_request(_base_body(**{field: []}), InstallerContext())
+
+        with self.assertRaisesRegex(InstallRequestError, "must be an object"):
+            validate_install_request([], InstallerContext())
+
     def test_confirmation_fields_require_json_true(self):
         for field in ("confirm_backup", "confirm_erase"):
             body = _base_body(**{field: "false"})

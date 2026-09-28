@@ -47,7 +47,7 @@ function renderPendingOps() {
     list.innerHTML = '<div style="color:var(--muted2);font-size:12px;padding:12px 0;">No pending partition operations. Use the toolbar above to modify the partition layout.</div>';
     return;
   }
-  list.replaceChildren(...S.pendingOps.map((op, i) => {
+  list.replaceChildren(...S.pendingOps.map(op => {
     const desc = describeOp(op);
     return el('div', { class: 'pending-item' },
       el('span', { style: 'flex:1;font-size:13px;', text: desc }),
@@ -55,7 +55,7 @@ function renderPendingOps() {
         class: 'undo-btn',
         text: '✕',
         title: 'Remove this operation',
-        onclick: () => removePendingOp(i),
+        onclick: () => removePendingOp(op.index),
       }));
   }));
 }

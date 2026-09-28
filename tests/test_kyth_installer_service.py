@@ -196,6 +196,17 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertIn("Unsupported filesystem", res.get("message", ""))
 
     @patch("kyth_installer.disk.list_disks")
+    def test_create_partition_rejects_non_text_label(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.create_partition({
+            "disk": "/dev/sda", "start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/", "label": [],
+        })
+        self.assertFalse(res["ok"])
+        self.assertIn("label must be text", res["message"])
+        self.assertFalse(any(op["kind"] == "create" for op in partition_ops.get_journal(self.context).ops))
+
+    @patch("kyth_installer.disk.list_disks")
     def test_create_partition_rejects_unsafe_mountpoint(self, mock_list_disks):
         self._new_table(mock_list_disks)
         res = self.service.create_partition({
@@ -205,6 +216,17 @@ class InstallerServiceCrudTests(unittest.TestCase):
         })
         self.assertFalse(res.get("ok"))
         self.assertIn("traversal", res.get("message", ""))
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_invalid_create_partition_is_removed_from_pending_journal(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.create_partition({
+            "disk": "/dev/sda", "start_bytes": 1536 * 1024, "size_bytes": 2 * 1024**2,
+            "fs_type": "btrfs", "mountpoint": "/home",
+        })
+        self.assertFalse(res["ok"])
+        self.assertTrue(any("overlaps" in error for error in res["errors"]))
+        self.assertFalse(any(op["kind"] == "create" for op in partition_ops.get_journal(self.context).ops))
 
     # ── delete_partition ─────────────────────────────────────────────
 
@@ -320,6 +342,18 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertTrue(res.get("ok"))
         journal = partition_ops.get_journal(self.context)
         self.assertEqual(journal.ops[-1]["kind"], "format")
+
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_format_partition_rejects_non_text_label(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.format_partition({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "fs_type": "btrfs", "label": {},
+        })
+        self.assertFalse(res["ok"])
+        self.assertIn("label must be text", res["message"])
+        self.assertFalse(any(op["kind"] == "format" for op in partition_ops.get_journal(self.context).ops))
 
     # ── set_mountpoint ───────────────────────────────────────────────
 
@@ -485,6 +519,23 @@ class InstallerServiceCrudTests(unittest.TestCase):
             )
         self.assertFalse(res.get("ok"))
         mock_commit.assert_not_called()
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_committed_journal_cannot_be_replayed_or_edited(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        journal._committed = True
+        with patch.object(journal, "commit") as mock_commit:
+            response = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
+        self.assertFalse(response["ok"])
+        self.assertIn("already been committed", response["message"])
+        mock_commit.assert_not_called()
+
+        with patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            response = self.service.set_mountpoint({
+                "disk": "/dev/sda", "partition": "/dev/sda1", "mountpoint": "/home",
+            })
+        self.assertFalse(response["ok"])
+        self.assertIn("already been committed", response["message"])
 
         # JSON strings are truthy but are not checkbox confirmations.
         with patch.object(journal, "commit") as mock_commit:

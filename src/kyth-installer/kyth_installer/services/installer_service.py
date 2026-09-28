@@ -41,6 +41,11 @@ class InstallerService:
         partition = disk._normal_device_path(body.get("partition", ""))
         if error or not partition:
             return None, None, None, error or {"ok": False, "message": "Disk and partition are required."}
+        if journal.committed:
+            return None, None, None, {
+                "ok": False,
+                "message": "Partition changes have already been committed and cannot be edited.",
+            }
         native_error = journal.rust_validate_target(partition)
         if native_error is not None:
             return None, None, None, {"ok": False, "message": native_error}
@@ -65,6 +70,8 @@ class InstallerService:
         _disk, journal, error = self._journal_for(body)
         if error:
             return error
+        if journal.committed:
+            return {"ok": False, "message": "Partition changes have already been committed."}
         start = disk._safe_int(body.get("start_bytes"), -1)
         size = disk._safe_int(body.get("size_bytes"), -1)
         if start < 0 or size < 1:
@@ -73,18 +80,23 @@ class InstallerService:
         fs_error = _validate_fs_type(fs_type)
         if fs_error:
             return fs_error
+        label = body.get("label", "")
+        if not isinstance(label, str):
+            return {"ok": False, "message": "Partition label must be text."}
         try:
             mountpoint = normalize_manual_mountpoint(body.get("mountpoint", ""))
         except ValueError as exc:
             return {"ok": False, "message": str(exc)}
-        journal.add_op("create", {
+        op = journal.add_op("create", {
             "start_bytes": start,
             "size_bytes": size,
             "fs_type": fs_type,
-            "label": body.get("label", ""),
+            "label": label,
             "mountpoint": mountpoint,
         })
         errors = journal.validate()
+        if errors:
+            journal.remove_op(op["index"])
         return {"ok": not errors, "pending": len(journal.ops), "errors": errors}
 
     def delete_partition(self, body: dict) -> dict:
@@ -122,8 +134,11 @@ class InstallerService:
         fs_error = _validate_fs_type(fs_type)
         if fs_error:
             return fs_error
+        label = body.get("label", "")
+        if not isinstance(label, str):
+            return {"ok": False, "message": "Partition label must be text."}
         journal.add_op("format", {
-            "partition": partition, "fs_type": fs_type, "label": body.get("label", ""),
+            "partition": partition, "fs_type": fs_type, "label": label,
         })
         return {"ok": True, "pending": len(journal.ops)}
 
@@ -167,6 +182,8 @@ class InstallerService:
         _disk, journal, error = self._journal_for(body)
         if error:
             return error
+        if journal.committed:
+            return {"ok": False, "message": "Partition changes have already been committed."}
         # Destructive journals (fresh table, partition deletion, format, or
         # resize) need the same on-screen acknowledgements as start_install:
         # committing without them would erase data the user never confirmed

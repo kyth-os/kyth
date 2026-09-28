@@ -136,6 +136,7 @@ class Journal:
         self._snapshot_saved = False
         self._committed = False
         self._root_partition: Optional[str] = None
+        self._next_op_index = 0
         self._backup_dir: tempfile.TemporaryDirectory[str] | None = None
         self.irreversible_completed = False
         if disk_service is not None:
@@ -193,15 +194,17 @@ class Journal:
         op = {
             "kind": kind,
             "params": dict(params),
-            "index": len(self.ops),
+            "index": self._next_op_index,
         }
+        self._next_op_index += 1
         self.ops.append(op)
         return op
 
     def remove_op(self, index: int) -> bool:
-        if 0 <= index < len(self.ops):
-            self.ops.pop(index)
-            return True
+        for position, op in enumerate(self.ops):
+            if op.get("index") == index:
+                self.ops.pop(position)
+                return True
         return False
 
     def clear(self):
@@ -384,7 +387,9 @@ class Journal:
                     )
 
             elif kind == "create":
-                error = self._validate_create_op(p, table_type, primary_count, allocated, mountpoints)
+                error = self._validate_create_op(
+                    p, table_type, primary_count, allocated, mountpoints, disk_size_bytes,
+                )
                 if error:
                     errors.append(error)
                 # Always update state to track root count and mountpoints for final validation
@@ -574,11 +579,12 @@ class Journal:
                             str(event.get("target") or self.disk),
                         )
                     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
-                        _logger.debug(
-                            "journal bookkeeping write failed for native step: %s",
-                            exc,
-                            exc_info=True,
-                        )
+                        if event.get("status") == "started":
+                            raise RuntimeError(
+                                "Could not persist recovery state before a native partition step; "
+                                "stopping the operation."
+                            ) from exc
+                        _logger.warning("native partition completion record failed: %s", exc)
             elif "ok" in event:
                 response.update(event)
 
@@ -619,7 +625,7 @@ class Journal:
 
     def _validate_create_op(self, p: dict, table_type: str, primary_count: int,
                             allocated: dict[str, tuple[int, int, str]],
-                            mountpoints: set[str]) -> str | None:
+                            mountpoints: set[str], disk_size_bytes: int = -1) -> str | None:
         """Validate a create partition operation. Returns error message or None."""
         start = _safe_int(p.get("start_bytes"), -1)
         size = _safe_int(p.get("size_bytes"), -1)
@@ -633,10 +639,12 @@ class Journal:
         except ValueError:
             return "Create partition: mount point must be an absolute safe path."
 
-        if start < 0 or size < 0:
+        if start <= 0 or size <= 0:
             return "Create partition: invalid start or size."
 
         end = start + size
+        if disk_size_bytes > 0 and end > disk_size_bytes:
+            return "Create partition: requested region extends past the end of the disk."
         for s, e, n in allocated.values():
             if s >= 0 and e > s and start < e and end > s:
                 return f"New partition overlaps with existing region ({n})."
@@ -833,6 +841,8 @@ class Journal:
         died, which is the only way a later recovery pass can tell a completed
         wipe from a half-written partition table.
         """
+        if self._committed:
+            raise RuntimeError("Partition changes have already been committed.")
         # Validate first, mutate never on failure: the service calls
         # validate() separately, but that leaves a TOCTOU window (and direct
         # commit() callers skip validation entirely). Re-running the pure
@@ -863,9 +873,13 @@ class Journal:
             try:
                 record(kind, status, target)
             except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
-                # A failed bookkeeping write must never abort a partition
-                # commit that is already mid-flight on the real disk.
-                _logger.debug("journal bookkeeping write failed for %s %s: %s", kind, target, exc, exc_info=True)
+                if status == "started":
+                    raise RuntimeError(
+                        f"Could not persist recovery state before {kind} on {target}; refusing to continue."
+                    ) from exc
+                # The operation succeeded; preserve its result and leave the
+                # durable "started" marker as the recovery signal.
+                _logger.warning("journal completion record failed for %s %s: %s", kind, target, exc)
 
         from .storage_guard import PartitionTableGuard
 

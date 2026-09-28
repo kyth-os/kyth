@@ -206,10 +206,15 @@ def _is_answer_file_request(body: dict) -> bool:
 
 def validate_install_request(body: dict, context: InstallerContext, *, strict_locale: bool = True) -> InstallRequest:
     """Validate a start request and return an immutable normalized request."""
+    if not isinstance(body, dict):
+        raise InstallRequestError("Install request must be an object.")
     for field in (
         "password", "username", "hostname", "timezone", "mok_password",
         "locale", "keymap", "kernel",
     ):
+        if field in body and not isinstance(body[field], str):
+            raise InstallRequestError(f"{field.replace('_', ' ').capitalize()} must be text.")
+    for field in ("disk", "install_mode", "target_partition", "resize_partition", "efi_partition"):
         if field in body and not isinstance(body[field], str):
             raise InstallRequestError(f"{field.replace('_', ' ').capitalize()} must be text.")
     state, disk_info = _storage_state(body, context)

@@ -2,9 +2,36 @@
 
 from __future__ import annotations
 
+import os
+import stat
+import tempfile
 from pathlib import Path
 
 from ..context import InstallPhase, InstallRequest
+
+
+def _restore_fstab_atomically(fstab_path: Path, contents: bytes) -> None:
+    """Restore fstab via an exclusive temporary file in its own directory."""
+    parent = fstab_path.parent
+    mode = stat.S_IMODE(fstab_path.stat().st_mode)
+    fd, temporary = tempfile.mkstemp(prefix=f".{fstab_path.name}.restore-", dir=parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, fstab_path)
+        directory_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def configure_installed_system(
@@ -27,6 +54,8 @@ def configure_installed_system(
             raise RuntimeError("Installed deployment could not be located for final configuration.")
         fstab_path = Path(etc) / "fstab"
         try:
+            if fstab_path.is_symlink() is True:
+                raise RuntimeError("Installed fstab is a symlink; refusing to modify the target deployment.")
             fstab_existed = fstab_path.is_file()
             if fstab_existed:
                 fstab_backup = fstab_path.read_bytes()
@@ -73,9 +102,7 @@ def configure_installed_system(
                     if not fstab_existed and fstab_path.is_file():
                         fstab_path.unlink()
                 else:
-                    tmp = fstab_path.with_suffix(".tmp")
-                    tmp.write_bytes(fstab_backup)
-                    tmp.replace(fstab_path)
+                    _restore_fstab_atomically(fstab_path, fstab_backup)
                 log("Rolled back fstab to pre-configure state due to error")
             except OSError as rb_exc:
                 log(f"Warning: fstab rollback failed: {rb_exc}")
