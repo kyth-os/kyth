@@ -43,7 +43,10 @@ class MountRegistry:
                 try:
                     from .system import _safe_umount
 
-                    _safe_umount(run, path, check=True)
+                    result = _safe_umount(run, path, check=True)
+                    returncode = getattr(result, "returncode", 0)
+                    if isinstance(returncode, int) and returncode != 0:
+                        raise RuntimeError(f"umount exited with status {returncode}")
                 except (OSError, RuntimeError, ValueError) as exc:  # noqa: BLE001 -- narrow: umount failures
                     if log:
                         log(f"Warning: could not unmount {path}: {exc}")
@@ -58,7 +61,10 @@ class MountRegistry:
             try:
                 from .system import _safe_umount
 
-                _safe_umount(run, path, check=True)
+                result = _safe_umount(run, path, check=True)
+                returncode = getattr(result, "returncode", 0)
+                if isinstance(returncode, int) and returncode != 0:
+                    raise RuntimeError(f"umount exited with status {returncode}")
             except (OSError, RuntimeError, ValueError) as exc:  # noqa: BLE001 -- narrow: umount failures
                 if log:
                     log(f"Warning: could not unmount {path}: {exc}")

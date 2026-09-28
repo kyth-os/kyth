@@ -337,7 +337,9 @@ class Journal:
 
         root_count = 0
         mountpoints: set[str] = set()
-        current_parts = list_partitions(self.disk)
+        # Never validate a destructive journal against an empty partition
+        # list produced by a failed lsblk probe.
+        current_parts = list_partitions(self.disk, strict=True)
         allocated: dict[str, tuple[int, int, str]] = {}
         last_mountpoint_op_index = self._last_mountpoint_op_index()
         for part in current_parts:

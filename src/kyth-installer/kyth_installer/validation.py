@@ -266,6 +266,11 @@ def validate_install_request(body: dict, context: InstallerContext, *, strict_lo
     _require_valid_username(username)
     hostname = body.get("hostname", "kyth")
     _require_valid_hostname(hostname)
+    kernel = str(body.get("kernel", "fedora") or "fedora").strip().lower()
+    if kernel == "cachyos":
+        kernel = "cachy"
+    if kernel not in {"fedora", "cachy"}:
+        raise InstallRequestError(f"Invalid kernel flavor: {kernel!r}.")
 
     return InstallRequest.from_state({
         **state,
@@ -275,7 +280,7 @@ def validate_install_request(body: dict, context: InstallerContext, *, strict_lo
         "keymap": keymap,
         "username": username,
         "password_hash": password_hash,
-        "kernel": body.get("kernel", "fedora") or "fedora",
+        "kernel": kernel,
         "mok_password": body.get("mok_password", "") or "",
     })
 

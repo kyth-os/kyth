@@ -73,7 +73,8 @@ class InstallerRefactorTests(unittest.TestCase):
         state = {"install_mode": "wipe", "disk": "/dev/sda", "target_partition": ""}
         original = state.copy()
 
-        with patch.object(plan, "_validate_install_target", return_value=("/dev/sda", None)):
+        with patch.object(plan, "_validate_install_target", return_value=("/dev/sda", None)), \
+             patch.object(plan, "list_partitions", return_value=[]):
             result = plan._prepare_install_plan(state, lambda _message: None)
 
         self.assertEqual(result, plan.InstallPlan("wipe", disk="/dev/sda", target_partition=None))

@@ -116,7 +116,9 @@ def _probe_storage(
     instead of this re-running the disk scan once per call."""
     return StorageSnapshot(
         disks=tuple(disks) if disks is not None else tuple(list_disks()),
-        partitions=tuple(list_partitions(disk)) if include_partitions else (),
+        # Planning is a safety boundary: an lsblk failure must not look like
+        # a disk with no partitions and skip BitLocker/ESP checks before wipe.
+        partitions=tuple(list_partitions(disk, strict=True)) if include_partitions else (),
         free_regions=tuple(list_free_space(disk)) if include_free_space else (),
         efi_partition=find_efi_partition(disk) if include_partitions else None,
         is_gpt=_is_gpt_disk(disk) if include_partitions else False,
