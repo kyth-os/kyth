@@ -53,8 +53,10 @@ def _require_no_symlink(path: str) -> None:
                     f"Refusing to use {path}: it already exists as a symlink (component {part}), which "
                     "may indicate local tampering. Remove it and retry."
                 )
-        except OSError:
-            continue
+        except OSError as exc:
+            raise RuntimeError(
+                f"Could not verify that {path} is free of symlink components: {exc}"
+            ) from exc
     # Also verify via O_NOFOLLOW open where possible
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_DIRECTORY if Path(path).suffix == "" else os.O_RDONLY | os.O_NOFOLLOW)
@@ -145,4 +147,3 @@ def format_install_error(exc: BaseException) -> str:
         detail = format_os_error(exc)
         return f"{exc.__class__.__name__}: {detail}"
     return str(exc) or exc.__class__.__name__
-

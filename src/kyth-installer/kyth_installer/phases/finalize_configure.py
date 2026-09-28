@@ -19,6 +19,7 @@ def configure_installed_system(
     request = request or context.request or InstallRequest.from_state(context.state)
     # Transactional guard: backup fstab so partial writes don't leave unbootable target
     fstab_backup: bytes | None = None
+    fstab_existed = False
     fstab_path: Path | None = None
     try:
         etc = find_deploy_etc(config_root)
@@ -26,9 +27,11 @@ def configure_installed_system(
             raise RuntimeError("Installed deployment could not be located for final configuration.")
         fstab_path = Path(etc) / "fstab"
         try:
-            fstab_backup = fstab_path.read_bytes() if fstab_path.is_file() else None
-        except OSError:
-            fstab_backup = None
+            fstab_existed = fstab_path.is_file()
+            if fstab_existed:
+                fstab_backup = fstab_path.read_bytes()
+        except OSError as exc:
+            raise RuntimeError(f"Could not back up the installed fstab before configuration: {exc}") from exc
         if install_mode == "alongside":
             configure_alongside_fstab(config_root, target_part, etc, log)
         if install_mode == "manual":
@@ -67,7 +70,7 @@ def configure_installed_system(
         if fstab_path is not None:
             try:
                 if fstab_backup is None:
-                    if fstab_path.is_file():
+                    if not fstab_existed and fstab_path.is_file():
                         fstab_path.unlink()
                 else:
                     tmp = fstab_path.with_suffix(".tmp")

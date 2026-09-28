@@ -169,6 +169,9 @@ def default_installation_state() -> InstallationState:
 @dataclass
 class EventBroker:
     events: list[dict] = field(default_factory=list)
+    max_events: int = 10_000
+    base_event_id: int = 0
+    next_event_id: int = 0
     condition: threading.Condition = field(
         default_factory=lambda: threading.Condition(threading.Lock())
     )
@@ -176,11 +179,17 @@ class EventBroker:
     def publish(self, event: dict) -> None:
         with self.condition:
             self.events.append(event)
+            self.next_event_id += 1
+            overflow = len(self.events) - max(1, self.max_events)
+            if overflow > 0:
+                del self.events[:overflow]
+                self.base_event_id += overflow
             self.condition.notify_all()
 
     def clear(self) -> None:
         with self.condition:
             self.events.clear()
+            self.base_event_id = self.next_event_id
 
 
 @dataclass

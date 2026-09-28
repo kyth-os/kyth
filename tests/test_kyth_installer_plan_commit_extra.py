@@ -115,33 +115,28 @@ class CommitVisibleWarnTests(unittest.TestCase):
 
 
 class NtfsMarkerProbeTests(unittest.TestCase):
-    def test_marker_probe_oserror_is_debug_and_continues(self):
-        # lines 239-240: marker.is_file OSError -> debug, then continues to validate_target
+    def test_marker_probe_oserror_fails_closed(self):
         with patch("pathlib.Path.is_file", side_effect=OSError("probe failed")):
-            # minimal validate_target returning disk/partition
             def fake_validate(cfg):
                 return ("/dev/sda", "/dev/sda2", 1*1024**3)
-            logs = []
-            # need deps that won't fail later; use real function but mock unmount/commit to no-op
-            result_disk, result_create = plan_commit.prepare_ntfs_resize_target(
-                {"resize_partition": "/dev/sda2"},
-                logs.append,
-                normal_device_path=lambda p: p,
-                validate_target=fake_validate,
-                required_tools=[],
-                which=lambda c: "/usr/bin/" + c,
-                unmount_target_disk=lambda d, l: None,
-                partition_size=lambda p: 10*1024**3,
-                partition_number=lambda p: 2,
-                block_size=lambda d: 512,
-                partition_start=lambda p: 0,
-                shrink_filesystem_guarded=lambda *a, **k: None,
-                run_command=lambda *a, **k: MagicMock(returncode=0),
-                as_root=lambda c: c,
-                settle=lambda: None,
-                commit_partition=lambda *a, **k: "/dev/sda3",
-            )
-            self.assertEqual(result_create, "/dev/sda3")
+            with self.assertRaisesRegex(RuntimeError, "Cannot verify whether /dev/sda2"):
+                plan_commit.prepare_ntfs_resize_target(
+                    {"resize_partition": "/dev/sda2"}, MagicMock(),
+                    normal_device_path=lambda p: p,
+                    validate_target=fake_validate,
+                    required_tools=[],
+                    which=lambda c: "/usr/bin/" + c,
+                    unmount_target_disk=lambda d, l: None,
+                    partition_size=lambda p: 10*1024**3,
+                    partition_number=lambda p: 2,
+                    block_size=lambda d: 512,
+                    partition_start=lambda p: 0,
+                    shrink_filesystem_guarded=lambda *a, **k: None,
+                    run_command=lambda *a, **k: MagicMock(returncode=0),
+                    as_root=lambda c: c,
+                    settle=lambda: None,
+                    commit_partition=lambda *a, **k: "/dev/sda3",
+                )
 
 
 if __name__ == "__main__":

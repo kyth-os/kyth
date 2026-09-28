@@ -449,15 +449,14 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
             "raised": raised,
         }
 
-    def test_fstab_read_oserror_sets_backup_none(self):
+    def test_fstab_read_oserror_aborts_before_configuration_or_deletion(self):
         result = self._call(fstab_is_file=True, read_bytes_error=True)
-        self.assertIsNone(result["raised"])
-        # Should not have raised; backup was None due to OSError then continued
+        self.assertIsInstance(result["raised"], RuntimeError)
+        self.assertIn("Could not back up the installed fstab", str(result["raised"]))
         result["mock_fstab"].read_bytes.assert_called_once()
+        result["mock_fstab"].unlink.assert_not_called()
 
-    def test_rollback_unlinks_when_backup_none_and_file_exists(self):
-        # Exercise rollback path where backup is restored via write or unlink
-        # (previous _call helper already validates the OSError backup path)
+    def test_fstab_read_failure_does_not_unlink_original_file(self):
         from kyth_installer.phases import finalize_configure as fc
 
         context = InstallerContext()
@@ -465,15 +464,11 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         log = mock.Mock()
         progress = mock.Mock()
         mock_fstab = mock.Mock()
-        # First is_file check returns False? Actually we need read_bytes not called then backup None
-        # Simulate: fstab does not exist at backup time, but does exist at rollback (partial write)
-        # Simpler: force backup None via OSError, then during rollback is_file True -> unlink
         call_count = {"is_file": 0}
 
         def is_file_side_effect():
             call_count["is_file"] += 1
-            # First call: backup check -> True but read will raise OSError -> backup None
-            # Second call: rollback check -> True -> unlink
+            # The file exists, but its backup cannot be read.
             return True
 
         mock_fstab.is_file.side_effect = is_file_side_effect
@@ -484,7 +479,7 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_path_cls = mock.Mock(return_value=mock_etc_path)
 
         with mock.patch.object(fc, "Path", mock_path_cls):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "Could not back up the installed fstab"):
                 fc.configure_installed_system(
                     target_part="/dev/sda3",
                     install_mode="wipe",
@@ -505,8 +500,8 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
                     unmount_configuration=mock.Mock(),
                     run_command=mock.Mock(),
                 )
-        mock_fstab.unlink.assert_called_once()
-        self.assertTrue(any("Rolled back" in c.args[0] for c in log.call_args_list))
+        mock_fstab.unlink.assert_not_called()
+        self.assertEqual(call_count["is_file"], 1)
 
     def test_rollback_restores_backup_when_present(self):
         from kyth_installer.phases import finalize_configure as fc
@@ -630,7 +625,7 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_fstab.unlink.assert_not_called()
         mock_fstab.write_bytes.assert_not_called()
 
-    def test_rollback_unlink_oserror_is_logged(self):
+    def test_fstab_read_failure_does_not_attempt_unlink(self):
         from kyth_installer.phases import finalize_configure as fc
 
         context = InstallerContext()
@@ -646,7 +641,7 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_etc_path.parent = pathlib.Path("/config/deploy")
         mock_path_cls = mock.Mock(return_value=mock_etc_path)
         with mock.patch.object(fc, "Path", mock_path_cls):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "Could not back up the installed fstab"):
                 fc.configure_installed_system(
                     target_part="/dev/sda3",
                     install_mode="wipe",
@@ -667,7 +662,7 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
                     unmount_configuration=mock.Mock(),
                     run_command=mock.Mock(),
                 )
-        self.assertTrue(any("rollback failed" in c.args[0] for c in log.call_args_list))
+        mock_fstab.unlink.assert_not_called()
 
 
 class InstallFailureTests(unittest.TestCase):

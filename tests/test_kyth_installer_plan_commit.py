@@ -214,14 +214,15 @@ class PlanCommitTests(unittest.TestCase):
             )
         dependencies["unmount_target_disk"].assert_not_called()
 
-    def test_ntfs_preparation_continues_when_marker_probe_is_unavailable(self):
+    def test_ntfs_preparation_fails_closed_when_marker_probe_is_unavailable(self):
         dependencies = self.ntfs_dependencies(
             normal_device_path=mock.Mock(side_effect=OSError("device lookup failed")),
         )
-        result = plan_commit.prepare_ntfs_resize_target(
-            {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
-        )
-        self.assertEqual(result, ("/dev/sda", "/dev/sda3"))
+        with self.assertRaisesRegex(RuntimeError, "Cannot verify whether"):
+            plan_commit.prepare_ntfs_resize_target(
+                {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+            )
+        dependencies["unmount_target_disk"].assert_not_called()
 
         dependencies = self.ntfs_dependencies(normal_device_path=lambda _value: "")
         result = plan_commit.prepare_ntfs_resize_target(

@@ -330,10 +330,10 @@ def prepare_ntfs_resize_target(
     except RuntimeError:
         raise
     except (OSError, ValueError) as exc:
-        _logger.debug("ntfs marker probe failed for %s: %s", preliminary if 'preliminary' in locals() else "unknown", exc, exc_info=True)
-    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
-        _logger.debug("ntfs marker probe unexpected error, failing closed: %s", exc, exc_info=True)
-        raise
+        raise RuntimeError(
+            f"Cannot verify whether {preliminary if 'preliminary' in locals() else 'the NTFS target'} "
+            f"was already shrunk in this session; refusing to continue: {exc}"
+        ) from exc
 
     disk, partition, shrink_bytes = validate_target(config)
     selected_target = (disk, partition)

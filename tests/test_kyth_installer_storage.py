@@ -1477,6 +1477,11 @@ class InstallerSystemTests(unittest.TestCase):
             system._require_no_symlink(real)  # does not raise
             system._require_no_symlink(os.path.join(tmpdir, "does-not-exist"))  # does not raise
 
+    def test_require_no_symlink_fails_closed_when_component_cannot_be_checked(self):
+        with patch("pathlib.Path.is_symlink", side_effect=PermissionError("probe denied")):
+            with self.assertRaisesRegex(RuntimeError, "Could not verify.*symlink components"):
+                system._require_no_symlink("/tmp/kyth-install-root")
+
     def test_safe_umount_defaults_to_check_false_and_captures_output(self):
         mock_run = MagicMock(return_value=MagicMock(returncode=1))
         result = system._safe_umount(mock_run, "/mnt/target")
