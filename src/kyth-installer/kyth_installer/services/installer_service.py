@@ -200,7 +200,7 @@ class InstallerService:
             )
             self.context.transition(context_module.InstallLifecycle.IDLE)
             return {"ok": True, "root_partition": root_part}
-        except RuntimeError as exc:
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
             irreversible = bool(getattr(journal, "irreversible_completed", False))
             if irreversible:
                 # Format/shrink already mutated filesystems. Reloading GPT
@@ -215,7 +215,18 @@ class InstallerService:
                         "Those partitions no longer contain their original contents."
                     ),
                 }
-            journal.rollback(lambda _msg: None)
+            try:
+                journal.rollback(lambda _msg: None)
+            except (OSError, RuntimeError, ValueError, TypeError) as rollback_exc:
+                # The disk state is uncertain when recovery itself fails. Keep
+                # this installer session terminal instead of leaving it stuck
+                # in PARTITIONING or offering an unsafe retry.
+                self.context.transition(context_module.InstallLifecycle.FAILED)
+                return {
+                    "ok": False,
+                    "rollback_failed": True,
+                    "message": f"{exc}. Partition rollback also failed: {rollback_exc}",
+                }
             # IDLE, not FAILED: journal.rollback() has already restored the
             # partition table, so the disk is back to a known-good state and
             # there is nothing unsafe about trying again. FAILED is a strict

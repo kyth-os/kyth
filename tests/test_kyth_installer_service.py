@@ -413,6 +413,32 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
 
     @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_handles_native_process_start_failure(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "commit", side_effect=OSError("executable not found")), \
+             patch.object(journal, "rollback") as mock_rollback:
+            res = self.service.commit_partitions(
+                {"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True}
+            )
+        self.assertFalse(res.get("ok"))
+        self.assertIn("executable not found", res.get("message", ""))
+        mock_rollback.assert_called_once()
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_marks_session_failed_when_rollback_fails(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "commit", side_effect=RuntimeError("partition write failed")), \
+             patch.object(journal, "rollback", side_effect=OSError("backup unavailable")):
+            res = self.service.commit_partitions(
+                {"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True}
+            )
+        self.assertFalse(res.get("ok"))
+        self.assertTrue(res.get("rollback_failed"))
+        self.assertIn("backup unavailable", res.get("message", ""))
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.FAILED)
+
+    @patch("kyth_installer.disk.list_disks")
     def test_commit_partitions_can_be_retried_after_a_failure(self, mock_list_disks):
         journal = self._committable_journal(mock_list_disks)
         with patch.object(journal, "commit", side_effect=RuntimeError("sgdisk failed")), \
