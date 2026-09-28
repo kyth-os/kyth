@@ -171,12 +171,13 @@ class Journal:
         if not self._disk_service.dry_run:
             _require_sgdisk()
         if self._backup_dir is None:
-            return
+            raise RuntimeError("Partition table snapshot is unavailable; cannot safely roll back.")
         backup_path = Path(self._backup_dir.name) / "partition-table.backup"
         backup = str(backup_path)
         if not backup_path.exists() and not self._disk_service.dry_run:
-            self._discard_snapshot()
-            return
+            raise RuntimeError(
+                "Partition table snapshot file is missing; cannot safely roll back."
+            )
         self._disk_service.restore_table(self.disk, backup)
         self._discard_snapshot()
 

@@ -87,7 +87,7 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         self.assertTrue((Path(journal._backup_dir.name) / "partition-table.backup").exists())
         journal._discard_snapshot()
 
-    def test_restore_without_snapshot_or_backup_is_safe(self):
+    def test_restore_without_snapshot_or_backup_fails_closed(self):
         journal = self._journal(dry_run=False)
         journal._restore_snapshot()
         journal._disk_service.restore_table.assert_not_called()
@@ -96,9 +96,11 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         backup_dir.name = "/definitely/missing"
         journal._backup_dir = backup_dir
         with mock.patch.object(journal_mod, "_require_sgdisk"):
-            journal._restore_snapshot()
+            with self.assertRaisesRegex(RuntimeError, "snapshot file is missing"):
+                journal._restore_snapshot()
         journal._disk_service.restore_table.assert_not_called()
-        backup_dir.cleanup.assert_called_once()
+        backup_dir.cleanup.assert_not_called()
+        self.assertTrue(journal._snapshot_saved)
 
     def test_root_partition_prefers_created_root_then_existing_assignment(self):
         journal = self._journal()
@@ -445,12 +447,13 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         with mock.patch.object(journal_mod, "_require_sgdisk") as req, mock.patch.object(journal, "_discard_snapshot"):
             journal._save_snapshot()
             req.assert_called()
-        # restore without backup dir returns early (185)
+        # A recorded snapshot without a backup directory cannot be restored.
         journal = self._journal(dry_run=False)
         journal._snapshot_saved = True
         journal._backup_dir = None
         with mock.patch.object(journal_mod, "_require_sgdisk"):
-            journal._restore_snapshot()
+            with self.assertRaisesRegex(RuntimeError, "snapshot is unavailable"):
+                journal._restore_snapshot()
             journal._disk_service.restore_table.assert_not_called()
         # _find_root_partition returns None when no root (238)
         journal = self._journal()
