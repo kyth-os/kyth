@@ -516,6 +516,14 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("message"), "sgdisk restore failed")
 
+    @patch("kyth_installer.disk.list_disks")
+    def test_rollback_partitions_reports_os_error(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "rollback", side_effect=OSError("backup unavailable")):
+            res = self.service.rollback_partitions({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("message"), "backup unavailable")
+
     def test_partition_actions_return_missing_journal_error_consistently(self):
         body = {"disk": "/dev/sda", "partition": "/dev/sda1"}
         for action in (

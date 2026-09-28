@@ -433,6 +433,12 @@ class ServerHardeningTests(unittest.TestCase):
             handler.do_POST()
         handler.send_error.assert_called_once_with(400, "Invalid Content-Length")
 
+    def test_post_rejects_non_object_json_body(self):
+        handler = self._post_handler(b"[]", 2)
+        with mock.patch.object(server.Handler, "_require_same_origin_context", return_value=True):
+            handler.do_POST()
+        handler.send_error.assert_called_once_with(400, "JSON request body must be an object")
+
     def test_log_route_refuses_symlink(self):
         handler = _make_handler("/api/log", host=f"127.0.0.1:{config.PORT}")
         handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN

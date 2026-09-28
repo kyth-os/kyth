@@ -251,7 +251,7 @@ class InstallerService:
             journal.rollback(lambda _msg: None)
             partition_ops.reset_journal(self.context)
             return {"ok": True}
-        except RuntimeError as exc:
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
             return {"ok": False, "message": str(exc)}
 
     def start_install(self, body: dict, *, strict_locale: bool = True) -> dict:

@@ -422,6 +422,9 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             self.send_error(400, "Invalid JSON")
             return
+        if not isinstance(body, dict):
+            self.send_error(400, "JSON request body must be an object")
+            return
 
         route_name = next((name for name, spec in ROUTES.items() if spec is route), "")
         response = PostRouteService(self.context).dispatch(route_name, body)
