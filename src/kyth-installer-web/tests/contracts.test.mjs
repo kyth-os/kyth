@@ -73,3 +73,15 @@ test("offline warning matches the selected image source requirement", () => {
   assert.match(api, /4 \* 60 \* 60 \* 1000 \+ 60_000/);
   assert.match(app, /setError\(event\.message\); setStep\("rescue"\); void probe\(\)/);
 });
+
+test("React account and hostname rules match the shared installer contract", async () => {
+  // validation_rules.json is the single source: the daemon rejects anything
+  // looser, and a name accepted here but refused by useradd fails the install
+  // after the image is already written.
+  const rules = JSON.parse(
+    await readFile(new URL("../../kyth-installer/kyth_installer/validation_rules.json", import.meta.url), "utf8"),
+  );
+  assert.ok(app.includes(`/^${rules.USERNAME_REGEX}$/.test(request.username)`), "username regex drifted from validation_rules.json");
+  assert.ok(app.includes("/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(request.hostname)"), "hostname regex drifted from validation_rules.json");
+  assert.ok(!app.includes("[A-Za-z0-9][A-Za-z0-9_-]{0,31}"), "the old permissive username regex is back");
+});

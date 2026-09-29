@@ -5,11 +5,24 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
-const MAX_USERNAME: usize = 32;
+/// Shared installer contract (`validation_rules.json`): `[a-z_][a-z0-9_-]{0,30}`.
+/// Accepting uppercase or a leading digit here let a request pass validation
+/// and then fail at `useradd` after the image was already written.
+const MAX_USERNAME: usize = 31;
+
+fn valid_username(username: &str) -> bool {
+    let bytes = username.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= MAX_USERNAME
+        && (bytes[0].is_ascii_lowercase() || bytes[0] == b'_')
+        && bytes[1..]
+            .iter()
+            .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-'))
+}
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct CreateUserInput {
@@ -81,15 +94,11 @@ pub fn validate(input: &CreateUserInput) -> Result<(PathBuf, PathBuf), String> {
     let deploy = absolute_tree(&input.deploy_root, "deploy_root")?;
     let target = absolute_tree(&input.target_root, "target_root")?;
     let username = input.username.trim();
-    if username.is_empty()
-        || username.len() > MAX_USERNAME
-        || username.starts_with('-')
-        || !username
-            .bytes()
-            .enumerate()
-            .all(|(i, b)| b.is_ascii_alphanumeric() || (matches!(b, b'_' | b'-') && i > 0))
-    {
-        return Err("username contains unsupported characters".into());
+    if !valid_username(username) {
+        return Err(
+            "username must start with a lowercase letter or underscore and use only lowercase letters, digits, '_' or '-' (at most 31 characters)"
+                .into(),
+        );
     }
     if input.password_hash.is_empty() || input.password_hash.contains(['\n', '\r', '\0']) {
         return Err("password_hash must be a single non-empty line".into());
@@ -139,17 +148,49 @@ fn replace_shadow_hash(path: &Path, username: &str, hash: &str) -> Result<(), St
             "user {username:?} not found in shadow after useradd"
         ));
     }
-    let mut file = OpenOptions::new()
-        .write(true)
-        .truncate(true)
-        .mode(0o000)
-        .open(path)
-        .map_err(|e| format!("could not open installed shadow: {e}"))?;
-    file.write_all(output.as_bytes())
-        .map_err(|e| format!("could not write installed shadow: {e}"))?;
-    file.sync_all()
-        .map_err(|e| format!("could not sync installed shadow: {e}"))?;
-    Ok(())
+    write_replacing(path, output.as_bytes())
+}
+
+/// Replace `path` atomically: write a same-directory temp file that already
+/// carries the original mode, fsync it, rename it over the target, then fsync
+/// the directory. A power loss leaves the old or the new shadow, never the
+/// empty file that truncate-then-write could leave (a locked-out system).
+fn write_replacing(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let mode = fs::metadata(path)
+        .map_err(|e| format!("could not stat installed shadow: {e}"))?
+        .permissions()
+        .mode()
+        & 0o7777;
+    let parent = path
+        .parent()
+        .ok_or_else(|| "installed shadow has no parent directory".to_string())?;
+    let temporary = path.with_extension("kyth-tmp");
+    let _ = fs::remove_file(&temporary);
+    let result = (|| {
+        let mut file = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(mode)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&temporary)
+            .map_err(|e| format!("could not create temporary shadow: {e}"))?;
+        file.write_all(contents)
+            .map_err(|e| format!("could not write temporary shadow: {e}"))?;
+        file.sync_all()
+            .map_err(|e| format!("could not sync temporary shadow: {e}"))?;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(mode))
+            .map_err(|e| format!("could not set shadow permissions: {e}"))?;
+        fs::rename(&temporary, path).map_err(|e| format!("could not replace shadow: {e}"))?;
+        OpenOptions::new()
+            .read(true)
+            .open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|e| format!("could not sync shadow directory: {e}"))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 pub fn apply(input: CreateUserInput) -> Result<(), String> {
@@ -257,9 +298,43 @@ mod tests {
         let mut value = input();
         value.username = "bad;id".into();
         assert!(validate(&value).is_err());
+        for bad in ["Bob", "1abc", "-x", "a.b", "", &"a".repeat(32)] {
+            let mut value = input();
+            value.username = bad.into();
+            assert!(validate(&value).is_err(), "{bad:?}");
+        }
+        for good in ["alice", "_svc", "a-b_c9", &"a".repeat(31)] {
+            let mut value = input();
+            value.username = good.into();
+            assert!(validate(&value).is_ok(), "{good:?}");
+        }
         let mut value = input();
         value.password_hash = "hash\nleak".into();
         assert!(validate(&value).is_err());
+    }
+
+    #[test]
+    fn shadow_replacement_is_atomic_and_keeps_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("shadow");
+        fs::write(&path, "root:!:x\nkyth_user:!:x\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).unwrap();
+        replace_shadow_hash(&path, "kyth_user", "$6$new").unwrap();
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+        // No temp file is left behind, and a failed replacement leaves the
+        // original untouched.
+        let leftovers: Vec<_> = fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|entry| entry.ok())
+            .filter(|entry| entry.file_name() != "shadow")
+            .collect();
+        assert!(leftovers.is_empty());
+        let before = fs::read_to_string(&path).unwrap();
+        assert!(replace_shadow_hash(&path, "missing", "$6$x").is_err());
+        assert_eq!(fs::read_to_string(&path).unwrap(), before);
     }
 
     #[test]

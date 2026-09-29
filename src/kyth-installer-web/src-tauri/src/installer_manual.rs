@@ -141,6 +141,20 @@ fn claim_assignment(
     Ok(())
 }
 
+/// Where a manual mount belongs inside the physical sysroot. ostree bind-mounts
+/// the stateroot's `var` over `/var` at boot, so `/var` and everything under it
+/// (`/var/home` included) must be mounted inside `ostree/deploy/default/var`.
+/// Mounting at `{root}/var/...` mounts over the sysroot's empty `var`, which the
+/// booted system never sees, and hides the home directory `create-user` makes.
+fn mount_target(root: &str, fstab_mountpoint: &str) -> String {
+    if fstab_mountpoint == "/var" || fstab_mountpoint.starts_with("/var/") {
+        let rest = &fstab_mountpoint["/var".len()..];
+        format!("{root}/ostree/deploy/default/var{rest}")
+    } else {
+        format!("{root}{fstab_mountpoint}")
+    }
+}
+
 pub(crate) fn apply(input: ManualMountsInput) -> Result<ManualMountsResult, String> {
     let root = safe_path(&input.config_root, "config root")?;
     let root_metadata = fs::symlink_metadata(&root)
@@ -211,7 +225,7 @@ pub(crate) fn apply(input: ManualMountsInput) -> Result<ManualMountsResult, Stri
     let skipped = 0;
     for (device, fs, fstab_mountpoint, line) in prepared {
         if fs != "linux-swap" {
-            let target = format!("{root}{fstab_mountpoint}");
+            let target = mount_target(&root, &fstab_mountpoint);
             // Refuse a final-path symlink before creating or mounting through
             // it. The parent may be an ostree-managed /var symlink by design.
             if let Ok(metadata) = fs::symlink_metadata(&target) {
@@ -259,7 +273,7 @@ pub(crate) fn apply(input: ManualMountsInput) -> Result<ManualMountsResult, Stri
             // Do not leave a mounted filesystem behind without its fstab
             // entry; report the durable configuration failure to the caller.
             if fs != "linux-swap" {
-                let target = format!("{root}{fstab_mountpoint}");
+                let target = mount_target(&root, &fstab_mountpoint);
                 let rollback = Command::new("/usr/bin/umount")
                     .args(["-R", "-l", &target])
                     .status();
@@ -282,6 +296,28 @@ pub(crate) fn apply(input: ManualMountsInput) -> Result<ManualMountsResult, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn var_mounts_land_in_the_stateroot_var() {
+        assert_eq!(
+            mount_target("/mnt/target", "/var/home"),
+            "/mnt/target/ostree/deploy/default/var/home"
+        );
+        assert_eq!(
+            mount_target("/mnt/target", "/var"),
+            "/mnt/target/ostree/deploy/default/var"
+        );
+        assert_eq!(
+            mount_target("/mnt/target", "/var/lib/games"),
+            "/mnt/target/ostree/deploy/default/var/lib/games"
+        );
+        // Not under /var: unchanged, and no false prefix match.
+        assert_eq!(mount_target("/mnt/target", "/data"), "/mnt/target/data");
+        assert_eq!(
+            mount_target("/mnt/target", "/variable"),
+            "/mnt/target/variable"
+        );
+    }
+
     #[test]
     fn rejects_unsafe_manual_inputs() {
         assert!(safe_device("/dev/sda;id").is_err());
