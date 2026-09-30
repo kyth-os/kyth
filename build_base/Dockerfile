@@ -1,7 +1,7 @@
 # Pull the upstream Fedora bootc base and apply KythOS branding.
 # Build with: docker build -t localhost/kyth-base:stable build_base/
-# Override the base via: docker build --build-arg BASE_IMAGE=ghcr.io/ublue-os/kinoite-main:44 build_base/
-ARG BASE_IMAGE=ghcr.io/ublue-os/kinoite-main:44@sha256:cab4b50650d4f1e07273b27bd8e6dd785a6b8c596e5bbe1b7ee2e18d3ecb2709
+# Override the base via: docker build --build-arg BASE_IMAGE=quay.io/fedora/fedora-kinoite:45 build_base/
+ARG BASE_IMAGE=quay.io/fedora/fedora-kinoite:45@sha256:884d0dee45a250f0e5d31c52e8167e6c8fc9e66fad80f1401d36400620d36861
 FROM ${BASE_IMAGE}
 
 # Fedora is the default kernel flavor. CachyOS is an advanced image

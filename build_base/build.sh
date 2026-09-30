@@ -14,10 +14,10 @@ write_kyth_os_release() {
 	mkdir -p "$(dirname "${target}")"
 	cat >"${target}" <<'EOF'
 NAME="KythOS"
-PRETTY_NAME="KythOS 44"
+PRETTY_NAME="KythOS 45"
 ID=kythos
-VERSION="44"
-VERSION_ID="44"
+VERSION="45"
+VERSION_ID="45"
 ANSI_COLOR="0;34"
 LOGO=kyth
 HOME_URL="https://github.com/kyth-os/kyth"
