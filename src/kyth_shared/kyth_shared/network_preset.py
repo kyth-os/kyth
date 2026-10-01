@@ -48,6 +48,7 @@ def load_network_preset(path: Path | None = None) -> dict[str, Any]:
         "doh": doh,
         "firewall_zone": zone,
         "dns_strict": bool(data.get("dns_strict", False)),
+        "dnssec": bool(data.get("dnssec", False)),
         "vpn_dns_exclusive": bool(data.get("vpn_dns_exclusive", False)),
         "vpn_fail_closed": bool(data.get("vpn_fail_closed", False)),
     }
@@ -88,6 +89,7 @@ def save_network_preset(cfg: dict[str, Any], path: Path | None = None) -> Path:
     lines.append(f'doh = {str(bool(cfg.get("doh", True))).lower()}')
     lines.append(f'firewall_zone = {_toml_str(zone)}')
     lines.append(f'dns_strict = {str(bool(cfg.get("dns_strict", False))).lower()}')
+    lines.append(f'dnssec = {str(bool(cfg.get("dnssec", False))).lower()}')
     lines.append(f'vpn_dns_exclusive = {str(bool(cfg.get("vpn_dns_exclusive", False))).lower()}')
     lines.append(f'vpn_fail_closed = {str(bool(cfg.get("vpn_fail_closed", False))).lower()}')
     atomic_write_text(p, "\n".join(lines)+"\n")
@@ -119,7 +121,14 @@ def apply_network_preset(cfg: dict[str, Any] | None = None, root: Path = Path("/
     # the old hand-rolled tmp + backup/rollback: no torn file, no symlink
     # plant at the predictable 50-kyth.tmp path.
     try:
-        atomic_write_text(dest, f"[Resolve]\nDNS={dns_ip}\nDNSOverTLS={doh}\n")
+        # DNSSEC is off unless the user opts in: corporate resolvers strip the
+        # records and resolved rejects their answers ("no-signature") with both
+        # `yes` and `allow-downgrade`. Mirrors the Rust renderer.
+        dnssec = "allow-downgrade" if cfg.get("dnssec") else "no"
+        atomic_write_text(
+            dest,
+            f"[Resolve]\nDNS={dns_ip}\nDNSSEC={dnssec}\nDNSOverTLS={doh}\n",
+        )
         written.append(dest)
     except OSError as exc:
         raise RuntimeError(f"failed to write {dest}: {exc}") from exc

@@ -16,6 +16,12 @@ pub struct NetworkPreset {
     /// expose DoT, so it is only for users who explicitly choose it in the
     /// Hub (documented in the save header and Hub network docs).
     pub dns_strict: bool,
+    /// DNSSEC validation opt-in (`DNSSEC=allow-downgrade`). Default off
+    /// (`DNSSEC=no`): corporate DHCP resolvers commonly strip DNSSEC records,
+    /// and resolved's `yes` AND `allow-downgrade` both rejected valid answers
+    /// from them ("no-signature") while re-probing a server, which broke
+    /// internal and public names alike. Encrypted DNS is unaffected.
+    pub dnssec: bool,
     /// Route all DNS through the VPN tunnel when one is up
     /// (`resolvectl` per-link DNS set to the tunnel only). Default off.
     pub vpn_dns_exclusive: bool,
@@ -35,6 +41,7 @@ impl Default for NetworkPreset {
             // trust the LAN. Users open their home LAN via the Hub (home).
             firewall_zone: "public".into(),
             dns_strict: false,
+            dnssec: false,
             vpn_dns_exclusive: false,
             vpn_fail_closed: false,
         }
@@ -81,6 +88,10 @@ fn validated(value: &toml::Value) -> NetworkPreset {
         firewall_zone,
         dns_strict: value
             .get("dns_strict")
+            .and_then(toml::Value::as_bool)
+            .unwrap_or(false),
+        dnssec: value
+            .get("dnssec")
             .and_then(toml::Value::as_bool)
             .unwrap_or(false),
         vpn_dns_exclusive: value
@@ -153,12 +164,14 @@ pub fn render_network_toml(preset: &NetworkPreset) -> String {
          doh = {}\n\
          firewall_zone = \"{}\"\n\
          dns_strict = {}\n\
+         dnssec = {}\n\
          vpn_dns_exclusive = {}\n\
          vpn_fail_closed = {}\n",
         preset.dns,
         preset.doh,
         preset.firewall_zone,
         preset.dns_strict,
+        preset.dnssec,
         preset.vpn_dns_exclusive,
         preset.vpn_fail_closed,
     )
@@ -169,12 +182,12 @@ pub fn render_resolved_conf(preset: &NetworkPreset) -> String {
     // resolved's opportunistic mode so encrypted DNS remains preferred when
     // available without breaking per-link enterprise resolvers.
     //
-    // DNSSEC uses `allow-downgrade`: validate whenever the resolver supports
-    // it, but do not fail lookups when it does not. `DNSSEC=yes` made
-    // resolved reject valid answers from corporate DHCP resolvers that strip
-    // DNSSEC records (hundreds of "no-signature" failures and Bogus verdicts
-    // per boot), which showed up as slow, intermittent name resolution.
-    // Encrypted DNS (DoT) and the public fallbacks are unchanged.
+    // DNSSEC is off by default (`DNSSEC=no`), opt-in via `dnssec` as
+    // `allow-downgrade`. `DNSSEC=yes` made resolved reject every answer from
+    // corporate resolvers that strip DNSSEC records, and `allow-downgrade` did
+    // the same while it re-probed a server after a link change (e.g. dock or
+    // Wi-Fi switch), taking internal names like single-label hosts down. Public
+    // fallbacks and DoT are unchanged.
     // `DNSOverTLS=strict` is a documented opt-in only (`dns_strict`): it
     // breaks captive portals and networks without DoT, so the Hub must have
     // the user choose it explicitly.
@@ -185,8 +198,13 @@ pub fn render_resolved_conf(preset: &NetworkPreset) -> String {
     } else {
         "no"
     };
+    let dnssec = if preset.dnssec {
+        "allow-downgrade"
+    } else {
+        "no"
+    };
     format!(
-        "[Resolve]\nDNS={}\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=allow-downgrade\nDNSOverTLS={tls}\n",
+        "[Resolve]\nDNS={}\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC={dnssec}\nDNSOverTLS={tls}\n",
         dns_ip(preset),
     )
 }
@@ -305,16 +323,23 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
-    fn resolved_conf_never_hard_requires_dnssec() {
-        // `DNSSEC=yes` breaks lookups on resolvers that do not pass DNSSEC
-        // records; every rendered preset must stay on allow-downgrade.
+    fn resolved_conf_does_not_validate_dnssec_unless_opted_in() {
+        // Corporate resolvers strip DNSSEC records; `yes` and even
+        // `allow-downgrade` rejected their answers ("no-signature") while
+        // re-probing after a link change. Off by default, never `yes`.
         for doh in [true, false] {
             let mut preset = NetworkPreset::default();
             preset.doh = doh;
             let conf = render_resolved_conf(&preset);
+            assert!(conf.contains("DNSSEC=no\n"), "{conf}");
+            assert!(!conf.contains("DNSSEC=yes"), "{conf}");
+
+            preset.dnssec = true;
+            let conf = render_resolved_conf(&preset);
             assert!(conf.contains("DNSSEC=allow-downgrade\n"), "{conf}");
             assert!(!conf.contains("DNSSEC=yes"), "{conf}");
         }
+        assert!(!NetworkPreset::default().dnssec);
     }
 
     #[test]
@@ -341,6 +366,7 @@ mod tests {
                 doh: false,
                 firewall_zone: "public".into(),
                 dns_strict: true,
+                dnssec: false,
                 vpn_dns_exclusive: true,
                 vpn_fail_closed: false,
             }
@@ -355,6 +381,7 @@ mod tests {
             doh: false,
             firewall_zone: "work".into(),
             dns_strict: true,
+            dnssec: true,
             vpn_dns_exclusive: true,
             vpn_fail_closed: true,
         };
@@ -399,19 +426,20 @@ mod tests {
         let preset = NetworkPreset::default();
         assert_eq!(
             render_resolved_conf(&preset),
-            "[Resolve]\nDNS=9.9.9.9\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=allow-downgrade\nDNSOverTLS=opportunistic\n"
+            "[Resolve]\nDNS=9.9.9.9\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=no\nDNSOverTLS=opportunistic\n"
         );
         let off = NetworkPreset {
             dns: "off".into(),
             doh: false,
             firewall_zone: "public".into(),
             dns_strict: false,
+            dnssec: false,
             vpn_dns_exclusive: false,
             vpn_fail_closed: false,
         };
         assert_eq!(
             render_resolved_conf(&off),
-            "[Resolve]\nDNS=\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=allow-downgrade\nDNSOverTLS=no\n"
+            "[Resolve]\nDNS=\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=no\nDNSOverTLS=no\n"
         );
         let strict = NetworkPreset {
             dns_strict: true,
@@ -455,7 +483,7 @@ mod tests {
         assert_eq!(written.len(), 1);
         assert_eq!(
             std::fs::read_to_string(&written[0]).unwrap(),
-            "[Resolve]\nDNS=9.9.9.9\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=allow-downgrade\nDNSOverTLS=opportunistic\n"
+            "[Resolve]\nDNS=9.9.9.9\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=no\nDNSOverTLS=opportunistic\n"
         );
     }
 }
