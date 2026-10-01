@@ -192,7 +192,7 @@ def apply_preset(
             installed.append(box)
             if not dry_run:
                 try:
-                    run(["distrobox", "create", "--yes", "--name", box, "--image", "registry.fedoraproject.org/fedora-toolbox:44"], capture_output=True, timeout=300)
+                    run(["distrobox", "create", "--yes", "--name", box, "--image", "registry.fedoraproject.org/fedora-toolbox:45"], capture_output=True, timeout=300)
                 except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                     logger.debug("handled expected exception", exc_info=True)
                     pass

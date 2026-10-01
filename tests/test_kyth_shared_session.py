@@ -50,9 +50,9 @@ class SessionTests(unittest.TestCase):
             argv = (home_path / ".config" / "Code" / "argv.json").read_text(
                 encoding="utf-8"
             )
-            self.assertIn('"password-store": "kwallet5"', argv)
+            self.assertIn('"password-store": "kwallet6"', argv)
             flags = home_path / ".config" / "brave-flags.conf"
-            self.assertIn("--password-store=kwallet5", flags.read_text(encoding="utf-8"))
+            self.assertIn("--password-store=kwallet6", flags.read_text(encoding="utf-8"))
 
     @mock.patch("pathlib.Path.home")
     def test_marker_path(self, mock_home) -> None:
@@ -86,7 +86,7 @@ class SessionTests(unittest.TestCase):
         p = pathlib.Path("/dummy/argv.json")
         write_code_argv(p)
         mock_write.assert_called_once()
-        self.assertIn('"password-store": "kwallet5"', mock_write.call_args[0][0])
+        self.assertIn('"password-store": "kwallet6"', mock_write.call_args[0][0])
 
     @mock.patch("pathlib.Path.is_file")
     @mock.patch("pathlib.Path.read_text")
@@ -97,7 +97,7 @@ class SessionTests(unittest.TestCase):
         p = pathlib.Path("/dummy/flags.conf")
         write_chromium_flags(p)
         mock_write.assert_called_once()
-        self.assertIn("--password-store=kwallet5", mock_write.call_args[0][0])
+        self.assertIn("--password-store=kwallet6", mock_write.call_args[0][0])
 
     @mock.patch("kyth_shared.session.write_chromium_flags")
     @mock.patch("kyth_shared.session.write_code_argv")

@@ -728,16 +728,18 @@ fn brave_desktop_with_kwallet(content: &str) -> String {
             if !line.starts_with("Exec=") {
                 return format!("{line}\n");
             }
-            let mut line = line.replace("--password-store=basic", "--password-store=kwallet5");
-            if !line.contains("--password-store=kwallet5")
-                && !line.contains("--password-store=kwallet")
+            let mut line = line.replace("--password-store=basic", "--password-store=kwallet6");
+            // Migrate the F44-era kwallet5 pin: F45 ships kwalletd6 only, and
+            // Chromium's kwallet5 backend needs the org.kde.kwalletd5 name.
+            line = line.replace("--password-store=kwallet5", "--password-store=kwallet6");
+            if !line.contains("--password-store=kwallet")
             {
                 line = browser
-                    .replace(&line, "$1 --password-store=kwallet5$2")
+                    .replace(&line, "$1 --password-store=kwallet6$2")
                     .into_owned();
                 if !line.contains("flatpak run") {
                     line = executable
-                        .replace(&line, "$1 --password-store=kwallet5$2")
+                        .replace(&line, "$1 --password-store=kwallet6$2")
                         .into_owned();
                 }
             }
@@ -915,14 +917,15 @@ mod tests {
     #[test]
     fn brave_launcher_never_keeps_or_doubles_a_password_store_flag() {
         let basic = "Name=Brave\nExec=/usr/bin/flatpak run --branch=stable --command=brave com.brave.Browser --password-store=basic @@u %U @@\nIcon=x\n";
+        let legacy = "Exec=/usr/bin/flatpak run --command=brave com.brave.Browser --password-store=kwallet5\n";
         let bare = "Exec=/usr/bin/flatpak run --branch=stable --command=brave com.brave.Browser --incognito\n";
-        let done = "Exec=/usr/bin/flatpak run --command=brave com.brave.Browser --password-store=kwallet5\n";
-        for input in [basic, bare, done] {
+        let done = "Exec=/usr/bin/flatpak run --command=brave com.brave.Browser --password-store=kwallet6\n";
+        for input in [basic, legacy, bare, done] {
             let out = brave_desktop_with_kwallet(input);
             assert!(!out.contains("--password-store=basic"), "{out}");
             for exec in out.lines().filter(|l| l.starts_with("Exec=")) {
                 assert_eq!(exec.matches("--password-store=").count(), 1, "{exec}");
-                assert!(exec.contains("--password-store=kwallet5"), "{exec}");
+                assert!(exec.contains("--password-store=kwallet6"), "{exec}");
             }
             // Idempotent: a second pass changes nothing.
             assert_eq!(brave_desktop_with_kwallet(&out), out);

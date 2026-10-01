@@ -205,10 +205,11 @@ Enabled=false
 First Use=false
 EOF
 
-# Plasma normally starts the PAM wallet bridge during login. The live account
-# has no persistent secrets, so keep that bridge out of its autologin session.
-for pam_file in /etc/pam.d/sddm-autologin /usr/lib/pam.d/plasmalogin-autologin; do
-	[ -f "${pam_file}" ] && sed -i '/pam_kwallet/d' "${pam_file}"
+# Plasma normally starts the PAM secrets-provider bridge during login. The live
+# account has no persistent secrets, so keep both bridges (KWallet and the F45
+# oo7 provider) out of its autologin session.
+for pam_file in /etc/pam.d/sddm-autologin /etc/pam.d/plasmalogin-autologin /usr/lib/pam.d/plasmalogin-autologin; do
+	[ -f "${pam_file}" ] && sed -i '/pam_kwallet/d; /pam_oo7/d' "${pam_file}"
 done
 mkdir -p /etc/xdg/autostart /etc/systemd/user
 cat >/etc/xdg/autostart/pam_kwallet_init.desktop <<'EOF'

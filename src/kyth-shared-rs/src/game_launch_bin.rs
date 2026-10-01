@@ -145,7 +145,15 @@ where
                 CHOICES.contains(&state.chosen.as_str()) && CHOICES.contains(&state.active.as_str())
             });
     if !fresh {
-        let _ = regenerate();
+        if let Err(e) = regenerate() {
+            // /run/kyth is the privileged daemon's RuntimeDirectory
+            // (root:wheel 0750); an unprivileged game launch can never refresh
+            // the arbiter, and the daemon owns that job — stay silent there,
+            // but report anything unexpected instead of swallowing it.
+            if e.kind() != std::io::ErrorKind::PermissionDenied {
+                eprintln!("warning: scheduler arbiter refresh failed: {e}");
+            }
+        }
     }
 }
 

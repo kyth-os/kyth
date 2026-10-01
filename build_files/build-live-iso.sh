@@ -117,7 +117,7 @@ echo "==> Assembling ISO with Titanoboa"
 	--mount type=image,source="${LIVE_TAG}",dst=/rootfs \
 	-v "${WORK}:/output" \
 	quay.io/fedora/fedora:44 /src/build_iso.sh
-mv "${WORK}/KYTHOS-44-LIVE.iso" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
+mv "${WORK}/KYTHOS-45-LIVE.iso" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 sudo chown "$(id -u):$(id -g)" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 test -r "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 test -w "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"

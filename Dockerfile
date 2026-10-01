@@ -201,7 +201,6 @@ RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=bind,source=build_files/scripts/packages,target=/ctx/packages \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-microsoft,target=/ctx/RPM-GPG-KEY-microsoft \
-    --mount=type=bind,source=build_files/RPM-GPG-KEY-google-antigravity,target=/ctx/RPM-GPG-KEY-google-antigravity \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \

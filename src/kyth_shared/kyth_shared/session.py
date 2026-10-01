@@ -55,7 +55,7 @@ def write_code_argv(path: Path) -> None:
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             logger.debug("handled expected exception", exc_info=True)
             pass
-    data["password-store"] = "kwallet5"
+    data["password-store"] = "kwallet6"
     try:
         path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
@@ -64,7 +64,7 @@ def write_code_argv(path: Path) -> None:
 
 
 def write_chromium_flags(path: Path) -> None:
-    """Configure password store to kwallet5 in Chromium/Brave flags file."""
+    """Configure password store to kwallet6 in Chromium/Brave flags file."""
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
@@ -84,13 +84,13 @@ def write_chromium_flags(path: Path) -> None:
         stripped = line.strip()
         if stripped.startswith("--password-store=") or stripped.startswith("password-store="):
             if not wrote_password_store:
-                updated.append("--password-store=kwallet5")
+                updated.append("--password-store=kwallet6")
                 wrote_password_store = True
             continue
         updated.append(line)
 
     if not wrote_password_store:
-        updated.append("--password-store=kwallet5")
+        updated.append("--password-store=kwallet6")
 
     try:
         path.write_text("\n".join(updated).rstrip() + "\n", encoding="utf-8")

@@ -8,7 +8,7 @@ dnf5 install -y \
 	plasma-login-manager
 dnf5 install -y --skip-unavailable \
 	kcm-plasmalogin \
-	kwallet-pam \
+	pam-kwallet \
 	fprintd \
 	fprintd-pam \
 	pcsc-lite \

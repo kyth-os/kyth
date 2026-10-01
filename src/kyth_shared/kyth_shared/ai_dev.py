@@ -17,7 +17,7 @@ from .commands import run
 logger = logging.getLogger(__name__)
 
 DEFAULT_BOX = "kyth-ai-dev"
-DEFAULT_IMAGE = "registry.fedoraproject.org/fedora-toolbox:44"
+DEFAULT_IMAGE = "registry.fedoraproject.org/fedora-toolbox:45"
 DEFAULT_MODEL = "qwen2.5-coder"
 
 # Kept as one shell program because it runs *inside* the container and relies on

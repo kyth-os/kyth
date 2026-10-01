@@ -578,13 +578,16 @@ def main() -> None:
             new_lines = []
             for line in lines:
                 if line.startswith("Exec="):
-                    # Migrate legacy basic store to kwallet5; ensure kwallet5 is present
+                    # Migrate legacy basic/kwallet5 stores to kwallet6; ensure a
+                    # kwallet-family store is present. F45 ships kwalletd6 only.
                     if "--password-store=basic" in line:
-                        line = line.replace("--password-store=basic", "--password-store=kwallet5")
-                    if "--password-store=kwallet5" not in line and "--password-store=kwallet" not in line:
-                        line = re.sub(r"(com\.brave\.Browser)(\s|$)", r"\1 --password-store=kwallet5\2", line)
+                        line = line.replace("--password-store=basic", "--password-store=kwallet6")
+                    if "--password-store=kwallet5" in line:
+                        line = line.replace("--password-store=kwallet5", "--password-store=kwallet6")
+                    if "--password-store=kwallet" not in line:
+                        line = re.sub(r"(com\.brave\.Browser)(\s|$)", r"\1 --password-store=kwallet6\2", line)
                         if "flatpak run" not in line:
-                            line = re.sub(r"(brave-browser|brave)(\s|$)", r"\1 --password-store=kwallet5\2", line)
+                            line = re.sub(r"(brave-browser|brave)(\s|$)", r"\1 --password-store=kwallet6\2", line)
                 new_lines.append(line)
             atomic_write_text(brave_desktop_dst, "".join(new_lines), encoding="utf-8")
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path

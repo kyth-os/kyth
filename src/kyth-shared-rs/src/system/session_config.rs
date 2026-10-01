@@ -15,7 +15,7 @@ pub fn update_code_argv(raw: Option<&str>) -> String {
         .unwrap_or_else(|| serde_json::json!({}));
     value.as_object_mut().unwrap().insert(
         "password-store".into(),
-        serde_json::Value::String("kwallet5".into()),
+        serde_json::Value::String("kwallet6".into()),
     );
     format!(
         "{}\n",
@@ -31,7 +31,7 @@ pub fn update_chromium_flags(raw: Option<&str>) -> String {
         let stripped = line.trim();
         if stripped.starts_with("--password-store=") || stripped.starts_with("password-store=") {
             if !wrote {
-                updated.push("--password-store=kwallet5".to_string());
+                updated.push("--password-store=kwallet6".to_string());
                 wrote = true;
             }
         } else {
@@ -39,7 +39,7 @@ pub fn update_chromium_flags(raw: Option<&str>) -> String {
         }
     }
     if !wrote {
-        updated.push("--password-store=kwallet5".into());
+        updated.push("--password-store=kwallet6".into());
     }
     format!("{}\n", updated.join("\n").trim_end())
 }
@@ -185,10 +185,10 @@ mod tests {
     #[test]
     fn updates_code_json_and_recovers_from_malformed_input() {
         assert!(update_code_argv(Some(r#"{"theme":"dark"}"#))
-            .contains("\"password-store\": \"kwallet5\""));
+            .contains("\"password-store\": \"kwallet6\""));
         assert_eq!(
             update_code_argv(Some("bad json")),
-            "{\n  \"password-store\": \"kwallet5\"\n}\n"
+            "{\n  \"password-store\": \"kwallet6\"\n}\n"
         );
     }
 
@@ -197,7 +197,7 @@ mod tests {
         let output =
             update_chromium_flags(Some("--foo\n--password-store=basic\npassword-store=old\n"));
         assert_eq!(output.matches("password-store=").count(), 1);
-        assert!(output.contains("--password-store=kwallet5"));
+        assert!(output.contains("--password-store=kwallet6"));
     }
 
     #[test]
@@ -218,11 +218,11 @@ mod tests {
         enable_vscode_brave_wallet_prompts(home.path());
         enable_vscode_brave_wallet_prompts(home.path());
         let argv = std::fs::read_to_string(home.path().join(".config/Code/argv.json")).unwrap();
-        assert!(argv.contains("kwallet5"));
+        assert!(argv.contains("kwallet6"));
         for path in chromium_flags_paths(home.path()) {
             let content = std::fs::read_to_string(&path).unwrap();
             assert_eq!(content.matches("password-store=").count(), 1, "{path:?}");
-            assert!(content.contains("--password-store=kwallet5"));
+            assert!(content.contains("--password-store=kwallet6"));
         }
     }
 
@@ -243,7 +243,7 @@ mod tests {
         write_code_argv_file(&path);
         let merged = std::fs::read_to_string(&path).unwrap();
         assert!(merged.contains("dark"));
-        assert!(merged.contains("kwallet5"));
+        assert!(merged.contains("kwallet6"));
         // Force restore brings back the exact pre-write bytes.
         std::fs::write(&path, "clobbered").unwrap();
         use std::os::unix::fs::PermissionsExt;

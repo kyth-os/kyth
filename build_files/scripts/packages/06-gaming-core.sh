@@ -22,7 +22,7 @@ done
 # steam and lutris are intentionally absent as RPMs — both are installed as
 # Flatpaks by kyth-default-flatpaks.service so the immutable base stays lean
 # while the first-boot gaming experience is ready out of the box.
-# umu-launcher is intentionally absent here — not in bazzite COPR for Fedora 44;
+# umu-launcher is intentionally absent here — not in bazzite COPR for Fedora 45;
 # installed from GitHub releases in thirdparty.sh instead.
 #
 # Keep native x86_64 packages aligned before adding their i686 multilib builds.
@@ -52,9 +52,10 @@ if is_enabled "${ENABLE_GAMING_CORE:-1}"; then
 fi
 
 # gamescope-shaders (Reshade effects under /usr/share/gamescope/reshade) lives in
-# ublue-os/bazzite COPR but currently has no Fedora 44 build — only fedora-43.
-# Keep it in the install list so it lands when COPR catches up; do not fail-closed
-# on it (see required_gaming_rpms below).
+# ublue-os/bazzite COPR; the fedora-45 chroot has almost no builds yet, so it
+# (like the controller drivers below) is installed with --skip-unavailable and
+# lands automatically when COPR catches up. Do not fail-closed on it (see
+# required_gaming_rpms below).
 dnf_retry install -y --skip-unavailable --exclude=libde265.i686 \
 	gamescope \
 	gamescope-shaders \
@@ -82,7 +83,6 @@ dnf_retry install -y --skip-unavailable --exclude=libde265.i686 \
 	"${multilib_pkgs[@]}"
 
 # --skip-unavailable must not silently drop the x86_64 gaming stack.
-# gamescope-shaders is intentionally omitted: no F44 COPR build yet (optional).
 required_gaming_rpms=(
 	gamescope
 	mangohud
@@ -98,6 +98,27 @@ done
 if ((${#missing_gaming_rpms[@]})); then
 	echo "ERROR: required gaming packages missing after install: ${missing_gaming_rpms[*]}" >&2
 	exit 1
+fi
+
+# Controller drivers and shader packs come from the bazzite COPR, whose
+# fedora-45 chroot may lag the Fedora release. They are best-effort, but a
+# silent skip means shipping an image without Xbox/PS5 controller support —
+# say so loudly so the missing builds get noticed.
+copr_best_effort_rpms=(
+	xpadneo
+	xone
+	dualsensectl
+	joycond
+	gamescope-shaders
+)
+skipped_copr_rpms=()
+for pkg in "${copr_best_effort_rpms[@]}"; do
+	if ! rpm -q "${pkg}" >/dev/null 2>&1; then
+		skipped_copr_rpms+=("${pkg}")
+	fi
+done
+if ((${#skipped_copr_rpms[@]})); then
+	echo "WARNING: bazzite COPR packages unavailable for this Fedora release, skipped: ${skipped_copr_rpms[*]}" >&2
 fi
 
 # Guards against a package landing in only one of x86_64/i686 (see
