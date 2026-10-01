@@ -88,6 +88,24 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn("kyth-performance-mode gaming", start)
         self.assertIn("kyth-performance-mode restore", end)
 
+    def test_gamemode_helpers_are_authorized_for_the_admin_user(self):
+        """Nothing adds a KythOS user to the "gamemode" group, so its polkit rule never applied.
+
+        Every launch logged ~150 "pkexec ... cpugovctl set performance: Not authorized".
+        The admin (wheel) user must get exactly the four GameMode helper actions.
+        """
+        body = (FRAG_DIR / "gaming" / "14-gamemode-configuration.sh").read_text(
+            encoding="utf-8"
+        )
+        rule = body.split("<<'GAMEMODEPOLKITEOF'\n", 1)[1].split("\nGAMEMODEPOLKITEOF", 1)[0]
+        for helper in ("governor", "gpu", "cpu", "procsys"):
+            self.assertIn(f"com.feralinteractive.GameMode.{helper}-helper", rule)
+        self.assertIn('subject.isInGroup("wheel")', rule)
+        self.assertEqual(rule.count("com.feralinteractive.GameMode."), 4, "no extra actions")
+        self.assertNotIn("polkit.Result.AUTH", rule)
+        self.assertIn("/usr/share/polkit-1/rules.d/49-kyth-gamemode.rules", body)
+        self.assertIn("@wheel - nice -10", body)
+
     def test_dxvk_defaults_do_not_enable_async(self):
         body = (FRAG_DIR / "gaming" / "47-dxvk-async.sh").read_text(encoding="utf-8")
         self.assertIn("DXVK_CONFIG_FILE=/etc/dxvk.conf", body)
