@@ -59,6 +59,11 @@ fn refresh_marker_path(operation: &str, home: Option<&std::ffi::OsStr>) -> PathB
     }
 }
 
+/// Only a clean install may stamp the sentinel; anything else is retried next boot.
+fn default_flatpaks_succeeded(result: &ExitCode) -> bool {
+    *result == ExitCode::SUCCESS
+}
+
 #[derive(Debug, PartialEq, Eq)]
 enum FlathubSetup {
     /// The remote is already configured: nothing to fetch.
@@ -2218,8 +2223,14 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
                 &args,
                 kyth_shared::default_flatpaks::INSTALL_TIMEOUT,
             )?;
-            if result != ExitCode::SUCCESS {
-                return Ok(result);
+            if !default_flatpaks_succeeded(&result) {
+                // Documented contract (kyth-default-flatpaks.service): a flaky
+                // first-online pull exits 0 and leaves the sentinel unset, so
+                // the next boot retries. Failing here put the unit in
+                // `systemctl --failed` on every boot where DNS was not up yet
+                // ("Could not resolve hostname" 8 s after boot).
+                eprintln!("default-flatpaks: install did not complete; will retry next boot");
+                return Ok(ExitCode::SUCCESS);
             }
             let sentinel = kyth_shared::default_flatpaks::sentinel_path();
             write_atomic(Path::new(&sentinel), b"done\n")?;
@@ -2288,6 +2299,13 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_flatpaks_only_stamps_on_a_clean_install() {
+        assert!(default_flatpaks_succeeded(&ExitCode::SUCCESS));
+        assert!(!default_flatpaks_succeeded(&ExitCode::from(1)));
+        assert!(!default_flatpaks_succeeded(&ExitCode::from(2)));
+    }
 
     #[test]
     fn flathub_setup_is_idempotent_and_offline_safe() {
