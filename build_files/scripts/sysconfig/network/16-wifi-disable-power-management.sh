@@ -73,8 +73,20 @@ if [[ -f /etc/kyth/wifi-powersave.conf ]]; then
 fi
 
 # Gaming opts out of powersave: kyth-game-launch drops a per-user
-# /run/kyth-gaming/hint-<uid> (not under root-only /run/kyth).
-if compgen -G '/run/kyth-gaming/hint-*' >/dev/null; then
+# /run/kyth-gaming/hint-<uid> holding the game PID (not under root-only /run/kyth).
+# The launcher execs the game, so the PID lives exactly as long as the session;
+# a hint whose PID is gone is stale and ignored. Unparseable content fails
+# toward gaming mode (legacy constant-content hints predate the PID format).
+gaming_live=0
+for hint in /run/kyth-gaming/hint-*; do
+    [[ -f "${hint}" ]] || continue
+    pid="$(cat "${hint}" 2>/dev/null)" || continue
+    case "${pid}" in
+        ''|*[!0-9]*) gaming_live=1; break ;;
+    esac
+    if kill -0 "${pid}" 2>/dev/null; then gaming_live=1; break; fi
+done
+if ((gaming_live)); then
     iw dev "${iface}" set power_save off >/dev/null 2>&1 || true
     exit 0
 fi

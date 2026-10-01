@@ -52,10 +52,9 @@ if is_enabled "${ENABLE_GAMING_CORE:-1}"; then
 fi
 
 # gamescope-shaders (Reshade effects under /usr/share/gamescope/reshade) lives in
-# ublue-os/bazzite COPR; the fedora-45 chroot has almost no builds yet, so it
-# (like the controller drivers below) is installed with --skip-unavailable and
-# lands automatically when COPR catches up. Do not fail-closed on it (see
-# required_gaming_rpms below).
+# ublue-os/bazzite COPR. The fedora-45 chroot carried a stale fc43 noarch build
+# (functional — shader data is arch-independent), so it installs normally now;
+# the controller drivers below are still best-effort until COPR catches up.
 dnf_retry install -y --skip-unavailable --exclude=libde265.i686 \
 	gamescope \
 	gamescope-shaders \
@@ -109,7 +108,6 @@ copr_best_effort_rpms=(
 	xone
 	dualsensectl
 	joycond
-	gamescope-shaders
 )
 skipped_copr_rpms=()
 for pkg in "${copr_best_effort_rpms[@]}"; do

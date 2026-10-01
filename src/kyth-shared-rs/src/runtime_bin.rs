@@ -66,12 +66,27 @@ fn refresh_marker_path(operation: &str, home: Option<&std::ffi::OsStr>) -> PathB
     }
 }
 
-/// True when any user has a running-game hint (`hint-<uid>`) in `dir`.
+/// True when any user has a *live* running-game hint (`hint-<uid>`) in `dir`.
+/// The hint file holds the launcher PID (`kyth-game-launch` execs the game, so
+/// the PID stays valid for the whole session and dies with it); a hint whose
+/// PID is gone is stale and ignored. Unparseable content counts as active —
+/// fail toward gaming mode — and `/run` is tmpfs, so legacy constant-content
+/// hints cannot survive a reboot anyway.
 fn gaming_hint_active(dir: &Path) -> bool {
     fs::read_dir(dir).is_ok_and(|entries| {
-        entries
-            .flatten()
-            .any(|entry| entry.file_name().to_string_lossy().starts_with("hint-"))
+        entries.flatten().any(|entry| {
+            if !entry.file_name().to_string_lossy().starts_with("hint-") {
+                return false;
+            }
+            let pid: u32 = match fs::read_to_string(entry.path()) {
+                Ok(contents) => match contents.trim().parse() {
+                    Ok(pid) => pid,
+                    Err(_) => return true,
+                },
+                Err(_) => return true,
+            };
+            Path::new(&format!("/proc/{pid}")).exists()
+        })
     })
 }
 
@@ -2357,7 +2372,24 @@ mod tests {
         assert!(!gaming_hint_active(&dir.path().join("missing")));
         fs::write(dir.path().join("unrelated"), "1").unwrap();
         assert!(!gaming_hint_active(dir.path()));
-        fs::write(dir.path().join("hint-1000"), "1").unwrap();
+        // Live hint: the test process's own PID is necessarily alive.
+        let live_pid = std::process::id().to_string();
+        fs::write(dir.path().join("hint-1000"), &live_pid).unwrap();
+        assert!(gaming_hint_active(dir.path()));
+    }
+
+    #[test]
+    fn gaming_hint_with_dead_pid_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        // u32::MAX can never be a live PID.
+        fs::write(dir.path().join("hint-1000"), u32::MAX.to_string()).unwrap();
+        assert!(!gaming_hint_active(dir.path()));
+    }
+
+    #[test]
+    fn gaming_hint_unparseable_content_fails_safe_to_active() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("hint-1000"), "not-a-pid").unwrap();
         assert!(gaming_hint_active(dir.path()));
     }
 

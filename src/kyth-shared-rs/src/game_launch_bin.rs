@@ -56,6 +56,11 @@ fn parse_args(args: &[String]) -> (bool, Vec<String>) {
 /// game launch could never create the hint there and the Wi-Fi power-save and
 /// NVMe read-ahead gaming modes silently never engaged. This one is created
 /// 1777 (sticky) at boot by tmpfiles.d; each user only touches their own file.
+///
+/// The file holds the launcher PID, not a constant: `launch()` execs the game
+/// (or a `systemd-run --scope` that waits for it), so the PID stays valid for
+/// the whole session and dies with it. Consumers treat a hint whose PID is
+/// gone as stale.
 const GAMING_HINT_DIR: &str = "/run/kyth-gaming";
 
 fn gaming_hint_path() -> String {
@@ -66,7 +71,12 @@ fn gaming_hint_path() -> String {
 }
 
 fn mark_gaming_hint() {
-    if std::fs::write(gaming_hint_path(), "1").is_err() {
+    // Record our PID: launch() below execs into the game (or into a
+    // systemd-run --scope that waits for it), so this PID remains valid for
+    // the entire session. The old constant content could only be removed on
+    // the exec-failure path, leaking the hint — and the gaming tunables —
+    // until reboot after every successful launch.
+    if std::fs::write(gaming_hint_path(), std::process::id().to_string()).is_err() {
         return;
     }
     if on_path("kyth-readahead-hint") {
