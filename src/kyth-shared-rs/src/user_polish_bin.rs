@@ -732,8 +732,7 @@ fn brave_desktop_with_kwallet(content: &str) -> String {
             // Migrate the F44-era kwallet5 pin: F45 ships kwalletd6 only, and
             // Chromium's kwallet5 backend needs the org.kde.kwalletd5 name.
             line = line.replace("--password-store=kwallet5", "--password-store=kwallet6");
-            if !line.contains("--password-store=kwallet")
-            {
+            if !line.contains("--password-store=kwallet") {
                 line = browser
                     .replace(&line, "$1 --password-store=kwallet6$2")
                     .into_owned();
