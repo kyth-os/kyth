@@ -180,6 +180,47 @@ fn deployment_line(line: &str) -> bool {
     }) && _version.is_some()
 }
 
+/// `major.minor` from `python3 --version` output ("Python 3.15.0rc2" -> "3.15").
+pub fn python_minor(version_output: &str) -> Option<String> {
+    let version = version_output.trim().strip_prefix("Python ")?;
+    let mut parts = version.split('.');
+    let major = parts.next()?;
+    let minor: String = parts
+        .next()?
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    (!major.is_empty() && major.chars().all(|c| c.is_ascii_digit()) && !minor.is_empty())
+        .then(|| format!("{major}.{minor}"))
+}
+
+/// Warn when `pip install --user` / pipx packages were installed for a Python
+/// that is no longer the system one. A Fedora release that moves Python
+/// (3.14 -> 3.15) leaves `~/.local/lib/python3.14` behind: every script in
+/// `~/.local/bin` whose shebang is `/usr/bin/python` then dies with
+/// `ModuleNotFoundError`, and user services that run them restart forever.
+///
+/// `user_site_minors` are the `X.Y` suffixes of `~/.local/lib/pythonX.Y`.
+pub fn stale_user_python_warning(
+    system_minor: &str,
+    user_site_minors: &[String],
+) -> Option<String> {
+    if system_minor.is_empty() || user_site_minors.iter().any(|m| m == system_minor) {
+        return None;
+    }
+    let mut stale: Vec<&str> = user_site_minors.iter().map(String::as_str).collect();
+    stale.sort_unstable();
+    stale.dedup();
+    if stale.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "User Python packages in ~/.local/lib/python{} were built for an older Python than the system's {system_minor}; \
+         scripts in ~/.local/bin may fail with ModuleNotFoundError. Reinstall them (pip install --user / pipx reinstall-all).",
+        stale.join(", python"),
+    ))
+}
+
 pub fn login_session_check(loginctl_available: bool, command_succeeded: bool) -> DriverCheck {
     DriverCheck {
         label: "Login session".into(),
@@ -216,6 +257,35 @@ pub fn service_detail(active: bool, result: Option<&str>) -> (&'static str, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn parses_python_minor() {
+        assert_eq!(python_minor("Python 3.15.0rc2\n").as_deref(), Some("3.15"));
+        assert_eq!(python_minor("Python 3.14.7").as_deref(), Some("3.14"));
+        assert_eq!(python_minor("Python 3.9.1+").as_deref(), Some("3.9"));
+        assert_eq!(python_minor("python3: not found"), None);
+        assert_eq!(python_minor(""), None);
+    }
+
+    #[test]
+    fn stale_user_python_is_flagged_only_when_the_system_version_is_missing() {
+        let user = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        // Matching version present (even alongside an old one): fine.
+        assert_eq!(
+            stale_user_python_warning("3.15", &user(&["3.14", "3.15"])),
+            None
+        );
+        assert_eq!(stale_user_python_warning("3.15", &user(&["3.15"])), None);
+        // No user site at all: nothing to warn about.
+        assert_eq!(stale_user_python_warning("3.15", &[]), None);
+        // Unknown system version: stay silent rather than guess.
+        assert_eq!(stale_user_python_warning("", &user(&["3.14"])), None);
+        // The F44 -> F45 case.
+        let warning = stale_user_python_warning("3.15", &user(&["3.14", "3.14"])).unwrap();
+        assert!(warning.contains("python3.14"), "{warning}");
+        assert!(warning.contains("system's 3.15"), "{warning}");
+        assert!(!warning.contains("python3.14, python3.14"), "{warning}");
+    }
 
     #[test]
     fn parses_live_image_and_deployments() {

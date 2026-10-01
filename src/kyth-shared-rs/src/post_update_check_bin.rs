@@ -161,6 +161,34 @@ fn main() -> std::process::ExitCode {
         warnings.push(vulkan.detail);
     }
 
+    let system_python = run("/usr/bin/python3", &["--version"], 5)
+        .and_then(|(ok, text)| ok.then_some(text))
+        .and_then(|text| kyth_shared::system::runtime_diagnostics::python_minor(&text));
+    let user_site_minors = std::fs::read_dir(home.join(".local/lib"))
+        .map(|entries| {
+            entries
+                .filter_map(Result::ok)
+                .filter(|entry| entry.path().is_dir())
+                .filter_map(|entry| {
+                    entry
+                        .file_name()
+                        .to_str()
+                        .and_then(|name| name.strip_prefix("python"))
+                        .filter(|rest| rest.split('.').count() == 2)
+                        .map(str::to_string)
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    if let Some(warning) = system_python.as_deref().and_then(|minor| {
+        kyth_shared::system::runtime_diagnostics::stale_user_python_warning(
+            minor,
+            &user_site_minors,
+        )
+    }) {
+        warnings.push(warning);
+    }
+
     if !command_exists("flatpak") {
         failures.push("Flatpak is missing.".into());
     }
