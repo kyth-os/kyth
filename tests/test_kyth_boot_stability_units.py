@@ -325,6 +325,29 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("--deepestcache=2", body)
         self.assertNotIn("write_config /etc/sysconfig/irqbalance", late)
 
+    def test_system_accounts_unit_cannot_form_an_ordering_cycle(self) -> None:
+        """After=local-fs.target and Before=systemd-sysusers.service are a cycle.
+
+        sysusers < tmpfiles-setup-dev < local-fs-pre.target < local-fs.target, so a
+        unit After=local-fs.target cannot also be Before=sysusers. systemd resolved
+        it by deleting a job on every boot, and validate.sh used to mask the
+        warning, which is how it shipped.
+        """
+        body = (
+            ROOT / "build_files/scripts/sysconfig/desktop/09-autostart-log-noise-guards.sh"
+        ).read_text(encoding="utf-8")
+        unit = body.split("SYSACCOUNTUNITEOF", 1)[1].split("SYSACCOUNTUNITEOF", 1)[0]
+        directives = [line for line in unit.splitlines() if not line.lstrip().startswith("#")]
+        after = " ".join(line for line in directives if line.startswith("After="))
+        before = " ".join(line for line in directives if line.startswith("Before="))
+        self.assertIn("local-fs.target", after)
+        self.assertNotIn("systemd-sysusers.service", before)
+        # It must still run before the consumers of the merged account databases.
+        self.assertIn("systemd-tmpfiles-setup.service", before)
+        self.assertIn("systemd-udevd.service", before)
+        validate = (ROOT / "build_files/scripts/validate.sh").read_text(encoding="utf-8")
+        self.assertNotIn("kyth-system-accounts\\.service): ", validate)
+
     def test_dbus_runtime_dir_stays_active_after_mkdir(self) -> None:
         body = (
             ROOT / "build_files/scripts/sysconfig/desktop/09-autostart-log-noise-guards.sh"

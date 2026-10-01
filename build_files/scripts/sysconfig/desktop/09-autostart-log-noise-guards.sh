@@ -59,7 +59,13 @@ After=local-fs.target ostree-remount.service
 # visible when they parse static-nodes/udev rules — otherwise every boot
 # logs "Failed to resolve group 'audio': Unknown group" (see host journal).
 Before=dbus.socket dbus-broker.service sockets.target plasmalogin.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
-Before=systemd-tmpfiles-setup.service systemd-sysusers.service
+# NOT Before=systemd-sysusers.service: sysusers runs before tmpfiles-setup-dev,
+# which precedes local-fs-pre.target, which precedes local-fs.target - and this
+# unit is After=local-fs.target (it needs a writable /var). Declaring both makes
+# an ordering cycle that systemd breaks on every boot by deleting a job
+# ("Found ordering cycle ... Job ... deleted"). sysusers does not need the
+# merged /etc databases; tmpfiles-setup (ordered below) does.
+Before=systemd-tmpfiles-setup.service
 
 [Service]
 Type=oneshot
