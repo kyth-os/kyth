@@ -56,9 +56,9 @@ const SPECS: &[Spec] = &[
     Spec { config: "min-free-kbytes.toml", drop_in: "99-kyth-min-free-kbytes.conf", comment: "Kyth min free kbytes", payload: "vm.min_free_kbytes=131072\n" },
     Spec { config: "somaxconn.toml", drop_in: "99-kyth-somaxconn.conf", comment: "Kyth somaxconn", payload: "net.core.somaxconn=8192\n" },
     Spec { config: "sched-autogroup.toml", drop_in: "99-kyth-sched-autogroup.conf", comment: "Kyth autogroup", payload: "kernel.sched_autogroup_enabled=0\n" },
-    Spec { config: "sched-child.toml", drop_in: "99-kyth-sched-child.conf", comment: "Kyth sched child", payload: "kernel.sched_child_runs_first=0\n" },
-    Spec { config: "sched-nr-migrate.toml", drop_in: "99-kyth-sched-nr-migrate.conf", comment: "Kyth nr migrate", payload: "kernel.sched_nr_migrate=64\n" },
-    Spec { config: "sched-latency.toml", drop_in: "99-kyth-sched-latency.conf", comment: "Kyth sched latency", payload: "kernel.sched_latency_ns = 6000000\nkernel.sched_min_granularity_ns = 1000000\nkernel.sched_wakeup_granularity_ns = 1000000\nkernel.sched_migration_cost_ns = 500000\nkernel.sched_nr_migrate = 32\n" },
+    Spec { config: "sched-child.toml", drop_in: "99-kyth-sched-child.conf", comment: "Kyth sched child", payload: "-kernel.sched_child_runs_first=0\n" },
+    Spec { config: "sched-nr-migrate.toml", drop_in: "99-kyth-sched-nr-migrate.conf", comment: "Kyth nr migrate", payload: "-kernel.sched_nr_migrate=64\n" },
+    Spec { config: "sched-latency.toml", drop_in: "99-kyth-sched-latency.conf", comment: "Kyth sched latency", payload: "-kernel.sched_latency_ns = 6000000\n-kernel.sched_min_granularity_ns = 1000000\n-kernel.sched_wakeup_granularity_ns = 1000000\n-kernel.sched_migration_cost_ns = 500000\n-kernel.sched_nr_migrate = 32\n" },
     Spec { config: "file-max.toml", drop_in: "99-kyth-file-max.conf", comment: "Kyth file max", payload: "fs.file-max=2097152\n" },
     Spec { config: "tcp-mtu-probing.toml", drop_in: "99-kyth-tcp-mtu-probing.conf", comment: "Kyth tcp mtu probing", payload: "net.ipv4.tcp_mtu_probing=1\n" },
     Spec { config: "vm-watermark.toml", drop_in: "99-kyth-vm-watermark.conf", comment: "Kyth vm watermark", payload: "vm.watermark_scale_factor=500\n" },
@@ -513,6 +513,26 @@ pub fn normalize_profile(value: Option<&str>) -> Profile {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn kernel_scheduler_keys_removed_in_6_6_are_optional_in_every_profile() {
+        // The CFS knobs (sched_latency_ns, sched_nr_migrate, ...) were removed
+        // with EEVDF, so an unprefixed line makes `sysctl --system` print an
+        // error on every boot. Each must carry the `-` ignore-missing prefix.
+        for spec in SPECS {
+            for line in spec.payload.lines() {
+                let key = line.split('=').next().unwrap_or("").trim();
+                let bare = key.trim_start_matches('-');
+                if bare.starts_with("kernel.sched_") && bare != "kernel.sched_autogroup_enabled" {
+                    assert!(
+                        key.starts_with('-'),
+                        "{}: {key} must be -prefixed",
+                        spec.config
+                    );
+                }
+            }
+        }
+    }
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;

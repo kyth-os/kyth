@@ -818,7 +818,11 @@ pub fn save_epp_ac(path: impl AsRef<Path>, config: &EppAcConfig) -> std::io::Res
     )
 }
 pub fn epp_ac_rule(config: &EppAcConfig) -> Option<&'static str> {
-    config.enabled.then_some("# Kyth EPP AC — generated\nSUBSYSTEM==\"power_supply\", ATTR{online}==\"1\", RUN+=\"/usr/bin/sh -c 'echo performance > /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference'\"\nSUBSYSTEM==\"power_supply\", ATTR{online}==\"0\", RUN+=\"/usr/bin/sh -c 'echo balance_performance > /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference'\"\n")
+    // A glob is not expanded in a redirection target, so `echo x > cpu*/...`
+    // never wrote anything. `tee` takes the shell-expanded paths as arguments.
+    // No `$` (udev substitutes it) and no inner double quote (it would end the
+    // RUN value, and udev then drops the whole line).
+    config.enabled.then_some("# Kyth EPP AC — generated\nSUBSYSTEM==\"power_supply\", ATTR{online}==\"1\", RUN+=\"/usr/bin/sh -c 'echo performance | /usr/bin/tee /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference >/dev/null'\"\nSUBSYSTEM==\"power_supply\", ATTR{online}==\"0\", RUN+=\"/usr/bin/sh -c 'echo balance_performance | /usr/bin/tee /sys/devices/system/cpu/cpu*/cpufreq/energy_performance_preference >/dev/null'\"\n")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -924,6 +928,62 @@ pub fn save_selinux(path: impl AsRef<Path>, config: &SelinuxConfig) -> std::io::
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn epp_ac_rule_writes_every_cpu_not_a_literal_glob() {
+        // `echo x > /sys/.../cpu*/...` does not expand a glob in a redirection
+        // target (and is an "ambiguous redirect" with several matches), so the
+        // rule never changed any CPU's EPP. Run the rule's command for real.
+        let rule = epp_ac_rule(&EppAcConfig { enabled: true }).expect("rule");
+        let dir = tempfile::tempdir().unwrap();
+        for cpu in 0..3 {
+            let freq = dir.path().join(format!("cpu{cpu}/cpufreq"));
+            std::fs::create_dir_all(&freq).unwrap();
+            std::fs::write(freq.join("energy_performance_preference"), "balance_power").unwrap();
+        }
+        for (online, expected) in [("1", "performance"), ("0", "balance_performance")] {
+            let line = rule
+                .lines()
+                .find(|l| l.contains(&format!("ATTR{{online}}==\"{online}\"")))
+                .expect("rule line");
+            let start = line.find("sh -c '").expect("sh -c") + "sh -c '".len();
+            let command = line[start..line.rfind('\'').unwrap()]
+                .replace("/sys/devices/system/cpu", dir.path().to_str().unwrap());
+            let status = std::process::Command::new("/bin/sh")
+                .args(["-c", &command])
+                .status()
+                .unwrap();
+            assert!(status.success(), "rule command failed: {command}");
+            for cpu in 0..3 {
+                let value = std::fs::read_to_string(
+                    dir.path()
+                        .join(format!("cpu{cpu}/cpufreq/energy_performance_preference")),
+                )
+                .unwrap();
+                assert_eq!(value.trim(), expected, "cpu{cpu} online={online}");
+            }
+        }
+    }
+
+    #[test]
+    fn epp_ac_rule_is_valid_udev_syntax() {
+        // A double quote inside the RUN value ends it early; udev then ignores
+        // the whole line ("Invalid key/value pair"). `$` is also substituted.
+        let rule = epp_ac_rule(&EppAcConfig { enabled: true }).expect("rule");
+        for line in rule
+            .lines()
+            .filter(|l| !l.starts_with('#') && !l.is_empty())
+        {
+            let run = &line[line.find("RUN+=\"").unwrap() + 5..];
+            assert!(run.ends_with('"'), "{line}");
+            assert_eq!(
+                run.matches('"').count(),
+                2,
+                "inner quote would end the RUN value: {line}"
+            );
+            assert!(!run.contains('$'), "udev substitutes `$`: {line}");
+        }
+    }
+
     use super::*;
     use tempfile::tempdir;
 
