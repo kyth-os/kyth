@@ -44,6 +44,13 @@ fn home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
+/// Root-owned boot markers live here, NOT in `/run/kyth`. That directory is
+/// `kyth-privileged.service`'s `RuntimeDirectory=`; when a marker already exists
+/// in it as root:root, systemd tries to re-own it to the unit's group and
+/// SELinux denies `init_t` the setattr, so the daemon fails its first start
+/// (status=233/RUNTIME_DIRECTORY) before recovering on the 2 s restart.
+const BOOT_STATE_DIR: &str = "/run/kyth-state";
+
 /// Where a guard records its last refresh. `kyth-boot-branding.service` is a
 /// system unit: `HOME` is unset there, `home()` falls back to `/`, and the write
 /// to `/.config/kyth` hit the read-only ostree root ("Read-only file system"),
@@ -54,9 +61,18 @@ fn refresh_marker_path(operation: &str, home: Option<&std::ffi::OsStr>) -> PathB
         ("session-splash-guard", Some(home)) if !home.is_empty() => {
             PathBuf::from(home).join(".config/kyth/runtime-last-refresh")
         }
-        ("session-splash-guard", _) => PathBuf::from("/run/kyth/session-splash-last-refresh"),
-        _ => PathBuf::from("/run/kyth/boot-branding-last-refresh"),
+        ("session-splash-guard", _) => PathBuf::from("/run/kyth-state/session-splash-last-refresh"),
+        _ => PathBuf::from("/run/kyth-state/boot-branding-last-refresh"),
     }
+}
+
+/// True when any user has a running-game hint (`hint-<uid>`) in `dir`.
+fn gaming_hint_active(dir: &Path) -> bool {
+    fs::read_dir(dir).is_ok_and(|entries| {
+        entries
+            .flatten()
+            .any(|entry| entry.file_name().to_string_lossy().starts_with("hint-"))
+    })
 }
 
 /// Only a clean install may stamp the sentinel; anything else is retried next boot.
@@ -1133,7 +1149,7 @@ fn power_arbiter() -> io::Result<ExitCode> {
 
 fn readahead(args: &[String]) -> io::Result<ExitCode> {
     let value = if args.first().is_some_and(|arg| arg == "hint") {
-        if Path::new("/run/kyth/gaming-hint").exists() {
+        if gaming_hint_active(Path::new("/run/kyth-gaming")) {
             "2048"
         } else {
             "512"
@@ -2251,7 +2267,7 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
         }
         "rotate-mok" => run("mokutil", &["--list-enrolled".into()]),
         "greenboot-success" | "greenboot-required" | "greenboot-failure" => {
-            let state = Path::new("/run/kyth/greenboot-state");
+            let state = Path::new("/run/kyth-state/greenboot-state");
             write_atomic(state, format!("{name}\n").as_bytes())?;
             Ok(ExitCode::SUCCESS)
         }
@@ -2335,13 +2351,46 @@ mod tests {
     }
 
     #[test]
+    fn gaming_hint_is_per_user_and_any_user_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!gaming_hint_active(dir.path()));
+        assert!(!gaming_hint_active(&dir.path().join("missing")));
+        fs::write(dir.path().join("unrelated"), "1").unwrap();
+        assert!(!gaming_hint_active(dir.path()));
+        fs::write(dir.path().join("hint-1000"), "1").unwrap();
+        assert!(gaming_hint_active(dir.path()));
+    }
+
+    #[test]
+    fn root_boot_markers_stay_out_of_the_privileged_runtime_directory() {
+        // /run/kyth is kyth-privileged's RuntimeDirectory; pre-existing root
+        // files there break its first start (RUNTIME_DIRECTORY, SELinux setattr).
+        let source = include_str!("runtime_bin.rs");
+        let shipped = source.split("#[cfg(test)]").next().unwrap();
+        for marker in [
+            "greenboot-state",
+            "boot-branding-last-refresh",
+            "session-splash-last-refresh",
+        ] {
+            assert!(
+                !shipped.contains(&format!("/run/kyth/{marker}")),
+                "{marker} must not be written under /run/kyth"
+            );
+            assert!(
+                shipped.contains(&format!("{BOOT_STATE_DIR}/{marker}"))
+                    || shipped.contains(&format!("/run/kyth-state/{marker}"))
+            );
+        }
+    }
+
+    #[test]
     fn boot_branding_marker_never_depends_on_home() {
         use std::ffi::OsStr;
         // System unit: HOME unset or "/" must not route to a read-only path.
         for home in [None, Some(OsStr::new("")), Some(OsStr::new("/"))] {
             assert_eq!(
                 refresh_marker_path("boot-branding-guard", home),
-                PathBuf::from("/run/kyth/boot-branding-last-refresh")
+                PathBuf::from("/run/kyth-state/boot-branding-last-refresh")
             );
         }
         assert_eq!(
@@ -2350,7 +2399,7 @@ mod tests {
         );
         assert_eq!(
             refresh_marker_path("session-splash-guard", None),
-            PathBuf::from("/run/kyth/session-splash-last-refresh")
+            PathBuf::from("/run/kyth-state/session-splash-last-refresh")
         );
     }
 

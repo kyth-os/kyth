@@ -72,8 +72,9 @@ if [[ -f /etc/kyth/wifi-powersave.conf ]]; then
     esac
 fi
 
-# Gaming opts out of powersave: kyth-game-launch marks /run/kyth/gaming-hint.
-if [[ -f /run/kyth/gaming-hint ]]; then
+# Gaming opts out of powersave: kyth-game-launch drops a per-user
+# /run/kyth-gaming/hint-<uid> (not under root-only /run/kyth).
+if compgen -G '/run/kyth-gaming/hint-*' >/dev/null; then
     iw dev "${iface}" set power_save off >/dev/null 2>&1 || true
     exit 0
 fi

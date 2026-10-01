@@ -27,6 +27,15 @@ install -m 0644 /dev/stdin /usr/lib/tmpfiles.d/kyth-fwupd-lock.conf <<'FWUPDLOCK
 f /run/kyth-fwupd.lock 0644 root root -
 FWUPDLOCKEOF
 
+# Unprivileged state dirs: per-user running-game hints (sticky 1777 so each
+# user only removes their own) and root-owned boot markers kept OUT of
+# /run/kyth, which kyth-privileged owns via RuntimeDirectory= and which is
+# root:wheel 0750 (users could never write a hint there).
+install -m 0644 /dev/stdin /usr/lib/tmpfiles.d/kyth-run-state.conf <<'RUNSTATEEOF'
+d /run/kyth-gaming 1777 root root -
+d /run/kyth-state 0755 root root -
+RUNSTATEEOF
+
 # Declarative cgroup gaming slice — hash-gated, offline
 install -m 0644 /ctx/gaming.slice /usr/lib/systemd/system/gaming.slice
 

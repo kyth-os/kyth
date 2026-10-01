@@ -5,7 +5,7 @@ set -euo pipefail
 source "../../lib/config-helpers.sh"
 
 # ── NVMe Read-Ahead Tuning ───────────────────────────────────────────────────
-# Gaming hint-aware: 2048 KB when /run/kyth/gaming-hint present (game active),
+# Gaming hint-aware: 2048 KB when a /run/kyth-gaming/hint-<uid> file is present (game active),
 # 512 KB otherwise (desktop random I/O). Reduces read amplification for asset
 # streaming while keeping sequential load benefit. Single flag file avoids
 # per-device hotplug races.

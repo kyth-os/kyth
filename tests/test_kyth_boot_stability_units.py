@@ -473,6 +473,21 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertNotIn("PrivateUsers=yes", body)
         self.assertIn("exit 0", body.split("ExecStart=", 1)[1])
 
+    def test_gaming_hint_lives_where_an_unprivileged_game_can_write(self) -> None:
+        """/run/kyth is kyth-privileged's root:wheel 0750 RuntimeDirectory, so the
+        hint a game launch writes there always failed silently and Wi-Fi
+        power-save / NVMe read-ahead never switched to gaming mode."""
+        wifi = (ROOT / "build_files/scripts/sysconfig/network/16-wifi-disable-power-management.sh").read_text(encoding="utf-8")
+        tmpfiles = (ROOT / "build_files/scripts/branding/27-performance-daemons.sh").read_text(encoding="utf-8")
+        launcher = (ROOT / "src/kyth-shared-rs/src/game_launch_bin.rs").read_text(encoding="utf-8")
+        self.assertIn("/run/kyth-gaming/hint-*", wifi)
+        self.assertNotIn("/run/kyth/gaming-hint", wifi)
+        self.assertIn("d /run/kyth-gaming 1777 root root -", tmpfiles)
+        self.assertIn("d /run/kyth-state 0755 root root -", tmpfiles)
+        shipped = launcher.split("#[cfg(test)]")[0]
+        self.assertNotIn("/run/kyth/gaming-hint", shipped)
+        self.assertIn("GAMING_HINT_DIR", shipped)
+
     def test_default_flatpaks_do_not_fail_when_flathub_is_absent(self) -> None:
         body = (ROOT / "build_files/kyth-default-flatpaks.service").read_text(
             encoding="utf-8"
