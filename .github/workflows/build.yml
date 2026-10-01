@@ -307,7 +307,16 @@ jobs:
         run: |
           set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
-          IMAGE="ghcr.io/ublue-os/kinoite-main:44"
+          # Single source of truth: the tag pinned in build_base/Dockerfile for
+          # the checked-out branch (main: ublue F44, testing: Fedora Kinoite
+          # 45). A hardcoded image here overrode that pin through
+          # --build-arg BASE_IMAGE and kept :testing on the old base.
+          PINNED="$(sed -n 's/^ARG BASE_IMAGE=//p' build_base/Dockerfile | head -n1)"
+          IMAGE="${PINNED%%@*}"
+          [[ "${IMAGE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)$ ]] || {
+            echo "::error::build_base/Dockerfile pins an unrecognised base image: ${IMAGE}" >&2
+            exit 1
+          }
           DIGEST="$(docker buildx imagetools inspect "${IMAGE}" --format '{{ .Manifest.Digest }}')"
           build_files/scripts/validate-digest.sh "${DIGEST}"
           echo "image=${IMAGE}" >&3

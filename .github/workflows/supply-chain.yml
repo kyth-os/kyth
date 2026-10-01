@@ -133,7 +133,7 @@ jobs:
           test "${BASE_NAME}" = "${IMAGE}:base-${TAG}"
           [[ "${BASE_NAME}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+$ ]]
           build_files/scripts/validate-digest.sh "${BASE_DIGEST}"
-          [[ "${UPSTREAM_BASE}" =~ ^ghcr\.io/ublue-os/kinoite-main:44@sha256:[0-9a-f]{64}$ ]]
+          [[ "${UPSTREAM_BASE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)@sha256:[0-9a-f]{64}$ ]]
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
           test "${KERNEL_FLAVOR}" = fedora
 
@@ -457,7 +457,7 @@ jobs:
           build_files/scripts/validate-digest.sh "${DIGEST}"
           [[ "${VERSION}" =~ ^[a-z0-9._-]+$ ]]
           [[ "${BUILD_BASE}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+@sha256:[0-9a-f]{64}$ ]]
-          [[ "${UPSTREAM_BASE}" =~ ^ghcr\.io/ublue-os/kinoite-main:44@sha256:[0-9a-f]{64}$ ]]
+          [[ "${UPSTREAM_BASE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)@sha256:[0-9a-f]{64}$ ]]
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
           test "${KERNEL_FLAVOR}" = fedora
           [[ "${SBOM}" == "$(basename "${SBOM}")" && -s "output/supply-chain/${SBOM}" ]]

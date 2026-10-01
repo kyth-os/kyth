@@ -82,6 +82,32 @@ class WorkflowArtifactContracts(unittest.TestCase):
 
 
 class ReleaseChainingContracts(unittest.TestCase):
+    def test_upstream_base_comes_from_the_dockerfile_pin(self):
+        """build.yml must not hardcode the base: --build-arg overrides the pin.
+
+        A hardcoded ublue F44 image here kept :testing on F44 even after
+        build_base/Dockerfile moved to Fedora Kinoite 45. The supply-chain
+        gate must also accept whichever base the branch pins.
+        """
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        step = build.split("- name: Resolve upstream base image digest", 1)[1].split(
+            "- name: Build base image", 1
+        )[0]
+        self.assertIn("build_base/Dockerfile", step)
+        self.assertNotIn('IMAGE="ghcr.io/ublue-os/kinoite-main:44"', step)
+        dockerfile = (ROOT / "build_base/Dockerfile").read_text(encoding="utf-8")
+        pinned = next(
+            line.split("=", 1)[1].split("@", 1)[0]
+            for line in dockerfile.splitlines()
+            if line.startswith("ARG BASE_IMAGE=")
+        )
+        # Every base the Dockerfile may pin is allowed by both workflows.
+        self.assertIn(pinned.replace(".", "\\."), step)
+        supply = (ROOT / ".github/workflows/supply-chain.yml").read_text(encoding="utf-8")
+        self.assertIn(pinned.replace(".", "\\."), supply)
+        for label in ('image.version="45"', 'osbuild.version="45"', 'KythOS 45"'):
+            self.assertIn(label, (ROOT / "Dockerfile").read_text(encoding="utf-8"))
+
     def test_r2_public_base_url_is_single_sourced(self):
         """The R2 download host lives in release_identity.py exactly once.
 

@@ -161,14 +161,14 @@ FROM ${BASE_IMAGE}
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Override upstream OCI labels so downstream tooling (lorax/bootc) sees KythOS product metadata
 LABEL org.opencontainers.image.title="KythOS"
-LABEL org.opencontainers.image.version="44"
+LABEL org.opencontainers.image.version="45"
 LABEL org.opencontainers.image.description="KythOS — atomic gaming and dev workstation built on Fedora Kinoite"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.source="https://github.com/kyth-os/kyth"
 LABEL org.opencontainers.image.documentation="https://github.com/kyth-os/kyth"
 LABEL org.osbuild.product="KythOS"
-LABEL org.osbuild.version="44"
-LABEL org.osbuild.branding.release="KythOS 44"
+LABEL org.osbuild.version="45"
+LABEL org.osbuild.branding.release="KythOS 45"
 
 ### MODIFICATIONS
 # Fedora 44 ships scx_rusty 0.5.4, whose pre-upstream sched_ext BPF ABI is
