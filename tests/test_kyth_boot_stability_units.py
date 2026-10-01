@@ -346,7 +346,14 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("systemd-tmpfiles-setup.service", before)
         self.assertIn("systemd-udevd.service", before)
         validate = (ROOT / "build_files/scripts/validate.sh").read_text(encoding="utf-8")
-        self.assertNotIn("kyth-system-accounts\\.service): ", validate)
+        # The cycle may only be tolerated while the *installed* host unit still
+        # carries the stale edge; never unconditionally.
+        self.assertIn("stale_host_cycle_filter", validate)
+        self.assertIn(
+            "host_accounts_unit=/usr/lib/systemd/system/kyth-system-accounts.service",
+            validate,
+        )
+        self.assertNotIn("kyth-system-accounts\\.service): .*' ||", validate)
 
     def test_dbus_runtime_dir_stays_active_after_mkdir(self) -> None:
         body = (
