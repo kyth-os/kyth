@@ -264,6 +264,9 @@ pub fn set_scheduler(run: &dyn Fn(&[String], u64) -> Option<(i32, String)>, name
 }
 
 /// Bounded attempts for one scheduler switch, with a sleep between tries.
+/// Polls to wait before re-trying a scheduler switch that was not confirmed
+/// (about 30 s at the default 5 s poll interval).
+pub const SCX_RETRY_POLLS: u32 = 6;
 pub const SCX_SET_ATTEMPTS: u32 = 3;
 /// Delay between scheduler-switch attempts while the loader may be starting.
 pub const SCX_SET_RETRY_DELAY: std::time::Duration = std::time::Duration::from_secs(2);
@@ -363,14 +366,29 @@ pub struct SchedState {
     pub profile: String,
     pub gaming_prev: bool,
     pub manual_override: Option<String>,
+    /// The scheduler the caller last confirmed it actually set. `poll_step`
+    /// keeps emitting `SetScheduler` for the wanted profile until this matches,
+    /// so a switch that failed (scx_loader down longer than the retry window)
+    /// is retried on the next poll instead of being abandoned for the whole
+    /// gaming session.
+    pub applied_scheduler: Option<String>,
+    /// Polls since `SetScheduler` was last emitted; paces the retries.
+    pub polls_since_attempt: u32,
 }
 
 impl SchedState {
+    /// Record that the caller successfully switched to `name`.
+    pub fn scheduler_applied(&mut self, name: &str) {
+        self.applied_scheduler = Some(name.to_string());
+    }
+
     pub fn new() -> Self {
         Self {
             profile: "desktop".to_string(),
             gaming_prev: false,
             manual_override: None,
+            applied_scheduler: None,
+            polls_since_attempt: 0,
         }
     }
 }
@@ -390,29 +408,88 @@ pub fn poll_step(
         }
     });
     let gaming_now = effective == "gaming";
-    if gaming_now == state.gaming_prev {
+    let wanted = if gaming_now {
+        config.gaming_scheduler.clone()
+    } else {
+        config.desktop_scheduler.clone()
+    };
+    let transitioned = gaming_now != state.gaming_prev;
+    let unconfirmed = state.applied_scheduler.as_deref() != Some(wanted.as_str());
+    // Retries are paced: a host with no sched_ext can never confirm, and each
+    // attempt blocks for the retry window and writes a log line.
+    let retry_due = unconfirmed && state.polls_since_attempt >= SCX_RETRY_POLLS;
+    if !transitioned && !retry_due {
+        if unconfirmed {
+            state.polls_since_attempt = state.polls_since_attempt.saturating_add(1);
+        }
         return Vec::new();
     }
+    state.polls_since_attempt = 0;
     state.gaming_prev = gaming_now;
-    if gaming_now {
-        state.profile = "gaming".to_string();
-        let mut effects = vec![SchedEffect::SetScheduler(config.gaming_scheduler.clone())];
-        if config.integrate_perf_mode {
-            effects.push(SchedEffect::EnterGamingPerf);
-        }
-        effects
-    } else {
-        state.profile = "desktop".to_string();
-        let mut effects = vec![SchedEffect::SetScheduler(config.desktop_scheduler.clone())];
-        if config.integrate_perf_mode {
-            effects.push(SchedEffect::RestorePerf);
-        }
-        effects
+    state.profile = if gaming_now { "gaming" } else { "desktop" }.to_string();
+    let mut effects = vec![SchedEffect::SetScheduler(wanted)];
+    // The perf-mode side effects belong to the transition only; retrying a
+    // failed scheduler switch must not re-enter/restore perf mode every poll.
+    if transitioned && config.integrate_perf_mode {
+        effects.push(if gaming_now {
+            SchedEffect::EnterGamingPerf
+        } else {
+            SchedEffect::RestorePerf
+        });
     }
+    effects
 }
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_failed_scheduler_switch_is_retried_on_later_polls() {
+        // poll_step used to emit SetScheduler once per transition; when
+        // scx_loader was down longer than the retry window the daemon stayed
+        // on the desktop scheduler for the whole gaming session.
+        let config = SchedConfig {
+            integrate_perf_mode: false,
+            ..SchedConfig::default()
+        };
+        let mut state = SchedState::new();
+        let first = poll_step(&mut state, &config, true);
+        assert_eq!(first, vec![SchedEffect::SetScheduler("scx_rusty".into())]);
+        // Still gaming, but the set never succeeded: it is re-emitted, paced
+        // so a host that can never switch does not retry on every poll.
+        for _ in 0..SCX_RETRY_POLLS {
+            assert!(poll_step(&mut state, &config, true).is_empty());
+        }
+        let again = poll_step(&mut state, &config, true);
+        assert_eq!(again, vec![SchedEffect::SetScheduler("scx_rusty".into())]);
+        // Once the caller reports success, the polling goes quiet.
+        state.scheduler_applied("scx_rusty");
+        assert!(poll_step(&mut state, &config, true).is_empty());
+        // Leaving gaming switches back, and is retried the same way.
+        let back = poll_step(&mut state, &config, false);
+        assert_eq!(back, vec![SchedEffect::SetScheduler("default".into())]);
+        for _ in 0..SCX_RETRY_POLLS {
+            assert!(poll_step(&mut state, &config, false).is_empty());
+        }
+        assert_eq!(
+            poll_step(&mut state, &config, false),
+            vec![SchedEffect::SetScheduler("default".into())]
+        );
+    }
+
+    #[test]
+    fn scheduler_retry_does_not_repeat_perf_mode_effects() {
+        let config = SchedConfig::default();
+        assert!(config.integrate_perf_mode);
+        let mut state = SchedState::new();
+        let first = poll_step(&mut state, &config, true);
+        assert!(first.contains(&SchedEffect::EnterGamingPerf));
+        for _ in 0..SCX_RETRY_POLLS {
+            poll_step(&mut state, &config, true);
+        }
+        let retry = poll_step(&mut state, &config, true);
+        assert_eq!(retry, vec![SchedEffect::SetScheduler("scx_rusty".into())]);
+    }
+
     use super::*;
 
     #[test]
@@ -528,6 +605,7 @@ mod tests {
             profile: "desktop".to_string(),
             gaming_prev: false,
             manual_override: Some("gaming".to_string()),
+            ..SchedState::default()
         };
         let effects = poll_step(&mut state, &config, false);
         assert_eq!(

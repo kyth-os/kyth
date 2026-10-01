@@ -434,6 +434,14 @@ pub fn clear_quarantine(state: &BootHealthState, digest: &str, now: i64) -> Boot
     // An explicit admin un-quarantine resets the tally so the next failure
     // starts from zero rather than instantly re-quarantining.
     updated.failures_by_digest.remove(digest);
+    // The rollback record is a single global slot. If it belongs to this digest,
+    // leaving it set reads as "already rolled back successfully" and the digest
+    // could never be rolled back again after it re-quarantines.
+    if updated.rollback_attempted_for == digest {
+        updated.rollback_attempted_for.clear();
+        updated.last_rollback_error.clear();
+        updated.last_rollback_at = 0;
+    }
     if updated.current_digest == digest && updated.status == "quarantined" {
         updated.status = "unhealthy".into();
     }
@@ -476,6 +484,40 @@ pub fn rollout_policy_reason(reference: &str, configured_ring: &str) -> Option<S
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rollback_is_due_again_after_an_admin_clears_quarantine() {
+        // clear_quarantine used to leave rollback_attempted_for == digest with
+        // no error, which rollback_retry_due reads as "already rolled back",
+        // so a re-quarantined digest never rolled back again.
+        let digest = "sha256:AAAA";
+        let mut state = BootHealthState::default();
+        for i in 0..3 {
+            state = record_failure(&state, digest, &format!("b{i}"), "x", 3, 100 + i);
+        }
+        state = note_rollback_attempted(&state, digest, None, 200);
+        state = clear_quarantine(&state, digest, 300);
+        assert_eq!(state.rollback_attempted_for, "");
+        let mut due = false;
+        for i in 3..6 {
+            let before = state.clone();
+            state = record_failure(&state, digest, &format!("b{i}"), "x", 3, 400 + i);
+            due = rollback_retry_due(&before, &state, digest);
+        }
+        assert!(state.quarantined.contains_key(digest));
+        assert!(
+            due,
+            "re-quarantine after an admin clear must roll back again"
+        );
+    }
+
+    #[test]
+    fn clearing_one_digest_keeps_another_digests_rollback_record() {
+        let mut state = BootHealthState::default();
+        state = note_rollback_attempted(&state, "sha256:BBBB", None, 10);
+        let cleared = clear_quarantine(&state, "sha256:AAAA", 20);
+        assert_eq!(cleared.rollback_attempted_for, "sha256:BBBB");
+    }
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;

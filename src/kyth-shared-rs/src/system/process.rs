@@ -210,6 +210,15 @@ pub fn spawn_detached(command: &mut Command) -> io::Result<()> {
 
 /// Run an already-validated argv with captured output and a hard wall-clock
 /// limit. It never invokes a shell and kills a child that outlives its bound.
+/// `Instant + Duration` panics on overflow, so a huge caller-supplied timeout
+/// (e.g. from a config file) must saturate instead. A year is "never" for every
+/// command we bound.
+fn deadline_after(start: Instant, timeout: Duration) -> Instant {
+    start
+        .checked_add(timeout)
+        .unwrap_or_else(|| start + Duration::from_secs(365 * 24 * 3600))
+}
+
 pub fn run_bounded(argv: &[String], timeout: Duration) -> io::Result<Output> {
     let (program, args) = argv
         .split_first()
@@ -301,7 +310,7 @@ pub fn run_bounded_with_input(
                     status,
                     stdout_reader,
                     stderr_reader,
-                    started + timeout,
+                    deadline_after(started, timeout),
                 );
             }
             Ok(None) => {}
@@ -359,7 +368,7 @@ pub fn run_bounded_command_cancel(
                     status,
                     stdout_reader,
                     stderr_reader,
-                    started + timeout,
+                    deadline_after(started, timeout),
                 );
             }
             Ok(None) => {}
@@ -630,6 +639,17 @@ fn human_bytes(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn run_bounded_with_an_enormous_timeout_does_not_panic() {
+        // `Instant + Duration` panics on overflow; a config-supplied timeout
+        // must never be able to take the caller down.
+        let out = run_bounded(
+            &["/usr/bin/true".to_string()],
+            std::time::Duration::from_secs(i64::MAX as u64),
+        );
+        assert!(out.is_ok_and(|o| o.status.success()));
+    }
+
     use super::*;
     use std::time::Duration;
 

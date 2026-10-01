@@ -240,6 +240,7 @@ fn main() -> std::process::ExitCode {
                 SchedEffect::SetScheduler(name) => {
                     if set_scheduler_with_retry(&run, &name, SCX_SET_ATTEMPTS, SCX_SET_RETRY_DELAY)
                     {
+                        state.scheduler_applied(&name);
                         log(&format!("Scheduler → {name}"));
                     } else {
                         log(&format!(
