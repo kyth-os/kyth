@@ -28,7 +28,13 @@ wifi.scan-rand-mac-address=yes
 
 [connection]
 wifi.cloned-mac-address=stable
-ethernet.cloned-mac-address=stable
+# Wired keeps the hardware address. NM's "stable" hash includes the interface
+# name, and a USB dock NIC's name embeds its port path (enp198s0f3u1u4 vs
+# ...f4u1u4), so every dock re-enumeration minted a new MAC and a new DHCP
+# lease. The HP dock also passes the laptop's MAC through (ethtool -P), which
+# NAC / DHCP reservations on wired networks key on; hashing it away made the
+# link intermittent until another interface re-registered the host.
+ethernet.cloned-mac-address=permanent
 ipv6.addr-gen-mode=stable-privacy
 NMEOF
 

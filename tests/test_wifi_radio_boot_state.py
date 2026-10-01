@@ -22,6 +22,13 @@ class WifiRadioBootStateTests(unittest.TestCase):
         self.assertNotIn("nmcli radio wifi off", dispatcher)
         self.assertNotIn("wifi-off-for-wired", dispatcher)
 
+    def test_wired_nics_keep_their_hardware_mac(self) -> None:
+        """A hashed wired MAC changes with the ifname, which a USB dock rewrites."""
+        body = NETWORK_SETUP.read_text(encoding="utf-8")
+        self.assertIn("ethernet.cloned-mac-address=permanent", body)
+        self.assertNotIn("ethernet.cloned-mac-address=stable", body)
+        self.assertIn("wifi.cloned-mac-address=stable", body)
+
 
 if __name__ == "__main__":
     unittest.main()
