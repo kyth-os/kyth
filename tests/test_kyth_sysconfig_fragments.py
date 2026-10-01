@@ -59,6 +59,35 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn('TEST=="charge_control_start_threshold"', guards)
         self.assertNotIn('TEST{0002}!="/sys%p/charge_', guards)
 
+    def test_gamemode_hooks_use_keys_gamemode_actually_reads(self):
+        """gamemode 1.8 ignores [general] startscript/endscript and [gpu] nv_perf_level.
+
+        The performance-profile switch lived in startscript, so it never ran, and
+        every launch logged "Config: Value ignored" for all three keys.
+        """
+        body = (FRAG_DIR / "gaming" / "14-gamemode-configuration.sh").read_text(
+            encoding="utf-8"
+        )
+        ini = body.split("<<'GAMEMODEEOF'\n", 1)[1].split("\nGAMEMODEEOF", 1)[0]
+        sections: dict[str, list[str]] = {}
+        current = ""
+        for line in ini.splitlines():
+            if line.startswith("[") and line.endswith("]"):
+                current = line[1:-1]
+                sections[current] = []
+            elif current and "=" in line and not line.lstrip().startswith("#"):
+                sections[current].append(line.split("=", 1)[0].strip())
+        for ignored in ("startscript", "endscript"):
+            self.assertNotIn(ignored, sections.get("general", []))
+        self.assertNotIn("nv_perf_level", sections.get("gpu", []))
+        self.assertIn("start", sections.get("custom", []))
+        self.assertIn("end", sections.get("custom", []))
+        start = next(l for l in ini.splitlines() if l.startswith("start="))
+        end = next(l for l in ini.splitlines() if l.startswith("end="))
+        self.assertIn("kyth-performance-mode save", start)
+        self.assertIn("kyth-performance-mode gaming", start)
+        self.assertIn("kyth-performance-mode restore", end)
+
     def test_dxvk_defaults_do_not_enable_async(self):
         body = (FRAG_DIR / "gaming" / "47-dxvk-async.sh").read_text(encoding="utf-8")
         self.assertIn("DXVK_CONFIG_FILE=/etc/dxvk.conf", body)
