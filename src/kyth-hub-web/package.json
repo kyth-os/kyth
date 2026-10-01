@@ -9,6 +9,7 @@
     "test:contracts": "node --test tests/command-contract.test.mjs",
     "test:vpn-handoff": "node --test tests/vpn-saml-handoff.test.mjs",
     "test:smoke": "node --test tests/hub-shell-smoke.test.mjs",
+    "test:exe-poll": "node --test tests/exe-handler-poll.test.mjs",
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "WEBKIT_DISABLE_SANDBOX_THIS_IS_DANGEROUS=1 tauri dev",
