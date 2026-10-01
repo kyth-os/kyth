@@ -187,6 +187,30 @@ fn sha256(path: &Path) -> Result<String, InstallerInspectionError> {
     Ok(format!("{:x}", digest.finalize()))
 }
 
+/// Whether an MSI file stem explicitly says 32-bit. Markers must be whole
+/// tokens: a substring test matched the "x86" inside "x86_64", so a 64-bit
+/// installer was put in a win32 bottle. An explicit 64-bit token wins.
+fn msi_stem_is_32bit(stem: &str) -> bool {
+    let tokens: Vec<&str> = stem
+        .split(|c: char| !c.is_ascii_alphanumeric())
+        .filter(|token| !token.is_empty())
+        .collect();
+    let has = |marker: &str| tokens.contains(&marker);
+    // "x86_64" splits into "x86" and "64"; "x86-64" likewise.
+    let x86_64_pair = tokens.windows(2).any(|pair| pair == ["x86", "64"]);
+    if x86_64_pair
+        || ["x64", "amd64", "win64", "64bit", "x8664"]
+            .iter()
+            .any(|marker| has(marker))
+    {
+        return false;
+    }
+    ["x86", "i386", "i686", "32bit", "win32", "ia32"]
+        .iter()
+        .any(|marker| has(marker))
+        || tokens.windows(2).any(|pair| pair == ["32", "bit"])
+}
+
 pub fn inspect_installer(
     path: impl AsRef<Path>,
 ) -> Result<InstallerRequest, InstallerInspectionError> {
@@ -235,10 +259,7 @@ pub fn inspect_installer(
                 .and_then(|stem| stem.to_str())
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            if ["x86", "i386", "i686", "32bit", "32-bit", "win32"]
-                .iter()
-                .any(|marker| stem.contains(marker))
-            {
+            if msi_stem_is_32bit(&stem) {
                 "win32".into()
             } else {
                 "win64".into()
@@ -684,6 +705,26 @@ pub fn launch_in_bottles(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn msi_architecture_uses_whole_tokens_not_substrings() {
+        for (stem, is_32) in [
+            ("app-x86_64", false),
+            ("app_x86-64", false),
+            ("office-x64", false),
+            ("tool-amd64", false),
+            ("tool", false),
+            ("tool-x86", true),
+            ("tool_i386", true),
+            ("a-win32-b", true),
+            ("tool-32bit", true),
+            ("tool-32-bit", true),
+            ("setup-x86-x64", false),
+            ("pix86ate", false),
+        ] {
+            assert_eq!(msi_stem_is_32bit(stem), is_32, "{stem}");
+        }
+    }
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;
