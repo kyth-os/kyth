@@ -33,9 +33,9 @@ const SPECS: &[Spec] = &[
     Spec { config: "busy-poll.toml", drop_in: "99-kyth-busy-poll.conf", comment: "Kyth busy poll", payload: "net.core.busy_poll=50\n" },
     Spec { config: "busy-read.toml", drop_in: "99-kyth-busy-read.conf", comment: "Kyth busy read", payload: "net.core.busy_read=50\n" },
     Spec { config: "compaction.toml", drop_in: "99-kyth-compaction.conf", comment: "Kyth compaction", payload: "vm.compaction_proactiveness=0\n" },
-    Spec { config: "thp-collapse.toml", drop_in: "99-kyth-thp-collapse.conf", comment: "Kyth THP collapse", payload: "kernel.khugepaged_defrag=0\n" },
+    Spec { config: "thp-collapse.toml", drop_in: "99-kyth-thp-collapse.conf", comment: "Kyth THP collapse", payload: "-kernel.khugepaged_defrag=0\n" },
     Spec { config: "numa-balancing.toml", drop_in: "99-kyth-numa-balancing.conf", comment: "Kyth numa balancing", payload: "kernel.numa_balancing=0\n" },
-    Spec { config: "psi-poll.toml", drop_in: "99-kyth-psi-poll.conf", comment: "Kyth PSI poll", payload: "vm.pressure_poll=500\n" },
+    Spec { config: "psi-poll.toml", drop_in: "99-kyth-psi-poll.conf", comment: "Kyth PSI poll", payload: "-vm.pressure_poll=500\n" },
     Spec { config: "tcp-ecn.toml", drop_in: "99-kyth-tcp-ecn.conf", comment: "Kyth tcp ecn", payload: "net.ipv4.tcp_ecn=1\n" },
     Spec { config: "tcp-fastopen.toml", drop_in: "99-kyth-tcp-fastopen.conf", comment: "Kyth tcp fastopen", payload: "net.ipv4.tcp_fastopen=3\n" },
     Spec { config: "tcp-fin-timeout.toml", drop_in: "99-kyth-tcp-fin-timeout.conf", comment: "Kyth tcp fin timeout", payload: "net.ipv4.tcp_fin_timeout=30\n" },
@@ -549,7 +549,7 @@ mod tests {
         generate_thp_collapse(Some(&thp_config), Some(&thp_drop_in), None).unwrap();
         assert_eq!(
             fs::read_to_string(&thp_drop_in).unwrap(),
-            "# Kyth THP collapse gaming — generated\nkernel.khugepaged_defrag=0\n"
+            "# Kyth THP collapse gaming — generated\n-kernel.khugepaged_defrag=0\n"
         );
     }
 

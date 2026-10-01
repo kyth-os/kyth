@@ -858,10 +858,10 @@ pub fn save_thp(path: impl AsRef<Path>, config: &ThpConfig) -> std::io::Result<(
     )
 }
 pub fn thp_dropin(config: &ThpConfig) -> Option<String> {
-    (config.profile == "kyth").then(|| format!("# Kyth THP — generated\nvm.compaction_proactiveness = 0\nkernel.khugepaged_scan_sleep_millisecs = {}\nkernel.khugepaged_alloc_sleep_millisecs = 60000\nkernel.khugepaged_max_ptes_none = 511\n", config.scan_sleep_ms))
+    (config.profile == "kyth").then(|| format!("# Kyth THP — generated\nvm.compaction_proactiveness = 0\n-kernel.khugepaged_scan_sleep_millisecs = {}\n-kernel.khugepaged_alloc_sleep_millisecs = 60000\n-kernel.khugepaged_max_ptes_none = 511\n", config.scan_sleep_ms))
 }
 pub fn thp_collapse_dropin(gaming: bool) -> Option<&'static str> {
-    gaming.then_some("# Kyth THP collapse gaming — generated\nkernel.khugepaged_defrag=0\n")
+    gaming.then_some("# Kyth THP collapse gaming — generated\n-kernel.khugepaged_defrag=0\n")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
