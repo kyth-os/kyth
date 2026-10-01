@@ -82,6 +82,44 @@ class WorkflowArtifactContracts(unittest.TestCase):
 
 
 class ReleaseChainingContracts(unittest.TestCase):
+    def test_testing_base_stage_refuses_a_non_f45_base(self):
+        """A workflow_run build uses main's build.yml and passes an F44 base arg."""
+        dockerfile = (ROOT / "build_base/Dockerfile").read_text(encoding="utf-8")
+        guard = dockerfile.split("FROM ${BASE_IMAGE}", 1)[1]
+        self.assertIn(". /etc/os-release", guard)
+        self.assertIn('[ "${VERSION_ID}" = "45" ]', guard)
+        self.assertIn("exit 1", guard)
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        # push builds use their own concurrency group so a doomed main-copy
+        # workflow_run build can never cancel the real F45 one.
+        self.assertIn("github.event_name == 'push' && 'push-'", build)
+
+    def test_every_testing_push_builds_with_testings_own_workflow(self):
+        """workflow_run runs main's copy of build.yml, so testing pushes built F44.
+
+        A push trigger runs the pushed branch's own build.yml (which pins F45).
+        The gate must wait for that exact commit's Validation, the plan must pin
+        the pushed SHA, and the build must refuse any non-F45 base on testing.
+        """
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        on_block = build.split("\npermissions:", 1)[0]
+        self.assertRegex(on_block, r"(?m)^  push:\n    branches: \[testing\]$")
+        # main must not gain a push build: it is promoted by a human, not pushed.
+        self.assertNotRegex(on_block, r"push:\n    branches: \[[^\]]*main")
+        gate = build.split("  plan:", 1)[0]
+        self.assertIn("eventName === 'push'", gate)
+        self.assertIn("head_sha: sha", gate)
+        self.assertIn("r.name === 'Validation'", gate)
+        self.assertIn("validation.conclusion === 'success'", gate)
+        plan = build.split("  plan:", 1)[1].split("  build_push:", 1)[0]
+        self.assertIn('elif [[ "${EVENT_NAME}" == push ]]', plan)
+        self.assertIn('echo "head_sha=${HEAD_SHA}" >&3', plan.split("== push ]]", 1)[1])
+        step = build.split("- name: Resolve upstream base image digest", 1)[1].split(
+            "- name: Build base image", 1
+        )[0]
+        self.assertIn('"${MATRIX_BRANCH}" == testing', step)
+        self.assertIn("!= quay.io/fedora/fedora-kinoite:45", step)
+
     def test_upstream_base_comes_from_the_dockerfile_pin(self):
         """build.yml must not hardcode the base: --build-arg overrides the pin.
 

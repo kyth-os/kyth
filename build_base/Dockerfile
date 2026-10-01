@@ -4,6 +4,14 @@
 ARG BASE_IMAGE=quay.io/fedora/fedora-kinoite:45@sha256:884d0dee45a250f0e5d31c52e8167e6c8fc9e66fad80f1401d36400620d36861
 FROM ${BASE_IMAGE}
 
+# testing is the Fedora 45 line. main's build.yml (which GitHub runs for
+# workflow_run events) passes its own F44 base through --build-arg BASE_IMAGE,
+# so the pin above alone cannot stop an F44 build of this tree. Fail the build
+# instead of publishing an F44 image as :testing.
+RUN . /etc/os-release \
+    && [ "${VERSION_ID}" = "45" ] \
+    || { echo "testing must build on Fedora 45 but the base is Fedora ${VERSION_ID:-unknown}" >&2; exit 1; }
+
 # Fedora is the default kernel flavor. CachyOS is an advanced image
 # variant built from the same tree and exposed to users through bootc switches.
 ARG KYTH_KERNEL_FLAVOR=fedora
