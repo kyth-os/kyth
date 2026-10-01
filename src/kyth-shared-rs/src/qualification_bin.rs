@@ -85,19 +85,31 @@ fn run(args: &mut Vec<String>) -> Result<QualificationReport, String> {
             {
                 return Err("unsupported regression budget schema version".into());
             }
-            let budgets: Vec<RegressionBudget> = serde_json::from_value(
-                budgets_value
-                    .get("budgets")
-                    .cloned()
-                    .unwrap_or_else(|| serde_json::json!([])),
-            )
-            .map_err(|error| format!("invalid regression budgets: {error}"))?;
+            let budgets = parse_budgets(&budgets_value)?;
             let report = evaluate_regressions(candidate, &baseline, &budgets);
             write_report(&report, &output, markdown.as_deref())?;
             Ok(report)
         }
         _ => Err("unknown qualification command".into()),
     }
+}
+
+/// A gate with no budgets can gate nothing, so a missing, non-array or empty
+/// `budgets` list is an error. It used to default to `[]`, which turned a typo
+/// such as `"budget"` into `overall: pass` for any regression.
+fn parse_budgets(value: &serde_json::Value) -> Result<Vec<RegressionBudget>, String> {
+    let list = value
+        .get("budgets")
+        .ok_or("budgets file has no \"budgets\" list (misspelled key?)")?;
+    if !list.is_array() {
+        return Err("\"budgets\" must be a list".into());
+    }
+    let budgets: Vec<RegressionBudget> = serde_json::from_value(list.clone())
+        .map_err(|error| format!("invalid regression budgets: {error}"))?;
+    if budgets.is_empty() {
+        return Err("budgets file defines no budgets, so nothing would be gated".into());
+    }
+    Ok(budgets)
 }
 
 fn main() -> ExitCode {
@@ -120,5 +132,27 @@ fn main() -> ExitCode {
             usage();
             ExitCode::from(2)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_budgets;
+    use serde_json::json;
+
+    #[test]
+    fn a_budgets_file_that_gates_nothing_is_refused() {
+        // Misspelled key, wrong type and empty list all used to become "no
+        // budgets" and let a 90% fps regression pass.
+        for bad in [
+            json!({"schema_version": 1, "budget": [{"metric": "fps", "max_regression_percent": 5.0}]}),
+            json!({"schema_version": 1}),
+            json!({"schema_version": 1, "budgets": {}}),
+            json!({"schema_version": 1, "budgets": []}),
+        ] {
+            assert!(parse_budgets(&bad).is_err(), "{bad} must be refused");
+        }
+        let good = json!({"schema_version": 1, "budgets": [{"metric": "fps", "max_regression_percent": 5.0}]});
+        assert_eq!(parse_budgets(&good).unwrap().len(), 1);
     }
 }
