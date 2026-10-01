@@ -170,7 +170,10 @@ pub(crate) fn validate_flatpak_id(value: &str) -> Result<(), String> {
         return Err("invalid Flatpak application id".to_string());
     }
     let parts: Vec<&str> = value.split(['.', '-']).collect();
+    // The first part must be non-empty: "all alphanumeric" is vacuously true
+    // for "", so "-v.x" used to pass and reach flatpak's argv as an option.
     if parts.len() < 2
+        || parts[0].is_empty()
         || !parts[0].bytes().all(|byte| byte.is_ascii_alphanumeric())
         || parts[1..].iter().any(|part| {
             part.is_empty()
@@ -360,6 +363,33 @@ pub(crate) fn privileged_action_cancel(job: String) -> crate::InstallStatus {
 
 #[cfg(test)]
 mod tests {
+    use super::validate_flatpak_id;
+
+    #[test]
+    fn flatpak_id_cannot_start_with_a_separator_or_look_like_a_flag() {
+        // Splitting on '.' and '-' left an empty first part, and "all
+        // alphanumeric" is vacuously true for it, so "-v.x" passed and reached
+        // flatpak's argv as an option.
+        for bad in [
+            "-v.x", "-y.x", ".x.y", "-v-x", "-", ".", "a", "a.", "a..b", "",
+        ] {
+            assert!(
+                validate_flatpak_id(bad).is_err(),
+                "{bad:?} must be rejected"
+            );
+        }
+        for good in [
+            "org.gnome.World.PikaBackup",
+            "com.valvesoftware.Steam",
+            "io.github.foo-bar.App",
+        ] {
+            assert!(
+                validate_flatpak_id(good).is_ok(),
+                "{good:?} must be accepted"
+            );
+        }
+    }
+
     use serde_json::json;
 
     use super::{validated_request, PrivilegedPayload};

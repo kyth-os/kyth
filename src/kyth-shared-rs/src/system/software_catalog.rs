@@ -377,6 +377,15 @@ pub fn installed_flatpaks() -> Vec<InstalledFlatpak> {
     apps
 }
 
+/// Installed flags for several app ids from ONE scan. `is_flatpak_installed`
+/// re-runs the whole `flatpak list` (two scopes, 10 s each) per call, so a grid
+/// of N tools cost N scans and froze the tab for N x 20 s when flatpak hung.
+pub fn installed_flags(ids: &[&str], scan: impl FnOnce() -> Vec<InstalledFlatpak>) -> Vec<bool> {
+    let installed: std::collections::HashSet<String> =
+        scan().into_iter().map(|app| app.id).collect();
+    ids.iter().map(|id| installed.contains(*id)).collect()
+}
+
 /// Port of `services.flatpak.is_installed`'s no-cache fallback path: check
 /// live installed state rather than trusting a cache this crate doesn't
 /// maintain. Used by the App Store's own installed list and the Security
@@ -541,6 +550,27 @@ pub fn familiar_apps() -> Vec<FamiliarApp> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn installed_flags_scan_once_for_the_whole_grid() {
+        let calls = std::cell::Cell::new(0);
+        let app = |id: &str| InstalledFlatpak {
+            id: id.to_string(),
+            name: String::new(),
+            version: String::new(),
+            branch: String::new(),
+            arch: String::new(),
+            scope: String::new(),
+            icon_url: String::new(),
+        };
+        let flags = installed_flags(&["a.b", "c.d", "e.f"], || {
+            calls.set(calls.get() + 1);
+            vec![app("c.d")]
+        });
+        assert_eq!(flags, vec![false, true, false]);
+        assert_eq!(calls.get(), 1, "one flatpak scan for N tools, not N");
+        assert_eq!(installed_flags(&[], Vec::new), Vec::<bool>::new());
+    }
+
     use super::*;
 
     #[test]

@@ -32,17 +32,30 @@ pub(crate) struct GamingActionLaunch {
     pub(crate) detail: String,
 }
 
+/// Async + one scan: this used to be a sync command that ran a full
+/// `flatpak list` (two scopes, 10 s each) once PER TOOL, so a wedged flatpak
+/// helper froze the Gaming tab for tools x 20 s.
 #[tauri::command]
-pub(crate) fn gaming_tools() -> Vec<GamingToolResponse> {
-    GAMING_TOOLS
-        .iter()
-        .map(|tool| GamingToolResponse {
-            flatpak: tool.flatpak.to_string(),
-            name: tool.name.to_string(),
-            desc: tool.desc.to_string(),
-            installed: kyth_shared::system::software_catalog::is_flatpak_installed(tool.flatpak),
-        })
-        .collect()
+pub(crate) async fn gaming_tools() -> Vec<GamingToolResponse> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let ids: Vec<&str> = GAMING_TOOLS.iter().map(|tool| tool.flatpak).collect();
+        let flags = kyth_shared::system::software_catalog::installed_flags(
+            &ids,
+            kyth_shared::system::software_catalog::installed_flatpaks,
+        );
+        GAMING_TOOLS
+            .iter()
+            .zip(flags)
+            .map(|(tool, installed)| GamingToolResponse {
+                flatpak: tool.flatpak.to_string(),
+                name: tool.name.to_string(),
+                desc: tool.desc.to_string(),
+                installed,
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 fn validated_gaming_tool(flatpak_id: &str) -> Result<&'static gaming_tools::GamingTool, String> {
