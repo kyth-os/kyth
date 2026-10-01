@@ -104,7 +104,12 @@ for ssid in "${!owe_ssids[@]}"; do
 done
 
 # Auto-connect if exactly one OWE network and no WiFi connected
-wifi_connected=$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | grep -c ':wifi:connected' || echo 0)
+# `grep -c` already prints 0 when nothing matches, then exits 1, so the old
+# `|| echo 0` printed a SECOND 0 and the value became "0\n0": the numeric test
+# below died with an arithmetic syntax error and the one case this block exists
+# for (a single OWE network, no Wi-Fi connected) never auto-connected.
+wifi_connected=$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null | grep -c ':wifi:connected' || true)
+wifi_connected=${wifi_connected:-0}
 if [[ "${#owe_ssids[@]}" -eq 1 && "${wifi_connected}" -eq 0 ]]; then
 	for ssid in "${!owe_ssids[@]}"; do
 		con_name="Kyth OWE ${ssid}"

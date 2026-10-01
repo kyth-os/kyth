@@ -473,6 +473,32 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertNotIn("PrivateUsers=yes", body)
         self.assertIn("exit 0", body.split("ExecStart=", 1)[1])
 
+    def test_live_owe_autoconnect_counts_connected_wifi_as_a_single_number(self) -> None:
+        """`grep -c ... || echo 0` yields "0\\n0" when nothing matches, which made
+        the numeric test error out and skipped the one auto-connect case."""
+        import os
+        import subprocess
+        import tempfile
+
+        script = (ROOT / "build_files/scripts/kyth-live-owe-wifi-setup.sh").read_text(encoding="utf-8")
+        line = next(l for l in script.splitlines() if l.startswith("wifi_connected=$(nmcli"))
+        default = next(l for l in script.splitlines() if l.startswith("wifi_connected=${wifi_connected"))
+        self.assertNotIn("|| echo", line)
+        cases = (("wlp1:wifi:disconnected\\nlo:loopback:unmanaged\\n", "0"), ("wlp1:wifi:connected\\n", "1"))
+        for nmcli_output, expected in cases:
+            with tempfile.TemporaryDirectory() as tmp:
+                stub = os.path.join(tmp, "nmcli")
+                with open(stub, "w", encoding="utf-8") as handle:
+                    handle.write(f"#!/bin/sh\nprintf '{nmcli_output}'\n")
+                os.chmod(stub, 0o755)
+                result = subprocess.run(
+                    ["bash", "-c", f"set -euo pipefail\n{line}\n{default}\nprintf '%s' \"$wifi_connected\""],
+                    env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+
     def test_gaming_hint_lives_where_an_unprivileged_game_can_write(self) -> None:
         """/run/kyth is kyth-privileged's root:wheel 0750 RuntimeDirectory, so the
         hint a game launch writes there always failed silently and Wi-Fi
