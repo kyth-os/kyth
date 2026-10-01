@@ -325,6 +325,22 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("--deepestcache=2", body)
         self.assertNotIn("write_config /etc/sysconfig/irqbalance", late)
 
+    def test_ntsync_device_is_usable_by_the_logged_in_user(self) -> None:
+        """Nobody is in the 'users' group, so a group-only rule left /dev/ntsync unusable."""
+        body = (ROOT / "build_files/scripts/sysconfig/kernel/13-ntsync.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('TAG+="uaccess"', body)
+        rule_path = next(
+            part.split(" ")[-1]
+            for part in body.splitlines()
+            if part.startswith("write_line") and "ntsync.rules" in part
+        )
+        name = rule_path.rsplit("/", 1)[1]
+        # uaccess is applied by 73-seat-late.rules, so the tag must be set earlier.
+        self.assertLess(int(name.split("-", 1)[0]), 73, name)
+        self.assertIn("rm -f /usr/lib/udev/rules.d/99-ntsync.rules", body)
+
     def test_system_accounts_unit_cannot_form_an_ordering_cycle(self) -> None:
         """After=local-fs.target and Before=systemd-sysusers.service are a cycle.
 
