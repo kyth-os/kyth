@@ -169,8 +169,12 @@ pub fn render_resolved_conf(preset: &NetworkPreset) -> String {
     // resolved's opportunistic mode so encrypted DNS remains preferred when
     // available without breaking per-link enterprise resolvers.
     //
-    // DNSSEC stays enforced (`DNSSEC=yes`) with public fallback resolvers so
-    // a poisoned/missing primary cannot silently downgrade validation.
+    // DNSSEC uses `allow-downgrade`: validate whenever the resolver supports
+    // it, but do not fail lookups when it does not. `DNSSEC=yes` made
+    // resolved reject valid answers from corporate DHCP resolvers that strip
+    // DNSSEC records (hundreds of "no-signature" failures and Bogus verdicts
+    // per boot), which showed up as slow, intermittent name resolution.
+    // Encrypted DNS (DoT) and the public fallbacks are unchanged.
     // `DNSOverTLS=strict` is a documented opt-in only (`dns_strict`): it
     // breaks captive portals and networks without DoT, so the Hub must have
     // the user choose it explicitly.
@@ -182,7 +186,7 @@ pub fn render_resolved_conf(preset: &NetworkPreset) -> String {
         "no"
     };
     format!(
-        "[Resolve]\nDNS={}\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=yes\nDNSOverTLS={tls}\n",
+        "[Resolve]\nDNS={}\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=allow-downgrade\nDNSOverTLS={tls}\n",
         dns_ip(preset),
     )
 }
@@ -301,6 +305,19 @@ mod tests {
     use tempfile::tempdir;
 
     #[test]
+    fn resolved_conf_never_hard_requires_dnssec() {
+        // `DNSSEC=yes` breaks lookups on resolvers that do not pass DNSSEC
+        // records; every rendered preset must stay on allow-downgrade.
+        for doh in [true, false] {
+            let mut preset = NetworkPreset::default();
+            preset.doh = doh;
+            let conf = render_resolved_conf(&preset);
+            assert!(conf.contains("DNSSEC=allow-downgrade\n"), "{conf}");
+            assert!(!conf.contains("DNSSEC=yes"), "{conf}");
+        }
+    }
+
+    #[test]
     fn defaults_and_validates_preset_values() {
         let dir = tempdir().unwrap();
         let missing = dir.path().join("network.toml");
@@ -382,7 +399,7 @@ mod tests {
         let preset = NetworkPreset::default();
         assert_eq!(
             render_resolved_conf(&preset),
-            "[Resolve]\nDNS=9.9.9.9\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=yes\nDNSOverTLS=opportunistic\n"
+            "[Resolve]\nDNS=9.9.9.9\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=allow-downgrade\nDNSOverTLS=opportunistic\n"
         );
         let off = NetworkPreset {
             dns: "off".into(),
@@ -394,7 +411,7 @@ mod tests {
         };
         assert_eq!(
             render_resolved_conf(&off),
-            "[Resolve]\nDNS=\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=yes\nDNSOverTLS=no\n"
+            "[Resolve]\nDNS=\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=allow-downgrade\nDNSOverTLS=no\n"
         );
         let strict = NetworkPreset {
             dns_strict: true,
@@ -438,7 +455,7 @@ mod tests {
         assert_eq!(written.len(), 1);
         assert_eq!(
             std::fs::read_to_string(&written[0]).unwrap(),
-            "[Resolve]\nDNS=9.9.9.9\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=yes\nDNSOverTLS=opportunistic\n"
+            "[Resolve]\nDNS=9.9.9.9\nFallbackDNS=1.1.1.1 8.8.8.8\nDNSSEC=allow-downgrade\nDNSOverTLS=opportunistic\n"
         );
     }
 }
