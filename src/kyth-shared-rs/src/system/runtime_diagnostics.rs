@@ -180,6 +180,46 @@ fn deployment_line(line: &str) -> bool {
     }) && _version.is_some()
 }
 
+/// Whether a sched_ext scheduler is actually running.
+///
+/// The kernel is the authority: `/sys/kernel/sched_ext/state` reads `enabled`
+/// only while a BPF scheduler is attached (`disabled`, `enabling`, `disabling`
+/// otherwise). The file exists on every sched_ext-capable kernel, and the
+/// `scx_rusty` binary is merely installed, so neither proves anything - the
+/// health tools used to report "scx low-latency scheduler active" on a machine
+/// where the state was `disabled` and no scheduler process existed. Only when
+/// the kernel exposes no state (older/non-scx kernel) do we fall back to the
+/// loader unit.
+pub fn scx_scheduler_active(kernel_state: Option<&str>, loader_unit_active: bool) -> bool {
+    match kernel_state.map(str::trim) {
+        Some(state) => state == "enabled",
+        None => loader_unit_active,
+    }
+}
+
+/// Wine/Proton can use NTSYNC only if the device exists AND the user can open it.
+/// `/dev/ntsync` was shipped `root:users 0660` while nobody is in `users`, so it
+/// "existed" (and the module was loaded) yet every open failed with EACCES and
+/// games silently fell back to fsync/esync.
+#[derive(Debug, PartialEq, Eq)]
+pub enum NtsyncState {
+    Usable,
+    /// Device node present but this user cannot open it.
+    NoAccess,
+    /// Module loaded but no device node (udev has not created it).
+    NoDevice,
+    Missing,
+}
+
+pub fn ntsync_state(device_exists: bool, can_open: bool, module_loaded: bool) -> NtsyncState {
+    match (device_exists, can_open, module_loaded) {
+        (true, true, _) => NtsyncState::Usable,
+        (true, false, _) => NtsyncState::NoAccess,
+        (false, _, true) => NtsyncState::NoDevice,
+        (false, _, false) => NtsyncState::Missing,
+    }
+}
+
 /// `major.minor` from `python3 --version` output ("Python 3.15.0rc2" -> "3.15").
 pub fn python_minor(version_output: &str) -> Option<String> {
     let version = version_output.trim().strip_prefix("Python ")?;
@@ -257,6 +297,32 @@ pub fn service_detail(active: bool, result: Option<&str>) -> (&'static str, Stri
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn scx_is_active_only_when_the_kernel_says_enabled() {
+        assert!(scx_scheduler_active(Some("enabled\n"), false));
+        assert!(scx_scheduler_active(Some("enabled"), true));
+        // The reported bug: state file present, scheduler off, binary installed.
+        assert!(!scx_scheduler_active(Some("disabled\n"), false));
+        // The loader unit claiming "active" does not override the kernel.
+        assert!(!scx_scheduler_active(Some("disabled"), true));
+        assert!(!scx_scheduler_active(Some("enabling"), true));
+        assert!(!scx_scheduler_active(Some("disabling"), true));
+        assert!(!scx_scheduler_active(Some(""), true));
+        // No sched_ext in this kernel: trust the loader unit.
+        assert!(scx_scheduler_active(None, true));
+        assert!(!scx_scheduler_active(None, false));
+    }
+
+    #[test]
+    fn ntsync_requires_an_openable_device() {
+        assert_eq!(ntsync_state(true, true, true), NtsyncState::Usable);
+        assert_eq!(ntsync_state(true, true, false), NtsyncState::Usable);
+        // The reported bug: node exists, module loaded, open() is EACCES.
+        assert_eq!(ntsync_state(true, false, true), NtsyncState::NoAccess);
+        assert_eq!(ntsync_state(false, false, true), NtsyncState::NoDevice);
+        assert_eq!(ntsync_state(false, false, false), NtsyncState::Missing);
+    }
 
     #[test]
     fn parses_python_minor() {
