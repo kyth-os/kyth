@@ -16,9 +16,65 @@ SELINUX_UNIT = (
 )
 BOOT_SPLASH = ROOT / "build_files/scripts/branding/28-bootc-kernel-arguments-and-boot-splash.sh"
 ENROLL_SCRIPT = ROOT / "build_files/tests/secureboot-enrollment.sh"
+VAR_HOME_ALIAS_FRAGMENT = (
+    ROOT / "build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh"
+)
 
 
 class BootStabilityUnitTests(unittest.TestCase):
+    def test_var_home_is_not_aliased_to_home_in_selinux_policy(self) -> None:
+        """F45's "/var/home /home" subs rule left every home file as default_t.
+
+        The alias rewrites lookups to /home/..., but the generated user-home rules
+        are for /var/home/..., so nothing matched: xdm_t was denied the KWallet
+        salt, pam_kwallet5 could not unlock at login and KWallet prompted for a
+        password on first boot. Run the real fragment on a copy of F45's file.
+        """
+        import os
+        import subprocess
+        import tempfile
+
+        original = (
+            "/var/lib/xguest/home /home\n"
+            "/home-inst           /home\n"
+            "/home/home-inst      /home\n"
+            "/var/home            /home\n"
+            "/var/roothome        /root\n"
+            "/var/home-backup     /keepme\n"
+            "/var/homes /alsokeep\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            subs = os.path.join(tmp, "file_contexts.subs_dist")
+            with open(subs, "w", encoding="utf-8") as handle:
+                handle.write(original)
+            os.chmod(subs, 0o644)
+            env = {**os.environ, "KYTH_SELINUX_SUBS_DIST": subs}
+            for _ in range(2):  # second pass must be a no-op
+                result = subprocess.run(
+                    ["bash", str(VAR_HOME_ALIAS_FRAGMENT)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            with open(subs, encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+            self.assertNotIn("/var/home            /home", lines)
+            self.assertFalse([l for l in lines if l.split()[:1] == ["/var/home"]])
+            # Every other alias, including look-alike prefixes, is preserved.
+            expected = [l for l in original.splitlines() if l.split()[:1] != ["/var/home"]]
+            self.assertEqual(lines, expected)
+            self.assertEqual(oct(os.stat(subs).st_mode & 0o777), "0o644")
+            missing = subprocess.run(
+                ["bash", str(VAR_HOME_ALIAS_FRAGMENT)],
+                env={**env, "KYTH_SELINUX_SUBS_DIST": os.path.join(tmp, "absent")},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(missing.returncode, 0, "absent policy file must not fail the build")
+
     def test_selinux_home_relabel_is_capped_and_still_before_greeter(self) -> None:
         """The login-critical relabel must stay bounded and gate the greeter;
         the exhaustive full-tree pass must run separately, in the background,

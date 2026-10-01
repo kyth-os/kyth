@@ -14042,6 +14042,36 @@
     },
     {
       "current_implementation": "shell",
+      "cutover": "replace installed 33-selinux-var-home-label-alias.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "33-selinux-var-home-label-alias.sh",
+      "owner": "fixture::build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed 33-selinux-var-home-label-alias.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
       "cutover": "replace installed 35-sudoers-passwordless-safe-upgrade-firmware-operati.sh entry point after parity gates",
       "function_inventory": [
         {
