@@ -300,6 +300,17 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("After=local-fs.target systemd-sysctl.service", body)
         self.assertNotRegex(body, r"^After=multi-user\.target$", re.M)
 
+    def test_irqbalance_args_only_use_options_the_shipped_daemon_accepts(self) -> None:
+        """irqbalance 1.9.x has no --hintpolicy; passing it kills the unit at start."""
+        body = (ROOT / "build_files/scripts/sysconfig/systemd/05-irqbalance-tuning.sh").read_text(
+            encoding="utf-8"
+        )
+        args = next(
+            line for line in body.splitlines() if line.startswith("IRQBALANCE_ARGS=")
+        )
+        self.assertNotIn("--hintpolicy", args)
+        self.assertIn("--deepestcache=2", args)
+
     def test_irqbalance_oneshot_does_not_fail_type_simple(self) -> None:
         body = (ROOT / "build_files/scripts/sysconfig/systemd/05-irqbalance-tuning.sh").read_text(
             encoding="utf-8"
