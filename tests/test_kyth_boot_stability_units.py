@@ -222,7 +222,9 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("kyth-boot-branding.service", body)
         self.assertIn("kyth-boot-splash-initramfs.service", body)
         self.assertGreaterEqual(body.count("TimeoutStartSec=60"), 2)
-        self.assertIn("TimeoutStartSec=300", body)
+        # initramfs refresh must outlast the binary's dracut budget (2x600s);
+        # a shorter timeout SIGTERMs dracut mid-run.
+        self.assertIn("TimeoutStartSec=1260", body)
         self.assertIn("TriggerLimitIntervalSec=10", body)
         self.assertIn("TriggerLimitBurst=5", body)
 
@@ -287,16 +289,15 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("StartLimitIntervalSec=60", zram)
         self.assertIn("StartLimitBurst=3", zram)
         # oneshot + RemainAfterExit cannot use Restart=; keep a start-limit
-        # so a crash loop still cannot take the boot.
-        arbiter = (ROOT / "build_files/kyth-sched-arbiter.service").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("StartLimitIntervalSec=60", arbiter)
-        self.assertIn("StartLimitBurst=3", arbiter)
-        self.assertNotRegex(arbiter, r"^Restart=", re.M)
+        # so a crash loop still cannot take the boot. The arbiter unit is
+        # generated at build time, so audit the generator script instead of
+        # a repo copy (the stale shadow has been removed).
         generated = (
             ROOT / "build_files/scripts/sysconfig/gaming/15-sched-arbiter.sh"
         ).read_text(encoding="utf-8")
+        self.assertIn("StartLimitIntervalSec=60", generated)
+        self.assertIn("StartLimitBurst=3", generated)
+        self.assertNotRegex(generated, r"^Restart=", re.M)
         self.assertIn("After=local-fs.target", generated)
         self.assertNotIn("Restart=on-failure", generated)
         self.assertNotRegex(generated, r"^After=multi-user\.target$", re.M)

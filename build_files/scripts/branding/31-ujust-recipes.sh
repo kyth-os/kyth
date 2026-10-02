@@ -38,7 +38,7 @@ install -m 0644 /ctx/kyth-duperemove.timer /usr/lib/systemd/system/kyth-duperemo
 install -m 0644 /ctx/kyth-scx-loader.service /usr/lib/systemd/system/scx_loader.service
 systemctl enable kyth-local-bin-migrate.service 2>/dev/null || true
 systemctl enable kyth-duperemove.timer 2>/dev/null || true
-systemctl --global enable kyth-proton-cachyos-update.timer 2>/dev/null || true
+systemctl enable kyth-proton-cachyos-update.timer 2>/dev/null || true
 # No NetworkManager-wait-online.service here on purpose: it stalls every boot
 # up to its timeout on metered/slow/offline links, and every Kyth network
 # waiter already skips cleanly offline (flathub-setup exits 0 with no default
@@ -57,6 +57,6 @@ if command -v scx_rusty >/dev/null 2>&1; then
 	systemctl --global enable kyth-sched.service 2>/dev/null || true
 fi
 systemctl --global enable kyth-telem.service 2>/dev/null || true
-systemctl --global enable kyth-probe.timer 2>/dev/null || true
+systemctl --global enable kyth-probe-user.timer 2>/dev/null || true
 systemctl --global enable kyth-guardian.timer 2>/dev/null || true
 # kyth-guardian.path removed (probe-cache check storm); timer only.

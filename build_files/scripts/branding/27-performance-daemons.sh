@@ -11,6 +11,7 @@ install -m 0644 /ctx/kyth-telem.service /usr/lib/systemd/user/kyth-telem.service
 # kyth-ai-perfd is the native Rust daemon copied from the hub-web-builder.
 # The former Python launcher remains source-only for compatibility fixtures.
 install -m 0644 /ctx/kyth-ai-perfd.service /usr/lib/systemd/user/kyth-ai-perfd.service
+systemctl --global enable kyth-ai-perfd.service 2>/dev/null || true
 
 # kyth-update-watcher is the native Rust binary copied from the hub-web-builder
 # stage. The legacy Python watcher remains source-only for compatibility tests.
@@ -45,6 +46,10 @@ install -m 0644 /ctx/gaming.slice /usr/lib/systemd/system/gaming.slice
 # fixtures; it is no longer installed or reachable from a service path.
 install -m 0644 /ctx/kyth-probe.service /usr/lib/systemd/system/kyth-probe.service
 install -m 0644 /ctx/kyth-probe.timer /usr/lib/systemd/system/kyth-probe.timer
+
+# kyth-probe-user refreshes the per-user probe cache shortly after login.
+install -m 0644 /ctx/kyth-probe-user.service /usr/lib/systemd/user/kyth-probe-user.service
+install -m 0644 /ctx/kyth-probe-user.timer /usr/lib/systemd/user/kyth-probe-user.timer
 
 install -m 0644 /ctx/kyth-guardian.service /usr/lib/systemd/user/kyth-guardian.service
 install -m 0644 /ctx/kyth-guardian.timer /usr/lib/systemd/user/kyth-guardian.timer

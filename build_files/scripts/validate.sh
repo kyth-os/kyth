@@ -260,7 +260,7 @@ fi
 # Non-blocking security audit — warn, don't fail (thresholds are advisory while
 # the demonolith is being split). Surfaces hardening regressions early.
 if command -v systemd-analyze >/dev/null 2>&1; then
-	output_sec="$(systemd-analyze security build_files/kyth-ai-perfd.service build_files/kyth-guardian.service build_files/kyth-sched.service build_files/kyth-sched-arbiter.service build_files/kyth-batteryd.service build_files/kyth-probe.service build_files/kyth-probe-user.service build_files/kyth-update-watcher.service 2>&1 || true)"
+	output_sec="$(systemd-analyze security build_files/kyth-ai-perfd.service build_files/kyth-guardian.service build_files/kyth-sched.service build_files/kyth-batteryd.service build_files/kyth-probe.service build_files/kyth-probe-user.service build_files/kyth-update-watcher.service 2>&1 || true)"
 	printf '%s\n' "${output_sec}" | grep -E "^(build_files|Overall exposure)" || true
 fi
 # Supply-chain audit — non-blocking, surfaces cargo/pip advisories
