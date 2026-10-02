@@ -588,6 +588,16 @@ def _configure_nvidia() -> str:
         "modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1 nvidia-drm.fbdev=1"
     )
     run_optional(["grubby", "--update-kernel=ALL", f"--args={kernel_args}"], capture_output=True)
+    # Persistent across bootc upgrades (grubby only edits the running
+    # deployment's BLS entries).
+    try:
+        Path("/etc/bootc/kargs.d").mkdir(parents=True, exist_ok=True)
+        Path("/etc/bootc/kargs.d/50-kyth-nvidia.toml").write_text(
+            'kargs = ["rd.driver.blacklist=nouveau,nova_core", "modprobe.blacklist=nouveau,nova_core", "nvidia-drm.modeset=1", "nvidia-drm.fbdev=1"]\n',
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
     for unit in ("nvidia-suspend.service", "nvidia-resume.service", "nvidia-hibernate.service"):
         run_optional(["systemctl", "enable", unit], capture_output=True)
     return "proprietary-ready"
@@ -599,6 +609,10 @@ def _clear_nvidia_policy() -> str:
         "modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1 nvidia-drm.fbdev=1"
     )
     run_optional(["grubby", "--update-kernel=ALL", f"--remove-args={kernel_args}"], capture_output=True)
+    try:
+        Path("/etc/bootc/kargs.d/50-kyth-nvidia.toml").unlink(missing_ok=True)
+    except OSError:
+        pass
     for unit in ("nvidia-suspend.service", "nvidia-resume.service", "nvidia-hibernate.service"):
         run_optional(["systemctl", "disable", unit], capture_output=True)
     return "not-required"

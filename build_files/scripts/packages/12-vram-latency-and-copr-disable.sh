@@ -33,7 +33,10 @@ mkdir -p /etc/yum.repos.d
 if dnf5 install -y --skip-unavailable \
 	dmemcg-booster \
 	plasma-foreground-booster-dmemcg \
-	vulkan-low-latency-layer; then
+	vulkan-low-latency-layer \
+	opentabletdriver \
+	extest \
+	extest.i686; then
 	systemctl enable dmemcg-booster-system.service 2>/dev/null || true
 	systemctl --global enable dmemcg-booster-user.service 2>/dev/null || true
 else

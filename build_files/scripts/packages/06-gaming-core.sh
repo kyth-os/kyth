@@ -71,11 +71,8 @@ dnf_retry install -y --skip-unavailable --exclude=libde265.i686 \
 	libatomic \
 	nss \
 	steam-devices \
-	game-devices-udev \
 	xpadneo \
 	xone \
-	dualsensectl \
-	joycond \
 	kdeplasma-addons \
 	input-remapper \
 	libxcrypt-compat \
@@ -99,15 +96,14 @@ if ((${#missing_gaming_rpms[@]})); then
 	exit 1
 fi
 
-# Controller drivers and shader packs come from the bazzite COPR, whose
-# fedora-45 chroot may lag the Fedora release. They are best-effort, but a
-# silent skip means shipping an image without Xbox/PS5 controller support —
-# say so loudly so the missing builds get noticed.
+# Controller drivers come from RPM Fusion (xpadneo, xone). They are
+# best-effort, but a silent skip means shipping an image without
+# Xbox controller support — say so loudly so a missing build gets noticed.
+# (dualsensectl/joycond/game-devices-udev were dropped: not packaged for
+# Fedora 45 in any enabled repo.)
 copr_best_effort_rpms=(
 	xpadneo
 	xone
-	dualsensectl
-	joycond
 )
 skipped_copr_rpms=()
 for pkg in "${copr_best_effort_rpms[@]}"; do

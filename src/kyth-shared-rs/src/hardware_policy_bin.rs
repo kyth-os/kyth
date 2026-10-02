@@ -297,6 +297,14 @@ fn configure_nvidia() -> Result<String, String> {
         "apply NVIDIA kernel arguments",
         Duration::from_secs(30),
     )?;
+    // grubby edits the CURRENT deployment's BLS entries only. bootc
+    // regenerates BLS on upgrade from /etc/bootc/kargs.d, so without a
+    // persistent drop-in the blacklist is lost on the next update and
+    // nova/nouveau bind the GPU before nvidia.ko loads. Write the same
+    // args additively; grubby still handles the running deployment.
+    if let Err(e) = write_bootc_nvidia_kargs() {
+        return Err(format!("write bootc NVIDIA kargs: {e}"));
+    }
     for unit in [
         "nvidia-suspend.service",
         "nvidia-resume.service",
@@ -339,6 +347,18 @@ fn configure_nvidia() -> Result<String, String> {
     Ok("proprietary-ready".into())
 }
 
+/// Writes the NVIDIA kernel args to /etc/bootc/kargs.d so they survive
+/// bootc upgrades. grubby (used by callers) only edits the running
+/// deployment's BLS entries; bootc regenerates BLS from kargs.d on upgrade.
+fn write_bootc_nvidia_kargs() -> io::Result<()> {
+    fs::create_dir_all("/etc/bootc/kargs.d")?;
+    fs::write(
+        "/etc/bootc/kargs.d/50-kyth-nvidia.toml",
+        "kargs = [\"rd.driver.blacklist=nouveau,nova_core\", \"modprobe.blacklist=nouveau,nova_core\", \"nvidia-drm.modeset=1\", \"nvidia-drm.fbdev=1\"]\n",
+    )?;
+    Ok(())
+}
+
 fn clear_nvidia() -> Result<String, String> {
     let args = "rd.driver.blacklist=nouveau,nova_core modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1 nvidia-drm.fbdev=1";
     run_checked(
@@ -350,6 +370,9 @@ fn clear_nvidia() -> Result<String, String> {
         "remove NVIDIA kernel arguments",
         Duration::from_secs(30),
     )?;
+    // Remove the persistent bootc drop-in written by apply; the running
+    // deployment is handled by grubby above.
+    let _ = fs::remove_file("/etc/bootc/kargs.d/50-kyth-nvidia.toml");
     for unit in [
         "nvidia-suspend.service",
         "nvidia-resume.service",

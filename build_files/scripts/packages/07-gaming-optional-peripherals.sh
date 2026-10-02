@@ -21,7 +21,6 @@ optional_gaming_packages=(
 	jstest-gtk
 	libcec
 	cec-utils
-	opentabletdriver
 	corectrl
 	akmod-v4l2loopback
 	v4l2loopback
@@ -33,8 +32,6 @@ optional_gaming_packages=(
 	ryzenadj
 	i2c-tools
 	lm_sensors
-	extest
-	extest.i686
 	# Vulkan / GL debugging: vulkaninfo, glxinfo, glxgears
 	vulkan-tools
 	mesa-demos
