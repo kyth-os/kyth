@@ -2392,14 +2392,22 @@ fn master_apply_paths() -> gaming_master::MasterApplyPaths {
     }
 }
 
-fn apply_master_children(gaming: bool) {
+/// Apply all master children, printing per-child status. Returns `true` when
+/// every child applied cleanly. A `false` result means at least one child
+/// failed; re-running converges because each child apply is idempotent
+/// (config write + drop-in regeneration), so a retry only re-attempts the
+/// failed children.
+fn apply_master_children(gaming: bool) -> bool {
+    let mut all_ok = true;
     for (name, status) in gaming_master::apply_children(gaming, &master_apply_paths()) {
         if status == "ok" {
             println!("gaming-master {name} ok");
         } else {
+            all_ok = false;
             eprintln!("kyth-gaming-master: {name} {status}");
         }
     }
+    all_ok
 }
 
 fn dispatch_gaming_master(action: &str) -> ExitCode {
@@ -2425,7 +2433,10 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
             if profile == Profile::Balanced {
                 eprintln!("kyth-gaming-master: staying balanced ({reason})");
             }
-            apply_master_children(profile == Profile::Gaming);
+            if !apply_master_children(profile == Profile::Gaming) {
+                eprintln!("kyth-gaming-master: some children failed; re-run to retry");
+                return ExitCode::from(1);
+            }
             println!("gaming-master {}", profile.as_str());
             ExitCode::SUCCESS
         }
@@ -2437,7 +2448,10 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
                 eprintln!("kyth-gaming-master: {error}");
                 return ExitCode::from(1);
             }
-            apply_master_children(false);
+            if !apply_master_children(false) {
+                eprintln!("kyth-gaming-master: some children failed; re-run to retry");
+                return ExitCode::from(1);
+            }
             println!("gaming-master balanced");
             ExitCode::SUCCESS
         }
@@ -2456,7 +2470,10 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
                 }
                 eprintln!("kyth-gaming-master: staying balanced ({reason})");
             }
-            apply_master_children(profile == Profile::Gaming);
+            if !apply_master_children(profile == Profile::Gaming) {
+                eprintln!("kyth-gaming-master: some children failed; re-run to retry");
+                return ExitCode::from(1);
+            }
             println!("gaming-master {}", profile.as_str());
             ExitCode::SUCCESS
         }

@@ -795,6 +795,10 @@ pub fn extract_archive(
             "-C".to_string(),
             dest_arg,
             "--no-same-owner".to_string(),
+            // Without this, tar run as root restores archived mode bits
+            // verbatim — including setuid/setgid (e.g. 4755) from a
+            // compromised or malicious release tarball.
+            "--no-same-permissions".to_string(),
         ],
     };
     match (run)(&argv, 600) {

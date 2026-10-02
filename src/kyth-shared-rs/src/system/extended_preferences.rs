@@ -211,9 +211,7 @@ pub fn generate_pipewire_gaming(
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
     if config.profile != "gaming" {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         return Ok(None);
     }
     let content = r#"-- Kyth PipeWire gaming — generated
@@ -264,9 +262,7 @@ pub fn generate_pcie(
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
     if config.profile != "gaming" {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         return Ok(None);
     }
     crate::atomic_io::atomic_write_text(destination, "# Kyth PCIe ASPM gaming — generated\nACTION==\"add\", SUBSYSTEM==\"pci\", ATTR{link/l1_aspm}=\"0\"\n", Some(0o644))?;
@@ -307,9 +303,7 @@ pub fn generate_psi(
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
     if config.profile != "gaming" {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         return Ok(None);
     }
     crate::atomic_io::atomic_write_text(
@@ -467,9 +461,7 @@ pub fn generate_wine_env(
         crate::atomic_io::atomic_write_text(destination, &content, Some(0o644))?;
         Ok(Some(destination.to_path_buf()))
     } else {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         Ok(None)
     }
 }
@@ -528,9 +520,7 @@ pub fn generate_mimalloc_env(
         crate::atomic_io::atomic_write_text(destination, &content, Some(0o644))?;
         Ok(Some(destination.to_path_buf()))
     } else {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         Ok(None)
     }
 }
@@ -607,9 +597,7 @@ pub fn generate_sccache(
         (sccache_env(config), sccache_service(config))
     else {
         for path in [environment, service] {
-            match std::fs::remove_file(path) {
-                Ok(()) | Err(_) => {}
-            }
+            crate::atomic_io::remove_if_exists(path)?;
         }
         return Ok(None);
     };

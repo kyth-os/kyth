@@ -27,10 +27,23 @@ const HARDWARE_APPLY_TIMEOUT: Duration = Duration::from_secs(1200);
 /// socket server that must run as root with CAP_CHOWN), so the oneshot unit
 /// died on every boot with "could not set socket owner: Operation not
 /// permitted" and the policy was never applied.
-fn hardware_apply_command(extra: &[String]) -> (&'static str, Vec<String>) {
-    let mut args = vec!["apply".to_string(), "--force".to_string()];
-    args.extend(extra.iter().cloned());
-    ("/usr/bin/kyth-hardware-policy", args)
+fn hardware_apply_command(extra: &[String]) -> io::Result<(&'static str, Vec<String>)> {
+    // Never forward caller args to the root hardware-policy binary: an
+    // unexpected flag (or a `--`-style separator smuggling a subcommand)
+    // would run with full privileges.
+    if !extra.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "apply-hardware takes no arguments, got: {}",
+                extra.join(" ")
+            ),
+        ));
+    }
+    Ok((
+        "/usr/bin/kyth-hardware-policy",
+        vec!["apply".to_string(), "--force".to_string()],
+    ))
 }
 
 fn usage() -> ! {
@@ -1975,7 +1988,7 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
         "windows-friendly-defaults" => run("/usr/bin/kyth-user-polish", args),
         "storage-gate" => run("/usr/bin/kyth-storage-sense", args),
         "apply-hardware" | "retry-hardware" => {
-            let (program, hardware_args) = hardware_apply_command(args);
+            let (program, hardware_args) = hardware_apply_command(args)?;
             run_timeout(program, &hardware_args, HARDWARE_APPLY_TIMEOUT)
         }
         "power-arbiter" => power_arbiter(),
@@ -2437,11 +2450,12 @@ mod tests {
 
     #[test]
     fn hardware_setup_applies_policy_instead_of_starting_the_daemon() {
-        let (program, args) = hardware_apply_command(&[]);
+        let (program, args) = hardware_apply_command(&[]).unwrap();
         assert_eq!(program, "/usr/bin/kyth-hardware-policy");
         assert_eq!(args, ["apply", "--force"]);
-        let (_, forwarded) = hardware_apply_command(&["--policy".into(), "x".into()]);
-        assert_eq!(forwarded, ["apply", "--force", "--policy", "x"]);
+        // Caller args are never forwarded to the root policy binary.
+        let err = hardware_apply_command(&["--policy".into(), "x".into()]).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
         assert_ne!(program, "/usr/bin/kyth-privileged");
     }
 

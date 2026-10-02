@@ -75,9 +75,7 @@ pub fn generate(
     let service = service.as_ref();
     if !config.enabled {
         for path in [tmpfiles, service] {
-            match std::fs::remove_file(path) {
-                Ok(()) | Err(_) => {}
-            }
+            crate::atomic_io::remove_if_exists(path)?;
         }
         return Ok(None);
     }

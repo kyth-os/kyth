@@ -231,9 +231,7 @@ pub fn generate_oom_gaming(
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
     if config.profile != "gaming" {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         return Ok(None);
     }
     crate::atomic_io::atomic_write_text(

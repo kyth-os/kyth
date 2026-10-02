@@ -55,7 +55,10 @@ pub(crate) async fn gaming_tools() -> Vec<GamingToolResponse> {
             .collect()
     })
     .await
-    .unwrap_or_default()
+    .unwrap_or_else(|err| {
+        eprintln!("gaming_tools: scan task failed: {err}");
+        Vec::new()
+    })
 }
 
 fn validated_gaming_tool(flatpak_id: &str) -> Result<&'static gaming_tools::GamingTool, String> {

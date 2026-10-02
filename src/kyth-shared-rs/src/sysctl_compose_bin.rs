@@ -71,7 +71,13 @@ fn remove_legacy(destination: &Path) -> Result<(), String> {
             }
         }
     }
-    atomic_write_text("/etc/modules-load.d/bbr.conf", "tcp_bbr\n", Some(0o644))
+    // modules-load.d sits next to sysctl.d; derive it from the destination
+    // instead of hardcoding /etc so --dest-root builds stay contained.
+    let modules_load_d = destination
+        .parent()
+        .map(|parent| parent.join("modules-load.d"))
+        .unwrap_or_else(|| PathBuf::from("/etc/modules-load.d"));
+    atomic_write_text(modules_load_d.join("bbr.conf"), "tcp_bbr\n", Some(0o644))
         .map_err(|error| error.to_string())
 }
 

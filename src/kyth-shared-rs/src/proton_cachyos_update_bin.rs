@@ -40,7 +40,13 @@ fn run(argv: &[String], timeout_secs: u64) -> Option<(i32, String)> {
         })
 }
 
-fn fail(message: String) -> ! {
+fn fail(message: String, work: Option<&TempWorkdir>) -> ! {
+    // process::exit() skips destructors, so TempWorkdir's Drop never runs:
+    // remove the workdir explicitly or every failed update leaks hundreds
+    // of MB into /tmp.
+    if let Some(work) = work {
+        let _ = std::fs::remove_dir_all(work.path());
+    }
     eprintln!("{message}");
     std::process::exit(1);
 }
@@ -70,23 +76,32 @@ fn main() -> std::process::ExitCode {
     let headers = github_headers(secret.as_deref(), env_token.as_deref());
     let release = match fetch_github_latest_release(&run, REPO, &headers) {
         Ok(release) => release,
-        Err(error) => fail(format!("Failed to fetch GE-Proton release info: {error}")),
+        Err(error) => fail(
+            format!("Failed to fetch GE-Proton release info: {error}"),
+            None,
+        ),
     };
     let ver = release
         .get("tag_name")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
     if ver.is_empty() {
-        fail("Failed to parse GE-Proton version tag from release JSON".to_string());
+        fail(
+            "Failed to parse GE-Proton version tag from release JSON".to_string(),
+            None,
+        );
     }
     if validate_version(ver, VERSION_PATTERN, "GE-Proton").is_err() {
-        fail(format!("Unexpected GE-Proton version format: {ver}"));
+        fail(format!("Unexpected GE-Proton version format: {ver}"), None);
     }
     let assets = release_assets(&release);
     let tarball = find_release_asset(&assets, |name| name.ends_with("x86_64.tar.gz"));
     let checksum = find_release_asset(&assets, |name| name.ends_with("x86_64.sha512sum"));
     let (Some(tarball), Some(checksum)) = (tarball, checksum) else {
-        fail("Failed to locate GE-Proton release assets".to_string());
+        fail(
+            "Failed to locate GE-Proton release assets".to_string(),
+            None,
+        );
     };
     let folder = tarball
         .name
@@ -103,13 +118,14 @@ fn main() -> std::process::ExitCode {
     }
     if install_dir.join(&folder).is_dir() {
         println!("GE-Proton {ver} found incomplete — re-installing...");
-        std::fs::remove_dir_all(install_dir.join(&folder))
-            .unwrap_or_else(|error| fail(format!("Failed to clear incomplete install: {error}")));
+        std::fs::remove_dir_all(install_dir.join(&folder)).unwrap_or_else(|error| {
+            fail(format!("Failed to clear incomplete install: {error}"), None)
+        });
     }
     println!("Updating to GE-Proton {ver}...");
     let work = match TempWorkdir::create("kyth-proton") {
         Ok(work) => work,
-        Err(error) => fail(format!("Failed to download assets: {error}")),
+        Err(error) => fail(format!("Failed to download assets: {error}"), None),
     };
     let tarball_dest = work.path().join(&tarball.name);
     let sha512_dest = work.path().join(&checksum.name);
@@ -125,19 +141,22 @@ fn main() -> std::process::ExitCode {
             kyth_shared::system::release_fetch::MAX_CHECKSUM_BYTES
         };
         if let Err(error) = download_file(&run, url, dest, &headers, 120, limit) {
-            fail(format!("Failed to download assets: {error}"));
+            fail(format!("Failed to download assets: {error}"), Some(&work));
         }
     }
     println!("Verifying checksum...");
     if let Err(error) = verify_checksum_file(&sha512_dest, &tarball_dest, "sha512") {
-        fail(format!("Checksum verification failed: {error}"));
+        fail(
+            format!("Checksum verification failed: {error}"),
+            Some(&work),
+        );
     }
     println!("Extracting to {}...", install_dir.display());
     if let Err(error) = extract_archive(&run, &tarball_dest, &install_dir) {
         // Never leave a partial version dir behind: the bare-dir check
         // above would otherwise declare it "up to date" forever.
         let _ = std::fs::remove_dir_all(install_dir.join(&folder));
-        fail(format!("Extraction failed: {error}"));
+        fail(format!("Extraction failed: {error}"), Some(&work));
     }
     // Completion marker (version-stamped): the only thing the up-to-date
     // short-circuit trusts.
@@ -146,7 +165,10 @@ fn main() -> std::process::ExitCode {
         format!("{ver}\n"),
     ) {
         let _ = std::fs::remove_dir_all(install_dir.join(&folder));
-        fail(format!("Failed to record completed install: {error}"));
+        fail(
+            format!("Failed to record completed install: {error}"),
+            Some(&work),
+        );
     }
     println!("GE-Proton {ver} installed to {}/", install_dir.display());
     // One-time migration: drop legacy Proton-CachyOS installs left behind by

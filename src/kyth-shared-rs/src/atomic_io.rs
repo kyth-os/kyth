@@ -79,6 +79,17 @@ pub fn atomic_write_text(
     atomic_write_bytes(path, content.as_bytes(), mode)
 }
 
+/// Remove `path`, treating "already absent" as success. Any other error
+/// (permissions, I/O, non-empty directory) is returned so callers cannot
+/// mistake a failed disable for a completed one.
+pub fn remove_if_exists(path: impl AsRef<Path>) -> std::io::Result<()> {
+    match fs::remove_file(path.as_ref()) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 pub fn atomic_write_json<T: serde::Serialize>(
     path: impl AsRef<Path>,
     value: &T,

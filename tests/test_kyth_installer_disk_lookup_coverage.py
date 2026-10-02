@@ -54,14 +54,15 @@ class InstallerDiskLookupCoverageTests(unittest.TestCase):
         ):
             self.assertEqual(_lookup.find_efi_partition("/dev/sda"), "")
 
-    def test_root_partition_selects_largest_lsblk_partition(self):
+    def test_root_partition_rejects_ambiguous_lsblk_without_fstype(self):
         payload = {"blockdevices": [{"children": [
             {"name": "sda1", "size": 1024, "type": "part"},
             {"name": "sda2", "size": 4096, "type": "part"},
             {"name": "crypt", "size": 8192, "type": "crypt"},
         ]}]}
         with mock.patch.object(disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload))):
-            self.assertEqual(_lookup.get_root_partition("/dev/sda"), "/dev/sda2")
+            with self.assertRaises(RuntimeError):
+                _lookup.get_root_partition("/dev/sda")
 
     def test_root_partition_falls_back_to_matching_btrfs_blkid(self):
         responses = [OSError("lsblk failed"), SimpleNamespace(stdout="/dev/sdb1\n/dev/sda3\n")]

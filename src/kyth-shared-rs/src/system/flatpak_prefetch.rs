@@ -17,11 +17,22 @@ impl Default for FlatpakPrefetchConfig {
     }
 }
 
+/// Parse "HH:MM" strictly; returns None for anything outside 00:00–23:59.
+fn parse_time(value: &str) -> Option<(u32, u32)> {
+    let (hour, minute) = value.split_once(':')?;
+    // Exactly two components: "1:2:3" and "12:" are rejected.
+    if minute.contains(':') {
+        return None;
+    }
+    let hour: u32 = hour.parse().ok()?;
+    let minute: u32 = minute.parse().ok()?;
+    (hour <= 23 && minute <= 59).then_some((hour, minute))
+}
+
 fn normalize_time(value: &str) -> String {
-    if value.contains(':') && value.len() <= 5 {
-        value.into()
-    } else {
-        "02:00".into()
+    match parse_time(value) {
+        Some((hour, minute)) => format!("{hour:02}:{minute:02}"),
+        None => "02:00".into(),
     }
 }
 
@@ -83,10 +94,10 @@ pub fn render_service() -> &'static str {
 }
 
 pub fn render_timer(config: &FlatpakPrefetchConfig) -> String {
-    let mut parts = config.time.split(':');
-    let hour = parts.next().unwrap_or("02");
-    let minute = parts.next().unwrap_or("00");
-    format!("[Unit]\nDescription=Kyth flatpak prefetch timer\n[Timer]\nOnCalendar=*-*-* {hour}:{minute}:00\nPersistent=true\n[Install]\nWantedBy=timers.target\n")
+    // Defense in depth: render_timer is pub and may see a config that never
+    // went through normalize_time. Never emit an invalid OnCalendar.
+    let (hour, minute) = parse_time(&config.time).unwrap_or((2, 0));
+    format!("[Unit]\nDescription=Kyth flatpak prefetch timer\n[Timer]\nOnCalendar=*-*-* {hour:02}:{minute:02}:00\nPersistent=true\n[Install]\nWantedBy=timers.target\n")
 }
 
 pub fn generate(
@@ -98,9 +109,7 @@ pub fn generate(
     let timer = timer.as_ref();
     if !config.enabled {
         for path in [service, timer] {
-            match std::fs::remove_file(path) {
-                Ok(()) | Err(_) => {}
-            }
+            crate::atomic_io::remove_if_exists(path)?;
         }
         return Ok(None);
     }
@@ -113,6 +122,26 @@ pub fn generate(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn rejects_out_of_range_and_non_numeric_times() {
+        // "99:99" and "ab:cd" previously passed through and produced an
+        // OnCalendar systemd would reject, leaving the timer silently dead.
+        for bad in ["99:99", "ab:cd", "24:00", "12:60", "1:2:3", "", "12", ":30"] {
+            assert_eq!(normalize_time(bad), "02:00", "bad time: {bad}");
+            let timer = render_timer(&FlatpakPrefetchConfig {
+                enabled: true,
+                time: bad.into(),
+            });
+            assert!(
+                timer.contains("*-*-* 02:00:00"),
+                "render must fall back, bad time: {bad}"
+            );
+        }
+        assert_eq!(normalize_time("23:30"), "23:30");
+        assert_eq!(normalize_time("2:5"), "02:05");
+        assert_eq!(normalize_time("00:00"), "00:00");
+    }
 
     #[test]
     fn defaults_and_normalizes_schedule() {

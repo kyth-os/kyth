@@ -321,6 +321,13 @@ pub fn add_share(request: &ShareRequest) -> Result<String, String> {
         let _ = run_systemctl(&["disable", &unit], 30);
     }
     if request.mount_now {
+        // Re-validate immediately before mounting: the mount point lives
+        // under user-writable prefixes, so a symlink swapped in after the
+        // initial check (during credential/unit writes and daemon-reload)
+        // would otherwise let root mount attacker-controlled storage over
+        // an arbitrary path. No slow operations may go between this check
+        // and the mount.
+        ensure_no_symlink_in_path(Path::new(&request.mount_point))?;
         run_systemctl(&["start", &unit], 45)?;
     }
     Ok(format!("Configured SMB share {}.", request.name))

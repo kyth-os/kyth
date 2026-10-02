@@ -32,9 +32,12 @@ fn config_from(raw: Option<&str>) -> toml::Value {
 }
 
 /// bootc may legitimately run for a long time, but a config value must never be
-/// able to overflow the deadline arithmetic.
+/// able to overflow the deadline arithmetic — and must never exceed the
+/// systemd unit's `TimeoutStartSec` (build_files/kyth-update-watcher.service,
+/// currently 2400s), or systemd SIGTERMs the watcher mid-upgrade. Keep the
+/// clamp in sync with the unit file.
 fn bootc_timeout_secs(value: i64) -> u64 {
-    value.clamp(1, 86_400) as u64
+    value.clamp(1, 2400) as u64
 }
 
 fn default_config() -> toml::Value {
@@ -588,12 +591,23 @@ fn main() -> std::process::ExitCode {
         let _ = kyth_shared::system::update_status::write_update_snapshot(&status);
         return std::process::ExitCode::from(1);
     }
-    if !remote.is_empty() {
+    // Re-read bootc status after the upgrade: `remote` was captured from the
+    // registry *before* the upgrade ran and can be up to 24h stale if the
+    // registry moved mid-upgrade. The staged digest must reflect the actual
+    // post-upgrade state, so re-query rather than trusting the pre-upgrade
+    // value. Falls back to `remote` if the re-query fails.
+    let staged_digest = kyth_shared::system::bootc_query::fetch_status_data()
+        .and_then(|status_data| {
+            kyth_shared::system::bootc_query::image_digest_from_status(&status_data, "staged")
+        })
+        .filter(|digest| !digest.is_empty())
+        .unwrap_or_else(|| remote.clone());
+    if !staged_digest.is_empty() {
         let coordinator = kyth_shared::system::update_coordinator::UpdateCoordinator::new(
             kyth_shared::system::boot_health::DEFAULT_STATE_PATH,
         );
         let _ = coordinator.record_staged(
-            &remote,
+            &staged_digest,
             kyth_shared::system::boot_health::image_ring(&image_ref).unwrap_or(ring),
             now(),
         );
@@ -609,7 +623,7 @@ fn main() -> std::process::ExitCode {
         output,
         image_ref,
         booted,
-        remote.clone(),
+        staged_digest.clone(),
         remote,
         flatpaks,
     );
@@ -636,7 +650,10 @@ mod tests {
 
     #[test]
     fn bootc_timeout_is_clamped_to_a_sane_range() {
-        assert_eq!(bootc_timeout_secs(i64::MAX), 86_400);
+        // Upper bound is the systemd unit's TimeoutStartSec (2400s); the
+        // clamp and the unit file must stay in sync.
+        assert_eq!(bootc_timeout_secs(i64::MAX), 2400);
+        assert_eq!(bootc_timeout_secs(5000), 2400);
         assert_eq!(bootc_timeout_secs(0), 1);
         assert_eq!(bootc_timeout_secs(-5), 1);
         assert_eq!(bootc_timeout_secs(1800), 1800);

@@ -149,7 +149,11 @@ pub fn icc_outcome(conn: &str, icc: &str, dest_dir: &Path) -> IccOutcome {
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let dest = dest_dir.join(file_name);
-    match std::fs::read(icc).and_then(|bytes| std::fs::write(&dest, bytes).map(|_| dest)) {
+    // Atomic replace: a crash mid-copy must not leave a torn ICC profile
+    // that color management then silently applies.
+    match std::fs::read(icc)
+        .and_then(|bytes| crate::atomic_io::atomic_write_bytes(&dest, &bytes, None).map(|_| dest))
+    {
         Ok(dest) => IccOutcome::Deployed(format!("{conn}.icc={}", dest.display())),
         Err(error) => IccOutcome::Failed(format!("{conn}.icc failed: {error}")),
     }

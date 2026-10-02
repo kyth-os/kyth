@@ -229,19 +229,19 @@ pub fn current_desired_state() -> DesiredState {
 }
 
 /// Sync one gamemode.ini `pin_cores` line to the arbiter decision, touching
-/// only `[cpu]`-section content like the Python rewrite. Returns true when
-/// the file was rewritten.
-pub fn sync_gamemode_pin(ini: &Path, pin: bool) -> bool {
+/// only `[cpu]`-section content like the Python rewrite. Returns `Ok(true)`
+/// when the file was rewritten and `Ok(false)` when no change was needed
+/// (missing file, no `[cpu]` section, already at the desired value); I/O
+/// failures propagate as `Err` so callers can't mistake a failed write for
+/// a no-op.
+pub fn sync_gamemode_pin(ini: &Path, pin: bool) -> std::io::Result<bool> {
     if !ini.is_file() {
-        return false;
+        return Ok(false);
     }
-    let Ok(text) = std::fs::read_to_string(ini) else {
-        return false;
-    };
+    let text = std::fs::read_to_string(ini)?;
     let desired = if pin { "yes" } else { "no" };
-    let Ok(pin_line) = Regex::new(r"(?m)^\s*pin_cores\s*=.*$") else {
-        return false;
-    };
+    let pin_line = Regex::new(r"(?m)^\s*pin_cores\s*=.*$")
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     let matched = pin_line.is_match(&text);
     let updated = if matched {
         pin_line
@@ -250,12 +250,13 @@ pub fn sync_gamemode_pin(ini: &Path, pin: bool) -> bool {
     } else if text.contains("[cpu]") {
         text.replacen("[cpu]", &format!("[cpu]\npin_cores = {desired}"), 1)
     } else {
-        return false;
+        return Ok(false);
     };
     if updated == text {
-        return false;
+        return Ok(false);
     }
-    crate::atomic_io::atomic_write_text(ini, &updated, None).is_ok()
+    crate::atomic_io::atomic_write_text(ini, &updated, None)?;
+    Ok(true)
 }
 
 /// Regenerate the flag file and sync gamemode.ini, mirroring
@@ -269,7 +270,9 @@ pub fn generate_arbiter_to(flag: &Path, gamemode_ini: &Path) -> std::io::Result<
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     text.push('\n');
     crate::atomic_io::atomic_write_text(flag, &text, Some(0o644))?;
-    sync_gamemode_pin(gamemode_ini, state.gamemode_pin);
+    // A failed gamemode sync must not be silently swallowed: the flag file
+    // now claims a pin state that gamemode.ini doesn't have.
+    sync_gamemode_pin(gamemode_ini, state.gamemode_pin)?;
     Ok(flag.to_path_buf())
 }
 
@@ -326,16 +329,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let ini = dir.path().join("gamemode.ini");
         std::fs::write(&ini, "[general]\nrenice = 10\n[cpu]\n  pin_cores = yes\n").unwrap();
-        assert!(sync_gamemode_pin(&ini, false));
+        assert!(sync_gamemode_pin(&ini, false).unwrap());
         let text = std::fs::read_to_string(&ini).unwrap();
         assert!(text.contains("pin_cores = no"));
-        assert!(!sync_gamemode_pin(&ini, false));
+        assert!(!sync_gamemode_pin(&ini, false).unwrap());
         std::fs::write(&ini, "[general]\n[cpu]\n").unwrap();
-        assert!(sync_gamemode_pin(&ini, true));
+        assert!(sync_gamemode_pin(&ini, true).unwrap());
         assert!(std::fs::read_to_string(&ini)
             .unwrap()
             .contains("[cpu]\npin_cores = yes"));
-        assert!(!sync_gamemode_pin(&dir.path().join("missing.ini"), true));
+        assert!(!sync_gamemode_pin(&dir.path().join("missing.ini"), true).unwrap());
     }
 
     #[test]

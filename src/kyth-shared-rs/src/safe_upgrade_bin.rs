@@ -630,6 +630,28 @@ fn expose_progress_fd(command: &mut std::process::Command, write_fd: libc::c_int
     }
 }
 
+/// Undo the parent's SIGTERM block in the upgrade child.
+/// `arm_sigterm_forwarder` blocks SIGTERM process-wide for its sigwait-based
+/// cancel watcher; the child inherits the blocked mask across fork+exec, which
+/// would make the cancel path's `killpg(pgid, SIGTERM)` a no-op and force
+/// every cancel through the SIGKILL grace wait. Unblocking here (between fork
+/// and exec) lets the child die promptly on cancel.
+fn unblock_sigterm_for_child(command: &mut std::process::Command) {
+    // SAFETY: pthread_sigmask/sigemptyset/sigaddset are async-signal-safe and
+    // only touch stack memory between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut set);
+            libc::sigaddset(&mut set, libc::SIGTERM);
+            if libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut()) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
 fn run_bootc_child_with(live_progress: bool) -> Result<std::process::Output, String> {
     let mut command = std::process::Command::new("/usr/bin/bootc");
     command.arg("upgrade");
@@ -643,6 +665,9 @@ fn run_bootc_child_with(live_progress: bool) -> Result<std::process::Output, Str
             .arg(BOOTC_PROGRESS_FD.to_string());
         expose_progress_fd(&mut command, *write_fd);
     }
+    // Unconditional: the progress-fd pre_exec above only runs when live
+    // progress is on, but the inherited SIGTERM block affects every spawn.
+    unblock_sigterm_for_child(&mut command);
     command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())

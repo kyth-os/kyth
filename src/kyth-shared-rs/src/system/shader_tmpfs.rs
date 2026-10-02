@@ -86,9 +86,7 @@ pub fn generate(
     let env_dropin = env_dropin.as_ref();
     if !config.enabled {
         for path in [tmpfiles, service, env_dropin] {
-            match std::fs::remove_file(path) {
-                Ok(()) | Err(_) => {}
-            }
+            crate::atomic_io::remove_if_exists(path)?;
         }
         return Ok(None);
     }
