@@ -25,7 +25,6 @@ optional_gaming_packages=(
 	akmod-v4l2loopback
 	v4l2loopback
 	v4l-utils
-	gamescope-session-plus
 	libwacom
 	libwacom-data
 	hplip

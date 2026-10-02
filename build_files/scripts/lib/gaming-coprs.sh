@@ -13,6 +13,7 @@ KYTH_GAMING_COPRS=(
 	ublue-os/staging
 	ublue-os/packages
 	ublue-os/obs-vkcapture
+	bazzite-org/rom-properties
 	lukenukem/asus-linux
 	ycollet/audinux
 )

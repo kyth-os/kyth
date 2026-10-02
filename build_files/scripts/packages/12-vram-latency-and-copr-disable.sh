@@ -47,6 +47,13 @@ fi
 if ! rpm -q plasma-foreground-booster-dmemcg >/dev/null 2>&1; then
 	echo "WARNING: plasma-foreground-booster-dmemcg unavailable for this Fedora release; Plasma foreground VRAM boost not installed." >&2
 fi
+# Same explicit guards for the other Terra-only packages: a partial skip
+# inside the --skip-unavailable batch would otherwise be silent.
+for terra_pkg in dmemcg-booster vulkan-low-latency-layer opentabletdriver extest; do
+	if ! rpm -q "${terra_pkg}" >/dev/null 2>&1; then
+		echo "WARNING: ${terra_pkg} unavailable for this Fedora release; skipped." >&2
+	fi
+done
 dnf5 config-manager setopt terra.enabled=0
 
 # Disable COPRs so they don't persist in the final image

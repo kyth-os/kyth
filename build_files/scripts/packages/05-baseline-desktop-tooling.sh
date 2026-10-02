@@ -21,7 +21,6 @@ dnf5 install -y --skip-unavailable \
 	irqbalance \
 	plocate \
 	ntfs-3g \
-	ntfsprogs \
 	os-prober \
 	rsync \
 	fuse \

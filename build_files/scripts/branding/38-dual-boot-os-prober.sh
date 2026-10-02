@@ -1,5 +1,12 @@
 # shellcheck shell=bash
 # ── Dual-boot: enable os-prober for the GRUB menu ─────────────────────────────
+# NOTE (F45/bootc): this drop-in is currently INERT. bootc/ostree never runs
+# grub2-mkconfig; the boot menu is bootupd's static grub.cfg plus BLS entries,
+# so /etc/default/grub.d is never consumed and dual-boot entries never appear
+# from this path. It is kept (harmless) as documentation of intent; a real
+# dual-boot implementation needs BLS chainloader entries or bootupd config,
+# not a grub.d drop-in. Users dual-booting today must use the firmware boot
+# picker (F12/Esc).
 # os-prober (installed in packages/05-baseline-desktop-tooling.sh) lets
 # grub2-mkconfig detect other installed OSes (e.g. Windows Boot Manager on an
 # alongside/resize_ntfs install) and add them to KythOS's own GRUB menu, so

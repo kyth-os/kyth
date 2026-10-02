@@ -55,7 +55,8 @@ dnf5 install -y --allowerasing \
 	gstreamer1-plugins-bad-freeworld \
 	gstreamer1-plugins-ugly \
 	gstreamer1-plugin-libav \
-	mozilla-openh264
+	mozilla-openh264 \
+	pipewire-plugin-libcamera
 
 required_codec_rpms=(
 	ffmpeg
