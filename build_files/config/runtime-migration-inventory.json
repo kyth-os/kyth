@@ -12369,6 +12369,36 @@
     },
     {
       "current_implementation": "shell",
+      "cutover": "replace installed kyth-kwallet-pam-ensure entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
+          "ownership": "shell"
+        }
+      ],
+      "installed_implementation": "shell",
+      "migration_priority": 2,
+      "name": "kyth-kwallet-pam-ensure",
+      "owner": "fixture::build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
+      "priority": 1,
+      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "resolved_target": "build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "privileged-writer",
+      "rollback": "restore previous installed kyth-kwallet-pam-ensure entry point",
+      "runtime_active": true,
+      "runtime_authority": "shell-orchestration",
+      "runtime_scope": "system-service",
+      "status": "queued",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
       "cutover": "replace installed 14-gamemode-configuration.sh entry point after parity gates",
       "function_inventory": [
         {

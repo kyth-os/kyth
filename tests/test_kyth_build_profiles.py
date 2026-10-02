@@ -21,12 +21,24 @@ class BuildProfileTests(unittest.TestCase):
     def test_common_controllers_remain_core_and_specialized_tools_are_profiled(self):
         core = _read("build_files/scripts/packages/06-gaming-core.sh")
         optional = _read("build_files/scripts/packages/07-gaming-optional-peripherals.sh")
-        for package in ("game-devices-udev", "xpadneo", "xone", "dualsensectl", "joycond"):
+        terra = _read("build_files/scripts/packages/12-vram-latency-and-copr-disable.sh")
+        # xpadneo/xone are RPM Fusion (installable); dualsensectl/joycond/
+        # game-devices-udev were dropped (not packaged for F45 in any repo).
+        for package in ("xpadneo", "xone"):
             self.assertIn(package, core)
             self.assertNotIn(f"\t{package}\n", optional)
+        for package in ("game-devices-udev", "dualsensectl", "joycond"):
+            self.assertNotIn(f"\t{package} \\\n", core)
+            self.assertNotIn(f"\t{package}\n", core)
+            self.assertNotIn(package, optional)
         self.assertIn('ENABLE_GAMING_PERIPHERALS:-0', optional)
-        for package in ("opentabletdriver", "akmod-v4l2loopback", "ryzenadj", "cec-utils"):
+        for package in ("akmod-v4l2loopback", "ryzenadj", "cec-utils"):
             self.assertIn(package, optional)
+        # Terra-only packages live in script 12 where the Terra repo is
+        # configured (script 07 runs before the repo exists).
+        for package in ("opentabletdriver", "extest"):
+            self.assertIn(package, terra)
+            self.assertNotIn(f"\t{package}\n", optional)
 
     def test_vm_host_is_profiled_but_guest_agent_remains_available(self):
         baseline = _read("build_files/scripts/packages/05-baseline-desktop-tooling.sh")
