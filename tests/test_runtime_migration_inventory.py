@@ -77,7 +77,7 @@ class InventoryTest(unittest.TestCase):
         # installer authority is active.
         self.assertEqual(report["summary"]["p0_open_entries"], 0)
         self.assertEqual(report["p0_open"], [])
-        self.assertEqual(report["summary"]["active_entries"], 188)
+        self.assertEqual(report["summary"]["active_entries"], 187)
         self.assertEqual(report["summary"]["active_python_entries"], 0)
         self.assertEqual(report["summary"]["superseded_entries"], 124)
         self.assertFalse(
@@ -243,10 +243,8 @@ class InventoryTest(unittest.TestCase):
     def test_data_or_config_is_terminal_not_queued(self):
         entries = load_inventory()["entries"]
         data = [item for item in entries if item["runtime_authority"] == "data-or-config"]
-        # Canary: bump the count only after reviewing each new entry. The 9th
-        # is build_files/kyth-welcome (retired welcome-wizard fixture kept as
-        # source; not migratable code, terminally not-applicable).
-        self.assertEqual(len(data), 9)
+        # Canary: bump the count only after reviewing each new entry.
+        self.assertEqual(len(data), 8)
         for item in data:
             self.assertEqual(item["status"], "not-applicable", item["path"])
             self.assertFalse(item["runtime_active"], item["path"])
