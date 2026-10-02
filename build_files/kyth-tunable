@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# kyth-tunable dispatcher — single entry for 94 tunables (Slice 5)
+# kyth-tunable dispatcher — single entry for 91 tunables (Slice 5)
 # Symlinks: kyth-foo -> kyth-tunable, basename foo dispatches via kyth_shared.tunable
 # Usage: kyth-<tunable> [status|gaming|balanced|apply]  or  kyth-tunable <tunable> [status|...]
 set -euo pipefail

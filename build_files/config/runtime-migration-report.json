@@ -1648,21 +1648,21 @@
     "active_by_authority": {
       "rust-dispatcher": 49,
       "rust-service": 29,
-      "shell-orchestration": 113
+      "shell-orchestration": 110
     },
     "active_by_scope": {
       "installer": 1,
       "system-service": 45,
-      "user-session": 145
+      "user-session": 142
     },
-    "active_entries": 191,
+    "active_entries": 188,
     "active_python_entries": 0,
-    "entries": 775,
+    "entries": 769,
     "p0_open_entries": 0,
     "status_by_active_entry": {
-      "done-native": 191
+      "done-native": 188
     },
-    "superseded_entries": 127
+    "superseded_entries": 124
   },
   "superseded": [
     {
@@ -2390,36 +2390,6 @@
       "name": "sched_autogroup",
       "owner": "native::kyth-tunable-rs",
       "path": "src/kyth_shared/kyth_shared/sched_autogroup.py",
-      "runtime_authority": "python-shared-package",
-      "runtime_scope": "standalone",
-      "status": "explicitly-not-ported",
-      "superseded_by": "native::kyth-tunable-rs"
-    },
-    {
-      "migration_priority": 3,
-      "name": "sched_child",
-      "owner": "native::kyth-tunable-rs",
-      "path": "src/kyth_shared/kyth_shared/sched_child.py",
-      "runtime_authority": "python-shared-package",
-      "runtime_scope": "standalone",
-      "status": "explicitly-not-ported",
-      "superseded_by": "native::kyth-tunable-rs"
-    },
-    {
-      "migration_priority": 3,
-      "name": "sched_latency",
-      "owner": "native::kyth-tunable-rs",
-      "path": "src/kyth_shared/kyth_shared/sched_latency.py",
-      "runtime_authority": "python-shared-package",
-      "runtime_scope": "standalone",
-      "status": "explicitly-not-ported",
-      "superseded_by": "native::kyth-tunable-rs"
-    },
-    {
-      "migration_priority": 3,
-      "name": "sched_nr_migrate",
-      "owner": "native::kyth-tunable-rs",
-      "path": "src/kyth_shared/kyth_shared/sched_nr_migrate.py",
       "runtime_authority": "python-shared-package",
       "runtime_scope": "standalone",
       "status": "explicitly-not-ported",

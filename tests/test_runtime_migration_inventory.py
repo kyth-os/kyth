@@ -77,9 +77,9 @@ class InventoryTest(unittest.TestCase):
         # installer authority is active.
         self.assertEqual(report["summary"]["p0_open_entries"], 0)
         self.assertEqual(report["p0_open"], [])
-        self.assertEqual(report["summary"]["active_entries"], 191)
+        self.assertEqual(report["summary"]["active_entries"], 188)
         self.assertEqual(report["summary"]["active_python_entries"], 0)
-        self.assertEqual(report["summary"]["superseded_entries"], 127)
+        self.assertEqual(report["summary"]["superseded_entries"], 124)
         self.assertFalse(
             [item for item in report["active_python"] if item["runtime_authority"] == "python-installer"]
         )
@@ -116,9 +116,9 @@ class InventoryTest(unittest.TestCase):
             and item["path"] != "build_files/kyth-tunable"
             and item.get("resolved_target") == "build_files/kyth-tunable"
         ]
-        # The 94th registry entry is the dispatcher itself; the source tree
-        # contains 93 alias symlinks plus that direct entry point.
-        self.assertEqual(len(tunables), 93)
+        # The 91st registry entry is the dispatcher itself; the source tree
+        # contains 90 alias symlinks plus that direct entry point.
+        self.assertEqual(len(tunables), 90)
         self.assertEqual({item["status"] for item in tunables}, {"done-native"})
         self.assertEqual({item["installed_implementation"] for item in tunables}, {"rust"})
         self.assertLessEqual(
@@ -131,7 +131,7 @@ class InventoryTest(unittest.TestCase):
         checker = load_checker()
         entries = load_inventory()["entries"]
         by_name = {item["name"]: item for item in entries if item["surface"] == "python-runtime"}
-        self.assertEqual(len(checker.SUPERSEDED_TUNABLE_MODULES), 92)
+        self.assertEqual(len(checker.SUPERSEDED_TUNABLE_MODULES), 89)
         for name in sorted(checker.SUPERSEDED_TUNABLE_MODULES):
             item = by_name[name]
             self.assertEqual(item["runtime_authority"], "python-shared-package", name)
@@ -323,7 +323,7 @@ class InventoryTest(unittest.TestCase):
     def test_tunable_registry_covers_all_python_aliases(self):
         rust = (ROOT / "src/kyth-shared-rs/src/system/tunable_registry.rs").read_text(encoding="utf-8")
         aliases = tunable_aliases()
-        self.assertEqual(len(aliases), 94)
+        self.assertEqual(len(aliases), 91)
         missing = [name for name in aliases if name not in rust]
         self.assertEqual(missing, [])
 

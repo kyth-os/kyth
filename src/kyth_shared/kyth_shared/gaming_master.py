@@ -178,7 +178,6 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
         ("trim_preset", "trim"),
         ("ananicy_preset", "ananicy"),
         ("zswap_preset", "zswap"),
-        ("sched_latency", "sched"),
     ]:
         try:
             m = __import__(f"kyth_shared.{mod}", fromlist=["load", "save", "generate"])
@@ -294,17 +293,6 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
         out["zswap"] = c["profile"]
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["zswap"] = f"error {e}"
-    try:
-        from .sched_latency import load_sched_latency, save_sched_latency, generate_sched_latency
-
-        c = load_sched_latency()
-        c["profile"] = "kyth" if gaming else "balanced"
-        if not dry_run:
-            save_sched_latency(c)
-            generate_sched_latency(c)
-        out["sched"] = c["profile"]
-    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
-        out["sched"] = f"error {e}"
     try:
         from .io_tune import load_io_tune, save_io_tune, generate_io_udev
 

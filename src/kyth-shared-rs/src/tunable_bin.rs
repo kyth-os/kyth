@@ -2193,14 +2193,7 @@ fn dispatch_kargs_apply(action: &str) -> ExitCode {
 }
 
 fn scheduler_bore_available() -> bool {
-    std::fs::read_to_string("/usr/share/kyth/kernel-flavor")
-        .ok()
-        .is_some_and(|flavor| {
-            matches!(
-                flavor.trim().to_ascii_lowercase().as_str(),
-                "cachy" | "cachyos"
-            )
-        })
+    scheduler_arbiter::bore_available()
 }
 
 fn dispatch_sched_arbiter(action: &str) -> ExitCode {

@@ -208,19 +208,17 @@ pub fn flag_path(path: Option<impl AsRef<Path>>) -> PathBuf {
     PathBuf::from(DEFAULT_FLAG_PATH)
 }
 
-/// True when the kernel flavor marks a BORE-capable kernel.
-pub fn bore_available_in(path: &Path) -> bool {
-    match std::fs::read_to_string(path) {
-        Ok(text) => matches!(
-            text.trim().to_ascii_lowercase().as_str(),
-            "cachy" | "cachyos"
-        ),
-        Err(_) => false,
-    }
+/// True when the kernel actually exposes the BORE scheduler knob.
+///
+/// The knob is ground truth. The old flavor-file heuristic ("cachy" implies
+/// BORE) went stale when upstream CachyOS dropped BORE — a flavor match
+/// without the knob must not report available.
+pub fn bore_available_in(knob_path: &Path) -> bool {
+    knob_path.exists()
 }
 
 pub fn bore_available() -> bool {
-    bore_available_in(Path::new(KERNEL_FLAVOR_PATH))
+    bore_available_in(Path::new("/proc/sys/kernel/sched_bore"))
 }
 
 /// Desired state from the default config and live detection, mirroring
@@ -313,14 +311,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn detects_bore_flavor_and_syncs_gamemode_pin() {
+    fn detects_bore_from_scheduler_knob_not_flavor() {
         let dir = tempfile::tempdir().unwrap();
-        let flavor = dir.path().join("kernel-flavor");
-        std::fs::write(&flavor, "CachyOS\n").unwrap();
-        assert!(bore_available_in(&flavor));
-        std::fs::write(&flavor, "fedora\n").unwrap();
-        assert!(!bore_available_in(&flavor));
-        assert!(!bore_available_in(&dir.path().join("missing")));
+        let knob = dir.path().join("sched_bore");
+        // Knob absent: not available, even on a "cachy" flavored kernel —
+        // upstream CachyOS dropped BORE, so flavor no longer implies it.
+        assert!(!bore_available_in(&knob));
+        std::fs::write(&knob, "1\n").unwrap();
+        assert!(bore_available_in(&knob));
+    }
+
+    #[test]
+    fn syncs_gamemode_pin() {
+        let dir = tempfile::tempdir().unwrap();
         let ini = dir.path().join("gamemode.ini");
         std::fs::write(&ini, "[general]\nrenice = 10\n[cpu]\n  pin_cores = yes\n").unwrap();
         assert!(sync_gamemode_pin(&ini, false));

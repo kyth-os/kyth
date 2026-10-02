@@ -219,7 +219,7 @@ SUPERSEDED_TUNABLE_MODULES = frozenset({
     "overcommit_memory", "overlay_tune", "page_cluster", "pcie_aspm",
     "perf_audit", "perf_cpu", "pipewire_gaming", "podman_btrfs", "psi_gaming",
     "psi_poll", "readahead_preset", "rmem_default", "rmem_max", "sccache_preset",
-    "sched_autogroup", "sched_child", "sched_latency", "sched_nr_migrate",
+    "sched_autogroup",
     "selinux_gaming", "shader_cache_size", "shader_tmpfs", "somaxconn",
     "steam_deadzone", "swappiness", "system_audit", "tcp_ecn", "tcp_fastopen",
     "tcp_fin_timeout", "tcp_keepalive", "tcp_mtu_probing", "tcp_no_metrics_save",

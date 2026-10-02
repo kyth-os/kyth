@@ -44,7 +44,7 @@ export function PerformanceSection({ section }: { section: HubSection }) {
       {audit ? (
         <div style={{ marginTop: 20 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {(["sched", "thp", "zswap", "swappiness", "sched_latency", "autogroup", "pipewire_gaming"] as const).map((k) => (
+            {(["sched", "thp", "zswap", "swappiness", "autogroup", "pipewire_gaming"] as const).map((k) => (
               <span key={k} className="pill pill-dim">{k}: {String(audit[k] ?? "—")}</span>
             ))}
           </div>

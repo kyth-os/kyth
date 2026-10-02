@@ -92,7 +92,7 @@ pub fn choose_policy(sample: &PerfSample) -> PerfPolicy {
         }
         return PerfPolicy::new(
             DEFAULT_SCX_FOR_GAMING,
-            // kernel.sched_latency_ns was removed with EEVDF (6.6); scx_rusty
+            // kernel.sched_latency_ns was removed with EEVDF; scx_rusty
             // owns scheduling latency now.
             &[("vm.swappiness", "10")],
             gpu,
