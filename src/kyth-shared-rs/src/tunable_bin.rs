@@ -3499,10 +3499,10 @@ mod tests {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../build_files/config/tunables.toml");
         let specs = kyth_shared::system::tunable_registry::list_tunables(Some(&path));
-        assert_eq!(specs.len(), 94);
+        assert_eq!(specs.len(), 91);
         assert_eq!(
             specs.iter().filter(|spec| spec.kind == "sysctl").count(),
-            49
+            46
         );
         assert_eq!(specs.iter().filter(|spec| spec.kind == "other").count(), 45);
     }
@@ -3544,7 +3544,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 94);
+        assert_eq!(names.len(), 91);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));

@@ -139,6 +139,17 @@ jobs:
         run: python3 -m pip install --disable-pip-version-check -r requirements-quality.txt
         shell: bash --noprofile --norc -euo pipefail {0}
 
+      # The quality gate runs Python tests that compile/inspect the shared
+      # Rust runtime (test_rust_runtime_dispatcher, test_formatting_contracts),
+      # so the same stable toolchain used elsewhere is required here too.
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable
+          rustup default stable
+          rustc --version
+          cargo --version
+        shell: bash --noprofile --norc -euo pipefail {0}
+
       - name: Run Python quality gates (changed-only on PR)
         run: |
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
