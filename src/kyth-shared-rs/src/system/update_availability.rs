@@ -161,16 +161,38 @@ pub fn flatpak_update_completion(
 ) -> Result<String, String> {
     let remaining = remaining.max(0);
     if remaining > 0 {
+        // Don't just report a count and tell the user to retry forever.
+        // Identify WHICH apps are stuck and WHY: masked/pinned apps are
+        // intentionally held back (not a failure), while unmasked apps
+        // that survive `flatpak update` need specific attention.
+        let pending_ids = flatpak_pending_update_ids();
+        let masked_ids = flatpak_masked_ids();
+        let stuck_ids: Vec<&String> = pending_ids
+            .iter()
+            .filter(|id| !masked_ids.contains(id))
+            .collect();
+        if stuck_ids.is_empty() && !pending_ids.is_empty() {
+            let names = pending_ids.join(", ");
+            return Ok(format!(
+                "App updates finished. {remaining} update(s) remain pinned ({names}); unpin them to update."
+            ));
+        }
         let pending = if remaining == 1 {
             "1 app update remains".to_string()
         } else {
             format!("{remaining} app updates remain")
         };
+        let stuck_detail = if stuck_ids.is_empty() {
+            String::new()
+        } else {
+            let names: Vec<&str> = stuck_ids.iter().map(|s| s.as_str()).collect();
+            format!(" Stuck apps: {}.", names.join(", "))
+        };
         let detail = if verification_detail.is_empty() {
-            format!("Flatpak update commands finished, but {pending}.")
+            format!("Flatpak update commands finished, but {pending}.{stuck_detail}")
         } else {
             let safe_detail = crate::system::process::redact_sensitive_text(verification_detail);
-            format!("Flatpak update commands finished, but {pending}; verification: {safe_detail}")
+            format!("Flatpak update commands finished, but {pending}; verification: {safe_detail}.{stuck_detail}")
         };
         return Err(detail);
     }
@@ -181,6 +203,62 @@ pub fn flatpak_update_completion(
         ));
     }
     Ok("App updates finished. No app updates remain.".to_string())
+}
+
+/// Returns the sorted, deduplicated list of application IDs with pending
+/// updates (from `flatpak remote-ls --updates`). Used to diagnose WHY
+/// updates remain after `flatpak update` exits successfully.
+pub fn flatpak_pending_update_ids() -> Vec<String> {
+    let mut ids = Vec::new();
+    for scope in ["--system", "--user"] {
+        let argv = vec![
+            "flatpak".to_string(),
+            "remote-ls".to_string(),
+            "--updates".to_string(),
+            scope.to_string(),
+            "--columns=application".to_string(),
+        ];
+        let timeout = std::time::Duration::from_secs(30);
+        if let Ok(output) = super::process::run_bounded(&argv, timeout) {
+            if output.status.success() {
+                for line in String::from_utf8_lossy(&output.stdout).lines() {
+                    let id = line.trim();
+                    if !id.is_empty() {
+                        ids.push(id.to_string());
+                    }
+                }
+            }
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
+}
+
+/// Returns the sorted, deduplicated list of masked (pinned) app IDs that
+/// `flatpak update` will intentionally skip. A "remaining" update for a
+/// masked app is not a failure — it's the user/admin's explicit choice.
+pub fn flatpak_masked_ids() -> Vec<String> {
+    let argv = vec!["flatpak".to_string(), "mask".to_string()];
+    let timeout = std::time::Duration::from_secs(10);
+    let mut ids = Vec::new();
+    if let Ok(output) = super::process::run_bounded(&argv, timeout) {
+        if output.status.success() {
+            for line in String::from_utf8_lossy(&output.stdout).lines() {
+                let line = line.trim();
+                // Skip comments and empty lines; format is "app-id [branch]"
+                if line.is_empty() || line.starts_with('#') {
+                    continue;
+                }
+                if let Some(app_id) = line.split_whitespace().next() {
+                    ids.push(app_id.to_string());
+                }
+            }
+        }
+    }
+    ids.sort();
+    ids.dedup();
+    ids
 }
 
 #[cfg(test)]

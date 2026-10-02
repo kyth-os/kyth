@@ -65,3 +65,25 @@ for PAM_FILE in /etc/pam.d/plasmalogin /usr/lib/pam.d/plasmalogin; do
 	fi
 	break
 done
+
+# Boot-time repair: on bootc/ostree upgrades, /etc/pam.d/plasmalogin in the
+# /etc overlay can be stale (missing the bridge above). Install an idempotent
+# oneshot that re-verifies the wiring on every boot; harmless when already
+# correct. Without this, upgraded systems prompt for the wallet on every login.
+install -m 0755 /ctx/sysconfig/desktop/kyth-kwallet-pam-ensure /usr/libexec/kyth-kwallet-pam-ensure
+write_config /usr/lib/systemd/system/kyth-kwallet-pam-ensure.service <<'PAMENSURESERVICEEOF'
+[Unit]
+Description=Ensure KWallet PAM bridge is wired
+Before=plasmalogin.service display-manager.service
+DefaultDependencies=no
+After=local-fs.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/libexec/kyth-kwallet-pam-ensure
+
+[Install]
+WantedBy=multi-user.target
+PAMENSURESERVICEEOF
+systemctl enable kyth-kwallet-pam-ensure.service 2>/dev/null || true
