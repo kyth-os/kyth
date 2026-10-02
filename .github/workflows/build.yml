@@ -332,7 +332,7 @@ jobs:
         with:
           dependency: cachyos-kernel
 
-      - name: Resolve latest Proton-CachyOS version
+      - name: Resolve latest GE-Proton version
         id: proton_cachyos
         uses: ./.github/actions/resolve-versions
         with:

@@ -6,14 +6,16 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/lib/thirdparty-common.sh"
 CURL_COMMON_ARGS+=(--max-time 3600)
 
-# ── Proton-CachyOS ───────────────────────────────────────────────────────────
+# ── GE-Proton ────────────────────────────────────────────────────────────────
 # Installed system-wide so Steam picks it up for all users without manual setup.
 # Steam looks in /usr/share/steam/compatibilitytools.d/ in addition to ~/.steam.
 # Custom rechunk metadata places this payload in its own published image layer,
 # so a Proton refresh does not invalidate the full package or Kyth payload.
-# Standard x86_64 build (not the _v3 microarch variant) to avoid crashing on
-# CPUs without AVX2/BMI2/FMA.
-PROTON_CACHYOS_REPO_API="https://api.github.com/repos/CachyOS/proton-cachyos/releases"
+# NOTE: identifiers keep the historical `PROTON_CACHYOS_*` names (build arg,
+# CI outputs, supply-chain labels) to avoid churning the Dockerfile/CI
+# plumbing; the source of truth is GloriousEggroll/proton-ge-custom.
+# x86_64 asset (not aarch64) — grep anchors on `x86_64.tar.gz`.
+PROTON_CACHYOS_REPO_API="https://api.github.com/repos/GloriousEggroll/proton-ge-custom/releases"
 PROTON_CACHYOS_VER="${PROTON_CACHYOS_VER:?PROTON_CACHYOS_VER must be an exact release tag}"
 require_release_tag PROTON_CACHYOS_VER "${PROTON_CACHYOS_VER}"
 TMPDIR_PC=$(mktemp -d)
@@ -23,16 +25,16 @@ release_api="${PROTON_CACHYOS_REPO_API}/tags/${PROTON_CACHYOS_VER}"
 
 release_json="${TMPDIR_PC}/release.json"
 if ! curl -fsSL "${CURL_COMMON_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" "${release_api}" -o "${release_json}"; then
-	echo "Failed to fetch Proton-CachyOS release info from ${release_api}" >&2
+	echo "Failed to fetch GE-Proton release info from ${release_api}" >&2
 	exit 1
 fi
 
 PROTON_CACHYOS_TARBALL_URL=$(
-	grep -o 'https://[^"]*x86_64\.tar\.xz' "${release_json}" | head -n1
+	grep -o 'https://[^"]*x86_64\.tar\.gz' "${release_json}" | head -n1
 )
 
 if [[ -z "${PROTON_CACHYOS_TARBALL_URL}" ]]; then
-	echo "Failed to locate Proton-CachyOS release assets from ${release_api}" >&2
+	echo "Failed to locate GE-Proton release assets from ${release_api}" >&2
 	exit 1
 fi
 

@@ -212,9 +212,11 @@ RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     ENABLE_SCX="${ENABLE_SCX}" \
     bash /ctx/packages-static.sh
 
-# Proton-CachyOS is an offline fallback for fresh installs. The build must use
+# GE-Proton is an offline fallback for fresh installs. The build must use
 # the exact release tag resolved by CI; the mutable user-side updater may fetch
 # newer versions later while retaining a rollback copy.
+# NOTE: the build arg keeps its historical `PROTON_CACHYOS_VER` name; the
+# payload is GE-Proton from GloriousEggroll/proton-ge-custom.
 ARG PROTON_CACHYOS_VER
 RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/proton-cachyos.sh \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \

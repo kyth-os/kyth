@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
-pub const DEFAULT_REPO: &str = "CachyOS/proton-cachyos";
+pub const DEFAULT_REPO: &str = "GloriousEggroll/proton-ge-custom";
 pub const CACHE_PATH: &str = "/var/lib/kyth/gaming-versions.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -198,7 +198,10 @@ mod tests {
         .unwrap();
         let versions = GamingVersions::load(&path);
         assert!(versions.is_pinned());
-        assert_eq!(versions.proton_cachyos_repo, "CachyOS/proton-cachyos");
+        assert_eq!(
+            versions.proton_cachyos_repo,
+            "GloriousEggroll/proton-ge-custom"
+        );
         assert_eq!(
             versions.label(),
             "umu@0.10, proton-cachyos@9.0, mesa-git:user/mesa"

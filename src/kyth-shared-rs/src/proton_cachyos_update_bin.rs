@@ -1,10 +1,14 @@
 //! Native replacement for the Python `kyth-proton-cachyos-update`
 //! launcher.
 //!
-//! Fetches the latest Proton-CachyOS release, verifies its checksum,
+//! Fetches the latest GE-Proton release, verifies its checksum,
 //! extracts it, and prunes old versions. Skipped on live ISOs. Exits `1`
 //! with the launcher error lines on failure. `system/updater.py` stays
 //! as the Phase 3 fixture.
+//!
+//! NOTE: the binary keeps its historical `proton_cachyos` name (unit files,
+//! ujust recipes, install paths) to avoid churning systemd/CI plumbing;
+//! the source of truth is GloriousEggroll/proton-ge-custom.
 
 use std::env;
 use std::path::{Path, PathBuf};
@@ -17,8 +21,8 @@ use kyth_shared::system::release_fetch::{
     verify_checksum_file, TempWorkdir,
 };
 
-const REPO: &str = "CachyOS/proton-cachyos";
-const VERSION_PATTERN: &str = r"cachyos-[0-9]+\.[0-9]+-[0-9]{8}-slr";
+const REPO: &str = "GloriousEggroll/proton-ge-custom";
+const VERSION_PATTERN: &str = r"GE-Proton[0-9]+-[0-9]+";
 
 fn run(argv: &[String], timeout_secs: u64) -> Option<(i32, String)> {
     run_bounded(argv, Duration::from_secs(timeout_secs))
@@ -55,41 +59,38 @@ fn main() -> std::process::ExitCode {
             .split_whitespace()
             .any(|arg| arg == "kyth.live" || arg == "kyth.live=1")
         {
-            println!("Proton-CachyOS update disabled in live ISO environment.");
+            println!("GE-Proton update disabled in live ISO environment.");
             return std::process::ExitCode::SUCCESS;
         }
     }
     let install_dir = PathBuf::from("/var/lib/kyth/proton-cachyos");
-    println!("Fetching latest Proton-CachyOS release metadata...");
+    println!("Fetching latest GE-Proton release metadata...");
     let secret = read_secret_file(std::path::Path::new("/run/secrets/github_token"));
     let env_token = env::var("GITHUB_TOKEN").ok();
     let headers = github_headers(secret.as_deref(), env_token.as_deref());
     let release = match fetch_github_latest_release(&run, REPO, &headers) {
         Ok(release) => release,
-        Err(error) => fail(format!(
-            "Failed to fetch Proton-CachyOS release info: {error}"
-        )),
+        Err(error) => fail(format!("Failed to fetch GE-Proton release info: {error}")),
     };
     let ver = release
         .get("tag_name")
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
     if ver.is_empty() {
-        fail("Failed to parse Proton-CachyOS version tag from release JSON".to_string());
+        fail("Failed to parse GE-Proton version tag from release JSON".to_string());
     }
-    if validate_version(ver, VERSION_PATTERN, "Proton-CachyOS").is_err() {
-        fail(format!("Unexpected Proton-CachyOS version format: {ver}"));
+    if validate_version(ver, VERSION_PATTERN, "GE-Proton").is_err() {
+        fail(format!("Unexpected GE-Proton version format: {ver}"));
     }
     let assets = release_assets(&release);
-    let tarball = find_release_asset(&assets, |name| name.ends_with("x86_64.tar.xz"));
+    let tarball = find_release_asset(&assets, |name| name.ends_with("x86_64.tar.gz"));
     let checksum = find_release_asset(&assets, |name| name.ends_with("x86_64.sha512sum"));
     let (Some(tarball), Some(checksum)) = (tarball, checksum) else {
-        fail("Failed to locate Proton-CachyOS release assets".to_string());
+        fail("Failed to locate GE-Proton release assets".to_string());
     };
     let folder = tarball
         .name
-        .strip_suffix(".tar.xz")
-        .or_else(|| tarball.name.strip_suffix(".xz"))
+        .strip_suffix(".tar.gz")
         .unwrap_or(&tarball.name)
         .to_string();
     // A bare dir check lies after interrupted installs (SIGKILL, power
@@ -97,15 +98,15 @@ fn main() -> std::process::ExitCode {
     // run would print "already up to date" forever. Only a valid
     // completion marker counts; anything else is re-installed.
     if is_complete_install(&install_dir, &folder, ver) {
-        println!("Proton-CachyOS {ver} is already up to date.");
+        println!("GE-Proton {ver} is already up to date.");
         return std::process::ExitCode::SUCCESS;
     }
     if install_dir.join(&folder).is_dir() {
-        println!("Proton-CachyOS {ver} found incomplete — re-installing...");
+        println!("GE-Proton {ver} found incomplete — re-installing...");
         std::fs::remove_dir_all(install_dir.join(&folder))
             .unwrap_or_else(|error| fail(format!("Failed to clear incomplete install: {error}")));
     }
-    println!("Updating to Proton-CachyOS {ver}...");
+    println!("Updating to GE-Proton {ver}...");
     let work = match TempWorkdir::create("kyth-proton") {
         Ok(work) => work,
         Err(error) => fail(format!("Failed to download assets: {error}")),
@@ -147,11 +148,20 @@ fn main() -> std::process::ExitCode {
         let _ = std::fs::remove_dir_all(install_dir.join(&folder));
         fail(format!("Failed to record completed install: {error}"));
     }
-    println!(
-        "Proton-CachyOS {ver} installed to {}/",
-        install_dir.display()
-    );
-    match prune_installations(&install_dir, "proton-cachyos-*", 2) {
+    println!("GE-Proton {ver} installed to {}/", install_dir.display());
+    // One-time migration: drop legacy Proton-CachyOS installs left behind by
+    // the pre-GE-Proton updater. No-op once the directory is clean.
+    match prune_installations(&install_dir, "proton-cachyos-*", 0) {
+        Ok(removed) => {
+            for old in &removed {
+                if let Some(name) = old.file_name().map(|name| name.to_string_lossy()) {
+                    println!("Removing legacy Proton-CachyOS version: {name}");
+                }
+            }
+        }
+        Err(error) => eprintln!("Failed to prune legacy Proton-CachyOS versions: {error}"),
+    }
+    match prune_installations(&install_dir, "GE-Proton*", 2) {
         Ok(removed) => {
             for old in &removed {
                 if let Some(name) = old.file_name().map(|name| name.to_string_lossy()) {
