@@ -243,7 +243,10 @@ class InventoryTest(unittest.TestCase):
     def test_data_or_config_is_terminal_not_queued(self):
         entries = load_inventory()["entries"]
         data = [item for item in entries if item["runtime_authority"] == "data-or-config"]
-        self.assertEqual(len(data), 8)
+        # Canary: bump the count only after reviewing each new entry. The 9th
+        # is build_files/kyth-welcome (retired welcome-wizard fixture kept as
+        # source; not migratable code, terminally not-applicable).
+        self.assertEqual(len(data), 9)
         for item in data:
             self.assertEqual(item["status"], "not-applicable", item["path"])
             self.assertFalse(item["runtime_active"], item["path"])

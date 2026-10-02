@@ -534,7 +534,8 @@ test("VPN polling stops on terminal states and is capped with backoff", () => {
 });
 
 test("exe handler dialog caps polls and stays cancellable while running", () => {
-  assert.match(exeDialog, /polls >= 240/, "exe handler polls must cap at 240");
+  assert.match(exeDialog, /const MAX_STATUS_POLLS = 240/, "exe handler polls must cap at 240");
+  assert.match(exeDialog, /polls >= MAX_STATUS_POLLS/, "cap must use the named constant");
   assert.match(exeDialog, /still running after several minutes/, "cap must surface a terminal error");
   assert.doesNotMatch(exeDialog, /setInspection\(null\)\} disabled/, "Cancel must stay enabled while a job runs");
   assert.match(exeDialog, /cancelExeHandlerBottles\(job\.job\)/, "Cancel must reach the backend Bottles job, not just close the dialog");

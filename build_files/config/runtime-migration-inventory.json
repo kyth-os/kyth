@@ -6683,6 +6683,36 @@
       "surface": "launcher"
     },
     {
+      "current_implementation": "data",
+      "cutover": "replace installed kyth-welcome entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/kyth-welcome",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "kyth-welcome",
+      "owner": "fixture::build_files/kyth-welcome",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/kyth-welcome",
+      "priority": 0,
+      "reason": "data or config file, not migratable code",
+      "resolved_target": "build_files/kyth-welcome",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed kyth-welcome entry point",
+      "runtime_active": false,
+      "runtime_authority": "data-or-config",
+      "runtime_scope": "configuration",
+      "status": "not-applicable",
+      "surface": "launcher"
+    },
+    {
       "current_implementation": "shell",
       "cutover": "replace installed kyth-windows-friendly-defaults entry point after parity gates",
       "function_inventory": [
