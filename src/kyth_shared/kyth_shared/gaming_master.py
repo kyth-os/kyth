@@ -2,9 +2,9 @@
 
 Single profile=gaming|balanced that composes 46-60 toggles.
 No new daemon, just orchestrates existing presets.
-Transaction: folded pipewire/kwin/autogroup/watermark/oom/cfs apply is
-all-or-none (dry_run gate, per-module try/except preserves prior state,
-no half-applied sysctl — S16 verified).
+Best-effort per module: failures are recorded in the returned dict as
+"error ..." strings (check them); a failed module does not roll back
+already-applied modules. Re-running converges.
 """
 from __future__ import annotations
 import logging
@@ -170,26 +170,6 @@ def apply_master(profile: str | None = None, dry_run: bool = False) -> dict[str,
         out["kargs"] = c["profile"]
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as e:  # noqa: BLE001 -- narrow: best-effort production path
         out["kargs"] = f"error {e}"
-    for mod, name in [
-        ("io_tune", "io"),
-        ("thp_tune", "thp"),
-        ("irq_tune", "irq"),
-        ("btrfs_perf", "btrfs"),
-        ("trim_preset", "trim"),
-        ("ananicy_preset", "ananicy"),
-        ("zswap_preset", "zswap"),
-    ]:
-        try:
-            m = __import__(f"kyth_shared.{mod}", fromlist=["load", "save", "generate"])
-            load = getattr(m, f"load_{name}" if hasattr(m, f"load_{name}") else f"load_{mod.split('_')[0]}")
-            # fallback handling: try common names
-            if not callable(load):
-                raise AttributeError
-            # Use generic load_*
-            # Instead directly handle per module types
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-            logger.debug("handled expected exception", exc_info=True)
-            pass
     # Explicit per-profile applies via helpers (avoid import complexity, use generate funcs directly)
     try:
         from .thp_tune import load_thp, save_thp, generate_thp_conf

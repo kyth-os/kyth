@@ -827,8 +827,8 @@ export async function fetchControllers(): Promise<ControllerInfo | null> {
   const raw = await fetchProbeSection<ControllersDetectRaw>("controllers-detect");
   if (!raw) return null;
   return {
-    usbControllers: raw.usb_controllers.map(([name, kind]) => ({ name, kind })),
-    inputNodeCount: raw.input_nodes.length,
+    usbControllers: (raw.usb_controllers ?? []).map(([name, kind]) => ({ name, kind })),
+    inputNodeCount: (raw.input_nodes ?? []).length,
     driverLoaded: { xone: raw.xone_loaded, xpadneo: raw.xpadneo_loaded, hidPlaystation: raw.hid_ps_loaded },
   };
 }

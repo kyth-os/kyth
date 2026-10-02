@@ -137,10 +137,19 @@ PY
 	fi
 
 	# 1. Look for a per-file sidecar: <tarball>.sha256, .sha512, .sha256sum, .sha512sum
+	# Also try the archive-stripped name (<name>.sha512sum), which some
+	# projects (e.g. GE-Proton) publish instead of <name>.tar.gz.sha512sum.
+	local stripped_name="${tarball_name%.tar.gz}"
+	stripped_name="${stripped_name%.tar.xz}"
+	stripped_name="${stripped_name%.tgz}"
 	for ext in sha256 sha512 sha256sum sha512sum SHA256 SHA512; do
 		local candidate
 		candidate=$(grep -oP "https://[^\"]+" "${release_json}" |
 			grep -F "${tarball_name}.${ext}" | head -n1 || true)
+		if [[ -z "${candidate}" && "${stripped_name}" != "${tarball_name}" ]]; then
+			candidate=$(grep -oP "https://[^\"]+" "${release_json}" |
+				grep -F "${stripped_name}.${ext}" | head -n1 || true)
+		fi
 		if [[ -n "${candidate}" ]]; then
 			checksum_url="${candidate}"
 			checksum_is_sidecar=1

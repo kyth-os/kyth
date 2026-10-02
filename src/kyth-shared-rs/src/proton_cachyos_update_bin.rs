@@ -59,6 +59,29 @@ fn is_complete_install(install_dir: &Path, folder: &str, ver: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Merge the installed Proton version into /var/lib/kyth/gaming-versions.json
+/// so gaming_versions() resolves at runtime. Best-effort: a failure here
+/// must not fail the install.
+fn refresh_gaming_versions_cache(ver: &str) {
+    let cache = Path::new("/var/lib/kyth/gaming-versions.json");
+    let mut map: serde_json::Map<String, serde_json::Value> = std::fs::read_to_string(cache)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default();
+    map.insert(
+        "proton_cachyos_version".to_string(),
+        serde_json::Value::String(ver.to_string()),
+    );
+    // Ensure the parent exists (unit's StateDirectory normally does this).
+    if let Some(parent) = cache.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    match std::fs::write(cache, serde_json::to_string(&map).unwrap_or_default()) {
+        Ok(()) => println!("Updated gaming versions cache: {ver}"),
+        Err(error) => eprintln!("Failed to update gaming versions cache: {error}"),
+    }
+}
+
 fn main() -> std::process::ExitCode {
     if let Ok(cmdline) = std::fs::read_to_string("/proc/cmdline") {
         if cmdline
@@ -171,6 +194,11 @@ fn main() -> std::process::ExitCode {
         );
     }
     println!("GE-Proton {ver} installed to {}/", install_dir.display());
+    // Publish the installed version where the runtime resolver looks.
+    // gaming_versions() reads /var/lib/kyth/gaming-versions.json as its
+    // writable fallback (the build-time /usr/share/kyth/config copy is
+    // immutable). Merge with any existing file so we don't clobber umu.
+    refresh_gaming_versions_cache(ver);
     // One-time migration: drop legacy Proton-CachyOS installs left behind by
     // the pre-GE-Proton updater. No-op once the directory is clean.
     match prune_installations(&install_dir, "proton-cachyos-*", 0) {

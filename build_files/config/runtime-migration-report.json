@@ -871,15 +871,6 @@
     },
     {
       "migration_priority": 3,
-      "name": "truth_engine",
-      "owner": "fixture::src/kyth_shared/kyth_shared/gaming/truth_engine.py",
-      "path": "src/kyth_shared/kyth_shared/gaming/truth_engine.py",
-      "runtime_authority": "source-only",
-      "runtime_scope": "test-fixture",
-      "status": "explicitly-not-ported"
-    },
-    {
-      "migration_priority": 3,
       "name": "gaming_snapshot",
       "owner": "fixture::src/kyth_shared/kyth_shared/gaming_snapshot.py",
       "path": "src/kyth_shared/kyth_shared/gaming_snapshot.py",
@@ -1657,7 +1648,7 @@
     },
     "active_entries": 188,
     "active_python_entries": 0,
-    "entries": 768,
+    "entries": 767,
     "p0_open_entries": 0,
     "status_by_active_entry": {
       "done-native": 187,

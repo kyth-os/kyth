@@ -239,6 +239,17 @@ RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/third
     UMU_VERSION="${UMU_VERSION}" \
     bash /ctx/thirdparty.sh
 
+# Publish the CI-resolved gaming versions where the runtime resolver looks.
+# gaming_resolve.py / gaming_versions.rs read
+# /usr/share/kyth/config/gaming-versions.json (build-time) and fall back to
+# /var/lib/kyth/gaming-versions.json (refreshed by the weekly updater).
+# Without this, gaming_versions() can never resolve on a deployed system:
+# the Dockerfile ARGs are not ENV, and nothing else writes these files.
+RUN mkdir -p /usr/share/kyth/config && \
+    printf '{"umu_version":"%s","proton_cachyos_version":"%s"}\n' \
+        "${UMU_VERSION}" "${PROTON_CACHYOS_VER}" \
+        > /usr/share/kyth/config/gaming-versions.json
+
 # Plymouth boot splash + initramfs rebuild.
 # COPY (not bind-mount) is intentional: COPY includes file content hashes in the
 # cache key, so the expensive dracut rebuild only reruns when the splash assets

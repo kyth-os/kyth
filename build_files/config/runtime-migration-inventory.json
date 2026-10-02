@@ -17465,30 +17465,6 @@
     },
     {
       "current_implementation": "python",
-      "cutover": "replace installed truth_engine entry point after parity gates",
-      "function_inventory": [],
-      "installed_implementation": "python-fixture",
-      "migration_priority": 3,
-      "name": "truth_engine",
-      "owner": "fixture::src/kyth_shared/kyth_shared/gaming/truth_engine.py",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "src/kyth_shared/kyth_shared/gaming/truth_engine.py",
-      "priority": 1,
-      "reason": "retained shared-package compatibility module is unreachable from active entry points and harnesses",
-      "resolved_target": "src/kyth_shared/kyth_shared/gaming/truth_engine.py",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
-      "rollback": "restore previous installed truth_engine entry point",
-      "runtime_active": false,
-      "runtime_authority": "source-only",
-      "runtime_scope": "test-fixture",
-      "status": "explicitly-not-ported",
-      "surface": "python-runtime"
-    },
-    {
-      "current_implementation": "python",
       "cutover": "replace installed gaming_cfs entry point after parity gates",
       "function_inventory": [],
       "installed_implementation": "python-fixture",
