@@ -50,6 +50,11 @@ COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
 # The Hub embeds `src/data/compat_games.json` from its own source tree. The
 # retired Python service tree is not copied into the builder or final image.
 COPY src/kyth-hub-web /build/kyth-hub-web
+# glib is a path dependency on the vendored third_party/gtk-glib-0.18.5
+# backport (see src/kyth-hub-web/src-tauri/Cargo.toml) — it must sit at the
+# same relative position as in the repo so the ../../../third_party path
+# resolves inside the builder, exactly like kyth-shared-rs above.
+COPY third_party/gtk-glib-0.18.5 /build/third_party/gtk-glib-0.18.5
 WORKDIR /build/kyth-hub-web
 RUN --mount=type=cache,id=kyth-hub-web-npm,target=/root/.npm \
     npm ci && npm run build

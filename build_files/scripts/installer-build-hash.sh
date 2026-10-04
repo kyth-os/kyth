@@ -20,6 +20,7 @@ git ls-files -z \
 	installer/calamares \
 	src/kyth-installer-web \
 	src/kyth-shared-rs \
+	third_party/gtk-glib-0.18.5 \
 	build_files/scripts \
 	build_files/kyth-launch-installer \
 	build_files/kyth-installerd.service \
