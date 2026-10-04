@@ -214,6 +214,15 @@
     },
     {
       "migration_priority": 3,
+      "name": "mountpoint",
+      "owner": "fixture::src/kyth-installer/kyth_installer/mountpoint.py",
+      "path": "src/kyth-installer/kyth_installer/mountpoint.py",
+      "runtime_authority": "source-only",
+      "runtime_scope": "test-fixture",
+      "status": "explicitly-not-ported"
+    },
+    {
+      "migration_priority": 3,
       "name": "orchestration",
       "owner": "fixture::src/kyth-installer/kyth_installer/orchestration.py",
       "path": "src/kyth-installer/kyth_installer/orchestration.py",
@@ -856,15 +865,6 @@
       "name": "gaming",
       "owner": "fixture::src/kyth_shared/kyth_shared/gaming.py",
       "path": "src/kyth_shared/kyth_shared/gaming.py",
-      "runtime_authority": "source-only",
-      "runtime_scope": "test-fixture",
-      "status": "explicitly-not-ported"
-    },
-    {
-      "migration_priority": 3,
-      "name": "truth_engine",
-      "owner": "fixture::src/kyth_shared/kyth_shared/gaming/truth_engine.py",
-      "path": "src/kyth_shared/kyth_shared/gaming/truth_engine.py",
       "runtime_authority": "source-only",
       "runtime_scope": "test-fixture",
       "status": "explicitly-not-ported"
@@ -1638,22 +1638,23 @@
   "summary": {
     "active_by_authority": {
       "rust-dispatcher": 49,
-      "rust-service": 29,
+      "rust-service": 28,
       "shell-orchestration": 113
     },
     "active_by_scope": {
       "installer": 1,
-      "system-service": 45,
-      "user-session": 145
+      "system-service": 47,
+      "user-session": 142
     },
-    "active_entries": 191,
+    "active_entries": 190,
     "active_python_entries": 0,
-    "entries": 771,
+    "entries": 767,
     "p0_open_entries": 0,
     "status_by_active_entry": {
-      "done-native": 191
+      "done-native": 187,
+      "queued": 3
     },
-    "superseded_entries": 127
+    "superseded_entries": 124
   },
   "superseded": [
     {
@@ -2381,36 +2382,6 @@
       "name": "sched_autogroup",
       "owner": "native::kyth-tunable-rs",
       "path": "src/kyth_shared/kyth_shared/sched_autogroup.py",
-      "runtime_authority": "python-shared-package",
-      "runtime_scope": "standalone",
-      "status": "explicitly-not-ported",
-      "superseded_by": "native::kyth-tunable-rs"
-    },
-    {
-      "migration_priority": 3,
-      "name": "sched_child",
-      "owner": "native::kyth-tunable-rs",
-      "path": "src/kyth_shared/kyth_shared/sched_child.py",
-      "runtime_authority": "python-shared-package",
-      "runtime_scope": "standalone",
-      "status": "explicitly-not-ported",
-      "superseded_by": "native::kyth-tunable-rs"
-    },
-    {
-      "migration_priority": 3,
-      "name": "sched_latency",
-      "owner": "native::kyth-tunable-rs",
-      "path": "src/kyth_shared/kyth_shared/sched_latency.py",
-      "runtime_authority": "python-shared-package",
-      "runtime_scope": "standalone",
-      "status": "explicitly-not-ported",
-      "superseded_by": "native::kyth-tunable-rs"
-    },
-    {
-      "migration_priority": 3,
-      "name": "sched_nr_migrate",
-      "owner": "native::kyth-tunable-rs",
-      "path": "src/kyth_shared/kyth_shared/sched_nr_migrate.py",
       "runtime_authority": "python-shared-package",
       "runtime_scope": "standalone",
       "status": "explicitly-not-ported",

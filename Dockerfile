@@ -50,6 +50,14 @@ COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
 # The Hub embeds `src/data/compat_games.json` from its own source tree. The
 # retired Python service tree is not copied into the builder or final image.
 COPY src/kyth-hub-web /build/kyth-hub-web
+# glib is a path dependency on the vendored third_party/gtk-glib-0.18.5
+# backport (see src/kyth-hub-web/src-tauri/Cargo.toml). The builder layout is
+# one level shallower than the repo (/build/kyth-hub-web instead of
+# /build/src/kyth-hub-web), so the ../../../third_party path escapes /build
+# and resolves to /third_party — copy it there to match, exactly like
+# build_files/exe-handler-apps.json above, rather than editing the crate
+# (whose path must stay correct for real-repo checkouts).
+COPY third_party/gtk-glib-0.18.5 /third_party/gtk-glib-0.18.5
 WORKDIR /build/kyth-hub-web
 RUN --mount=type=cache,id=kyth-hub-web-npm,target=/root/.npm \
     npm ci && npm run build
@@ -161,14 +169,14 @@ FROM ${BASE_IMAGE}
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 # Override upstream OCI labels so downstream tooling (lorax/bootc) sees KythOS product metadata
 LABEL org.opencontainers.image.title="KythOS"
-LABEL org.opencontainers.image.version="44"
+LABEL org.opencontainers.image.version="45"
 LABEL org.opencontainers.image.description="KythOS — atomic gaming and dev workstation built on Fedora Kinoite"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 LABEL org.opencontainers.image.source="https://github.com/kyth-os/kyth"
 LABEL org.opencontainers.image.documentation="https://github.com/kyth-os/kyth"
 LABEL org.osbuild.product="KythOS"
-LABEL org.osbuild.version="44"
-LABEL org.osbuild.branding.release="KythOS 44"
+LABEL org.osbuild.version="45"
+LABEL org.osbuild.branding.release="KythOS 45"
 
 ### MODIFICATIONS
 # Fedora 44 ships scx_rusty 0.5.4, whose pre-upstream sched_ext BPF ABI is
@@ -201,7 +209,6 @@ RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=bind,source=build_files/scripts/packages,target=/ctx/packages \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-microsoft,target=/ctx/RPM-GPG-KEY-microsoft \
-    --mount=type=bind,source=build_files/RPM-GPG-KEY-google-antigravity,target=/ctx/RPM-GPG-KEY-google-antigravity \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
@@ -213,9 +220,11 @@ RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     ENABLE_SCX="${ENABLE_SCX}" \
     bash /ctx/packages-static.sh
 
-# Proton-CachyOS is an offline fallback for fresh installs. The build must use
+# GE-Proton is an offline fallback for fresh installs. The build must use
 # the exact release tag resolved by CI; the mutable user-side updater may fetch
 # newer versions later while retaining a rollback copy.
+# NOTE: the build arg keeps its historical `PROTON_CACHYOS_VER` name; the
+# payload is GE-Proton from GloriousEggroll/proton-ge-custom.
 ARG PROTON_CACHYOS_VER
 RUN --mount=type=bind,source=build_files/scripts/proton-cachyos.sh,target=/ctx/proton-cachyos.sh \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
@@ -237,6 +246,17 @@ RUN --mount=type=bind,source=build_files/scripts/thirdparty.sh,target=/ctx/third
     : "cache-bust=${THIRDPARTY_VERSIONS_HASH}" && \
     UMU_VERSION="${UMU_VERSION}" \
     bash /ctx/thirdparty.sh
+
+# Publish the CI-resolved gaming versions where the runtime resolver looks.
+# gaming_resolve.py / gaming_versions.rs read
+# /usr/share/kyth/config/gaming-versions.json (build-time) and fall back to
+# /var/lib/kyth/gaming-versions.json (refreshed by the weekly updater).
+# Without this, gaming_versions() can never resolve on a deployed system:
+# the Dockerfile ARGs are not ENV, and nothing else writes these files.
+RUN mkdir -p /usr/share/kyth/config && \
+    printf '{"umu_version":"%s","proton_cachyos_version":"%s"}\n' \
+        "${UMU_VERSION}" "${PROTON_CACHYOS_VER}" \
+        > /usr/share/kyth/config/gaming-versions.json
 
 # Plymouth boot splash + initramfs rebuild.
 # COPY (not bind-mount) is intentional: COPY includes file content hashes in the

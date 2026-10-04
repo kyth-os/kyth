@@ -59,6 +59,17 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("valid", result.stdout)
 
+    def test_multiline_install_commands_are_classified_as_runtime_helpers(self):
+        checker = load_checker()
+        logical = checker._logical_lines(
+            "install -Dm755 \\\n"
+            "  /ctx/kyth-helper \\\n"
+            "  /usr/libexec/kyth-helper\n"
+        )[0]
+        match = checker._INSTALL_DEST.search(logical)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(2), "/usr/libexec/kyth-helper")
+
     def test_installer_source_is_retired_fixture(self):
         # Post-cutover contract: the Python installer backend is source-only
         # parity material, not an installed runtime authority.
@@ -77,9 +88,9 @@ class InventoryTest(unittest.TestCase):
         # installer authority is active.
         self.assertEqual(report["summary"]["p0_open_entries"], 0)
         self.assertEqual(report["p0_open"], [])
-        self.assertEqual(report["summary"]["active_entries"], 191)
+        self.assertEqual(report["summary"]["active_entries"], 190)
         self.assertEqual(report["summary"]["active_python_entries"], 0)
-        self.assertEqual(report["summary"]["superseded_entries"], 127)
+        self.assertEqual(report["summary"]["superseded_entries"], 124)
         self.assertFalse(
             [item for item in report["active_python"] if item["runtime_authority"] == "python-installer"]
         )
@@ -116,9 +127,9 @@ class InventoryTest(unittest.TestCase):
             and item["path"] != "build_files/kyth-tunable"
             and item.get("resolved_target") == "build_files/kyth-tunable"
         ]
-        # The 94th registry entry is the dispatcher itself; the source tree
-        # contains 93 alias symlinks plus that direct entry point.
-        self.assertEqual(len(tunables), 93)
+        # The 91st registry entry is the dispatcher itself; the source tree
+        # contains 90 alias symlinks plus that direct entry point.
+        self.assertEqual(len(tunables), 90)
         self.assertEqual({item["status"] for item in tunables}, {"done-native"})
         self.assertEqual({item["installed_implementation"] for item in tunables}, {"rust"})
         self.assertLessEqual(
@@ -131,7 +142,7 @@ class InventoryTest(unittest.TestCase):
         checker = load_checker()
         entries = load_inventory()["entries"]
         by_name = {item["name"]: item for item in entries if item["surface"] == "python-runtime"}
-        self.assertEqual(len(checker.SUPERSEDED_TUNABLE_MODULES), 92)
+        self.assertEqual(len(checker.SUPERSEDED_TUNABLE_MODULES), 89)
         for name in sorted(checker.SUPERSEDED_TUNABLE_MODULES):
             item = by_name[name]
             self.assertEqual(item["runtime_authority"], "python-shared-package", name)
@@ -243,6 +254,7 @@ class InventoryTest(unittest.TestCase):
     def test_data_or_config_is_terminal_not_queued(self):
         entries = load_inventory()["entries"]
         data = [item for item in entries if item["runtime_authority"] == "data-or-config"]
+        # Canary: bump the count only after reviewing each new entry.
         self.assertEqual(len(data), 8)
         for item in data:
             self.assertEqual(item["status"], "not-applicable", item["path"])
@@ -320,7 +332,7 @@ class InventoryTest(unittest.TestCase):
     def test_tunable_registry_covers_all_python_aliases(self):
         rust = (ROOT / "src/kyth-shared-rs/src/system/tunable_registry.rs").read_text(encoding="utf-8")
         aliases = tunable_aliases()
-        self.assertEqual(len(aliases), 94)
+        self.assertEqual(len(aliases), 91)
         missing = [name for name in aliases if name not in rust]
         self.assertEqual(missing, [])
 

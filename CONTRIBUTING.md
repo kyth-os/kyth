@@ -19,6 +19,9 @@ merge to `main`.
 You need Docker (or Podman) and [just](https://github.com/casey/just).
 
 ```bash
+# One-time per checkout: provision the Rust, Python, and pinned validation tools
+just setup-test-tools
+
 # Build both the base layer and the final OS image
 just build
 
@@ -43,6 +46,11 @@ python3 -m unittest discover -s tests
 # Or use the task runner
 just test
 ```
+
+The Rust toolchain is selected from `rust-toolchain.toml`. On Ubuntu, the
+installer Tauri shell also needs the native GTK/WebKit development packages;
+install `libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev pkg-config
+build-essential` before running `just check-installer-shell`.
 
 Feature flags and opt-in image profiles:
 

@@ -231,9 +231,7 @@ pub fn generate_oom_gaming(
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
     if config.profile != "gaming" {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         return Ok(None);
     }
     crate::atomic_io::atomic_write_text(
@@ -344,6 +342,42 @@ impl Default for SelinuxGamingConfig {
         }
     }
 }
+pub fn apply_selinux_gaming(enabled: bool) -> Result<bool, String> {
+    if std::env::var_os("KYTH_TEST_MODE").is_some() {
+        return Ok(false);
+    }
+    let selinuxenabled = ["/usr/sbin/selinuxenabled", "/usr/bin/selinuxenabled"]
+        .iter()
+        .find(|path| Path::new(path).exists());
+    let Some(selinuxenabled) = selinuxenabled else {
+        return Ok(false);
+    };
+    let enabled_state = crate::system::process::run_bounded(
+        &[(*selinuxenabled).to_string()],
+        std::time::Duration::from_secs(3),
+    )
+    .map(|output| output.status.success())
+    .unwrap_or(false);
+    if !enabled_state {
+        return Ok(false);
+    }
+    let value = if enabled { "on" } else { "off" };
+    let ok = crate::system::process::run_bounded_success(
+        &[
+            "setsebool".into(),
+            "-P".into(),
+            "allow_execheap".into(),
+            value.into(),
+        ],
+        std::time::Duration::from_secs(5),
+    );
+    if ok {
+        Ok(true)
+    } else {
+        Err(format!("setsebool allow_execheap {value} failed"))
+    }
+}
+
 pub fn selinux_gaming_path(path: Option<impl AsRef<Path>>) -> PathBuf {
     system_path("selinux-gaming.toml", path)
 }

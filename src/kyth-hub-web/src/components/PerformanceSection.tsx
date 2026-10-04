@@ -1,3 +1,4 @@
+import { pipewireConfirmOutcome } from "../services/jobResults";
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, fetchGamingPerfStatus, fetchScxAvailable, fetchScxStatus, fetchTelemetryRecent, setScxScheduler, type AuditCache, type GamingPerfStatus, type ScxStatus, type TelemetrySession } from "../services/liveData";
@@ -44,7 +45,7 @@ export function PerformanceSection({ section }: { section: HubSection }) {
       {audit ? (
         <div style={{ marginTop: 20 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {(["sched", "thp", "zswap", "swappiness", "sched_latency", "autogroup", "pipewire_gaming"] as const).map((k) => (
+            {(["sched", "thp", "zswap", "swappiness", "autogroup", "pipewire_gaming"] as const).map((k) => (
               <span key={k} className="pill pill-dim">{k}: {String(audit[k] ?? "—")}</span>
             ))}
           </div>
@@ -148,9 +149,9 @@ export function PerformanceSection({ section }: { section: HubSection }) {
                     label={busy === `pw-apply-${pendingPreset}` ? "Applying…" : "Confirm"}
                     disabled={busy !== null}
                     onClick={() => run(`pw-apply-${pendingPreset}`, `Applying ${pendingPreset}…`, async () => {
-                      const res = await applyPipewireQuantum(pendingPreset, false);
-                      setPendingPreset(null);
-                      return res?.detail ?? "Not available outside the Hub shell.";
+                      const outcome = pipewireConfirmOutcome(await applyPipewireQuantum(pendingPreset, false));
+                      if (outcome.closePreview) setPendingPreset(null);
+                      return outcome.message;
                     })}
                   />
                   <ActionButton label="Cancel" disabled={busy !== null} onClick={() => setPendingPreset(null)} />

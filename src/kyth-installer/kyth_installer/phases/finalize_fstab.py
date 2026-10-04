@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 
 from .compat import phase_dependency
+from ..mountpoint import normalize_manual_mountpoint
 
 
 def fsck_pass_for(fstype: str) -> int:
@@ -50,9 +51,10 @@ def configure_alongside_fstab(
     mount_filesystem(target_part, str(target_home), options=["subvol=@home"], run=run_command, as_root=as_root, check=True)
     uuid_out = uuid_lookup(target_part, log)
     if uuid_out is None:
-        return
+        raise RuntimeError(f"Could not read the UUID for alongside filesystem {target_part}.")
     line = f"UUID={uuid_out} /var/home btrfs subvol=@home,compress=zstd:1 0 0\n"
-    append_line(etc, line, log, "@home subvolume")
+    if not append_line(etc, line, log, "@home subvolume"):
+        raise RuntimeError("Could not write the fstab entry for the alongside @home subvolume.")
 
 
 def configure_manual_mounts(
@@ -67,13 +69,14 @@ def configure_manual_mounts(
     get_manual_mounts = phase_dependency("_get_manual_mounts")
     for mount in get_manual_mounts(context):
         part = mount["partition"]
-        mountpoint = mount["mountpoint"]
+        mountpoint = normalize_manual_mountpoint(mount["mountpoint"])
         fstype = mount["fstype"]
         try:
             uuid_out = uuid_lookup(part, log)
             if uuid_out is None:
-                log(f"Warning: skipping fstab entry for {mountpoint} ({part}) — no UUID")
-                continue
+                raise RuntimeError(
+                    f"Could not read the UUID for requested manual mount {part} at {mountpoint}."
+                )
             fstab_mountpoint = "/var/home" if mountpoint == "/home" else mountpoint
             target_path = Path(config_root) / fstab_mountpoint.lstrip("/")
             if fstype == "linux-swap":
@@ -81,12 +84,14 @@ def configure_manual_mounts(
             else:
                 options = "defaults,compress=zstd:1" if fstype == "btrfs" else "defaults"
                 line = f"UUID={uuid_out} {fstab_mountpoint} {fstype} {options} 0 {fsck_pass_for(fstype)}\n"
-                ensure_directory(str(target_path), run=run_command, as_root=as_root, check=False)
+                ensure_directory(str(target_path), run=run_command, as_root=as_root, check=True)
                 safe_umount(run_command, str(target_path))
             if not append_line(etc, line, log, f"{part} at {mountpoint}"):
-                continue
+                raise RuntimeError(f"Could not write the fstab entry for {part} at {mountpoint}.")
             if fstype != "linux-swap":
-                mount_filesystem(part, str(target_path), run=run_command, as_root=as_root, check=False)
+                mount_filesystem(part, str(target_path), run=run_command, as_root=as_root, check=True)
             log(f"Manual mount: {part} at {mountpoint} ({fstype})")
-        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:  # noqa: BLE001 -- narrow: best-effort production path
-            log(f"Warning: failed to configure manual mount {part} at {mountpoint}: {exc}")
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+            raise RuntimeError(
+                f"Failed to configure requested manual mount {part} at {mountpoint}: {exc}"
+            ) from exc

@@ -9,7 +9,14 @@ source "../../lib/config-helpers.sh"
 # to /dev/ntsync so Wine/Proton can use NT synchronization primitives when the
 # module is available.
 write_line 'ntsync' /usr/lib/modules-load.d/kyth-ntsync.conf
-write_line 'KERNEL=="ntsync", GROUP="users", MODE="0660"' /usr/lib/udev/rules.d/99-ntsync.rules
+# uaccess (not a bare GROUP=users): no KythOS user is ever in the "users"
+# group, so /dev/ntsync was root:users 0660 and Wine/Proton got EACCES, silently
+# falling back to fsync/esync while the health check still reported NTSYNC as
+# loaded. uaccess grants an ACL to the logged-in seat user. The rule must sort
+# before 73-seat-late.rules, where the uaccess builtin runs - a "99-" name tags
+# the device too late for the ACL to be applied.
+rm -f /usr/lib/udev/rules.d/99-ntsync.rules
+write_line 'KERNEL=="ntsync", GROUP="users", MODE="0660", TAG+="uaccess"' /usr/lib/udev/rules.d/60-kyth-ntsync.rules
 
 # zram-size: tuned for 16GB ASUS TUF FA617NS (2026-08-20 host trace:
 # 10.76s Add device -> 132.83s Found device = 122s udevd stall, zram 7.4G

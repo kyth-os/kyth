@@ -35,5 +35,12 @@ fn main() -> std::process::ExitCode {
         "kyth-apply-input: {} devices → {XORG_CONF_DEST}",
         devices.len()
     );
+    // Plasma 6.8 removed X11 login support; KWin Wayland never reads
+    // xorg.conf.d, so these presets are currently inert. They are still
+    // written (harmless) in case an X11 session returns. A Wayland-native
+    // path (per-device kcminputrc/libinput quirks) is future work.
+    eprintln!(
+        "kyth-apply-input: NOTE: Xorg InputClass presets have no effect under Wayland (Plasma 6.8+); see kcminputrc for Wayland input tuning."
+    );
     std::process::ExitCode::SUCCESS
 }

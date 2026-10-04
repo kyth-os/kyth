@@ -68,9 +68,7 @@ def apply_overlay(files: dict[str, str] | None = None, root: Path = Path("/")) -
         except ValueError:
             continue
         p.parent.mkdir(parents=True, exist_ok=True)
-        tmp = p.with_suffix(".tmp")
-        tmp.write_text(content, encoding="utf-8")
-        tmp.replace(p)
+        atomic_write_text(p, content, mode=0o644)
         written.append(p)
     # TTL marker like ai_perf
     try:

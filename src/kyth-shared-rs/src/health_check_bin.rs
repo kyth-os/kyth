@@ -49,13 +49,24 @@ fn pipewire_running() -> bool {
 }
 
 fn run_checks() -> Vec<Check> {
-    let scx_active = command_ok("systemctl", &["is-active", "--quiet", "scx_loader.service"])
-        || command_exists("scx_rusty")
-        || Path::new("/sys/kernel/sched_ext/state").exists();
-    let ntsync_loaded = Path::new("/dev/ntsync").exists()
-        || std::fs::read_to_string("/proc/modules")
+    let scx_active = kyth_shared::system::runtime_diagnostics::scx_scheduler_active(
+        std::fs::read_to_string("/sys/kernel/sched_ext/state")
+            .ok()
+            .as_deref(),
+        command_ok("systemctl", &["is-active", "--quiet", "scx_loader.service"]),
+    );
+    let ntsync = kyth_shared::system::runtime_diagnostics::ntsync_state(
+        Path::new("/dev/ntsync").exists(),
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/ntsync")
+            .is_ok(),
+        std::fs::read_to_string("/proc/modules")
             .map(|modules| modules.lines().any(|line| line.starts_with("ntsync ")))
-            .unwrap_or(false);
+            .unwrap_or(false),
+    );
+    let ntsync_loaded = ntsync == kyth_shared::system::runtime_diagnostics::NtsyncState::Usable;
     let vulkan_ok = command_ok("vulkaninfo", &["--summary"]);
     let vaapi_ok = command_ok("vainfo", &[]);
     let input_available = Path::new("/dev/input").is_dir();
@@ -77,6 +88,11 @@ fn run_checks() -> Vec<Check> {
         {
             let (level, detail) = if ntsync_loaded {
                 ("PASS", "NTSYNC fast kernel driver loaded")
+            } else if ntsync == kyth_shared::system::runtime_diagnostics::NtsyncState::NoAccess {
+                (
+                    "WARN",
+                    "/dev/ntsync exists but this user cannot open it; Wine falls back to fsync",
+                )
             } else if kyth_shared::system::extended_preferences::probe_wine_sync().1 {
                 ("PASS", "FUTEX2 fsync verified (kernel 5.16+)")
             } else {

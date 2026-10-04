@@ -206,22 +206,32 @@ def _is_answer_file_request(body: dict) -> bool:
 
 def validate_install_request(body: dict, context: InstallerContext, *, strict_locale: bool = True) -> InstallRequest:
     """Validate a start request and return an immutable normalized request."""
+    if not isinstance(body, dict):
+        raise InstallRequestError("Install request must be an object.")
+    for field in (
+        "password", "username", "hostname", "timezone", "mok_password",
+        "locale", "keymap", "kernel",
+    ):
+        if field in body and not isinstance(body[field], str):
+            raise InstallRequestError(f"{field.replace('_', ' ').capitalize()} must be text.")
+    for field in ("disk", "install_mode", "target_partition", "resize_partition", "efi_partition"):
+        if field in body and not isinstance(body[field], str):
+            raise InstallRequestError(f"{field.replace('_', ' ').capitalize()} must be text.")
     state, disk_info = _storage_state(body, context)
     current_ok = (
         state["install_mode"] == "alongside"
         or not disk_info.get("current")
-        or bool(body.get("confirm_current"))
+        or body.get("confirm_current") is True
     )
     # Canonical acknowledgement: "acknowledged-irreversible" (kebab, matching
     # the native shell wire key). Legacy "confirm_backup" answer files keep
     # working so existing media is not bricked, but new clients must send the
     # explicit irreversible acknowledgement.
-    acknowledged = (
-        body.get("acknowledged-irreversible")
-        or body.get("acknowledged_irreversible")
-        or body.get("confirm_backup")
+    acknowledged = any(
+        body.get(key) is True
+        for key in ("acknowledged-irreversible", "acknowledged_irreversible", "confirm_backup")
     )
-    if not (acknowledged and body.get("confirm_erase") and current_ok):
+    if not (acknowledged and body.get("confirm_erase") is True and current_ok):
         raise InstallRequestError(
             "This installation cannot be undone. Please acknowledge the "
             "on-screen irreversible-action confirmation before starting the install."
@@ -266,6 +276,11 @@ def validate_install_request(body: dict, context: InstallerContext, *, strict_lo
     _require_valid_username(username)
     hostname = body.get("hostname", "kyth")
     _require_valid_hostname(hostname)
+    kernel = str(body.get("kernel", "fedora") or "fedora").strip().lower()
+    if kernel == "cachyos":
+        kernel = "cachy"
+    if kernel not in {"fedora", "cachy"}:
+        raise InstallRequestError(f"Invalid kernel flavor: {kernel!r}.")
 
     return InstallRequest.from_state({
         **state,
@@ -275,7 +290,7 @@ def validate_install_request(body: dict, context: InstallerContext, *, strict_lo
         "keymap": keymap,
         "username": username,
         "password_hash": password_hash,
-        "kernel": body.get("kernel", "fedora") or "fedora",
+        "kernel": kernel,
         "mok_password": body.get("mok_password", "") or "",
     })
 
@@ -338,10 +353,10 @@ def validate_partition_install_request(
     _require_valid_hostname(hostname)
     if timezone not in set(system.list_timezones()):
         raise InstallRequestError(f"Invalid timezone: {timezone}")
-    _require_valid_username(username, required=False)
-    if bool(username) != bool(password):
+    _require_valid_username(username)
+    if not password:
         raise InstallRequestError(
-            "An admin username and password must either both be supplied or both be blank."
+            "An admin username and password must both be supplied to create a login account."
         )
     password_hash = _hash_password_for_request(password, allow_blank=True)
 

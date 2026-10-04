@@ -146,6 +146,11 @@ def emit_all(config_dir: Path | None = None, dest_root: Path | None = None) -> l
         "99-kyth-inotify-watches.conf",
         "99-kyth-max-map-count.conf",
         "99-kyth-sched-autogroup.conf",
+        # Dead CFS tunables removed with EEVDF: purge their persistent
+        # drop-ins on upgrade so stale keys can't linger in /etc/sysctl.d.
+        "99-kyth-sched-latency.conf",
+        "99-kyth-sched-child.conf",
+        "99-kyth-sched-nr-migrate.conf",
         "99-kyth-vfs-cache.conf",
         "99-kyth-vm-stat.conf",
         "99-kyth-vm-watermark.conf",
@@ -156,8 +161,6 @@ def emit_all(config_dir: Path | None = None, dest_root: Path | None = None) -> l
         "99-kyth-wmem-max.conf",
         "99-kyth-busy-poll.conf",
         "99-kyth-busy-read.conf",
-        "99-kyth-sched-child.conf",
-        "99-kyth-sched-nr-migrate.conf",
         "99-kyth-tcp-*.conf",
         "99-kyth-psi-poll.conf",
         "99-kyth-page-cluster.conf",

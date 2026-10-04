@@ -110,6 +110,28 @@ class GuidedInstallPlanFacadeTests(unittest.TestCase):
             validate_target=plan._validate_free_space_target,
             prepare_target=plan._prepare_free_space_target,
         )
+    def test_prepare_free_space_install_plan_forwards_optional_hooks(self):
+        cancel_event = object()
+        register_mount = mock.Mock()
+        release_mount = mock.Mock()
+        with mock.patch.object(plan._plan_commit, "prepare_guided_install_plan", return_value="plan") as delegate:
+            result = plan._prepare_free_space_install_plan(
+                {"install_mode": "free_space"},
+                log=print,
+                cancel_event=cancel_event,
+                register_mount=register_mount,
+                release_mount=release_mount,
+            )
+
+        self.assertEqual(result, "plan")
+        delegate.assert_called_once_with(
+            {"install_mode": "free_space"}, print,
+            validate_target=plan._validate_free_space_target,
+            prepare_target=plan._prepare_free_space_target,
+            cancel_event=cancel_event,
+            register_mount=register_mount,
+            release_mount=release_mount,
+        )
 
 
 if __name__ == "__main__":

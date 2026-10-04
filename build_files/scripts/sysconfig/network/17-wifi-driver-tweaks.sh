@@ -34,7 +34,11 @@ case "${zone}" in
     America/Santiago) cc="CL" ;;
     America/Bogota) cc="CO" ;;
     America/Lima) cc="PE" ;;
-    America/Caracas|America/La_Paz|America/Asuncion|America/Montevideo|America/Guayaquil) cc="VE" ;;
+    America/Caracas) cc="VE" ;;
+    America/La_Paz) cc="BO" ;;
+    America/Asuncion) cc="PY" ;;
+    America/Montevideo) cc="UY" ;;
+    America/Guayaquil) cc="EC" ;;
     Europe/London) cc="GB" ;;
     Europe/Dublin) cc="IE" ;;
     Europe/Berlin) cc="DE" ;;

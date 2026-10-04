@@ -24,6 +24,7 @@ class InstallerJournalParityTests(unittest.TestCase):
                 journal = journal_mod.Journal.__new__(journal_mod.Journal)
                 journal.disk = "/dev/sda"
                 journal.ops = []
+                journal._next_op_index = 0
                 journal._committed = False
                 journal._root_partition = None
                 for operation in case["ops"]:

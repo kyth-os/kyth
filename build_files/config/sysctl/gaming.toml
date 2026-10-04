@@ -3,15 +3,22 @@
 # Slice 3: 10 wrappers / 11 keys consolidated from per-tunable emitters (all non-duplicate vs base/network).
 # Per-tunable shims remain until Slice 5 dispatcher removes 99-kyth-*.conf emitters.
 
+# Keys prefixed with "-" are optional: sysctl.d ignores them silently when the
+# running kernel lacks them (BORE is CachyOS-only; the CFS sched_* knobs were
+# removed with EEVDF). Without the prefix each one logged a failure on
+# every boot. vm.pressure_poll and kernel.khugepaged_defrag are not sysctls on
+# any kernel and were removed; khugepaged defrag is set through sysfs in
+# scripts/sysconfig/kernel/52-khugepaged-intervals.sh.
+
 [keys."fs.aio-max-nr"]
 value = "1048576"
 comment = "aio-max gaming — consolidated from aio_max (was 99-kyth-aio-max.conf)"
 
-[keys."kernel.sched_bore"]
+[keys."-kernel.sched_bore"]
 value = "1"
 comment = "bore gaming — from bore_tune"
 
-[keys."kernel.sched_bore_burst_penalty_offset"]
+[keys."-kernel.sched_bore_burst_penalty_offset"]
 value = "12"
 comment = "bore gaming — from bore_tune"
 
@@ -47,37 +54,14 @@ comment = "perf-cpu gaming — from perf_cpu"
 value = "262144"
 comment = "rmem-default gaming — from rmem_default"
 
-# Slice 4: 16 wrappers / 20 keys (remaining non-duplicate sysctls). Total gaming 31 keys.
+# Slice 4: 13 wrappers / 12 keys (remaining non-duplicate sysctls). Total gaming 23 keys.
 # Excludes 22 wrappers that duplicate base/network (see docs/tunables-inventory.md) — those become compat aliases via tunable registry.
 # Note: vm.swappiness intentionally stays base-only (120 for productivity/APU); gaming_master may raise to 180 on 32GB+ via transient sysctl, not via tier duplicate.
-
-[keys."vm.pressure_poll"]
-value = "500"
-comment = "psi-poll gaming — from psi_poll"
-
-[keys."kernel.sched_child_runs_first"]
-value = "0"
-comment = "sched-child gaming — from sched_child"
-
-[keys."kernel.sched_latency_ns"]
-value = "6000000"
-comment = "sched-latency gaming — from sched_latency"
-
-[keys."kernel.sched_min_granularity_ns"]
-value = "1000000"
-comment = "sched-latency gaming — from sched_latency"
-
-[keys."kernel.sched_wakeup_granularity_ns"]
-value = "1000000"
-comment = "sched-latency gaming — from sched_latency"
-
-[keys."kernel.sched_migration_cost_ns"]
-value = "500000"
-comment = "sched-latency gaming — from sched_latency"
-
-[keys."kernel.sched_nr_migrate"]
-value = "32"
-comment = "sched-latency gaming — from sched_latency (sched-nr-migrate=64 is superseded, latency tier is canonical)"
+# Note: the CFS scheduler-latency knobs (sched_latency_ns, sched_min_granularity_ns,
+# sched_wakeup_granularity_ns, sched_migration_cost_ns, sched_nr_migrate,
+# sched_child_runs_first) were removed from the kernel with EEVDF — the entries
+# lived here -prefixed (silently ignored) and are now deleted outright. EEVDF
+# has no equivalent tunables; scheduling latency is owned by scx/BORE paths.
 
 [keys."net.core.somaxconn"]
 value = "8192"
@@ -122,10 +106,6 @@ comment = "tcp-timestamps gaming — from tcp_timestamps"
 [keys."net.ipv4.tcp_window_scaling"]
 value = "1"
 comment = "tcp-window-scaling gaming — from tcp_window_scaling"
-
-[keys."kernel.khugepaged_defrag"]
-value = "0"
-comment = "thp-collapse gaming — from thp_collapse"
 
 [keys."net.core.wmem_default"]
 value = "262144"

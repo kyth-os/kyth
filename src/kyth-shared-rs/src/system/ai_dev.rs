@@ -17,7 +17,7 @@ use std::time::Duration;
 use super::dev_tools_catalog::{DevTool, InstallMethod};
 
 pub const DEFAULT_BOX: &str = "kyth-ai-dev";
-pub const DEFAULT_IMAGE: &str = "registry.fedoraproject.org/fedora-toolbox:44";
+pub const DEFAULT_IMAGE: &str = "registry.fedoraproject.org/fedora-toolbox:45";
 pub const DEFAULT_MODEL: &str = "qwen2.5-coder";
 pub const DEFAULT_MODEL_DIR_SUFFIX: &str = ".local/share/kyth-ai/models";
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);

@@ -15,14 +15,20 @@ for ublue_update in \
 		-e 's/^update( VERB_LEVEL=|:)/ublue-legacy-update\1/' \
 		"${ublue_update}"
 done
-mkdir -p /usr/share/ublue-os/just
-cp /ctx/just/kyth.just /usr/share/ublue-os/just/75-kyth.just
-# kyth.just imports its per-domain recipe files from kyth/ next to itself
-# (just resolves imports relative to the importing file), so that directory
-# ships alongside it here.
-cp -r /ctx/just/kyth /usr/share/ublue-os/just/kyth
-# The upstream justfile only imports up to 60-custom.just; wire in our file.
-printf '\nimport? "/usr/share/ublue-os/just/75-kyth.just"\n' >>/usr/share/ublue-os/justfile
+# On a Universal Blue base, install into the ublue just tree. On the Fedora
+# base (no /usr/share/ublue-os/justfile) the KythOS-native provider in
+# 32-kyth-just-provider.sh owns recipe delivery instead — skip the ublue
+# paths so we don't leave a stray ublue tree behind.
+if [[ -f /usr/share/ublue-os/justfile ]]; then
+	mkdir -p /usr/share/ublue-os/just
+	cp /ctx/just/kyth.just /usr/share/ublue-os/just/75-kyth.just
+	# kyth.just imports its per-domain recipe files from kyth/ next to itself
+	# (just resolves imports relative to the importing file), so that directory
+	# ships alongside it here.
+	cp -r /ctx/just/kyth /usr/share/ublue-os/just/kyth
+	# The upstream justfile only imports up to 60-custom.just; wire in our file.
+	printf '\nimport? "/usr/share/ublue-os/just/75-kyth.just"\n' >>/usr/share/ublue-os/justfile
+fi
 # Unit files installed here (not just before, elsewhere) since `systemctl
 # enable` below needs each one to already exist — see
 # branding/36-misc-utility-installs.sh for the matching binaries.
@@ -32,7 +38,7 @@ install -m 0644 /ctx/kyth-duperemove.timer /usr/lib/systemd/system/kyth-duperemo
 install -m 0644 /ctx/kyth-scx-loader.service /usr/lib/systemd/system/scx_loader.service
 systemctl enable kyth-local-bin-migrate.service 2>/dev/null || true
 systemctl enable kyth-duperemove.timer 2>/dev/null || true
-systemctl --global enable kyth-proton-cachyos-update.timer 2>/dev/null || true
+systemctl enable kyth-proton-cachyos-update.timer 2>/dev/null || true
 # No NetworkManager-wait-online.service here on purpose: it stalls every boot
 # up to its timeout on metered/slow/offline links, and every Kyth network
 # waiter already skips cleanly offline (flathub-setup exits 0 with no default
@@ -51,6 +57,6 @@ if command -v scx_rusty >/dev/null 2>&1; then
 	systemctl --global enable kyth-sched.service 2>/dev/null || true
 fi
 systemctl --global enable kyth-telem.service 2>/dev/null || true
-systemctl --global enable kyth-probe.timer 2>/dev/null || true
+systemctl --global enable kyth-probe-user.timer 2>/dev/null || true
 systemctl --global enable kyth-guardian.timer 2>/dev/null || true
 # kyth-guardian.path removed (probe-cache check storm); timer only.

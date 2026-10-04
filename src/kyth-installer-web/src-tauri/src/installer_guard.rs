@@ -1,10 +1,34 @@
 //! Last-moment guards for the selected installation disk.
 
+use std::fs::{File, OpenOptions};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::OpenOptionsExt;
+
 use crate::installer_storage;
 
 fn normalized(disk: &str) -> Result<String, String> {
     crate::installer_plan::normalize_device_path(disk)
         .ok_or_else(|| "selected disk is not a safe device path".to_string())
+}
+
+/// Hold an exclusive advisory lock on the selected whole disk for a complete
+/// destructive operation. Callers must keep the returned file alive until all
+/// backup, mutation, and rollback work has finished.
+pub(crate) fn acquire_disk_lock(disk: &str) -> Result<File, String> {
+    let disk = normalized(disk)?;
+    let file = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_CLOEXEC)
+        .open(&disk)
+        .map_err(|error| format!("could not lock {disk} for exclusive use: {error}"))?;
+    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0
+        && std::env::var("KYTH_INSTALL_ALLOW_NO_DISK_LOCK").as_deref() != Ok("1")
+    {
+        return Err(format!(
+            "another process is using {disk}; close other installers and retry"
+        ));
+    }
+    Ok(file)
 }
 
 /// Validate disk ownership from already-captured read-only snapshots.

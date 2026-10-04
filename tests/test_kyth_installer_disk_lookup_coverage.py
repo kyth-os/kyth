@@ -1,4 +1,5 @@
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -54,14 +55,15 @@ class InstallerDiskLookupCoverageTests(unittest.TestCase):
         ):
             self.assertEqual(_lookup.find_efi_partition("/dev/sda"), "")
 
-    def test_root_partition_selects_largest_lsblk_partition(self):
+    def test_root_partition_rejects_ambiguous_lsblk_without_fstype(self):
         payload = {"blockdevices": [{"children": [
             {"name": "sda1", "size": 1024, "type": "part"},
             {"name": "sda2", "size": 4096, "type": "part"},
             {"name": "crypt", "size": 8192, "type": "crypt"},
         ]}]}
         with mock.patch.object(disk, "run_command", return_value=SimpleNamespace(stdout=json.dumps(payload))):
-            self.assertEqual(_lookup.get_root_partition("/dev/sda"), "/dev/sda2")
+            with self.assertRaises(RuntimeError):
+                _lookup.get_root_partition("/dev/sda")
 
     def test_root_partition_falls_back_to_matching_btrfs_blkid(self):
         responses = [OSError("lsblk failed"), SimpleNamespace(stdout="/dev/sdb1\n/dev/sda3\n")]
@@ -96,6 +98,37 @@ class InstallerDiskLookupCoverageTests(unittest.TestCase):
             self.assertEqual(_util._lsblk_text(["-n"]), "")
         with mock.patch.object(disk, "run_command", return_value=SimpleNamespace(stdout="overlay\n")):
             self.assertEqual(_util._findmnt_source("/"), "")
+
+    def test_findmnt_subvolume_and_stacked_mounts_resolve_to_a_plain_device(self):
+        # findmnt prints "/dev/nvme0n1p3[/boot]" for a btrfs subvolume or bind
+        # mount, and prints one line per stacked mount. The bracket suffix made
+        # the path unresolvable, so _parent_disk() returned nothing and the
+        # running disk silently dropped out of the protected set.
+        stacked = SimpleNamespace(stdout="/dev/nvme0n1p3[/boot]\n/dev/nvme0n1p3[/boot]\n")
+        with mock.patch.object(disk, "run_command", return_value=stacked):
+            self.assertEqual(_util._findmnt_source("/boot"), "/dev/nvme0n1p3")
+        with mock.patch.object(disk, "run_command", return_value=stacked):
+            self.assertEqual(disk._mount_sources("/boot"), {os.path.realpath("/dev/nvme0n1p3")})
+        plain = SimpleNamespace(stdout="/dev/sda2\n")
+        with mock.patch.object(disk, "run_command", return_value=plain):
+            self.assertEqual(_util._findmnt_source("/"), "/dev/sda2")
+
+    def test_safe_int_survives_json_infinity_and_nan(self):
+        # json.loads('1e999') is inf; int(inf) raised an uncaught OverflowError.
+        for value in (json.loads("1e999"), json.loads("-1e999"), float("nan"), "x", None):
+            self.assertEqual(disk._safe_int(value, -1), -1, value)
+        self.assertEqual(disk._safe_int("42", -1), 42)
+
+    def test_password_hash_refuses_characters_openssl_would_silently_drop(self):
+        # NUL truncates the password and a trailing newline is stripped, so the
+        # installed password would differ from what the user typed. Parity with
+        # the Rust daemon (installer_accounts.rs::hash_password).
+        from kyth_installer import system
+
+        for bad in ("pa\x00ss", "ab\n", "a\nb", "a\r\nb"):
+            with self.assertRaises(RuntimeError, msg=repr(bad)):
+                system._hash_password(bad)
+        self.assertTrue(system._hash_password("plain-pass").startswith("$6$"))
 
     def test_lsblk_tree_flattens_children_and_normalizes_parents(self):
         devices = [{

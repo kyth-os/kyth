@@ -74,11 +74,27 @@ pub fn render_quantum_dropin(quantum: i64) -> String {
     )
 }
 
+/// App names come from a user-owned TOML file while this output is sourced
+/// or parsed by launch helpers. Escape newlines/control characters so a
+/// key cannot inject arbitrary lines into the env map (same approach as
+/// input_preset.rs).
+fn safe_app_name(name: &str) -> String {
+    name.chars()
+        .map(|character| match character {
+            '\n' => String::from("\\n"),
+            '\r' => String::from("\\r"),
+            c if c.is_control() => format!("\\u{{{:x}}}", c as u32),
+            c => c.to_string(),
+        })
+        .collect()
+}
+
 pub fn render_env_map(named: &BTreeMap<String, i64>, rate: i64) -> String {
     let mut text =
         String::from("# Kyth PipeWire per-app latency — source or parse from launch helpers\n");
     text.push_str(&format!("# rate={rate}\n"));
     for (app, quantum) in named {
+        let app = safe_app_name(app);
         text.push_str(&format!("{app}=PIPEWIRE_LATENCY={quantum}/{rate}\n"));
     }
     text
@@ -157,6 +173,21 @@ mod tests {
             render_env_map(&named, 48000),
             "# Kyth PipeWire per-app latency — source or parse from launch helpers\n# rate=48000\ngame=PIPEWIRE_LATENCY=64/48000\n"
         );
+    }
+
+    #[test]
+    fn app_names_cannot_inject_env_lines() {
+        let mut named = BTreeMap::new();
+        named.insert("evil\nINJECTED=1".to_string(), 64);
+        named.insert("cr\rev".to_string(), 128);
+        let rendered = render_env_map(&named, 48000);
+        // Every app entry stays on exactly one line: no raw newlines survive.
+        for line in rendered.lines().skip(2) {
+            assert!(!line.contains('\n') && !line.contains('\r'));
+        }
+        assert!(rendered.contains("evil\\nINJECTED=1=PIPEWIRE_LATENCY=64/48000\n"));
+        assert!(rendered.contains("cr\\rev=PIPEWIRE_LATENCY=128/48000\n"));
+        assert!(!rendered.contains("INJECTED=1\n"));
     }
 
     #[test]

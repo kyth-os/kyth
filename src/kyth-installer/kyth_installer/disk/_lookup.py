@@ -78,8 +78,13 @@ def get_root_partition(disk: str) -> str:
         _logger.debug("get_root_partition: lsblk probe of %s failed", disk, exc_info=True)
 
     labeled = [p for p in parts if p["label"] == "KythOS"]
-    if labeled:
-        return max(labeled, key=lambda p: p["size"])["name"]
+    if len(labeled) == 1:
+        return labeled[0]["name"]
+    if len(labeled) > 1:
+        raise RuntimeError(
+            f"Ambiguous root partition on {disk}: "
+            f"{len(labeled)} partitions labeled 'KythOS'."
+        )
     btrfs = [p for p in parts if p["fstype"] == "btrfs"]
     if btrfs:
         return max(btrfs, key=lambda p: p["size"])["name"]
@@ -91,9 +96,6 @@ def get_root_partition(disk: str) -> str:
     except Exception:  # noqa: BLE001 -- broad: must catch StopIteration from mock side_effect and other probe failures
         _logger.debug("get_root_partition: blkid probe of %s failed", disk, exc_info=True)
 
-    if parts and all(not p["fstype"] for p in parts):
-        # lsblk omitted FSTYPE (legacy probe / incomplete JSON) — largest last-resort.
-        return max(parts, key=lambda p: p["size"])["name"]
     if len(parts) == 1:
         return parts[0]["name"]
     if parts:

@@ -116,7 +116,9 @@ def _probe_storage(
     instead of this re-running the disk scan once per call."""
     return StorageSnapshot(
         disks=tuple(disks) if disks is not None else tuple(list_disks()),
-        partitions=tuple(list_partitions(disk)) if include_partitions else (),
+        # Planning is a safety boundary: an lsblk failure must not look like
+        # a disk with no partitions and skip BitLocker/ESP checks before wipe.
+        partitions=tuple(list_partitions(disk, strict=True)) if include_partitions else (),
         free_regions=tuple(list_free_space(disk)) if include_free_space else (),
         efi_partition=find_efi_partition(disk) if include_partitions else None,
         is_gpt=_is_gpt_disk(disk) if include_partitions else False,
@@ -348,11 +350,24 @@ def _prepare_ntfs_install_plan(state: dict | InstallRequest, log, cancel_event=N
         cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount,
     )
 
-def _prepare_free_space_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
-    return _plan_commit.prepare_guided_install_plan(
-        state, log, validate_target=_validate_free_space_target,
-        prepare_target=_prepare_free_space_target,
-    )
+def _prepare_free_space_install_plan(
+    state: dict | InstallRequest,
+    log,
+    cancel_event=None,
+    register_mount=None,
+    release_mount=None,
+) -> InstallPlan:
+    kwargs = {
+        "validate_target": _validate_free_space_target,
+        "prepare_target": _prepare_free_space_target,
+    }
+    if cancel_event is not None:
+        kwargs["cancel_event"] = cancel_event
+    if register_mount is not None:
+        kwargs["register_mount"] = register_mount
+    if release_mount is not None:
+        kwargs["release_mount"] = release_mount
+    return _plan_commit.prepare_guided_install_plan(state, log, **kwargs)
 
 def _prepare_explicit_install_plan(
     plan: InstallPlan,

@@ -81,7 +81,7 @@ so output lands in root's `containers-storage`, which `bootc switch
 Ordered layers, not one monolithic Dockerfile:
 
 ```text
-Fedora Kinoite / Universal Blue base
+Fedora Kinoite base
   → KythOS base layer (build_base/ — kernel, plymouth, dracut, DM defaults)
   → final OCI desktop image (Dockerfile + build_files/scripts/*.sh fragments)
   → live ISO installer (installer/ + build_files/kyth-installer)
@@ -128,7 +128,7 @@ sudo bootc upgrade
 ```text
 Dockerfile              # final OS image (layers 2+3)
 Justfile                # build orchestration (imports build_files/just/*.just)
-build_base/             # layer 1: CachyOS kernel + base Fedora Kinoite 44
+build_base/             # layer 1: CachyOS kernel + base Fedora Kinoite 45
 build_files/            # layer 2+: packages, tweaks, branding, runtime code
 installer/              # live payload customization
 tests/                  # flat unittest suite for installer, Hub, shared helpers
@@ -139,7 +139,7 @@ docs/                   # architecture, security, hardware, validation docs
 
 ## Key details
 
-- Base: `ghcr.io/ublue-os/kinoite-main:44` (Fedora 44 KDE); CachyOS kernel
+- Base: `quay.io/fedora/fedora-kinoite:45` (Fedora 45 KDE, digest-pinned in `build_base/Dockerfile`); CachyOS kernel
   (BORE, sched-ext, BBRv3, NTSYNC); Mesa-git via `xxmitsu/mesa-git` COPR.
 - SELinux enforcing (bootc/ostree relabels on every deployment).
 - Live ISOs on Cloudflare R2: `kyth-live-latest.iso` / `kyth-live-testing.iso`.

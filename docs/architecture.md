@@ -8,8 +8,8 @@ atomic updates, and a first-run System Hub for setup and repair.
 ### Container Image
 
 The operating system is built as an OCI container image and published to GitHub
-Container Registry. The image is based on Fedora Kinoite through Universal Blue
-base images, then layered with KythOS packages, configuration, services,
+Container Registry. The image is based on the official Fedora Kinoite base
+image, then layered with KythOS packages, configuration, services,
 helpers, branding, and desktop defaults.
 
 ### Base Image Layer

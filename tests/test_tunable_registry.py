@@ -22,13 +22,13 @@ from kyth_shared.tunable import (
 class TestTunableRegistry(unittest.TestCase):
     def test_builtin_count(self):
         reg = load_registry()
-        self.assertEqual(len(reg), 94)
+        self.assertEqual(len(reg), 91)
 
     def test_builtin_kinds(self):
         reg = load_registry()
         sysctl = [s for s in reg.values() if s.kind == "sysctl"]
         other = [s for s in reg.values() if s.kind == "other"]
-        self.assertEqual(len(sysctl), 49)
+        self.assertEqual(len(sysctl), 46)
         self.assertEqual(len(other), 45)
 
     def test_get_spec_normalizes(self):
@@ -50,7 +50,7 @@ class TestTunableRegistry(unittest.TestCase):
     def test_load_from_toml(self):
         # tunables.toml should be present in build_files/config
         reg = load_registry(Path("build_files/config"))
-        self.assertEqual(len(reg), 94)
+        self.assertEqual(len(reg), 91)
         self.assertEqual(reg["swappiness"].module, "swappiness")
 
     def test_round_trip_via_registry(self):

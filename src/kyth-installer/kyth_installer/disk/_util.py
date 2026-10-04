@@ -35,6 +35,12 @@ def _lsblk_text(args: list[str], timeout: int = 5) -> str:
 
 
 
+def _bare_mount_source(line: str) -> str:
+    """`/dev/nvme0n1p3[/ostree/var]` -> `/dev/nvme0n1p3`; non-device -> ""."""
+    source = line.strip().split("[", 1)[0].strip()
+    return source if source.startswith("/dev/") else ""
+
+
 def _findmnt_source(target: str, timeout: int = 5) -> str:
     """Return the mount SOURCE for `target` (a path), or "" if it isn't a
     real block device path. Propagates subprocess/timeout failures — some
@@ -45,8 +51,13 @@ def _findmnt_source(target: str, timeout: int = 5) -> str:
         ["findmnt", "-n", "-o", "SOURCE", target],
         capture_output=True, text=True, check=True, timeout=timeout,
     )
-    source = result.stdout.strip()
-    return source if source.startswith("/dev/") else ""
+    # One line per stacked mount, and "/dev/x[/subvol]" for a btrfs subvolume
+    # or bind mount: take the first device line and drop the bracket suffix.
+    for line in result.stdout.splitlines():
+        source = _bare_mount_source(line)
+        if source:
+            return source
+    return ""
 
 
 

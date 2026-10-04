@@ -41,16 +41,16 @@ class RuntimeRecipeInventoryTest(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("valid: 202 recipes", result.stdout)
+        self.assertIn("valid: 199 recipes", result.stdout)
         self.assertIn("verification: 0 routed-only, 20 behavior-tested", result.stdout)
 
     def test_every_native_recipe_has_one_unique_ledger_entry(self):
         recipes = self.checker.parse_recipes()
         entries = self.document["entries"]
-        self.assertEqual(len(recipes), 202)
-        self.assertEqual(self.document["recipe_count"], 202)
+        self.assertEqual(len(recipes), 199)
+        self.assertEqual(self.document["recipe_count"], 199)
         self.assertEqual([recipe["name"] for recipe in recipes], [entry["name"] for entry in entries])
-        self.assertEqual(len({entry["name"] for entry in entries}), 202)
+        self.assertEqual(len({entry["name"] for entry in entries}), 199)
         self.assertEqual({entry["manifest"] for entry in entries}, {"build_files/just/kyth/native.just"})
 
     def test_open_owner_set_matches_assessed_gap(self):
@@ -80,10 +80,10 @@ class RuntimeRecipeInventoryTest(unittest.TestCase):
             self.assertEqual(entry["rust_owner"], owner, entry["name"])
             self.assertEqual(entry["rust_target"], target, entry["name"])
 
-        self.assertEqual(self.document["summary"]["routed"], 202)
+        self.assertEqual(self.document["summary"]["routed"], 199)
         self.assertEqual(self.document["summary"]["explicit_dispatch"], 106)
         self.assertEqual(self.document["summary"]["explicit_retirement"], 3)
-        self.assertEqual(self.document["summary"]["native_fallback"], 93)
+        self.assertEqual(self.document["summary"]["native_fallback"], 90)
 
     def test_verification_depth_is_separate_from_route_ownership(self):
         high_risk = {

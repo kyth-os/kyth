@@ -53,12 +53,20 @@ export function ControllersSection({ section }: { section: HubSection }) {
 
   useEffect(() => {
     let cancelled = false;
-    fetchControllers().then((c) => {
-      if (!cancelled) {
-        setInfo(c);
-        setLoaded(true);
-      }
-    });
+    fetchControllers()
+      .then((c) => {
+        if (!cancelled) {
+          setInfo(c);
+        }
+      })
+      .catch(() => {
+        // Leave info as null; the section renders its empty state.
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setLoaded(true);
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -66,7 +74,7 @@ export function ControllersSection({ section }: { section: HubSection }) {
 
   // Normalize both shapes to the one the list below renders.
   const pads = live
-    ? live.usb_controllers.map(([name, kind]) => ({ name, kind }))
+    ? (live.usb_controllers ?? []).map(([name, kind]) => ({ name, kind }))
     : (info?.usbControllers ?? null);
   const drivers = live
     ? { xone: live.xone_loaded, xpadneo: live.xpadneo_loaded, hidPlaystation: live.hid_ps_loaded }

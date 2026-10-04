@@ -216,7 +216,7 @@ class ThpTuneClampTests(unittest.TestCase):
             dest = Path(tmp) / "99-kyth-thp.conf"
             generate_thp_conf({"profile": "kyth", "scan_sleep_ms": 1}, dest)
             text = dest.read_text(encoding="utf-8")
-            self.assertIn("kernel.khugepaged_scan_sleep_millisecs = 1000", text)
+            self.assertIn("-kernel.khugepaged_scan_sleep_millisecs = 1000", text)
 
 
 class LoaderTimeoutClampTests(unittest.TestCase):

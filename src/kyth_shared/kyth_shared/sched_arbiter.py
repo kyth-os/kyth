@@ -29,7 +29,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_PATH = Path("/etc/kyth/sched-arbiter.toml")
 DEFAULT_FLAG = Path("/run/kyth/sched-arbiter.json")
 DEFAULT_GAMEMODE_INI = Path("/etc/gamemode.ini")
-KERNEL_FLAVOR_PATH = Path("/usr/share/kyth/kernel-flavor")
 
 
 def arbiter_config_path(path: Path | None = None) -> Path:
@@ -78,11 +77,16 @@ def detect_scx_active() -> bool:
     return False
 
 
-def bore_available(flavor_path: Path = KERNEL_FLAVOR_PATH) -> bool:
-    try:
-        return flavor_path.read_text(encoding="utf-8").strip().lower() in ("cachy", "cachyos")
-    except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
-        return False
+BORE_KNOB_PATH = Path("/proc/sys/kernel/sched_bore")
+
+
+def bore_available(knob_path: Path = BORE_KNOB_PATH) -> bool:
+    """True when the kernel actually exposes the BORE scheduler knob.
+
+    The knob is ground truth; the old flavor-file heuristic went stale when
+    upstream CachyOS dropped BORE.
+    """
+    return knob_path.exists()
 
 
 def load_arbiter(path: Path | None = None) -> dict[str, Any]:

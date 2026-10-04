@@ -21,10 +21,10 @@ write_kyth_os_release() {
 	local target=$1
 	write_config "${target}" <<'EOF'
 NAME="KythOS"
-PRETTY_NAME="KythOS 44"
+PRETTY_NAME="KythOS 45"
 ID=kythos
-VERSION="44"
-VERSION_ID="44"
+VERSION="45"
+VERSION_ID="45"
 ANSI_COLOR="0;34"
 LOGO=kyth
 HOME_URL="https://github.com/kyth-os/kyth"

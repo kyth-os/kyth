@@ -112,16 +112,22 @@ class ShippedCommandContracts(unittest.TestCase):
         self.assertNotIn("pulse", keywords)
 
     def test_hub_desktop_entries_match_tauri_app_id(self):
-        # Regression pin: the Hub window is a Tauri/WebKitGTK window whose
-        # Wayland app-id is the bundle identifier. Every desktop entry that
-        # launches it must declare that id as StartupWMClass, or Plasma
-        # cannot group the window under the Hub icon and shows a generic
-        # Wayland icon instead.
+        # Regression pin: Tauri defaults enableGTKAppId to false, which leaves
+        # the Hub without its own GTK/Wayland app-id. Enable it and keep every
+        # launching desktop entry matched to that id, or Plasma creates a
+        # separate generic Wayland taskbar item instead of grouping the pinned
+        # Hub launcher.
         import json
 
         tauri_conf = ROOT / "src/kyth-hub-web/src-tauri/tauri.conf.json"
-        app_id = json.loads(tauri_conf.read_text(encoding="utf-8"))["identifier"]
+        tauri_config = json.loads(tauri_conf.read_text(encoding="utf-8"))
+        app_id = tauri_config["identifier"]
         self.assertTrue(app_id, "tauri.conf.json must define an identifier")
+        self.assertIs(
+            tauri_config["app"].get("enableGTKAppId"),
+            True,
+            "Tauri must publish its identifier as the GTK/Wayland app-id",
+        )
         desktop = ROOT / "src/kyth-hub-web/src/data/kyth-welcome.desktop"
         parser = configparser.ConfigParser(interpolation=None, strict=False)
         parser.read(desktop, encoding="utf-8")
@@ -147,6 +153,22 @@ class ShippedCommandContracts(unittest.TestCase):
 
 
 class BuildAssemblyContracts(unittest.TestCase):
+    def test_rust_desktop_stack_has_scheduled_coordinated_freshness_check(self):
+        workflow = (
+            ROOT / ".github" / "workflows" / "rust-desktop-stack-freshness.yml"
+        ).read_text(encoding="utf-8")
+        checker = (
+            BUILD_FILES / "scripts" / "check-rust-desktop-stack-freshness.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("schedule:", workflow)
+        self.assertIn(
+            "python3 build_files/scripts/check-rust-desktop-stack-freshness.py",
+            workflow,
+        )
+        self.assertIn("src/kyth-hub-web/src-tauri/Cargo.toml", checker)
+        self.assertIn("src/kyth-installer-web/src-tauri/Cargo.toml", checker)
+        self.assertNotIn("pull-requests: write", workflow)
+
     def test_package_install_sources_do_not_pin_literal_rpm_nvrs(self):
         """Kyth resolves current RPMs at build time; manifests record results."""
         sources = [ROOT / "Dockerfile"]
@@ -262,6 +284,86 @@ class BuildAssemblyContracts(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_fragment_runner_retries_with_set_e_and_restores_cwd(self):
+        runner = BUILD_FILES / "scripts/lib/fragment-runner.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            fragments = scripts / "packages"
+            fragments.mkdir(parents=True)
+            (fragments / "01-flaky.sh").write_text(
+                "attempt_file=../attempts\n"
+                "n=$(cat \"${attempt_file}\" 2>/dev/null || printf 0)\n"
+                "n=$((n + 1)); printf '%s' \"${n}\" >\"${attempt_file}\"\n"
+                "if [[ \"${n}\" -lt 2 ]]; then false; fi\n",
+                encoding="utf-8",
+            )
+            (root / "attempts").write_text("0", encoding="utf-8")
+            orchestrator = scripts / "run.sh"
+            orchestrator.write_text(
+                f"#!/bin/bash\nset -e\nsource {runner}\nstart=$PWD\nrun_fragments packages source\n[[ $PWD == $start ]]\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(["bash", str(orchestrator)], cwd=root, text=True, capture_output=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_fragment_runner_retries_in_bash_mode_under_set_e(self):
+        runner = BUILD_FILES / "scripts/lib/fragment-runner.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            fragments = scripts / "packages"
+            fragments.mkdir(parents=True)
+            (fragments / "01-flaky.sh").write_text(
+                "n=$(cat ../attempts 2>/dev/null || printf 0); n=$((n + 1)); printf '%s' \"${n}\" > ../attempts;\n"
+                "if [[ \"${n}\" -lt 2 ]]; then false; fi\n",
+                encoding="utf-8",
+            )
+            (root / "attempts").write_text("0", encoding="utf-8")
+            orchestrator = scripts / "run.sh"
+            orchestrator.write_text(
+                f"#!/bin/bash\nset -e\nsource {runner}\nrun_fragments packages bash\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(["bash", str(orchestrator)], cwd=root, text=True, capture_output=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_sysconfig_hash_changes_when_shared_fragment_helper_changes(self):
+        # A sourced helper is an input to every fragment that uses it; omitting it
+        # lets BuildKit reuse a stale sysconfig-static layer after helper edits.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "build_files/scripts"
+            (scripts / "sysconfig/lib").mkdir(parents=True)
+            (scripts / "lib").mkdir(parents=True)
+            (scripts / "sysconfig-static.sh").write_text("# static\n", encoding="utf-8")
+            (scripts / "sysconfig/01-fragment.sh").write_text(
+                'source "../lib/config-helpers.sh"\n', encoding="utf-8"
+            )
+            (scripts / "lib/config-helpers.sh").write_text("# helper v1\n", encoding="utf-8")
+            (root / "build_files/data").mkdir()
+            (root / "src/kyth_shared").mkdir(parents=True)
+            (root / "build_files/kyth_shared").mkdir(parents=True)
+            hasher = scripts / "hash-sysconfig.sh"
+            hasher.write_text(
+                (BUILD_FILES / "scripts/hash-sysconfig.sh").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            def content_hash():
+                return subprocess.check_output(["bash", str(hasher)], cwd=root, text=True).strip()
+
+            before = content_hash()
+            (scripts / "lib/config-helpers.sh").write_text("# helper v2\n", encoding="utf-8")
+            self.assertNotEqual(before, content_hash())
+
+    def test_installer_hash_and_live_iso_use_one_canonical_input_set(self):
+        hasher = (BUILD_FILES / "scripts/installer-build-hash.sh").read_text(encoding="utf-8")
+        iso = (BUILD_FILES / "build-live-iso.sh").read_text(encoding="utf-8")
+        self.assertIn("build_files/scripts", hasher)
+        self.assertIn("installer-build-hash.sh", iso)
+        self.assertNotIn("build_files/kyth_shared/kyth_shared/vm_acceptance.py \\", iso)
 
     def test_standalone_container_scripts_anchor_helper_sources(self):
         scripts = BUILD_FILES / "scripts"
@@ -526,9 +628,18 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertNotIn("dnf5 install -y cosign", build)
         self.assertNotIn("dnf install -y cosign", build)
         # No silent pass: every failure path in the cosign block exits 1.
-        gate = build.split("Registry signature gate", 1)[1].split("KYTH_SOURCE_IMAGE=oci", 1)[0]
+        gate = build.split("Registry signature gate", 1)[1].split("KYTH_SOURCE_IMAGE=", 1)[0]
         self.assertNotIn("exit 0", gate)
         self.assertIn("exit 1", gate)
+
+    def test_live_iso_does_not_embed_the_full_install_image(self):
+        build = (ROOT / "installer" / "build.sh").read_text(encoding="utf-8")
+        iso_workflow = (ROOT / ".github/workflows/build-live-iso.yml").read_text(encoding="utf-8")
+        self.assertNotIn("skopeo copy", build)
+        self.assertIn("KYTH_SOURCE_IMAGE=%s", build)
+        self.assertIn("KYTH_SOURCE_DIGEST=%s", build)
+        self.assertIn("Gate ISO size (8.5 GiB max)", iso_workflow)
+        self.assertIn('"${cosign_bin}" verify', build)
 
 
 if __name__ == "__main__":

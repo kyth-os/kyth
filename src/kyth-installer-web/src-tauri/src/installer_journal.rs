@@ -6,10 +6,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
-use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::process::CommandExt;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -148,11 +145,14 @@ impl PartitionJournal {
     }
 
     pub(crate) fn remove_op(&mut self, index: usize) -> bool {
-        if index >= self.ops.len() {
-            return false;
-        }
-        self.ops.remove(index);
-        true
+        self.ops
+            .iter()
+            .position(|operation| operation.index == index)
+            .map(|position| {
+                self.ops.remove(position);
+                true
+            })
+            .unwrap_or(false)
     }
 
     pub(crate) fn clear(&mut self) {
@@ -175,11 +175,17 @@ impl PartitionJournal {
         Ok(())
     }
 
-    pub(crate) fn rollback_metadata(&mut self) {
+    pub(crate) fn rollback_metadata(&mut self) -> Result<(), String> {
+        if self.committed {
+            return Err(
+                "Partition changes have already been committed and cannot be rolled back."
+                    .to_string(),
+            );
+        }
         self.clear();
-        self.committed = false;
         self.root_partition = None;
         self.irreversible_completed = false;
+        Ok(())
     }
 }
 
@@ -953,25 +959,6 @@ fn run_disk_operation(operation: installer_disk::DiskOperationInput) -> Result<(
     Ok(())
 }
 
-fn acquire_disk_lock(disk: &str) -> Result<File, String> {
-    let file = OpenOptions::new()
-        .read(true)
-        .custom_flags(libc::O_CLOEXEC)
-        .open(disk)
-        .map_err(|error| format!("could not lock {disk} for exclusive use: {error}"))?;
-    // The compatibility implementation permits this only for constrained
-    // test environments. Production remains fail-closed when the lock cannot
-    // be acquired.
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0
-        && std::env::var("KYTH_INSTALL_ALLOW_NO_DISK_LOCK").as_deref() != Ok("1")
-    {
-        return Err(format!(
-            "another process is using {disk}; close other installers and retry"
-        ));
-    }
-    Ok(file)
-}
-
 fn runtime_lsblk(disk: &str) -> Result<Value, String> {
     let disk =
         normalize_device_path(disk).ok_or_else(|| "disk must be a safe device path".to_string())?;
@@ -1433,7 +1420,7 @@ fn commit_request_with_target_guard(
     // from the guided installer phases. Repeat the protected/current-disk
     // check here, immediately before the first privileged disk probe or write.
     validate_target(&input.journal.disk)?;
-    let _lock = acquire_disk_lock(&input.journal.disk)?;
+    let _lock = crate::installer_guard::acquire_disk_lock(&input.journal.disk)?;
     let current_parts = runtime_partition_records(&input.journal.disk)?;
     let (table_type, disk_size_bytes) = runtime_disk_metadata(&input.journal.disk)?;
     let errors = validate(&input.journal, &current_parts, &table_type, disk_size_bytes);
@@ -1903,6 +1890,47 @@ mod tests {
         assert_eq!(journal.pending()[0].index, 1);
         assert_eq!(journal.add_op("format", json!({"fs_type": "btrfs"})), 2);
         assert!(!journal.remove_op(99));
+    }
+
+    #[test]
+    fn removes_by_stable_operation_id_after_a_gap() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("create", json!({}));
+        journal.add_op("format", json!({}));
+        journal.add_op("delete", json!({}));
+        assert!(journal.remove_op(0));
+        assert!(journal.remove_op(2));
+        assert_eq!(
+            journal
+                .pending()
+                .iter()
+                .map(|op| op.index)
+                .collect::<Vec<_>>(),
+            [1]
+        );
+    }
+
+    #[test]
+    fn committed_metadata_cannot_be_rolled_back() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("create", json!({}));
+        journal
+            .mark_committed(Some("/dev/sda2"))
+            .expect("valid root");
+        let result = journal.rollback_metadata();
+        assert!(result.is_err());
+        assert!(journal.committed);
+        assert_eq!(journal.ops.len(), 1);
+        assert_eq!(journal.root_partition.as_deref(), Some("/dev/sda2"));
+    }
+
+    #[test]
+    fn uncommitted_metadata_rollback_clears_state() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("create", json!({}));
+        journal.rollback_metadata().expect("uncommitted rollback");
+        assert!(journal.ops.is_empty());
+        assert!(!journal.committed);
     }
 
     #[test]

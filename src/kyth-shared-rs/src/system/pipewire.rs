@@ -1,6 +1,5 @@
 //! Port of `kyth_shared.system.pipewire` — quantum presets (N32).
 
-use std::os::unix::fs::PermissionsExt as _;
 use std::path::Path;
 
 const PRESETS: &[(&str, &str)] = &[("gaming", "128"), ("work", "256"), ("balanced", "256")];
@@ -26,17 +25,14 @@ pub fn apply_pipewire_quantum(preset: &str, dry_run: bool) -> (bool, String) {
         return (false, format!("mkdir failed: {}", e));
     }
     let target = conf_dir.join("99-kyth-quantum.conf");
-    let tmp = conf_dir.join("99-kyth-quantum.conf.tmp");
     let content = format!(
         "# kyth quantum {}\ncontext.properties = {{\n  default.clock.quantum = {}\n}}\n",
         preset, q
     );
-    if let Err(e) = std::fs::write(&tmp, &content) {
+    // Crash-safe replace: unique tmp name, create_new, fsync, symlink
+    // refusal are all handled inside atomic_write_text.
+    if let Err(e) = crate::atomic_io::atomic_write_text(&target, &content, Some(0o644)) {
         return (false, format!("write failed: {}", e));
-    }
-    let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o644));
-    if let Err(e) = std::fs::rename(&tmp, &target) {
-        return (false, format!("rename failed: {}", e));
     }
     (true, format!("applied {} quantum {}", preset, q))
 }

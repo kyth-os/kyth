@@ -41,6 +41,12 @@ class FullUpdateTests(unittest.TestCase):
         ):
             self.assertIn(expected, source)
 
+    def test_update_watcher_does_not_stage_after_refresh_failure(self):
+        source = (ROOT / "src/kyth-shared-rs/src/system/firmware.rs").read_text(encoding="utf-8")
+        self.assertIn("let (refreshed, refresh_output) = run_firmware_refresh(60);", source)
+        stage = source.index("pub fn stage_firmware_batch")
+        count = source.index("let count = check_firmware_updates(20);", stage)
+        self.assertIn("if !refreshed", source[stage:count])
 
 if __name__ == "__main__":
     unittest.main()

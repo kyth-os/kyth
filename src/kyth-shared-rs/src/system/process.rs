@@ -3,6 +3,7 @@
 //! helpers: is_live_session, strip_ansi, with_idle_inhibit, disk write bytes,
 //! format_elapsed/eta/progress.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -210,6 +211,15 @@ pub fn spawn_detached(command: &mut Command) -> io::Result<()> {
 
 /// Run an already-validated argv with captured output and a hard wall-clock
 /// limit. It never invokes a shell and kills a child that outlives its bound.
+/// `Instant + Duration` panics on overflow, so a huge caller-supplied timeout
+/// (e.g. from a config file) must saturate instead. A year is "never" for every
+/// command we bound.
+fn deadline_after(start: Instant, timeout: Duration) -> Instant {
+    start
+        .checked_add(timeout)
+        .unwrap_or_else(|| start + Duration::from_secs(365 * 24 * 3600))
+}
+
 pub fn run_bounded(argv: &[String], timeout: Duration) -> io::Result<Output> {
     let (program, args) = argv
         .split_first()
@@ -301,7 +311,7 @@ pub fn run_bounded_with_input(
                     status,
                     stdout_reader,
                     stderr_reader,
-                    started + timeout,
+                    deadline_after(started, timeout),
                 );
             }
             Ok(None) => {}
@@ -359,7 +369,7 @@ pub fn run_bounded_command_cancel(
                     status,
                     stdout_reader,
                     stderr_reader,
-                    started + timeout,
+                    deadline_after(started, timeout),
                 );
             }
             Ok(None) => {}
@@ -559,18 +569,43 @@ fn which(cmd: &str) -> bool {
     false
 }
 
+pub fn diskstats_write_sectors(text: &str, whole_devices: &[&str]) -> u64 {
+    let allowed: HashSet<&str> = whole_devices.iter().copied().collect();
+    text.lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 10 || !allowed.contains(parts[2]) {
+                return None;
+            }
+            parts[9].parse::<u64>().ok()
+        })
+        .sum()
+}
+
+fn whole_physical_block_devices() -> HashSet<String> {
+    let mut devices = HashSet::new();
+    let Ok(entries) = fs::read_dir("/sys/dev/block") else {
+        return devices;
+    };
+    for entry in entries.flatten() {
+        let Ok(path) = entry.path().canonicalize() else {
+            continue;
+        };
+        if path.join("partition").exists() || path.to_string_lossy().contains("/virtual/block/") {
+            continue;
+        }
+        if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+            devices.insert(name.to_string());
+        }
+    }
+    devices
+}
+
 pub fn get_disk_write_bytes() -> u64 {
     if let Ok(text) = fs::read_to_string("/proc/diskstats") {
-        let mut total: u64 = 0;
-        for line in text.lines() {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 10 {
-                if let Ok(v) = parts[9].parse::<u64>() {
-                    total += v;
-                }
-            }
-        }
-        return total * 512;
+        let devices = whole_physical_block_devices();
+        let refs: Vec<&str> = devices.iter().map(String::as_str).collect();
+        return diskstats_write_sectors(&text, &refs) * 512;
     }
     0
 }
@@ -630,6 +665,17 @@ fn human_bytes(n: u64) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn run_bounded_with_an_enormous_timeout_does_not_panic() {
+        // `Instant + Duration` panics on overflow; a config-supplied timeout
+        // must never be able to take the caller down.
+        let out = run_bounded(
+            &["/usr/bin/true".to_string()],
+            std::time::Duration::from_secs(i64::MAX as u64),
+        );
+        assert!(out.is_ok_and(|o| o.status.success()));
+    }
+
     use super::*;
     use std::time::Duration;
 
@@ -702,6 +748,12 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
+    }
+
+    #[test]
+    fn diskstats_counts_only_whole_devices_named_by_sysfs_filter() {
+        let text = "8 0 sda 0 0 0 0 0 0 100 0 0 0 0\n8 1 sda1 0 0 0 0 0 0 200 0 0 0 0\n7 0 loop0 0 0 0 0 0 0 300 0 0 0 0";
+        assert_eq!(diskstats_write_sectors(text, &["sda"]), 100);
     }
 
     #[test]

@@ -1,10 +1,10 @@
-label: "KYTHOS-44-LIVE"
+label: "KYTHOS-45-LIVE"
 grub2:
   timeout: 10
   entries:
     - name: "Try KythOS Live"
-      linux: "/images/pxeboot/vmlinuz quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 root=live:CDLABEL=KYTHOS-44-LIVE rd.live.image kyth.live=1 enforcing=0"
+      linux: "/images/pxeboot/vmlinuz quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 root=live:CDLABEL=KYTHOS-45-LIVE rd.live.image kyth.live=1 enforcing=0"
       initrd: "/images/pxeboot/initrd.img"
     - name: "Try KythOS Live (Basic Graphics)"
-      linux: "/images/pxeboot/vmlinuz quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 root=live:CDLABEL=KYTHOS-44-LIVE rd.live.image kyth.live=1 enforcing=0 nomodeset"
+      linux: "/images/pxeboot/vmlinuz quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 root=live:CDLABEL=KYTHOS-45-LIVE rd.live.image kyth.live=1 enforcing=0 nomodeset"
       initrd: "/images/pxeboot/initrd.img"

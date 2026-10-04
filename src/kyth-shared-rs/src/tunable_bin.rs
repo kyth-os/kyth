@@ -156,6 +156,65 @@ fn generated_path(test_subdirectory: &str, filename: &str, production: &str) -> 
     PathBuf::from(production)
 }
 
+fn run_systemctl_command(args: &[&str]) -> Result<(), String> {
+    let mut argv = vec!["systemctl".to_string()];
+    argv.extend(args.iter().map(|arg| (*arg).to_string()));
+    let output = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(30))
+        .map_err(|error| format!("systemctl failed to run: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = String::from_utf8_lossy(&output.stderr)
+        .trim()
+        .chars()
+        .take(400)
+        .collect::<String>();
+    Err(if detail.is_empty() {
+        format!(
+            "systemctl {} failed",
+            args.first().copied().unwrap_or("operation")
+        )
+    } else {
+        detail
+    })
+}
+
+fn activate_systemd_units_with<F>(units: &[&str], runner: &mut F) -> Result<(), String>
+where
+    F: FnMut(&[&str]) -> Result<(), String>,
+{
+    runner(&["daemon-reload"])?;
+    for unit in units {
+        runner(&["enable", unit])?;
+        // Restart also starts inactive units; unlike `enable --now`, it applies
+        // a regenerated unit when the service was already active.
+        runner(&["restart", unit])?;
+    }
+    Ok(())
+}
+
+fn disable_systemd_units_with<F>(units: &[&str], runner: &mut F) -> Result<(), String>
+where
+    F: FnMut(&[&str]) -> Result<(), String>,
+{
+    for unit in units {
+        runner(&["disable", "--now", unit])?;
+    }
+    Ok(())
+}
+
+fn activate_systemd_units(units: &[&str]) -> Result<(), String> {
+    activate_systemd_units_with(units, &mut run_systemctl_command)
+}
+
+fn disable_systemd_units(units: &[&str]) -> Result<(), String> {
+    disable_systemd_units_with(units, &mut run_systemctl_command)
+}
+
+fn reload_systemd_manager() -> Result<(), String> {
+    run_systemctl_command(&["daemon-reload"])
+}
+
 fn dispatch_zswap(action: &str) -> ExitCode {
     let config_path = zswap::config_path(None::<&Path>);
     let sysctl_path = generated_path(
@@ -186,8 +245,9 @@ fn dispatch_zswap(action: &str) -> ExitCode {
                 "balanced"
             }
             .into();
-            if let Err(error) = zswap::save(&config_path, &config)
-                .and_then(|_| zswap::generate(&config, &sysctl_path, &modprobe_path).map(|_| ()))
+            if let Err(error) = zswap::generate(&config, &sysctl_path, &modprobe_path)
+                .map(|_| ())
+                .and_then(|_| zswap::save(&config_path, &config))
             {
                 eprintln!("kyth-zswap: {error}");
                 return ExitCode::from(1);
@@ -244,8 +304,9 @@ fn dispatch_bore(action: &str) -> ExitCode {
             }
             .into();
             let scx_active = !test_mode() && scheduler_arbiter::detect_scx_active();
-            if let Err(error) = bore::save(&config_path, &config)
-                .and_then(|_| bore::generate(&config, &drop_in, scx_active).map(|_| ()))
+            if let Err(error) = bore::generate(&config, &drop_in, scx_active)
+                .map(|_| ())
+                .and_then(|_| bore::save(&config_path, &config))
             {
                 eprintln!("kyth-bore: {error}");
                 return ExitCode::from(1);
@@ -297,8 +358,9 @@ fn dispatch_net_tune(action: &str) -> ExitCode {
             }
             let mut config = net_latency::load(&config_path);
             config.enabled = action == "gaming";
-            if let Err(error) = net_latency::save(&config_path, &config)
-                .and_then(|_| net_latency::generate(&config, &drop_in).map(|_| ()))
+            if let Err(error) = net_latency::generate(&config, &drop_in)
+                .map(|_| ())
+                .and_then(|_| net_latency::save(&config_path, &config))
             {
                 eprintln!("kyth-net-tune: {error}");
                 return ExitCode::from(1);
@@ -354,8 +416,9 @@ fn dispatch_ananicy(action: &str) -> ExitCode {
                 "balanced"
             }
             .into();
-            if let Err(error) = ananicy::save(&config_path, &config)
-                .and_then(|_| ananicy::generate(&config, &rule).map(|_| ()))
+            if let Err(error) = ananicy::generate(&config, &rule)
+                .map(|_| ())
+                .and_then(|_| ananicy::save(&config_path, &config))
             {
                 eprintln!("kyth-ananicy: {error}");
                 return ExitCode::from(1);
@@ -404,8 +467,9 @@ fn dispatch_btrfs_autotune(action: &str) -> ExitCode {
             }
             let mut config = btrfs_autotune::load(&config_path);
             config.enabled = action == "gaming";
-            if let Err(error) = btrfs_autotune::save(&config_path, config)
-                .and_then(|_| btrfs_autotune::generate(config, &script).map(|_| ()))
+            if let Err(error) = btrfs_autotune::generate(config, &script)
+                .map(|_| ())
+                .and_then(|_| btrfs_autotune::save(&config_path, config))
             {
                 eprintln!("kyth-btrfs-autotune: {error}");
                 return ExitCode::from(1);
@@ -460,8 +524,9 @@ fn dispatch_btrfs_tune(action: &str) -> ExitCode {
                 "balanced"
             }
             .into();
-            if let Err(error) = btrfs_perf::save(&config_path, &config)
-                .and_then(|_| btrfs_perf::generate(&config, generate_destination).map(|_| ()))
+            if let Err(error) = btrfs_perf::generate(&config, generate_destination)
+                .map(|_| ())
+                .and_then(|_| btrfs_perf::save(&config_path, &config))
             {
                 eprintln!("kyth-btrfs-tune: {error}");
                 return ExitCode::from(1);
@@ -539,9 +604,14 @@ fn dispatch_distrobox_cache(action: &str) -> ExitCode {
             }
             let mut config = distrobox_cache::load(&config_path);
             config.enabled = true;
-            if let Err(error) = distrobox_cache::save(&config_path, &config)
-                .and_then(|_| distrobox_cache::generate(&config, &tmpfiles, &service).map(|_| ()))
+            if let Err(error) = distrobox_cache::generate(&config, &tmpfiles, &service)
+                .map(|_| ())
+                .and_then(|_| distrobox_cache::save(&config_path, &config))
             {
+                eprintln!("kyth-distrobox-cache: {error}");
+                return ExitCode::from(1);
+            }
+            if let Err(error) = activate_systemd_units(&["kyth-distrobox-cache.service"]) {
                 eprintln!("kyth-distrobox-cache: {error}");
                 return ExitCode::from(1);
             }
@@ -554,11 +624,25 @@ fn dispatch_distrobox_cache(action: &str) -> ExitCode {
             }
             let mut config = distrobox_cache::load(&config_path);
             config.enabled = false;
-            if let Err(error) = distrobox_cache::save(&config_path, &config)
-                .and_then(|_| distrobox_cache::generate(&config, &tmpfiles, &service).map(|_| ()))
+            let had_service = service.is_file();
+            if had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-distrobox-cache.service"]) {
+                    eprintln!("kyth-distrobox-cache: {error}");
+                    return ExitCode::from(1);
+                }
+            }
+            if let Err(error) = distrobox_cache::generate(&config, &tmpfiles, &service)
+                .map(|_| ())
+                .and_then(|_| distrobox_cache::save(&config_path, &config))
             {
                 eprintln!("kyth-distrobox-cache: {error}");
                 return ExitCode::from(1);
+            }
+            if had_service {
+                if let Err(error) = reload_systemd_manager() {
+                    eprintln!("kyth-distrobox-cache: {error}");
+                    return ExitCode::from(1);
+                }
             }
             println!("distrobox cache off");
             ExitCode::SUCCESS
@@ -568,7 +652,25 @@ fn dispatch_distrobox_cache(action: &str) -> ExitCode {
                 return code;
             }
             let config = distrobox_cache::load(&config_path);
+            let had_service = service.is_file();
+            if !config.enabled && had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-distrobox-cache.service"]) {
+                    eprintln!("kyth-distrobox-cache: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = distrobox_cache::generate(&config, &tmpfiles, &service) {
+                eprintln!("kyth-distrobox-cache: {error}");
+                return ExitCode::from(1);
+            }
+            let systemd_result = if config.enabled {
+                activate_systemd_units(&["kyth-distrobox-cache.service"])
+            } else if had_service {
+                reload_systemd_manager()
+            } else {
+                Ok(())
+            };
+            if let Err(error) = systemd_result {
                 eprintln!("kyth-distrobox-cache: {error}");
                 return ExitCode::from(1);
             }
@@ -610,9 +712,14 @@ fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
             }
             let mut config = flatpak_prefetch::load(&config_path);
             config.enabled = true;
-            if let Err(error) = flatpak_prefetch::save(&config_path, &config)
-                .and_then(|_| flatpak_prefetch::generate(&config, &service, &timer).map(|_| ()))
+            if let Err(error) = flatpak_prefetch::generate(&config, &service, &timer)
+                .map(|_| ())
+                .and_then(|_| flatpak_prefetch::save(&config_path, &config))
             {
+                eprintln!("kyth-flatpak-prefetch: {error}");
+                return ExitCode::from(1);
+            }
+            if let Err(error) = activate_systemd_units(&["flatpak-prefetch.timer"]) {
                 eprintln!("kyth-flatpak-prefetch: {error}");
                 return ExitCode::from(1);
             }
@@ -625,11 +732,32 @@ fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
             }
             let mut config = flatpak_prefetch::load(&config_path);
             config.enabled = false;
-            if let Err(error) = flatpak_prefetch::save(&config_path, &config)
-                .and_then(|_| flatpak_prefetch::generate(&config, &service, &timer).map(|_| ()))
+            let had_service = service.is_file();
+            let had_timer = timer.is_file();
+            if had_timer {
+                if let Err(error) = disable_systemd_units(&["flatpak-prefetch.timer"]) {
+                    eprintln!("kyth-flatpak-prefetch: {error}");
+                    return ExitCode::from(1);
+                }
+            }
+            if had_service {
+                if let Err(error) = run_systemctl_command(&["stop", "flatpak-prefetch.service"]) {
+                    eprintln!("kyth-flatpak-prefetch: {error}");
+                    return ExitCode::from(1);
+                }
+            }
+            if let Err(error) = flatpak_prefetch::generate(&config, &service, &timer)
+                .map(|_| ())
+                .and_then(|_| flatpak_prefetch::save(&config_path, &config))
             {
                 eprintln!("kyth-flatpak-prefetch: {error}");
                 return ExitCode::from(1);
+            }
+            if had_service || had_timer {
+                if let Err(error) = reload_systemd_manager() {
+                    eprintln!("kyth-flatpak-prefetch: {error}");
+                    return ExitCode::from(1);
+                }
             }
             println!("flatpak prefetch off");
             ExitCode::SUCCESS
@@ -639,7 +767,35 @@ fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
                 return code;
             }
             let config = flatpak_prefetch::load(&config_path);
+            let had_service = service.is_file();
+            let had_timer = timer.is_file();
+            if !config.enabled {
+                if had_timer {
+                    if let Err(error) = disable_systemd_units(&["flatpak-prefetch.timer"]) {
+                        eprintln!("kyth-flatpak-prefetch: {error}");
+                        return ExitCode::from(1);
+                    }
+                }
+                if had_service {
+                    if let Err(error) = run_systemctl_command(&["stop", "flatpak-prefetch.service"])
+                    {
+                        eprintln!("kyth-flatpak-prefetch: {error}");
+                        return ExitCode::from(1);
+                    }
+                }
+            }
             if let Err(error) = flatpak_prefetch::generate(&config, &service, &timer) {
+                eprintln!("kyth-flatpak-prefetch: {error}");
+                return ExitCode::from(1);
+            }
+            let systemd_result = if config.enabled {
+                activate_systemd_units(&["flatpak-prefetch.timer"])
+            } else if had_service || had_timer {
+                reload_systemd_manager()
+            } else {
+                Ok(())
+            };
+            if let Err(error) = systemd_result {
                 eprintln!("kyth-flatpak-prefetch: {error}");
                 return ExitCode::from(1);
             }
@@ -679,8 +835,9 @@ fn dispatch_flatpak_trim(action: &str) -> ExitCode {
                 return code;
             }
             let config = flatpak_trim::FlatpakTrimConfig { enabled: true };
-            if let Err(error) = flatpak_trim::save(&config_path, config)
-                .and_then(|_| flatpak_trim::generate(config, &service, &timer).map(|_| ()))
+            if let Err(error) = flatpak_trim::generate(config, &service, &timer)
+                .map(|_| ())
+                .and_then(|_| flatpak_trim::save(&config_path, config))
             {
                 eprintln!("kyth-flatpak-trim: {error}");
                 return ExitCode::from(1);
@@ -693,8 +850,9 @@ fn dispatch_flatpak_trim(action: &str) -> ExitCode {
                 return code;
             }
             let config = flatpak_trim::FlatpakTrimConfig { enabled: false };
-            if let Err(error) = flatpak_trim::save(&config_path, config)
-                .and_then(|_| flatpak_trim::generate(config, &service, &timer).map(|_| ()))
+            if let Err(error) = flatpak_trim::generate(config, &service, &timer)
+                .map(|_| ())
+                .and_then(|_| flatpak_trim::save(&config_path, config))
             {
                 eprintln!("kyth-flatpak-trim: {error}");
                 return ExitCode::from(1);
@@ -791,14 +949,13 @@ fn dispatch_trim_tune(action: &str) -> ExitCode {
             }
             let mut config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
             config.profile = "kyth".into();
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_trim(
-                &config_path,
-                &config,
-            )
-            .and_then(|_| {
+            if let Err(error) =
                 kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker)
                     .map(|_| ())
-            }) {
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::save_trim(&config_path, &config)
+                    })
+            {
                 eprintln!("kyth-trim-tune: {error}");
                 return ExitCode::from(1);
             }
@@ -811,14 +968,13 @@ fn dispatch_trim_tune(action: &str) -> ExitCode {
             }
             let mut config = kyth_shared::system::runtime_preferences::load_trim(&config_path);
             config.profile = "balanced".into();
-            if let Err(error) = kyth_shared::system::runtime_preferences::save_trim(
-                &config_path,
-                &config,
-            )
-            .and_then(|_| {
+            if let Err(error) =
                 kyth_shared::system::runtime_preferences::generate_trim_marker(&config, &marker)
                     .map(|_| ())
-            }) {
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::save_trim(&config_path, &config)
+                    })
+            {
                 eprintln!("kyth-trim-tune: {error}");
                 return ExitCode::from(1);
             }
@@ -871,13 +1027,10 @@ fn dispatch_uksmd(action: &str) -> ExitCode {
             let mut config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
             config.enabled = true;
             if let Err(error) =
-                kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
+                kyth_shared::system::runtime_preferences::generate_uksmd(&config, &destination)
+                    .map(|_| ())
                     .and_then(|_| {
-                        kyth_shared::system::runtime_preferences::generate_uksmd(
-                            &config,
-                            &destination,
-                        )
-                        .map(|_| ())
+                        kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
                     })
             {
                 eprintln!("kyth-uksmd: {error}");
@@ -893,13 +1046,10 @@ fn dispatch_uksmd(action: &str) -> ExitCode {
             let mut config = kyth_shared::system::runtime_preferences::load_uksmd(&config_path);
             config.enabled = false;
             if let Err(error) =
-                kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
+                kyth_shared::system::runtime_preferences::generate_uksmd(&config, &destination)
+                    .map(|_| ())
                     .and_then(|_| {
-                        kyth_shared::system::runtime_preferences::generate_uksmd(
-                            &config,
-                            &destination,
-                        )
-                        .map(|_| ())
+                        kyth_shared::system::runtime_preferences::save_uksmd(&config_path, &config)
                     })
             {
                 eprintln!("kyth-uksmd: {error}");
@@ -953,12 +1103,11 @@ fn dispatch_irq_tune(action: &str) -> ExitCode {
             let mut config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
             config.profile = "kyth".into();
             if let Err(error) =
-                kyth_shared::system::runtime_preferences::save_irq(&config_path, &config).and_then(
-                    |_| {
-                        kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "")
-                            .map(|_| ())
-                    },
-                )
+                kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "")
+                    .map(|_| ())
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::save_irq(&config_path, &config)
+                    })
             {
                 eprintln!("kyth-irq-tune: {error}");
                 return ExitCode::from(1);
@@ -973,12 +1122,11 @@ fn dispatch_irq_tune(action: &str) -> ExitCode {
             let mut config = kyth_shared::system::runtime_preferences::load_irq(&config_path);
             config.profile = "balanced".into();
             if let Err(error) =
-                kyth_shared::system::runtime_preferences::save_irq(&config_path, &config).and_then(
-                    |_| {
-                        kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "")
-                            .map(|_| ())
-                    },
-                )
+                kyth_shared::system::runtime_preferences::generate_irq(&config, &dropin, "")
+                    .map(|_| ())
+                    .and_then(|_| {
+                        kyth_shared::system::runtime_preferences::save_irq(&config_path, &config)
+                    })
             {
                 eprintln!("kyth-irq-tune: {error}");
                 return ExitCode::from(1);
@@ -1033,13 +1181,13 @@ fn dispatch_fscache(action: &str) -> ExitCode {
             }
             let config = kyth_shared::system::runtime_preferences::FscacheConfig { enabled: true };
             if let Err(error) =
-                kyth_shared::system::runtime_preferences::save_fscache(&config_path, &config)
+                kyth_shared::system::runtime_preferences::generate_fscache(&config, &destination)
+                    .map(|_| ())
                     .and_then(|_| {
-                        kyth_shared::system::runtime_preferences::generate_fscache(
+                        kyth_shared::system::runtime_preferences::save_fscache(
+                            &config_path,
                             &config,
-                            &destination,
                         )
-                        .map(|_| ())
                     })
             {
                 eprintln!("kyth-fscache: {error}");
@@ -1054,13 +1202,13 @@ fn dispatch_fscache(action: &str) -> ExitCode {
             }
             let config = kyth_shared::system::runtime_preferences::FscacheConfig { enabled: false };
             if let Err(error) =
-                kyth_shared::system::runtime_preferences::save_fscache(&config_path, &config)
+                kyth_shared::system::runtime_preferences::generate_fscache(&config, &destination)
+                    .map(|_| ())
                     .and_then(|_| {
-                        kyth_shared::system::runtime_preferences::generate_fscache(
+                        kyth_shared::system::runtime_preferences::save_fscache(
+                            &config_path,
                             &config,
-                            &destination,
                         )
-                        .map(|_| ())
                     })
             {
                 eprintln!("kyth-fscache: {error}");
@@ -1119,13 +1267,13 @@ fn dispatch_journal_tune(action: &str) -> ExitCode {
             let mut config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
             config.perf = true;
             if let Err(error) =
-                kyth_shared::system::runtime_preferences::save_journal(&config_path, &config)
+                kyth_shared::system::runtime_preferences::generate_journal(&config, &destination)
+                    .map(|_| ())
                     .and_then(|_| {
-                        kyth_shared::system::runtime_preferences::generate_journal(
+                        kyth_shared::system::runtime_preferences::save_journal(
+                            &config_path,
                             &config,
-                            &destination,
                         )
-                        .map(|_| ())
                     })
             {
                 eprintln!("kyth-journal-tune: {error}");
@@ -1141,13 +1289,13 @@ fn dispatch_journal_tune(action: &str) -> ExitCode {
             let mut config = kyth_shared::system::runtime_preferences::load_journal(&config_path);
             config.perf = false;
             if let Err(error) =
-                kyth_shared::system::runtime_preferences::save_journal(&config_path, &config)
+                kyth_shared::system::runtime_preferences::generate_journal(&config, &destination)
+                    .map(|_| ())
                     .and_then(|_| {
-                        kyth_shared::system::runtime_preferences::generate_journal(
+                        kyth_shared::system::runtime_preferences::save_journal(
+                            &config_path,
                             &config,
-                            &destination,
                         )
-                        .map(|_| ())
                     })
             {
                 eprintln!("kyth-journal-tune: {error}");
@@ -1200,10 +1348,9 @@ fn dispatch_io_tune(action: &str) -> ExitCode {
             }
             let mut config = kyth_shared::system::io_tune::load(&config_path);
             config.profile = "kyth".into();
-            if let Err(error) =
-                kyth_shared::system::io_tune::save(&config_path, &config).and_then(|_| {
-                    kyth_shared::system::io_tune::generate(&config, &destination).map(|_| ())
-                })
+            if let Err(error) = kyth_shared::system::io_tune::generate(&config, &destination)
+                .map(|_| ())
+                .and_then(|_| kyth_shared::system::io_tune::save(&config_path, &config))
             {
                 eprintln!("kyth-io-tune: {error}");
                 return ExitCode::from(1);
@@ -1217,10 +1364,9 @@ fn dispatch_io_tune(action: &str) -> ExitCode {
             }
             let mut config = kyth_shared::system::io_tune::load(&config_path);
             config.profile = "balanced".into();
-            if let Err(error) =
-                kyth_shared::system::io_tune::save(&config_path, &config).and_then(|_| {
-                    kyth_shared::system::io_tune::generate(&config, &destination).map(|_| ())
-                })
+            if let Err(error) = kyth_shared::system::io_tune::generate(&config, &destination)
+                .map(|_| ())
+                .and_then(|_| kyth_shared::system::io_tune::save(&config_path, &config))
             {
                 eprintln!("kyth-io-tune: {error}");
                 return ExitCode::from(1);
@@ -1279,9 +1425,10 @@ fn dispatch_podman_overlay(action: &str) -> ExitCode {
             if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) {
                 return code;
             }
-            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::On).and_then(|_| {
-                overlay::generate(overlay::Metacopy::On, on_btrfs, &destination).map(|_| ())
-            }) {
+            if let Err(error) = overlay::generate(overlay::Metacopy::On, on_btrfs, &destination)
+                .map(|_| ())
+                .and_then(|_| overlay::save(&config_path, overlay::Metacopy::On))
+            {
                 eprintln!("kyth-podman-overlay: {error}");
                 return ExitCode::from(1);
             }
@@ -1292,9 +1439,10 @@ fn dispatch_podman_overlay(action: &str) -> ExitCode {
             if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) {
                 return code;
             }
-            if let Err(error) = overlay::save(&config_path, overlay::Metacopy::Off).and_then(|_| {
-                overlay::generate(overlay::Metacopy::Off, on_btrfs, &destination).map(|_| ())
-            }) {
+            if let Err(error) = overlay::generate(overlay::Metacopy::Off, on_btrfs, &destination)
+                .map(|_| ())
+                .and_then(|_| overlay::save(&config_path, overlay::Metacopy::Off))
+            {
                 eprintln!("kyth-podman-overlay: {error}");
                 return ExitCode::from(1);
             }
@@ -1305,10 +1453,9 @@ fn dispatch_podman_overlay(action: &str) -> ExitCode {
             if let Err(code) = ensure_root("podman-overlay", &[action.to_string()]) {
                 return code;
             }
-            if let Err(error) =
-                overlay::save(&config_path, overlay::Metacopy::Auto).and_then(|_| {
-                    overlay::generate(overlay::Metacopy::Auto, on_btrfs, &destination).map(|_| ())
-                })
+            if let Err(error) = overlay::generate(overlay::Metacopy::Auto, on_btrfs, &destination)
+                .map(|_| ())
+                .and_then(|_| overlay::save(&config_path, overlay::Metacopy::Auto))
             {
                 eprintln!("kyth-podman-overlay: {error}");
                 return ExitCode::from(1);
@@ -1357,11 +1504,10 @@ fn dispatch_podman_btrfs(action: &str) -> ExitCode {
             if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) {
                 return code;
             }
-            if let Err(error) = podman_btrfs::save(&config_path, podman_btrfs::PodmanMode::Btrfs)
-                .and_then(|_| {
-                    podman_btrfs::generate(podman_btrfs::PodmanMode::Btrfs, on_btrfs, &destination)
-                        .map(|_| ())
-                })
+            if let Err(error) =
+                podman_btrfs::generate(podman_btrfs::PodmanMode::Btrfs, on_btrfs, &destination)
+                    .map(|_| ())
+                    .and_then(|_| podman_btrfs::save(&config_path, podman_btrfs::PodmanMode::Btrfs))
             {
                 eprintln!("kyth-podman-btrfs: {error}");
                 return ExitCode::from(1);
@@ -1378,8 +1524,9 @@ fn dispatch_podman_btrfs(action: &str) -> ExitCode {
             } else {
                 podman_btrfs::PodmanMode::Overlay
             };
-            if let Err(error) = podman_btrfs::save(&config_path, mode)
-                .and_then(|_| podman_btrfs::generate(mode, on_btrfs, &destination).map(|_| ()))
+            if let Err(error) = podman_btrfs::generate(mode, on_btrfs, &destination)
+                .map(|_| ())
+                .and_then(|_| podman_btrfs::save(&config_path, mode))
             {
                 eprintln!("kyth-podman-btrfs: {error}");
                 return ExitCode::from(1);
@@ -1391,11 +1538,10 @@ fn dispatch_podman_btrfs(action: &str) -> ExitCode {
             if let Err(code) = ensure_root("podman-btrfs", &[action.to_string()]) {
                 return code;
             }
-            if let Err(error) = podman_btrfs::save(&config_path, podman_btrfs::PodmanMode::Auto)
-                .and_then(|_| {
-                    podman_btrfs::generate(podman_btrfs::PodmanMode::Auto, on_btrfs, &destination)
-                        .map(|_| ())
-                })
+            if let Err(error) =
+                podman_btrfs::generate(podman_btrfs::PodmanMode::Auto, on_btrfs, &destination)
+                    .map(|_| ())
+                    .and_then(|_| podman_btrfs::save(&config_path, podman_btrfs::PodmanMode::Auto))
             {
                 eprintln!("kyth-podman-btrfs: {error}");
                 return ExitCode::from(1);
@@ -1555,6 +1701,10 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
                 eprintln!("kyth-selinux-gaming: {error}");
                 return ExitCode::from(1);
             }
+            if let Err(error) = preference_presets::apply_selinux_gaming(true) {
+                eprintln!("kyth-selinux-gaming: {error}");
+                return ExitCode::from(1);
+            }
             println!("selinux-gaming gaming");
             ExitCode::SUCCESS
         }
@@ -1567,6 +1717,10 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
                 eprintln!("kyth-selinux-gaming: {error}");
                 return ExitCode::from(1);
             }
+            if let Err(error) = preference_presets::apply_selinux_gaming(false) {
+                eprintln!("kyth-selinux-gaming: {error}");
+                return ExitCode::from(1);
+            }
             println!("selinux-gaming balanced");
             ExitCode::SUCCESS
         }
@@ -1574,7 +1728,14 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
             if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) {
                 return code;
             }
-            ExitCode::SUCCESS
+            let config = preference_presets::load_selinux_gaming(&config_path);
+            match preference_presets::apply_selinux_gaming(config.allow_execheap) {
+                Ok(_) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("kyth-selinux-gaming: {error}");
+                    ExitCode::from(1)
+                }
+            }
         }
         _ => {
             eprintln!("Usage: kyth-selinux-gaming [gaming|balanced|apply|status]");
@@ -1617,9 +1778,14 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
             }
             let mut config = shader_tmpfs::load(&config_path);
             config.enabled = true;
-            if let Err(error) = shader_tmpfs::save(&config_path, &config).and_then(|_| {
-                shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin).map(|_| ())
-            }) {
+            if let Err(error) = shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin)
+                .map(|_| ())
+                .and_then(|_| shader_tmpfs::save(&config_path, &config))
+            {
+                eprintln!("kyth-shader-tmpfs: {error}");
+                return ExitCode::from(1);
+            }
+            if let Err(error) = activate_systemd_units(&["kyth-shader-tmpfs.service"]) {
                 eprintln!("kyth-shader-tmpfs: {error}");
                 return ExitCode::from(1);
             }
@@ -1631,11 +1797,25 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
                 return code;
             }
             let config = shader_tmpfs::ShaderTmpfsConfig::default();
-            if let Err(error) = shader_tmpfs::save(&config_path, &config).and_then(|_| {
-                shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin).map(|_| ())
-            }) {
+            let had_service = service.is_file();
+            if had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-shader-tmpfs.service"]) {
+                    eprintln!("kyth-shader-tmpfs: {error}");
+                    return ExitCode::from(1);
+                }
+            }
+            if let Err(error) = shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin)
+                .map(|_| ())
+                .and_then(|_| shader_tmpfs::save(&config_path, &config))
+            {
                 eprintln!("kyth-shader-tmpfs: {error}");
                 return ExitCode::from(1);
+            }
+            if had_service {
+                if let Err(error) = reload_systemd_manager() {
+                    eprintln!("kyth-shader-tmpfs: {error}");
+                    return ExitCode::from(1);
+                }
             }
             println!("shader-tmpfs off");
             ExitCode::SUCCESS
@@ -1645,7 +1825,25 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
                 return code;
             }
             let config = shader_tmpfs::load(&config_path);
+            let had_service = service.is_file();
+            if !config.enabled && had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-shader-tmpfs.service"]) {
+                    eprintln!("kyth-shader-tmpfs: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin) {
+                eprintln!("kyth-shader-tmpfs: {error}");
+                return ExitCode::from(1);
+            }
+            let systemd_result = if config.enabled {
+                activate_systemd_units(&["kyth-shader-tmpfs.service"])
+            } else if had_service {
+                reload_systemd_manager()
+            } else {
+                Ok(())
+            };
+            if let Err(error) = systemd_result {
                 eprintln!("kyth-shader-tmpfs: {error}");
                 return ExitCode::from(1);
             }
@@ -1804,9 +2002,14 @@ fn dispatch_work_cache(action: &str) -> ExitCode {
             }
             let mut config = work_cache::load(&config_path);
             config.enabled = true;
-            if let Err(error) = work_cache::save(&config_path, &config)
-                .and_then(|_| work_cache::generate(&config, &tmpfiles, &service).map(|_| ()))
+            if let Err(error) = work_cache::generate(&config, &tmpfiles, &service)
+                .map(|_| ())
+                .and_then(|_| work_cache::save(&config_path, &config))
             {
+                eprintln!("kyth-work-cache: {error}");
+                return ExitCode::from(1);
+            }
+            if let Err(error) = activate_systemd_units(&["kyth-work-cache.service"]) {
                 eprintln!("kyth-work-cache: {error}");
                 return ExitCode::from(1);
             }
@@ -1818,11 +2021,25 @@ fn dispatch_work_cache(action: &str) -> ExitCode {
                 return code;
             }
             let config = work_cache::WorkCacheConfig::default();
-            if let Err(error) = work_cache::save(&config_path, &config)
-                .and_then(|_| work_cache::generate(&config, &tmpfiles, &service).map(|_| ()))
+            let had_service = service.is_file();
+            if had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-work-cache.service"]) {
+                    eprintln!("kyth-work-cache: {error}");
+                    return ExitCode::from(1);
+                }
+            }
+            if let Err(error) = work_cache::generate(&config, &tmpfiles, &service)
+                .map(|_| ())
+                .and_then(|_| work_cache::save(&config_path, &config))
             {
                 eprintln!("kyth-work-cache: {error}");
                 return ExitCode::from(1);
+            }
+            if had_service {
+                if let Err(error) = reload_systemd_manager() {
+                    eprintln!("kyth-work-cache: {error}");
+                    return ExitCode::from(1);
+                }
             }
             println!("work-cache off");
             ExitCode::SUCCESS
@@ -1832,7 +2049,25 @@ fn dispatch_work_cache(action: &str) -> ExitCode {
                 return code;
             }
             let config = work_cache::load(&config_path);
+            let had_service = service.is_file();
+            if !config.enabled && had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-work-cache.service"]) {
+                    eprintln!("kyth-work-cache: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = work_cache::generate(&config, &tmpfiles, &service) {
+                eprintln!("kyth-work-cache: {error}");
+                return ExitCode::from(1);
+            }
+            let systemd_result = if config.enabled {
+                activate_systemd_units(&["kyth-work-cache.service"])
+            } else if had_service {
+                reload_systemd_manager()
+            } else {
+                Ok(())
+            };
+            if let Err(error) = systemd_result {
                 eprintln!("kyth-work-cache: {error}");
                 return ExitCode::from(1);
             }
@@ -2193,14 +2428,7 @@ fn dispatch_kargs_apply(action: &str) -> ExitCode {
 }
 
 fn scheduler_bore_available() -> bool {
-    std::fs::read_to_string("/usr/share/kyth/kernel-flavor")
-        .ok()
-        .is_some_and(|flavor| {
-            matches!(
-                flavor.trim().to_ascii_lowercase().as_str(),
-                "cachy" | "cachyos"
-            )
-        })
+    scheduler_arbiter::bore_available()
 }
 
 fn dispatch_sched_arbiter(action: &str) -> ExitCode {
@@ -2399,14 +2627,22 @@ fn master_apply_paths() -> gaming_master::MasterApplyPaths {
     }
 }
 
-fn apply_master_children(gaming: bool) {
+/// Apply all master children, printing per-child status. Returns `true` when
+/// every child applied cleanly. A `false` result means at least one child
+/// failed; re-running converges because each child apply is idempotent
+/// (config write + drop-in regeneration), so a retry only re-attempts the
+/// failed children.
+fn apply_master_children(gaming: bool) -> bool {
+    let mut all_ok = true;
     for (name, status) in gaming_master::apply_children(gaming, &master_apply_paths()) {
         if status == "ok" {
             println!("gaming-master {name} ok");
         } else {
+            all_ok = false;
             eprintln!("kyth-gaming-master: {name} {status}");
         }
     }
+    all_ok
 }
 
 fn dispatch_gaming_master(action: &str) -> ExitCode {
@@ -2432,7 +2668,10 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
             if profile == Profile::Balanced {
                 eprintln!("kyth-gaming-master: staying balanced ({reason})");
             }
-            apply_master_children(profile == Profile::Gaming);
+            if !apply_master_children(profile == Profile::Gaming) {
+                eprintln!("kyth-gaming-master: some children failed; re-run to retry");
+                return ExitCode::from(1);
+            }
             println!("gaming-master {}", profile.as_str());
             ExitCode::SUCCESS
         }
@@ -2444,7 +2683,10 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
                 eprintln!("kyth-gaming-master: {error}");
                 return ExitCode::from(1);
             }
-            apply_master_children(false);
+            if !apply_master_children(false) {
+                eprintln!("kyth-gaming-master: some children failed; re-run to retry");
+                return ExitCode::from(1);
+            }
             println!("gaming-master balanced");
             ExitCode::SUCCESS
         }
@@ -2463,7 +2705,10 @@ fn dispatch_gaming_master(action: &str) -> ExitCode {
                 }
                 eprintln!("kyth-gaming-master: staying balanced ({reason})");
             }
-            apply_master_children(profile == Profile::Gaming);
+            if !apply_master_children(profile == Profile::Gaming) {
+                eprintln!("kyth-gaming-master: some children failed; re-run to retry");
+                return ExitCode::from(1);
+            }
             println!("gaming-master {}", profile.as_str());
             ExitCode::SUCCESS
         }
@@ -3453,9 +3698,10 @@ fn dispatch(name: &str, args: &[String]) -> ExitCode {
             } else {
                 Profile::Balanced
             };
-            if let Err(error) = sysctl_profiles::save(&config, None, profile).and_then(|_| {
-                sysctl_profiles::generate(&config, None, None, Some(profile)).map(|_| ())
-            }) {
+            if let Err(error) = sysctl_profiles::generate(&config, None, None, Some(profile))
+                .map(|_| ())
+                .and_then(|_| sysctl_profiles::save(&config, None, profile))
+            {
                 eprintln!("kyth-{}: {error}", spec.name);
                 return ExitCode::from(1);
             }
@@ -3502,14 +3748,50 @@ mod tests {
     use super::*;
 
     #[test]
+    fn generated_unit_activation_reloads_enables_and_restarts_units() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let mut runner = |args: &[&str]| {
+            calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+            Ok(())
+        };
+
+        activate_systemd_units_with(&["kyth-work-cache.service"], &mut runner).unwrap();
+
+        assert_eq!(
+            calls,
+            vec![
+                vec!["daemon-reload"],
+                vec!["enable", "kyth-work-cache.service"],
+                vec!["restart", "kyth-work-cache.service"],
+            ]
+        );
+    }
+
+    #[test]
+    fn generated_unit_deactivation_stops_and_disables_units() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let mut runner = |args: &[&str]| {
+            calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+            Ok(())
+        };
+
+        disable_systemd_units_with(&["kyth-work-cache.service"], &mut runner).unwrap();
+
+        assert_eq!(
+            calls,
+            vec![vec!["disable", "--now", "kyth-work-cache.service"]]
+        );
+    }
+
+    #[test]
     fn registry_has_expected_complete_split() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
             .join("../../build_files/config/tunables.toml");
         let specs = kyth_shared::system::tunable_registry::list_tunables(Some(&path));
-        assert_eq!(specs.len(), 94);
+        assert_eq!(specs.len(), 91);
         assert_eq!(
             specs.iter().filter(|spec| spec.kind == "sysctl").count(),
-            49
+            46
         );
         assert_eq!(specs.iter().filter(|spec| spec.kind == "other").count(), 45);
     }
@@ -3551,7 +3833,7 @@ mod tests {
     #[test]
     fn native_list_is_exactly_the_implemented_sysctl_subset() {
         let names = native_tunable_names();
-        assert_eq!(names.len(), 94);
+        assert_eq!(names.len(), 91);
         assert!(names.iter().any(|name| name == "swappiness"));
         assert!(names.iter().any(|name| name == "thp-collapse"));
         assert!(names.iter().any(|name| name == "thp-tune"));

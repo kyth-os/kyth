@@ -4,11 +4,14 @@ set -euo pipefail
 
 # Install baseline tooling in a single transaction to reduce solver and
 # metadata overhead before the gaming repos are enabled.
+# pam-kwallet is required (not --skip-unavailable): script 26 wires its PAM
+# module into the login stack, and a silently-missing package would break
+# wallet unlock while the build looks green.
 dnf5 install -y \
-	plasma-login-manager
+	plasma-login-manager \
+	pam-kwallet
 dnf5 install -y --skip-unavailable \
 	kcm-plasmalogin \
-	kwallet-pam \
 	fprintd \
 	fprintd-pam \
 	pcsc-lite \
@@ -18,7 +21,6 @@ dnf5 install -y --skip-unavailable \
 	irqbalance \
 	plocate \
 	ntfs-3g \
-	ntfsprogs \
 	os-prober \
 	rsync \
 	fuse \

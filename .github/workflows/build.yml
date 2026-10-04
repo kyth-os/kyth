@@ -4,6 +4,13 @@ on:
   schedule:
     - cron: '05 10 * * 0' # 10:05am UTC weekly on Sundays — rebuilds both :latest and :testing with fresh upstream packages
   workflow_dispatch:
+  # `workflow_run` always executes the DEFAULT branch's copy of this file, so a
+  # testing push was built by main's (F44) workflow no matter what testing's
+  # copy said. A push trigger runs the pushed branch's own copy, which is the
+  # only way "every push to testing builds on the F45 base" can hold. The gate
+  # job below waits for that commit's Validation run before building.
+  push:
+    branches: [testing]
   workflow_run: # zizmor: ignore[dangerous-triggers]
     workflows: ["Validation"]
     types: [completed]
@@ -25,7 +32,7 @@ jobs:
     name: Gate on Validation
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 30
     permissions:
       actions: read
       contents: read
@@ -46,6 +53,37 @@ jobs:
               core.setOutput('head_sha', context.sha);
               core.setOutput('head_branch', context.ref.replace('refs/heads/', ''));
               return;
+            }
+            if (eventName === 'push') {
+              // Build the pushed commit once Validation has passed for it. Wait
+              // (Validation takes ~3 min) instead of racing it; a newer push
+              // cancels Validation, which correctly gates this older build.
+              const sha = context.sha;
+              core.setOutput('head_sha', sha);
+              core.setOutput('head_branch', context.ref.replace('refs/heads/', ''));
+              const deadline = Date.now() + 25 * 60 * 1000;
+              for (;;) {
+                const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  head_sha: sha,
+                  event: 'push',
+                  per_page: 50,
+                });
+                const validation = data.workflow_runs.find((r) => r.name === 'Validation');
+                if (validation && validation.status === 'completed') {
+                  const ok = validation.conclusion === 'success';
+                  core.info(`Validation ${validation.conclusion} for ${sha}${ok ? ' — proceeding' : ' — gating build'}`);
+                  core.setOutput('ok', ok ? 'true' : 'false');
+                  return;
+                }
+                if (Date.now() > deadline) {
+                  core.warning(`Validation did not finish for ${sha} in time — gating build`);
+                  core.setOutput('ok', 'false');
+                  return;
+                }
+                await new Promise((resolve) => setTimeout(resolve, 20000));
+              }
             }
             if (eventName !== 'workflow_run') {
               core.setOutput('ok', 'false');
@@ -123,6 +161,10 @@ jobs:
             # (workflow_run's head_branch, not the default branch)
             echo "branches=[\"${HEAD_BRANCH}\"]" >&3
             echo "head_sha=${HEAD_SHA}" >&3 || true
+          elif [[ "${EVENT_NAME}" == push ]]; then
+            # Pin the exact commit that was pushed and validated.
+            echo "branches=[\"${REF_NAME}\"]" >&3
+            echo "head_sha=${HEAD_SHA}" >&3
           else
             echo "branches=[\"${REF_NAME}\"]" >&3
           fi
@@ -140,7 +182,7 @@ jobs:
 
     # One slot per branch — prevents a scheduled run and a push from racing on the same tag.
     concurrency:
-      group: ${{ github.workflow }}-${{ matrix.branch }}-${{ matrix.kernel_flavor }}
+      group: ${{ github.workflow }}-${{ github.event_name == 'push' && 'push-' || '' }}${{ matrix.branch }}-${{ matrix.kernel_flavor }}
       cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
     strategy:
@@ -290,7 +332,7 @@ jobs:
         with:
           dependency: cachyos-kernel
 
-      - name: Resolve latest Proton-CachyOS version
+      - name: Resolve latest GE-Proton version
         id: proton_cachyos
         uses: ./.github/actions/resolve-versions
         with:
@@ -304,10 +346,26 @@ jobs:
 
       - name: Resolve upstream base image digest
         id: upstream_base
+        env:
+          MATRIX_BRANCH: ${{ matrix.branch }}
         run: |
           set -euo pipefail
           exec 3>>"${GITHUB_OUTPUT}"
-          IMAGE="ghcr.io/ublue-os/kinoite-main:44"
+          # Single source of truth: the tag pinned in build_base/Dockerfile for
+          # the checked-out branch (main: ublue F44, testing: Fedora Kinoite
+          # 45). A hardcoded image here overrode that pin through
+          # --build-arg BASE_IMAGE and kept :testing on the old base.
+          PINNED="$(sed -n 's/^ARG BASE_IMAGE=//p' build_base/Dockerfile | head -n1)"
+          IMAGE="${PINNED%%@*}"
+          [[ "${IMAGE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)$ ]] || {
+            echo "::error::build_base/Dockerfile pins an unrecognised base image: ${IMAGE}" >&2
+            exit 1
+          }
+          # testing is the Fedora 45 line and must never build on anything else.
+          if [[ "${MATRIX_BRANCH}" == testing && "${IMAGE}" != quay.io/fedora/fedora-kinoite:45 ]]; then
+            echo "::error::testing must build on quay.io/fedora/fedora-kinoite:45 but build_base/Dockerfile pins ${IMAGE}" >&2
+            exit 1
+          fi
           DIGEST="$(docker buildx imagetools inspect "${IMAGE}" --format '{{ .Manifest.Digest }}')"
           build_files/scripts/validate-digest.sh "${DIGEST}"
           echo "image=${IMAGE}" >&3
@@ -775,6 +833,8 @@ jobs:
       # runs only against the Fedora-flavor image and needs the immutable
       # digest, so it is dispatched explicitly instead of using a workflow_run
       # trigger — workflow_run events carry no inputs and cannot pin the digest.
+      # ISO dispatch is deliberately owned by supply-chain.yml after its signed
+      # image verification; starting both here races its serialized publish job.
       - name: Dispatch supply chain metadata
         if: matrix.kernel_flavor == 'fedora'
         uses: ./.github/actions/dispatch-workflow
@@ -788,29 +848,7 @@ jobs:
               "source_digest": ${{ toJSON(steps.image.outputs.digest) }},
               "source_sha": ${{ toJSON(steps.image.outputs.source_sha) }},
               "source_github_sha": ${{ toJSON(steps.image.outputs.github_sha) }},
+              "dispatch_iso": "true",
               "original_event": ${{ toJSON(github.event_name) }},
               "original_actor": ${{ toJSON(github.actor) }}
             }
-
-      # Live ISO is dispatched explicitly with the pinned Fedora digest so it
-      # runs automatically after the Fedora container build succeeds — independent
-      # of the cachy flavor outcome (workflow_run overall success would otherwise
-      # block ISO when cachy fails due to fail-fast: false + aggregate result).
-      - name: Dispatch Live ISO
-        if: matrix.kernel_flavor == 'fedora'
-        uses: ./.github/actions/dispatch-workflow
-        with:
-          workflow: build-live-iso.yml
-          ref: ${{ matrix.branch }}
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          fields-json: |
-            {
-              "source_tag": ${{ toJSON(steps.prep.outputs.tag) }},
-              "source_digest": ${{ toJSON(steps.image.outputs.digest) }},
-              "source_sha": ${{ toJSON(steps.image.outputs.source_sha) }},
-              "run_acceptance": "${{ matrix.branch == 'main' && 'true' || 'false' }}"
-            }
-        # Branch-scoped, not a blanket "false": stable (main) keeps requiring
-        # a proven boot before publish, since guest-side acceptance produces
-        # no signal on testing (never emits a KYTH_ACCEPTANCE sentinel) and
-        # would otherwise fail every scheduled/promoted testing ISO build.

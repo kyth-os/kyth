@@ -17,15 +17,33 @@ def unmount_configuration(
     alongside_mount: str,
     *,
     run: RunCommand = run_command,
-) -> None:
+) -> tuple[str, ...]:
     """Sync writes and release mounts created for installed-system configuration."""
     run(_as_root(["sync"]), check=False)
+    unmounted: list[str] = []
     if alongside_mount:
         target_home = Path(alongside_mount) / "ostree/deploy/default/var/home"
-        unmount_filesystem(str(target_home), recursive=True, lazy=True, run=run, as_root=_as_root, check=False, capture_output=True)
-        unmount_filesystem(alongside_mount, recursive=True, lazy=True, run=run, as_root=_as_root, check=False, capture_output=True)
+        for mountpoint in (str(target_home), alongside_mount):
+            try:
+                result = unmount_filesystem(
+                    mountpoint, recursive=True, lazy=True, run=run,
+                    as_root=_as_root, check=False, capture_output=True,
+                )
+            except (OSError, ValueError, RuntimeError):
+                continue
+            if getattr(result, "returncode", 0) == 0:
+                unmounted.append(mountpoint)
     else:
-        unmount_filesystem(config_root, run=run, as_root=_as_root, check=False)
+        try:
+            result = unmount_filesystem(
+                config_root, run=run, as_root=_as_root,
+                check=False, capture_output=True,
+            )
+        except (OSError, ValueError, RuntimeError):
+            return ()
+        if getattr(result, "returncode", 0) == 0:
+            unmounted.append(config_root)
+    return tuple(unmounted)
 
 
 def clear_secrets_and_orphan_mount(

@@ -73,7 +73,7 @@ mod tests {
         let plan = build_plan(InstallerExecutionInput {
             bootc: BootcInstallInput {
                 subcommand: "to-disk".to_string(),
-                source_imgref: "oci:/usr/share/kyth/image:latest".to_string(),
+                source_imgref: "ghcr.io/kyth-os/kyth:latest".to_string(),
                 target_imgref: "ghcr.io/kyth-os/kyth:latest".to_string(),
                 target: "/dev/sda".to_string(),
                 skip_fetch_check: true,

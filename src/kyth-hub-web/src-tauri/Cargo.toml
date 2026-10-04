@@ -38,6 +38,12 @@ tempfile = "3"
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
+[patch.crates-io]
+# GTK 3/Tauri 2 still requires glib ^0.18. The 0.18.6 release containing
+# the upstream VariantStrIter UB fix has not been published, so consume the
+# reviewed 0.18 backport until it is released.
+glib = { path = "../../../third_party/gtk-glib-0.18.5" }
+
 [profile.release]
 panic = "abort"
 codegen-units = 1

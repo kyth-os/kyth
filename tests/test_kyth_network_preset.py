@@ -124,6 +124,29 @@ class NetworkPresetRoundTripTests(unittest.TestCase):
             ).read_text(encoding="utf-8")
             self.assertIn("DNSOverTLS=opportunistic", conf)
 
+    def test_dnssec_is_off_by_default_and_never_yes(self):
+        """Corporate resolvers strip DNSSEC records; yes AND allow-downgrade
+        rejected their answers ("no-signature"), breaking internal names."""
+        for cfg, expected in (
+            ({"dns": "quad9", "doh": True}, "DNSSEC=no\n"),
+            ({"dns": "quad9", "doh": True, "dnssec": False}, "DNSSEC=no\n"),
+            ({"dns": "quad9", "doh": True, "dnssec": True}, "DNSSEC=allow-downgrade\n"),
+        ):
+            with tempfile.TemporaryDirectory() as td:
+                root = Path(td)
+                preset_mod.apply_network_preset(cfg, root=root)
+                conf = (
+                    root / "etc/systemd/resolved.conf.d/50-kyth.conf"
+                ).read_text(encoding="utf-8")
+                self.assertIn(expected, conf)
+                self.assertNotIn("DNSSEC=yes", conf)
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "network.toml"
+            preset_mod.save_network_preset({"dns": "quad9", "dnssec": True}, path)
+            self.assertTrue(preset_mod.load_network_preset(path)["dnssec"])
+            preset_mod.save_network_preset({"dns": "quad9"}, path)
+            self.assertFalse(preset_mod.load_network_preset(path)["dnssec"])
+
 
 if __name__ == "__main__":
     unittest.main()

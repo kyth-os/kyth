@@ -11,9 +11,19 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 
 from kyth_shared.telemetry import recent_sessions, SessionRow
+from kyth_shared.system.process import diskstats_write_sectors
 
 
 class TestKythSharedTelemetry(unittest.TestCase):
+    def test_diskstats_counts_only_declared_whole_physical_devices(self):
+        text = """   8        0 sda 1 0 2 0 3 0 100 0 0 0 0
+   8        1 sda1 1 0 2 0 3 0 200 0 0 0 0
+ 259        0 nvme0n1 1 0 2 0 3 0 300 0 0 0 0
+ 259        1 nvme0n1p1 1 0 2 0 3 0 400 0 0 0 0
+   7        0 loop0 1 0 2 0 3 0 500 0 0 0 0
+"""
+        self.assertEqual(diskstats_write_sectors(text, {"sda", "nvme0n1"}), 400)
+
     def test_session_row_labels(self):
         # average case
         row = SessionRow(

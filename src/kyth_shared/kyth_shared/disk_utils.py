@@ -15,7 +15,8 @@ _SAFE_DEVICE_PATH_RE = re.compile(r"^/dev/[A-Za-z0-9._/+:-]+$")
 def _safe_int(value, default: int = 0) -> int:
     try:
         return int(value or default)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # JSON accepts 1e999 as inf, and int(inf) raises OverflowError.
         return default
 
 

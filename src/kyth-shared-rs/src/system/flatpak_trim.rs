@@ -79,9 +79,7 @@ pub fn generate(
     let timer = timer.as_ref();
     if !config.enabled {
         for path in [service, timer] {
-            match std::fs::remove_file(path) {
-                Ok(()) | Err(_) => {}
-            }
+            crate::atomic_io::remove_if_exists(path)?;
         }
         return Ok(None);
     }

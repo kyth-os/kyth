@@ -4754,39 +4754,6 @@
       "surface": "launcher"
     },
     {
-      "current_implementation": "data",
-      "cutover": "replace installed kyth-sched-arbiter entry point after parity gates",
-      "exec_start": [
-        "/usr/bin/kyth-tunable-rs sched-arbiter apply"
-      ],
-      "function_inventory": [
-        {
-          "name": "ExecStart:/usr/bin/kyth-tunable-rs sched-arbiter apply",
-          "owner": "native::kyth-tunable-rs",
-          "ownership": "native"
-        }
-      ],
-      "installed_implementation": "rust",
-      "migration_priority": 1,
-      "name": "kyth-sched-arbiter",
-      "owner": "native::kyth-tunable-rs",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-sched-arbiter.service",
-      "priority": 0,
-      "reason": "unit delegates to an installed Rust owner",
-      "resolved_target": "build_files/kyth-sched-arbiter.service",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "daemon",
-      "rollback": "restore previous installed kyth-sched-arbiter entry point",
-      "runtime_active": true,
-      "runtime_authority": "rust-service",
-      "runtime_scope": "system-service",
-      "status": "done-native",
-      "surface": "systemd-unit"
-    },
-    {
       "current_implementation": "alias",
       "cutover": "replace installed kyth-sched-autogroup entry point after parity gates",
       "function_inventory": [
@@ -4810,96 +4777,6 @@
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed kyth-sched-autogroup entry point",
-      "runtime_active": true,
-      "runtime_authority": "shell-orchestration",
-      "runtime_scope": "user-session",
-      "status": "done-native",
-      "surface": "launcher"
-    },
-    {
-      "current_implementation": "alias",
-      "cutover": "replace installed kyth-sched-child entry point after parity gates",
-      "function_inventory": [
-        {
-          "name": "need_root",
-          "owner": "native::kyth-tunable-rs",
-          "ownership": "native"
-        }
-      ],
-      "installed_implementation": "rust",
-      "migration_priority": 2,
-      "name": "kyth-sched-child",
-      "owner": "native::kyth-tunable-rs",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-sched-child",
-      "priority": 0,
-      "reason": "native Rust crate or installed unit is already declared/packaged",
-      "resolved_target": "build_files/kyth-tunable",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
-      "rollback": "restore previous installed kyth-sched-child entry point",
-      "runtime_active": true,
-      "runtime_authority": "shell-orchestration",
-      "runtime_scope": "user-session",
-      "status": "done-native",
-      "surface": "launcher"
-    },
-    {
-      "current_implementation": "alias",
-      "cutover": "replace installed kyth-sched-latency entry point after parity gates",
-      "function_inventory": [
-        {
-          "name": "need_root",
-          "owner": "native::kyth-tunable-rs",
-          "ownership": "native"
-        }
-      ],
-      "installed_implementation": "rust",
-      "migration_priority": 2,
-      "name": "kyth-sched-latency",
-      "owner": "native::kyth-tunable-rs",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-sched-latency",
-      "priority": 0,
-      "reason": "native Rust crate or installed unit is already declared/packaged",
-      "resolved_target": "build_files/kyth-tunable",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
-      "rollback": "restore previous installed kyth-sched-latency entry point",
-      "runtime_active": true,
-      "runtime_authority": "shell-orchestration",
-      "runtime_scope": "user-session",
-      "status": "done-native",
-      "surface": "launcher"
-    },
-    {
-      "current_implementation": "alias",
-      "cutover": "replace installed kyth-sched-nr-migrate entry point after parity gates",
-      "function_inventory": [
-        {
-          "name": "need_root",
-          "owner": "native::kyth-tunable-rs",
-          "ownership": "native"
-        }
-      ],
-      "installed_implementation": "rust",
-      "migration_priority": 2,
-      "name": "kyth-sched-nr-migrate",
-      "owner": "native::kyth-tunable-rs",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "build_files/kyth-sched-nr-migrate",
-      "priority": 0,
-      "reason": "native Rust crate or installed unit is already declared/packaged",
-      "resolved_target": "build_files/kyth-tunable",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
-      "rollback": "restore previous installed kyth-sched-nr-migrate entry point",
       "runtime_active": true,
       "runtime_authority": "shell-orchestration",
       "runtime_scope": "user-session",
@@ -7947,6 +7824,36 @@
     },
     {
       "current_implementation": "shell",
+      "cutover": "replace installed 32-kyth-just-provider.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/branding/32-kyth-just-provider.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "32-kyth-just-provider.sh",
+      "owner": "fixture::build_files/scripts/branding/32-kyth-just-provider.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/branding/32-kyth-just-provider.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/branding/32-kyth-just-provider.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed 32-kyth-just-provider.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
       "cutover": "replace installed 32-update-notifications.sh entry point after parity gates",
       "function_inventory": [
         {
@@ -10387,27 +10294,27 @@
         {
           "name": "log",
           "owner": "fixture::build_files/scripts/kyth-live-owe-wifi-setup.sh",
-          "ownership": "build-only"
+          "ownership": "shell"
         }
       ],
-      "installed_implementation": "not-installed",
-      "migration_priority": 3,
+      "installed_implementation": "shell",
+      "migration_priority": 2,
       "name": "kyth-live-owe-wifi-setup.sh",
       "owner": "fixture::build_files/scripts/kyth-live-owe-wifi-setup.sh",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/kyth-live-owe-wifi-setup.sh",
-      "priority": 0,
-      "reason": "build/test shell script, not installed runtime authority",
+      "priority": 1,
+      "reason": "installed shell script owns runtime behavior; no native owner yet",
       "resolved_target": "build_files/scripts/kyth-live-owe-wifi-setup.sh",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "build-time",
+      "risk_tier": "privileged-writer",
       "rollback": "restore previous installed kyth-live-owe-wifi-setup.sh entry point",
-      "runtime_active": false,
-      "runtime_authority": "build-only",
-      "runtime_scope": "build",
-      "status": "not-applicable",
+      "runtime_active": true,
+      "runtime_authority": "shell-orchestration",
+      "runtime_scope": "system-service",
+      "status": "queued",
       "surface": "shell-script"
     },
     {
@@ -11622,27 +11529,27 @@
         {
           "name": "__main__",
           "owner": "fixture::build_files/scripts/plymouth-branding-guard.sh",
-          "ownership": "build-only"
+          "ownership": "shell"
         }
       ],
-      "installed_implementation": "not-installed",
-      "migration_priority": 3,
+      "installed_implementation": "shell",
+      "migration_priority": 2,
       "name": "plymouth-branding-guard.sh",
       "owner": "fixture::build_files/scripts/plymouth-branding-guard.sh",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/plymouth-branding-guard.sh",
-      "priority": 0,
-      "reason": "build/test shell script, not installed runtime authority",
+      "priority": 1,
+      "reason": "installed shell script owns runtime behavior; no native owner yet",
       "resolved_target": "build_files/scripts/plymouth-branding-guard.sh",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "build-time",
+      "risk_tier": "privileged-writer",
       "rollback": "restore previous installed plymouth-branding-guard.sh entry point",
-      "runtime_active": false,
-      "runtime_authority": "build-only",
-      "runtime_scope": "build",
-      "status": "not-applicable",
+      "runtime_active": true,
+      "runtime_authority": "shell-orchestration",
+      "runtime_scope": "system-service",
+      "status": "queued",
       "surface": "shell-script"
     },
     {
@@ -12458,6 +12365,36 @@
       "runtime_authority": "build-only",
       "runtime_scope": "build",
       "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
+      "cutover": "replace installed kyth-kwallet-pam-ensure entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
+          "ownership": "shell"
+        }
+      ],
+      "installed_implementation": "shell",
+      "migration_priority": 2,
+      "name": "kyth-kwallet-pam-ensure",
+      "owner": "fixture::build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
+      "priority": 1,
+      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "resolved_target": "build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "privileged-writer",
+      "rollback": "restore previous installed kyth-kwallet-pam-ensure entry point",
+      "runtime_active": true,
+      "runtime_authority": "shell-orchestration",
+      "runtime_scope": "system-service",
+      "status": "queued",
       "surface": "shell-script"
     },
     {
@@ -14012,6 +13949,36 @@
     },
     {
       "current_implementation": "shell",
+      "cutover": "replace installed 33-selinux-var-home-label-alias.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "33-selinux-var-home-label-alias.sh",
+      "owner": "fixture::build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed 33-selinux-var-home-label-alias.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
       "cutover": "replace installed 35-sudoers-passwordless-safe-upgrade-firmware-operati.sh entry point after parity gates",
       "function_inventory": [
         {
@@ -15014,6 +14981,30 @@
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed mount_registry entry point",
+      "runtime_active": false,
+      "runtime_authority": "source-only",
+      "runtime_scope": "test-fixture",
+      "status": "explicitly-not-ported",
+      "surface": "installer-runtime"
+    },
+    {
+      "current_implementation": "python",
+      "cutover": "replace installed mountpoint entry point after parity gates",
+      "function_inventory": [],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "mountpoint",
+      "owner": "fixture::src/kyth-installer/kyth_installer/mountpoint.py",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "src/kyth-installer/kyth_installer/mountpoint.py",
+      "priority": 1,
+      "reason": "retired Python/Qt Hub source retained only for compatibility fixtures; not installed in the supported image",
+      "resolved_target": "src/kyth-installer/kyth_installer/mountpoint.py",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "user-session-writer",
+      "rollback": "restore previous installed mountpoint entry point",
       "runtime_active": false,
       "runtime_authority": "source-only",
       "runtime_scope": "test-fixture",
@@ -17474,30 +17465,6 @@
     },
     {
       "current_implementation": "python",
-      "cutover": "replace installed truth_engine entry point after parity gates",
-      "function_inventory": [],
-      "installed_implementation": "python-fixture",
-      "migration_priority": 3,
-      "name": "truth_engine",
-      "owner": "fixture::src/kyth_shared/kyth_shared/gaming/truth_engine.py",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "src/kyth_shared/kyth_shared/gaming/truth_engine.py",
-      "priority": 1,
-      "reason": "retained shared-package compatibility module is unreachable from active entry points and harnesses",
-      "resolved_target": "src/kyth_shared/kyth_shared/gaming/truth_engine.py",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
-      "rollback": "restore previous installed truth_engine entry point",
-      "runtime_active": false,
-      "runtime_authority": "source-only",
-      "runtime_scope": "test-fixture",
-      "status": "explicitly-not-ported",
-      "surface": "python-runtime"
-    },
-    {
-      "current_implementation": "python",
       "cutover": "replace installed gaming_cfs entry point after parity gates",
       "function_inventory": [],
       "installed_implementation": "python-fixture",
@@ -19598,81 +19565,6 @@
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "user-session-writer",
       "rollback": "restore previous installed sched_autogroup entry point",
-      "runtime_active": false,
-      "runtime_authority": "python-shared-package",
-      "runtime_scope": "standalone",
-      "status": "explicitly-not-ported",
-      "superseded_by": "native::kyth-tunable-rs",
-      "surface": "python-runtime"
-    },
-    {
-      "current_implementation": "python",
-      "cutover": "replace installed sched_child entry point after parity gates",
-      "function_inventory": [],
-      "installed_implementation": "python-fixture",
-      "migration_priority": 3,
-      "name": "sched_child",
-      "owner": "native::kyth-tunable-rs",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "src/kyth_shared/kyth_shared/sched_child.py",
-      "priority": 1,
-      "reason": "retained tunable compatibility module is fully superseded by the native Rust dispatcher",
-      "resolved_target": "src/kyth_shared/kyth_shared/sched_child.py",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
-      "rollback": "restore previous installed sched_child entry point",
-      "runtime_active": false,
-      "runtime_authority": "python-shared-package",
-      "runtime_scope": "standalone",
-      "status": "explicitly-not-ported",
-      "superseded_by": "native::kyth-tunable-rs",
-      "surface": "python-runtime"
-    },
-    {
-      "current_implementation": "python",
-      "cutover": "replace installed sched_latency entry point after parity gates",
-      "function_inventory": [],
-      "installed_implementation": "python-fixture",
-      "migration_priority": 3,
-      "name": "sched_latency",
-      "owner": "native::kyth-tunable-rs",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "src/kyth_shared/kyth_shared/sched_latency.py",
-      "priority": 1,
-      "reason": "retained tunable compatibility module is fully superseded by the native Rust dispatcher",
-      "resolved_target": "src/kyth_shared/kyth_shared/sched_latency.py",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
-      "rollback": "restore previous installed sched_latency entry point",
-      "runtime_active": false,
-      "runtime_authority": "python-shared-package",
-      "runtime_scope": "standalone",
-      "status": "explicitly-not-ported",
-      "superseded_by": "native::kyth-tunable-rs",
-      "surface": "python-runtime"
-    },
-    {
-      "current_implementation": "python",
-      "cutover": "replace installed sched_nr_migrate entry point after parity gates",
-      "function_inventory": [],
-      "installed_implementation": "python-fixture",
-      "migration_priority": 3,
-      "name": "sched_nr_migrate",
-      "owner": "native::kyth-tunable-rs",
-      "parity_tests": [
-        "tests/"
-      ],
-      "path": "src/kyth_shared/kyth_shared/sched_nr_migrate.py",
-      "priority": 1,
-      "reason": "retained tunable compatibility module is fully superseded by the native Rust dispatcher",
-      "resolved_target": "src/kyth_shared/kyth_shared/sched_nr_migrate.py",
-      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "user-session-writer",
-      "rollback": "restore previous installed sched_nr_migrate entry point",
       "runtime_active": false,
       "runtime_authority": "python-shared-package",
       "runtime_scope": "standalone",

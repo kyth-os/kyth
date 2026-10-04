@@ -83,14 +83,14 @@ class NativeTunableRuntimeTest(unittest.TestCase):
         native_names = {
             line.strip() for line in listed.stdout.splitlines() if line.strip()
         }
-        self.assertEqual(len(native_names), 94)
+        self.assertEqual(len(native_names), 91)
 
         fallback_routes = {
             entry["name"]
             for entry in self.ledger["entries"]
             if entry["rust_owner"] == "native::kyth-tunable-rs"
         }
-        self.assertEqual(len(fallback_routes), 91)
+        self.assertEqual(len(fallback_routes), 88)
         self.assertTrue(fallback_routes <= native_names)
 
         with tempfile.TemporaryDirectory() as directory:

@@ -714,6 +714,39 @@ fn apply_plasma(binary: &str, home: &Path, force: bool) {
     write_config(binary, "dolphinrc", &["PreviewSettings"], "Plugins", "audiothumbnail,comicbookthumbnail,cursorthumbnail,djvuthumbnail,ebookthumbnail,exrthumbnail,ffmpegthumbs,imagethumbnail,jpegthumbnail,kraorathumbnail,windowsexethumbnail", None);
 }
 
+/// Rewrite the Exec= lines of Brave's launcher so it uses the KWallet password
+/// store. Pure so it can be tested; an entry that already says
+/// `--password-store=basic` (what older images wrote, and a plaintext-ish store
+/// that bypasses KWallet) is converted, never left in place or doubled.
+fn brave_desktop_with_kwallet(content: &str) -> String {
+    let browser = Regex::new(r"(com\.brave\.Browser)(\s|$)").expect("valid brave regex");
+    let executable =
+        Regex::new(r"(brave-browser|brave)(\s|$)").expect("valid brave executable regex");
+    content
+        .lines()
+        .map(|line| {
+            if !line.starts_with("Exec=") {
+                return format!("{line}\n");
+            }
+            let mut line = line.replace("--password-store=basic", "--password-store=kwallet6");
+            // Migrate the F44-era kwallet5 pin: F45 ships kwalletd6 only, and
+            // Chromium's kwallet5 backend needs the org.kde.kwalletd5 name.
+            line = line.replace("--password-store=kwallet5", "--password-store=kwallet6");
+            if !line.contains("--password-store=kwallet") {
+                line = browser
+                    .replace(&line, "$1 --password-store=kwallet6$2")
+                    .into_owned();
+                if !line.contains("flatpak run") {
+                    line = executable
+                        .replace(&line, "$1 --password-store=kwallet6$2")
+                        .into_owned();
+                }
+            }
+            format!("{line}\n")
+        })
+        .collect::<String>()
+}
+
 fn rewrite_brave(home: &Path) {
     let source = [
         "/var/lib/flatpak/exports/share/applications/com.brave.Browser.desktop",
@@ -730,31 +763,13 @@ fn rewrite_brave(home: &Path) {
     let Ok(content) = fs::read_to_string(source) else {
         return;
     };
-    let browser = Regex::new(r"(com\.brave\.Browser)(\s|$)").expect("valid brave regex");
-    let executable =
-        Regex::new(r"(brave-browser|brave)(\s|$)").expect("valid brave executable regex");
-    let rewritten = content
-        .lines()
-        .map(|line| {
-            if !line.starts_with("Exec=") {
-                return format!("{line}\n");
-            }
-            let mut line = line.replace("--password-store=basic", "--password-store=kwallet5");
-            if !line.contains("--password-store=kwallet5")
-                && !line.contains("--password-store=kwallet")
-            {
-                line = browser
-                    .replace(&line, "$1 --password-store=kwallet5$2")
-                    .into_owned();
-                if !line.contains("flatpak run") {
-                    line = executable
-                        .replace(&line, "$1 --password-store=kwallet5$2")
-                        .into_owned();
-                }
-            }
-            format!("{line}\n")
-        })
-        .collect::<String>();
+    let rewritten = brave_desktop_with_kwallet(&content);
+    // Skip the write when nothing changes so the idempotent refresh below
+    // does not touch the file (and trigger a desktop-database rebuild) on
+    // every login.
+    if fs::read_to_string(&destination).is_ok_and(|current| current == rewritten) {
+        return;
+    }
     let _ = atomic_write_text(&destination, &rewritten, Some(0o644));
 }
 
@@ -791,6 +806,10 @@ fn main() -> ExitCode {
     let stamp_name = format!("user-polish-{}", desktop_polish::VERSION);
     let first_polish = !has_polish_stamp(&home);
     if already_run(&home, &stamp_name) && !force {
+        // The one-time polish is stamped, but this launcher is derived from the
+        // system entry and an older image may have left `--password-store=basic`
+        // in a copy that is never revisited. Refreshing is idempotent.
+        rewrite_brave(&home);
         cleanup_autostart(&home);
         return ExitCode::SUCCESS;
     }
@@ -893,6 +912,27 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn brave_launcher_never_keeps_or_doubles_a_password_store_flag() {
+        let basic = "Name=Brave\nExec=/usr/bin/flatpak run --branch=stable --command=brave com.brave.Browser --password-store=basic @@u %U @@\nIcon=x\n";
+        let legacy = "Exec=/usr/bin/flatpak run --command=brave com.brave.Browser --password-store=kwallet5\n";
+        let bare = "Exec=/usr/bin/flatpak run --branch=stable --command=brave com.brave.Browser --incognito\n";
+        let done = "Exec=/usr/bin/flatpak run --command=brave com.brave.Browser --password-store=kwallet6\n";
+        for input in [basic, legacy, bare, done] {
+            let out = brave_desktop_with_kwallet(input);
+            assert!(!out.contains("--password-store=basic"), "{out}");
+            for exec in out.lines().filter(|l| l.starts_with("Exec=")) {
+                assert_eq!(exec.matches("--password-store=").count(), 1, "{exec}");
+                assert!(exec.contains("--password-store=kwallet6"), "{exec}");
+            }
+            // Idempotent: a second pass changes nothing.
+            assert_eq!(brave_desktop_with_kwallet(&out), out);
+        }
+        // Non-Exec lines are preserved.
+        assert!(brave_desktop_with_kwallet(basic).contains("Name=Brave\n"));
+        assert!(brave_desktop_with_kwallet(basic).contains("Icon=x\n"));
+    }
 
     #[test]
     fn snapshot_restore_path_allowlist_rejects_crafted_home_traversal() {

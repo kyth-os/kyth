@@ -16,9 +16,65 @@ SELINUX_UNIT = (
 )
 BOOT_SPLASH = ROOT / "build_files/scripts/branding/28-bootc-kernel-arguments-and-boot-splash.sh"
 ENROLL_SCRIPT = ROOT / "build_files/tests/secureboot-enrollment.sh"
+VAR_HOME_ALIAS_FRAGMENT = (
+    ROOT / "build_files/scripts/sysconfig/systemd/33-selinux-var-home-label-alias.sh"
+)
 
 
 class BootStabilityUnitTests(unittest.TestCase):
+    def test_var_home_is_not_aliased_to_home_in_selinux_policy(self) -> None:
+        """F45's "/var/home /home" subs rule left every home file as default_t.
+
+        The alias rewrites lookups to /home/..., but the generated user-home rules
+        are for /var/home/..., so nothing matched: xdm_t was denied the KWallet
+        salt, pam_kwallet5 could not unlock at login and KWallet prompted for a
+        password on first boot. Run the real fragment on a copy of F45's file.
+        """
+        import os
+        import subprocess
+        import tempfile
+
+        original = (
+            "/var/lib/xguest/home /home\n"
+            "/home-inst           /home\n"
+            "/home/home-inst      /home\n"
+            "/var/home            /home\n"
+            "/var/roothome        /root\n"
+            "/var/home-backup     /keepme\n"
+            "/var/homes /alsokeep\n"
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            subs = os.path.join(tmp, "file_contexts.subs_dist")
+            with open(subs, "w", encoding="utf-8") as handle:
+                handle.write(original)
+            os.chmod(subs, 0o600)
+            env = {**os.environ, "KYTH_SELINUX_SUBS_DIST": subs}
+            for _ in range(2):  # second pass must be a no-op
+                result = subprocess.run(
+                    ["bash", str(VAR_HOME_ALIAS_FRAGMENT)],
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            with open(subs, encoding="utf-8") as handle:
+                lines = handle.read().splitlines()
+            self.assertNotIn("/var/home            /home", lines)
+            self.assertFalse([l for l in lines if l.split()[:1] == ["/var/home"]])
+            # Every other alias, including look-alike prefixes, is preserved.
+            expected = [l for l in original.splitlines() if l.split()[:1] != ["/var/home"]]
+            self.assertEqual(lines, expected)
+            self.assertEqual(oct(os.stat(subs).st_mode & 0o777), "0o600")
+            missing = subprocess.run(
+                ["bash", str(VAR_HOME_ALIAS_FRAGMENT)],
+                env={**env, "KYTH_SELINUX_SUBS_DIST": os.path.join(tmp, "absent")},
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            self.assertEqual(missing.returncode, 0, "absent policy file must not fail the build")
+
     def test_selinux_home_relabel_is_capped_and_still_before_greeter(self) -> None:
         """The login-critical relabel must stay bounded and gate the greeter;
         the exhaustive full-tree pass must run separately, in the background,
@@ -166,7 +222,9 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("kyth-boot-branding.service", body)
         self.assertIn("kyth-boot-splash-initramfs.service", body)
         self.assertGreaterEqual(body.count("TimeoutStartSec=60"), 2)
-        self.assertIn("TimeoutStartSec=300", body)
+        # initramfs refresh must outlast the binary's dracut budget (2x600s);
+        # a shorter timeout SIGTERMs dracut mid-run.
+        self.assertIn("TimeoutStartSec=1260", body)
         self.assertIn("TriggerLimitIntervalSec=10", body)
         self.assertIn("TriggerLimitBurst=5", body)
 
@@ -231,16 +289,15 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("StartLimitIntervalSec=60", zram)
         self.assertIn("StartLimitBurst=3", zram)
         # oneshot + RemainAfterExit cannot use Restart=; keep a start-limit
-        # so a crash loop still cannot take the boot.
-        arbiter = (ROOT / "build_files/kyth-sched-arbiter.service").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("StartLimitIntervalSec=60", arbiter)
-        self.assertIn("StartLimitBurst=3", arbiter)
-        self.assertNotRegex(arbiter, r"^Restart=", re.M)
+        # so a crash loop still cannot take the boot. The arbiter unit is
+        # generated at build time, so audit the generator script instead of
+        # a repo copy (the stale shadow has been removed).
         generated = (
             ROOT / "build_files/scripts/sysconfig/gaming/15-sched-arbiter.sh"
         ).read_text(encoding="utf-8")
+        self.assertIn("StartLimitIntervalSec=60", generated)
+        self.assertIn("StartLimitBurst=3", generated)
+        self.assertNotRegex(generated, r"^Restart=", re.M)
         self.assertIn("After=local-fs.target", generated)
         self.assertNotIn("Restart=on-failure", generated)
         self.assertNotRegex(generated, r"^After=multi-user\.target$", re.M)
@@ -300,6 +357,17 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("After=local-fs.target systemd-sysctl.service", body)
         self.assertNotRegex(body, r"^After=multi-user\.target$", re.M)
 
+    def test_irqbalance_args_only_use_options_the_shipped_daemon_accepts(self) -> None:
+        """irqbalance 1.9.x has no --hintpolicy; passing it kills the unit at start."""
+        body = (ROOT / "build_files/scripts/sysconfig/systemd/05-irqbalance-tuning.sh").read_text(
+            encoding="utf-8"
+        )
+        args = next(
+            line for line in body.splitlines() if line.startswith("IRQBALANCE_ARGS=")
+        )
+        self.assertNotIn("--hintpolicy", args)
+        self.assertIn("--deepestcache=2", args)
+
     def test_irqbalance_oneshot_does_not_fail_type_simple(self) -> None:
         body = (ROOT / "build_files/scripts/sysconfig/systemd/05-irqbalance-tuning.sh").read_text(
             encoding="utf-8"
@@ -313,6 +381,52 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("RemainAfterExit=yes", body)
         self.assertIn("--deepestcache=2", body)
         self.assertNotIn("write_config /etc/sysconfig/irqbalance", late)
+
+    def test_ntsync_device_is_usable_by_the_logged_in_user(self) -> None:
+        """Nobody is in the 'users' group, so a group-only rule left /dev/ntsync unusable."""
+        body = (ROOT / "build_files/scripts/sysconfig/kernel/13-ntsync.sh").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('TAG+="uaccess"', body)
+        rule_path = next(
+            part.split(" ")[-1]
+            for part in body.splitlines()
+            if part.startswith("write_line") and "ntsync.rules" in part
+        )
+        name = rule_path.rsplit("/", 1)[1]
+        # uaccess is applied by 73-seat-late.rules, so the tag must be set earlier.
+        self.assertLess(int(name.split("-", 1)[0]), 73, name)
+        self.assertIn("rm -f /usr/lib/udev/rules.d/99-ntsync.rules", body)
+
+    def test_system_accounts_unit_cannot_form_an_ordering_cycle(self) -> None:
+        """After=local-fs.target and Before=systemd-sysusers.service are a cycle.
+
+        sysusers < tmpfiles-setup-dev < local-fs-pre.target < local-fs.target, so a
+        unit After=local-fs.target cannot also be Before=sysusers. systemd resolved
+        it by deleting a job on every boot, and validate.sh used to mask the
+        warning, which is how it shipped.
+        """
+        body = (
+            ROOT / "build_files/scripts/sysconfig/desktop/09-autostart-log-noise-guards.sh"
+        ).read_text(encoding="utf-8")
+        unit = body.split("SYSACCOUNTUNITEOF", 1)[1].split("SYSACCOUNTUNITEOF", 1)[0]
+        directives = [line for line in unit.splitlines() if not line.lstrip().startswith("#")]
+        after = " ".join(line for line in directives if line.startswith("After="))
+        before = " ".join(line for line in directives if line.startswith("Before="))
+        self.assertIn("local-fs.target", after)
+        self.assertNotIn("systemd-sysusers.service", before)
+        # It must still run before the consumers of the merged account databases.
+        self.assertIn("systemd-tmpfiles-setup.service", before)
+        self.assertIn("systemd-udevd.service", before)
+        validate = (ROOT / "build_files/scripts/validate.sh").read_text(encoding="utf-8")
+        # The cycle may only be tolerated while the *installed* host unit still
+        # carries the stale edge; never unconditionally.
+        self.assertIn("stale_host_cycle_filter", validate)
+        self.assertIn(
+            "host_accounts_unit=/usr/lib/systemd/system/kyth-system-accounts.service",
+            validate,
+        )
+        self.assertNotIn("kyth-system-accounts\\.service): .*' ||", validate)
 
     def test_dbus_runtime_dir_stays_active_after_mkdir(self) -> None:
         body = (
@@ -359,6 +473,47 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("ReadWritePaths=-/var/lib/flatpak -/var/cache/flatpak", body)
         self.assertNotIn("PrivateUsers=yes", body)
         self.assertIn("exit 0", body.split("ExecStart=", 1)[1])
+
+    def test_live_owe_autoconnect_counts_connected_wifi_as_a_single_number(self) -> None:
+        """`grep -c ... || echo 0` yields "0\\n0" when nothing matches, which made
+        the numeric test error out and skipped the one auto-connect case."""
+        import os
+        import subprocess
+        import tempfile
+
+        script = (ROOT / "build_files/scripts/kyth-live-owe-wifi-setup.sh").read_text(encoding="utf-8")
+        line = next(l for l in script.splitlines() if l.startswith("wifi_connected=$(nmcli"))
+        default = next(l for l in script.splitlines() if l.startswith("wifi_connected=${wifi_connected"))
+        self.assertNotIn("|| echo", line)
+        cases = (("wlp1:wifi:disconnected\\nlo:loopback:unmanaged\\n", "0"), ("wlp1:wifi:connected\\n", "1"))
+        for nmcli_output, expected in cases:
+            with tempfile.TemporaryDirectory() as tmp:
+                stub = os.path.join(tmp, "nmcli")
+                with open(stub, "w", encoding="utf-8") as handle:
+                    handle.write(f"#!/bin/sh\nprintf '{nmcli_output}'\n")
+                os.chmod(stub, 0o700)
+                result = subprocess.run(
+                    ["bash", "-c", f"set -euo pipefail\n{line}\n{default}\nprintf '%s' \"$wifi_connected\""],
+                    env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.stdout, expected)
+
+    def test_gaming_hint_lives_where_an_unprivileged_game_can_write(self) -> None:
+        """/run/kyth is kyth-privileged's root:wheel 0750 RuntimeDirectory, so the
+        hint a game launch writes there always failed silently and Wi-Fi
+        power-save / NVMe read-ahead never switched to gaming mode."""
+        wifi = (ROOT / "build_files/scripts/sysconfig/network/16-wifi-disable-power-management.sh").read_text(encoding="utf-8")
+        tmpfiles = (ROOT / "build_files/scripts/branding/27-performance-daemons.sh").read_text(encoding="utf-8")
+        launcher = (ROOT / "src/kyth-shared-rs/src/game_launch_bin.rs").read_text(encoding="utf-8")
+        self.assertIn("/run/kyth-gaming/hint-*", wifi)
+        self.assertNotIn("/run/kyth/gaming-hint", wifi)
+        self.assertIn("d /run/kyth-gaming 1777 root root -", tmpfiles)
+        self.assertIn("d /run/kyth-state 0755 root root -", tmpfiles)
+        shipped = launcher.split("#[cfg(test)]")[0]
+        self.assertNotIn("/run/kyth/gaming-hint", shipped)
+        self.assertIn("GAMING_HINT_DIR", shipped)
 
     def test_default_flatpaks_do_not_fail_when_flathub_is_absent(self) -> None:
         body = (ROOT / "build_files/kyth-default-flatpaks.service").read_text(

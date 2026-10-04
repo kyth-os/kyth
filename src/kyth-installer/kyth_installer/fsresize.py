@@ -260,25 +260,28 @@ def _shrink_btrfs(partition: str, new_size_bytes: int, log, *, cancel_event=None
                 cancel_event=cancel_event,
             )
         finally:
-            unmounted = _run_typed(
-                {"operation": "unmount_filesystem", "mountpoint": mount_point},
-                check=False, timeout=30,
-            )
-            if getattr(unmounted, "returncode", 0) != 0:
-                # Busy mount: lazy-detach so the mountpoint goes away now
-                # and the kernel releases it when the last user exits,
-                # instead of leaking a busy mount for later steps to trip on.
-                _run_typed(
-                    {"operation": "unmount_filesystem", "mountpoint": mount_point,
-                     "lazy": True},
+            unmounted = False
+            try:
+                result = _run_typed(
+                    {"operation": "unmount_filesystem", "mountpoint": mount_point},
                     check=False, timeout=30,
                 )
-            if release_mount is not None and registered:
+                unmounted = getattr(result, "returncode", 0) == 0
+                if not unmounted:
+                    # Busy mount: lazy-detach, but keep the registry entry if
+                    # both attempts fail so worker cleanup can retry it.
+                    result = _run_typed(
+                        {"operation": "unmount_filesystem", "mountpoint": mount_point,
+                         "lazy": True},
+                        check=False, timeout=30,
+                    )
+                    unmounted = getattr(result, "returncode", 0) == 0
+            except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+                log(f"Warning: could not unmount Btrfs resize mount {mount_point}: {exc}")
+            if unmounted and release_mount is not None and registered:
                 release_mount(mount_point)
                 registered = False
     finally:
-        if release_mount is not None and registered:
-            release_mount(mount_point)
         try:
             Path(mount_point).rmdir()
         except OSError as exc:
@@ -304,13 +307,11 @@ def validate_shrink_request(partition: str, fstype: str) -> None:
     except (OSError, ValueError, RuntimeError, AttributeError, KeyError):
         parent = partition
     # Fail closed: if the encryption probe itself breaks (lsblk/blkid
-    # unavailable), the volume's BitLocker/LUKS state is UNKNOWN — and the
-    # explicit bitlocker gate below can only fire when detection worked.
-    # Shrinking a locked volume corrupts it, so an unverifiable probe is a
-    # blocker, not a debug log line.
+    # unavailable), the volume's BitLocker/LUKS state is UNKNOWN. Shrinking a
+    # locked volume corrupts it, so an unverifiable probe is a blocker.
     try:
-        enc = _encryption_check(disk=parent)
-    except (OSError, ValueError, AttributeError, KeyError) as exc:
+        enc = _encryption_check(disk=parent, strict=True)
+    except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
         raise RuntimeError(
             f"Could not verify the encryption state of {parent}; "
             f"refusing to shrink blind ({exc})."
@@ -336,18 +337,24 @@ def shrink_filesystem(partition: str, fstype: str, new_size_bytes: int, log, *, 
     Raises for any filesystem type without a safe, supported shrink path
     (fail closed rather than silently truncating an unsupported filesystem).
     """
+    fstype = (fstype or "").lower()
+    if fstype == "bitlocker":
+        raise RuntimeError(
+            "This partition is BitLocker-encrypted and cannot be resized "
+            "while locked. In Windows, suspend or disable BitLocker and wait "
+            "for decryption to finish before retrying."
+        )
+    if fstype not in ("ntfs", "ntfs3", "ext2", "ext3", "ext4", "btrfs"):
+        raise RuntimeError(
+            f"Shrinking {fstype or 'this'} filesystems is not supported by "
+            "this installer. Back up the partition, delete it, and recreate "
+            "it at the smaller size instead."
+        )
     _check_cancelled(cancel_event, "before the filesystem shrink started")
     validate_shrink_request(partition, fstype)
-    fstype = (fstype or "").lower()
     if fstype in ("ntfs", "ntfs3"):
         _shrink_ntfs(partition, new_size_bytes, log, cancel_event=cancel_event)
     elif fstype in ("ext2", "ext3", "ext4"):
         _shrink_ext(partition, new_size_bytes, log, cancel_event=cancel_event)
     elif fstype == "btrfs":
         _shrink_btrfs(partition, new_size_bytes, log, cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount)
-    else:
-        raise RuntimeError(
-            f"Shrinking {fstype or 'this'} filesystems is not supported by "
-            "this installer. Back up the partition, delete it, and recreate "
-            "it at the smaller size instead."
-        )

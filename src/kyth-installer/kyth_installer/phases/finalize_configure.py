@@ -2,9 +2,36 @@
 
 from __future__ import annotations
 
+import os
+import stat
+import tempfile
 from pathlib import Path
 
 from ..context import InstallPhase, InstallRequest
+
+
+def _restore_fstab_atomically(fstab_path: Path, contents: bytes) -> None:
+    """Restore fstab via an exclusive temporary file in its own directory."""
+    parent = fstab_path.parent
+    mode = stat.S_IMODE(fstab_path.stat().st_mode)
+    fd, temporary = tempfile.mkstemp(prefix=f".{fstab_path.name}.restore-", dir=parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(contents)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, mode)
+        os.replace(temporary, fstab_path)
+        directory_fd = os.open(parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def configure_installed_system(
@@ -19,6 +46,7 @@ def configure_installed_system(
     request = request or context.request or InstallRequest.from_state(context.state)
     # Transactional guard: backup fstab so partial writes don't leave unbootable target
     fstab_backup: bytes | None = None
+    fstab_existed = False
     fstab_path: Path | None = None
     try:
         etc = find_deploy_etc(config_root)
@@ -26,9 +54,13 @@ def configure_installed_system(
             raise RuntimeError("Installed deployment could not be located for final configuration.")
         fstab_path = Path(etc) / "fstab"
         try:
-            fstab_backup = fstab_path.read_bytes() if fstab_path.is_file() else None
-        except OSError:
-            fstab_backup = None
+            if fstab_path.is_symlink() is True:
+                raise RuntimeError("Installed fstab is a symlink; refusing to modify the target deployment.")
+            fstab_existed = fstab_path.is_file()
+            if fstab_existed:
+                fstab_backup = fstab_path.read_bytes()
+        except OSError as exc:
+            raise RuntimeError(f"Could not back up the installed fstab before configuration: {exc}") from exc
         if install_mode == "alongside":
             configure_alongside_fstab(config_root, target_part, etc, log)
         if install_mode == "manual":
@@ -67,22 +99,25 @@ def configure_installed_system(
         if fstab_path is not None:
             try:
                 if fstab_backup is None:
-                    if fstab_path.is_file():
+                    if not fstab_existed and fstab_path.is_file():
                         fstab_path.unlink()
                 else:
-                    tmp = fstab_path.with_suffix(".tmp")
-                    tmp.write_bytes(fstab_backup)
-                    tmp.replace(fstab_path)
+                    _restore_fstab_atomically(fstab_path, fstab_backup)
                 log("Rolled back fstab to pre-configure state due to error")
             except OSError as rb_exc:
                 log(f"Warning: fstab rollback failed: {rb_exc}")
         raise
     finally:
         progress(99)
-        unmount_configuration(config_root, alongside_mount, run=run_command)
-        if alongside_mount:
+        unmounted = unmount_configuration(config_root, alongside_mount, run=run_command)
+        # Leave failed/unverified mounts registered for the worker's final
+        # cleanup retry. A successful recursive parent unmount covers every
+        # registered child beneath that mount.
+        if isinstance(unmounted, (tuple, list, set, frozenset)):
+            successful = set(unmounted)
             for mountpoint in list(context.cleanup_mounts):
-                if mountpoint == alongside_mount or mountpoint.startswith(f"{alongside_mount}/"):
+                if mountpoint in successful or any(
+                    root and mountpoint.startswith(f"{root}/")
+                    for root in successful
+                ):
                     context.release_mount(mountpoint)
-        else:
-            context.release_mount(config_root)

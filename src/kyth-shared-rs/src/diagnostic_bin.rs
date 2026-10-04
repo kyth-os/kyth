@@ -63,20 +63,37 @@ fn health_check() -> ExitCode {
     report_header("Subsystem Health");
     let mut report = DiagnosticReport::new("Subsystem Health");
 
-    let scx_active = (command_exists("systemctl")
-        && succeeds(&["systemctl", "is-active", "--quiet", "scx_loader.service"], 5))
-        || command_exists("scx_rusty");
+    let scx_active = kyth_shared::system::runtime_diagnostics::scx_scheduler_active(
+        std::fs::read_to_string("/sys/kernel/sched_ext/state")
+            .ok()
+            .as_deref(),
+        command_exists("systemctl")
+            && succeeds(&["systemctl", "is-active", "--quiet", "scx_loader.service"], 5),
+    );
     if scx_active {
         report.passed("Kernel Scheduler", "sched-ext (scx) low-latency scheduler active");
     } else {
         report.warned("Kernel Scheduler", "CFS/EEVDF fallback (scx not active)");
     }
 
-    let ntsync = Path::new("/dev/ntsync").exists()
-        || std::fs::read_to_string("/proc/modules")
+    let ntsync_state = kyth_shared::system::runtime_diagnostics::ntsync_state(
+        Path::new("/dev/ntsync").exists(),
+        std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open("/dev/ntsync")
+            .is_ok(),
+        std::fs::read_to_string("/proc/modules")
             .map(|text| text.lines().any(|line| line.split_whitespace().next() == Some("ntsync")))
-            .unwrap_or(false);
-    if ntsync {
+            .unwrap_or(false),
+    );
+    let ntsync = ntsync_state == kyth_shared::system::runtime_diagnostics::NtsyncState::Usable;
+    if ntsync_state == kyth_shared::system::runtime_diagnostics::NtsyncState::NoAccess {
+        report.warned(
+            "Wine Synchronization",
+            "/dev/ntsync exists but this user cannot open it; Wine falls back to fsync",
+        );
+    } else if ntsync {
         report.passed("Wine Synchronization", "NTSYNC fast kernel driver loaded");
     } else {
         let (_, futex2) = kyth_shared::system::extended_preferences::probe_wine_sync();

@@ -433,6 +433,34 @@ class ServerHardeningTests(unittest.TestCase):
             handler.do_POST()
         handler.send_error.assert_called_once_with(400, "Invalid Content-Length")
 
+    def test_post_rejects_non_object_json_body(self):
+        handler = self._post_handler(b"[]", 2)
+        with mock.patch.object(server.Handler, "_require_same_origin_context", return_value=True):
+            handler.do_POST()
+        handler.send_error.assert_called_once_with(400, "JSON request body must be an object")
+
+    def test_sse_event_history_is_bounded_and_keeps_monotonic_ids(self):
+        handler = _make_handler("/api/events")
+        handler.context.events.max_events = 2
+        handler.context.events.publish({"type": "log", "text": "old"})
+        handler.context.events.publish({"type": "log", "text": "retained"})
+        handler.context.events.publish({"type": "done"})
+        handler._serve_sse_events()
+        body = handler.wfile.getvalue().decode()
+        self.assertNotIn("old", body)
+        self.assertIn("id: 1", body)
+        self.assertIn("id: 2", body)
+        self.assertEqual(len(handler.context.events.events), 2)
+
+    def test_sse_future_cursor_restarts_from_retained_events(self):
+        handler = _make_handler("/api/events")
+        handler.headers["Last-Event-ID"] = "999999"
+        handler.context.events.publish({"type": "done"})
+        handler._serve_sse_events()
+        body = handler.wfile.getvalue().decode()
+        self.assertIn("id: 0", body)
+        self.assertIn('"type": "done"', body)
+
     def test_log_route_refuses_symlink(self):
         handler = _make_handler("/api/log", host=f"127.0.0.1:{config.PORT}")
         handler.headers["X-Kyth-Session-Token"] = config.SESSION_TOKEN

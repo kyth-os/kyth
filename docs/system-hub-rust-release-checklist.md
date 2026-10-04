@@ -235,3 +235,20 @@ on the testing ISO.
 loaded the capability configuration, but final AppImage bundling was blocked by
 the environment's read-only filesystem. This is an environment limitation, not
 a passing installed-image package result.
+
+## Rust desktop dependency maintenance
+
+The scheduled `Rust desktop stack freshness` workflow checks monthly for
+compatible Tauri/Wry/GTK-family updates in both Rust shells. When either lock
+file changes, update and validate both shells together; never force an isolated
+`glib` lockfile override across incompatible GTK crate versions. Run locked
+checks/tests for both shells and the Hub shell validation before publishing on
+`testing`. The schedule runs on the repository's default branch; use
+`workflow_dispatch` against `testing` to check that branch before promotion.
+
+Known limitation at the current dependency snapshot: Tauri `2.12.0` / Wry
+`0.57.0` still resolve `glib 0.18.5` through GTK `0.18.2`. The update does not
+clear the reported `glib` security advisory. Keep that advisory open and repeat
+the coordinated compatibility check monthly; do not claim the vulnerability
+is fixed until an upstream-compatible GTK/Tauri stack resolves a fixed `glib`
+version and both shells build with `--locked`.

@@ -406,6 +406,53 @@ fn digest_bytes(algorithm: &str, data: &[u8]) -> Option<(Vec<u8>, usize)> {
     Some((bytes, length))
 }
 
+/// Some publishers (rclone) ship SHA256SUMS as a PGP clear-signed message.
+/// Return just the signed body so the armor lines are not parsed as entries.
+///
+/// This only removes the armor: it does NOT verify the signature (the sums
+/// still come from the same host as the archive). It is strict about shape so
+/// it cannot be used to smuggle entries in: a signed message must be followed
+/// by a signature block, and nothing after that block is ever read.
+fn clear_signed_body(content: &str) -> Result<String, String> {
+    const BEGIN: &str = "-----BEGIN PGP SIGNED MESSAGE-----";
+    const SIGNATURE: &str = "-----BEGIN PGP SIGNATURE-----";
+    let mut lines = content.lines().peekable();
+    // Plain manifests (leading blank lines or comments aside) pass through.
+    let first = loop {
+        match lines.peek() {
+            Some(line) if line.trim().is_empty() => {
+                lines.next();
+            }
+            other => break other.copied(),
+        }
+    };
+    if first.map(str::trim) != Some(BEGIN) {
+        return Ok(content.to_string());
+    }
+    lines.next();
+    // Armor headers (Hash: ...) run until the first blank line.
+    for line in lines.by_ref() {
+        if line.trim().is_empty() {
+            break;
+        }
+    }
+    let mut body = Vec::new();
+    let mut signed = false;
+    for line in lines {
+        if line.trim() == SIGNATURE {
+            signed = true;
+            break;
+        }
+        // Dash-escaped lines ("- ...") are how clear-signing protects a body
+        // line that starts with a dash.
+        body.push(line.strip_prefix("- ").unwrap_or(line));
+    }
+    if !signed {
+        return Err("Clear-signed checksum file has no signature block (truncated)".to_string());
+    }
+    Ok(body.join("\n"))
+}
+
 /// Require exactly one valid checksum entry for the target file, with the
 /// same error contract as the Python verifier.
 pub fn verify_checksum_file(
@@ -444,6 +491,7 @@ pub fn verify_checksum_file(
     }
     let content = std::fs::read_to_string(checksum_path)
         .map_err(|error| format!("Cannot read checksum file: {error}"))?;
+    let content = clear_signed_body(&content)?;
     let mut matches = Vec::new();
     for (index, line) in content.lines().enumerate() {
         let line_number = index + 1;
@@ -747,6 +795,10 @@ pub fn extract_archive(
             "-C".to_string(),
             dest_arg,
             "--no-same-owner".to_string(),
+            // Without this, tar run as root restores archived mode bits
+            // verbatim — including setuid/setgid (e.g. 4755) from a
+            // compromised or malicious release tarball.
+            "--no-same-permissions".to_string(),
         ],
     };
     match (run)(&argv, 600) {
@@ -1011,6 +1063,62 @@ mod tests {
         )
         .unwrap();
         assert_eq!(std::fs::read(dest).unwrap(), b"public asset");
+    }
+
+    #[test]
+    fn clear_signed_checksum_manifests_are_read_without_their_pgp_armor() {
+        // downloads.rclone.org publishes SHA256SUMS as a PGP clear-signed file.
+        // The first line is the armor header, which used to be parsed as a
+        // "hash  filename" entry and rejected: kyth-rclone-update could never
+        // get past verification.
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("rclone-v1.0.0-linux-amd64.zip");
+        std::fs::write(&target, "payload").unwrap();
+        let good = sha256_hex(b"payload");
+        let other = "1".repeat(64);
+        let signed = |good_line: &str, trailer: &str| {
+            format!(
+                "-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA1\n\n{other}  rclone-v1.0.0\n{good_line}\n-----BEGIN PGP SIGNATURE-----\n\niQIzBAEBCAAdFiEE\n=abcd\n-----END PGP SIGNATURE-----\n{trailer}"
+            )
+        };
+        let sums = dir.path().join("sums");
+        std::fs::write(
+            &sums,
+            signed(&format!("{good}  rclone-v1.0.0-linux-amd64.zip"), ""),
+        )
+        .unwrap();
+        assert_eq!(verify_checksum_file(&sums, &target, "sha256"), Ok(()));
+
+        // A wrong digest inside a signed manifest still fails.
+        std::fs::write(
+            &sums,
+            signed(
+                &format!("{}  rclone-v1.0.0-linux-amd64.zip", "0".repeat(64)),
+                "",
+            ),
+        )
+        .unwrap();
+        assert!(verify_checksum_file(&sums, &target, "sha256")
+            .unwrap_err()
+            .contains("mismatch"));
+
+        // Nothing after the signature block is trusted as an entry.
+        let smuggled = format!("{good}  rclone-v1.0.0-linux-amd64.zip\n");
+        std::fs::write(
+            &sums,
+            signed(
+                &format!("{}  rclone-v1.0.0-linux-amd64.zip", "0".repeat(64)),
+                &smuggled,
+            ),
+        )
+        .unwrap();
+        assert!(verify_checksum_file(&sums, &target, "sha256")
+            .unwrap_err()
+            .contains("mismatch"));
+
+        // A signed message with no signature block is truncated and refused.
+        std::fs::write(&sums, format!("-----BEGIN PGP SIGNED MESSAGE-----\nHash: SHA1\n\n{good}  rclone-v1.0.0-linux-amd64.zip\n")).unwrap();
+        assert!(verify_checksum_file(&sums, &target, "sha256").is_err());
     }
 
     #[test]

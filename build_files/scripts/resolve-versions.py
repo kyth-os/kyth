@@ -44,10 +44,15 @@ def gh_latest_tag(repo: str) -> str:
 
 
 def cmd_proton_cachyos() -> int:
-    """Print the latest Proton-CachyOS release tag."""
-    tag = gh_latest_tag("CachyOS/proton-cachyos")
+    """Print the latest GE-Proton release tag.
+
+    NOTE: the subcommand keeps its historical `proton-cachyos` name (CI step
+    ids and the resolve-versions action contract); the source of truth is
+    GloriousEggroll/proton-ge-custom.
+    """
+    tag = gh_latest_tag("GloriousEggroll/proton-ge-custom")
     if not tag or not re.match(r"^[A-Za-z0-9][A-Za-z0-9._+-]*$", tag):
-        print("ERROR: could not resolve a safe immutable Proton-CachyOS release tag", file=sys.stderr)
+        print("ERROR: could not resolve a safe immutable GE-Proton release tag", file=sys.stderr)
         return 1
     print(tag)
     return 0

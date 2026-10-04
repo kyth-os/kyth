@@ -532,21 +532,22 @@ class InstallerPlanTests(unittest.TestCase):
                 })
 
     def test_validate_wipe_rejects_disk_missing_from_safe_scan(self):
-        with patch.object(self.plan, "list_disks", return_value=[]):
+        with patch.object(self.plan, "list_disks", return_value=[]), \
+             patch.object(self.plan, "list_partitions", return_value=[]):
             with self.assertRaisesRegex(RuntimeError, "not a safe install target"):
                 self.plan._validate_install_target({"install_mode": "wipe", "disk": "/dev/sda"})
 
     def test_validate_wipe_rejects_disk_below_minimum_size(self):
         with patch.object(self.plan, "list_disks", return_value=[
             {"name": "/dev/sda", "size_bytes": 16 * 1024**3},
-        ]):
+        ]), patch.object(self.plan, "list_partitions", return_value=[]):
             with self.assertRaisesRegex(RuntimeError, "too small"):
                 self.plan._validate_install_target({"install_mode": "wipe", "disk": "/dev/sda"})
 
     def test_validate_wipe_accepts_disk_at_minimum_size(self):
         with patch.object(self.plan, "list_disks", return_value=[
             {"name": "/dev/sda", "size_bytes": 32 * 1024**3},
-        ]):
+        ]), patch.object(self.plan, "list_partitions", return_value=[]):
             disk_name, target = self.plan._validate_install_target({"install_mode": "wipe", "disk": "/dev/sda"})
 
         self.assertEqual((disk_name, target), ("/dev/sda", None))
@@ -654,7 +655,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "shrink_filesystem") as mock_shrink, \
              patch.object(self.plan, "DiskService", mock_disk_service_cls), \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
-             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 192 * 1024**3]), \
+             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 256 * 1024**3, 192 * 1024**3]), \
              patch.object(self.plan, "_partition_number", return_value=3), \
              patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
              patch.object(self.plan, "_block_size_bytes", return_value=512), \
@@ -728,7 +729,7 @@ class InstallerPlanTests(unittest.TestCase):
              patch.object(self.plan, "shrink_filesystem"), \
              patch.object(self.plan, "DiskService", mock_disk_service_cls), \
              patch.object(self.plan, "_validate_resize_ntfs_target", return_value=("/dev/nvme0n1", partition, 64 * 1024**3)), \
-             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 192 * 1024**3]), \
+             patch.object(self.plan, "_partition_size_bytes", side_effect=[256 * 1024**3, 256 * 1024**3, 192 * 1024**3]), \
              patch.object(self.plan, "_partition_number", return_value=3), \
              patch.object(self.plan, "_partition_start_bytes", return_value=128 * 1024**3), \
              patch.object(self.plan, "_block_size_bytes", return_value=512), \
@@ -1475,6 +1476,11 @@ class InstallerSystemTests(unittest.TestCase):
             os.makedirs(real)
             system._require_no_symlink(real)  # does not raise
             system._require_no_symlink(os.path.join(tmpdir, "does-not-exist"))  # does not raise
+
+    def test_require_no_symlink_fails_closed_when_component_cannot_be_checked(self):
+        with patch("pathlib.Path.is_symlink", side_effect=PermissionError("probe denied")):
+            with self.assertRaisesRegex(RuntimeError, "Could not verify.*symlink components"):
+                system._require_no_symlink("/tmp/kyth-install-root")
 
     def test_safe_umount_defaults_to_check_false_and_captures_output(self):
         mock_run = MagicMock(return_value=MagicMock(returncode=1))

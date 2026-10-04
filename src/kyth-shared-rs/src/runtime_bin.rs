@@ -12,11 +12,39 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::thread;
 use std::time::Duration;
 
 use kyth_shared::system::process::{redact_sensitive_text, run_bounded};
 
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+/// Matches `TimeoutStartSec=1200` in kyth-hw-setup.service: an NVIDIA akmods
+/// build after a kernel bump legitimately takes 5-15 minutes.
+const HARDWARE_APPLY_TIMEOUT: Duration = Duration::from_secs(1200);
+
+/// `kyth-hw-setup` and `kyth-retry-hardware-setup` both mean "apply the
+/// hardware policy now". They used to exec the kyth-privileged *daemon* (a
+/// socket server that must run as root with CAP_CHOWN), so the oneshot unit
+/// died on every boot with "could not set socket owner: Operation not
+/// permitted" and the policy was never applied.
+fn hardware_apply_command(extra: &[String]) -> io::Result<(&'static str, Vec<String>)> {
+    // Never forward caller args to the root hardware-policy binary: an
+    // unexpected flag (or a `--`-style separator smuggling a subcommand)
+    // would run with full privileges.
+    if !extra.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "apply-hardware takes no arguments, got: {}",
+                extra.join(" ")
+            ),
+        ));
+    }
+    Ok((
+        "/usr/bin/kyth-hardware-policy",
+        vec!["apply".to_string(), "--force".to_string()],
+    ))
+}
 
 fn usage() -> ! {
     eprintln!("usage: kyth-runtime <operation> [arguments...]");
@@ -27,6 +55,131 @@ fn home() -> PathBuf {
     env::var_os("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("/"))
+}
+
+/// Root-owned boot markers live here, NOT in `/run/kyth`. That directory is
+/// `kyth-privileged.service`'s `RuntimeDirectory=`; when a marker already exists
+/// in it as root:root, systemd tries to re-own it to the unit's group and
+/// SELinux denies `init_t` the setattr, so the daemon fails its first start
+/// (status=233/RUNTIME_DIRECTORY) before recovering on the 2 s restart.
+const BOOT_STATE_DIR: &str = "/run/kyth-state";
+
+/// Where a guard records its last refresh. `kyth-boot-branding.service` is a
+/// system unit: `HOME` is unset there, `home()` falls back to `/`, and the write
+/// to `/.config/kyth` hit the read-only ostree root ("Read-only file system"),
+/// failing the unit on every boot. The boot guard therefore records under
+/// `/run/kyth`; only the per-user splash guard writes under `$HOME`.
+fn refresh_marker_path(operation: &str, home: Option<&std::ffi::OsStr>) -> PathBuf {
+    match (operation, home) {
+        ("session-splash-guard", Some(home)) if !home.is_empty() => {
+            PathBuf::from(home).join(".config/kyth/runtime-last-refresh")
+        }
+        ("session-splash-guard", _) => PathBuf::from("/run/kyth-state/session-splash-last-refresh"),
+        _ => PathBuf::from("/run/kyth-state/boot-branding-last-refresh"),
+    }
+}
+
+/// True when any user has a *live* running-game hint (`hint-<uid>`) in `dir`.
+/// The hint file holds the launcher PID (`kyth-game-launch` execs the game, so
+/// the PID stays valid for the whole session and dies with it); a hint whose
+/// PID is gone is stale and ignored. Unparseable content counts as active —
+/// fail toward gaming mode — and `/run` is tmpfs, so legacy constant-content
+/// hints cannot survive a reboot anyway.
+fn gaming_hint_active(dir: &Path) -> bool {
+    fs::read_dir(dir).is_ok_and(|entries| {
+        entries.flatten().any(|entry| {
+            if !entry.file_name().to_string_lossy().starts_with("hint-") {
+                return false;
+            }
+            let pid: u32 = match fs::read_to_string(entry.path()) {
+                Ok(contents) => match contents.trim().parse() {
+                    Ok(pid) => pid,
+                    Err(_) => return true,
+                },
+                Err(_) => return true,
+            };
+            Path::new(&format!("/proc/{pid}")).exists()
+        })
+    })
+}
+
+/// Only a clean install may stamp the sentinel; anything else is retried next boot.
+fn default_flatpaks_succeeded(result: &ExitCode) -> bool {
+    *result == ExitCode::SUCCESS
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum FlathubSetup {
+    /// The remote is already configured: nothing to fetch.
+    AlreadyPresent,
+    /// No default route: offline boots finish cleanly instead of failing.
+    Offline,
+    Add,
+}
+
+fn flathub_setup_plan(remotes: &str, route_table: &str) -> FlathubSetup {
+    if remotes.lines().any(|line| line.trim() == "flathub") {
+        return FlathubSetup::AlreadyPresent;
+    }
+    // /proc/net/route: a default route has an all-zero destination.
+    let has_default_route = route_table
+        .lines()
+        .skip(1)
+        .any(|line| line.split_whitespace().nth(1) == Some("00000000"));
+    if has_default_route {
+        FlathubSetup::Add
+    } else {
+        FlathubSetup::Offline
+    }
+}
+
+/// Add the Flathub remote with the contract `kyth-flathub-setup.service`
+/// documents: idempotent, no network when it is already configured, and exit 0
+/// when offline. The previous one-line `flatpak remote-add` fetched the
+/// .flatpakrepo file even when Flathub existed and failed the unit on every
+/// boot where DNS was not up yet.
+fn flathub_setup() -> io::Result<ExitCode> {
+    let remotes = run_bounded(
+        &argv(
+            "flatpak",
+            &["remotes".into(), "--system".into(), "--columns=name".into()],
+        ),
+        COMMAND_TIMEOUT,
+    )
+    .map(|output| String::from_utf8_lossy(&output.stdout).into_owned())
+    .unwrap_or_default();
+    let routes = fs::read_to_string("/proc/net/route").unwrap_or_default();
+    match flathub_setup_plan(&remotes, &routes) {
+        FlathubSetup::AlreadyPresent => {
+            println!("Flathub remote already configured.");
+            return Ok(ExitCode::SUCCESS);
+        }
+        FlathubSetup::Offline => {
+            println!("No default route; Flathub setup skipped until the next boot online.");
+            return Ok(ExitCode::SUCCESS);
+        }
+        FlathubSetup::Add => {}
+    }
+    let add = [
+        "remote-add".to_string(),
+        "--if-not-exists".into(),
+        "--system".into(),
+        "flathub".into(),
+        "https://dl.flathub.org/repo/flathub.flatpakrepo".into(),
+    ];
+    // DNS can lag the route at boot: retry with backoff inside the unit's
+    // 300 s budget, then defer (exit 0) rather than leaving the unit failed.
+    for (attempt, delay) in [0u64, 5, 15, 30, 60].into_iter().enumerate() {
+        if delay > 0 {
+            thread::sleep(Duration::from_secs(delay));
+        }
+        if run("flatpak", &add)? == ExitCode::SUCCESS {
+            return Ok(ExitCode::SUCCESS);
+        }
+        eprintln!("flathub-setup: attempt {} failed", attempt + 1);
+    }
+    println!("Flathub is unreachable; will retry on the next boot.");
+    Ok(ExitCode::SUCCESS)
 }
 
 fn argv(program: &str, args: &[String]) -> Vec<String> {
@@ -1024,7 +1177,7 @@ fn power_arbiter() -> io::Result<ExitCode> {
 
 fn readahead(args: &[String]) -> io::Result<ExitCode> {
     let value = if args.first().is_some_and(|arg| arg == "hint") {
-        if Path::new("/run/kyth/gaming-hint").exists() {
+        if gaming_hint_active(Path::new("/run/kyth-gaming")) {
             "2048"
         } else {
             "512"
@@ -1834,7 +1987,10 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
         "perf-gate" => run("/usr/bin/kyth-perf-gate-rs", args),
         "windows-friendly-defaults" => run("/usr/bin/kyth-user-polish", args),
         "storage-gate" => run("/usr/bin/kyth-storage-sense", args),
-        "apply-hardware" | "retry-hardware" => run("/usr/bin/kyth-privileged", args),
+        "apply-hardware" | "retry-hardware" => {
+            let (program, hardware_args) = hardware_apply_command(args)?;
+            run_timeout(program, &hardware_args, HARDWARE_APPLY_TIMEOUT)
+        }
         "power-arbiter" => power_arbiter(),
         "readahead-hint" => readahead(&["hint".into()]),
         "readahead-run" => {
@@ -2066,7 +2222,7 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
         ),
         "boot-verify" => run("/usr/bin/kyth-bootc-guard", &["status".into()]),
         "boot-branding-guard" | "session-splash-guard" => {
-            let marker = home().join(".config/kyth/runtime-last-refresh");
+            let marker = refresh_marker_path(name, env::var_os("HOME").as_deref());
             write_atomic(&marker, b"ok\n")?;
             Ok(ExitCode::SUCCESS)
         }
@@ -2111,24 +2267,21 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
                 &args,
                 kyth_shared::default_flatpaks::INSTALL_TIMEOUT,
             )?;
-            if result != ExitCode::SUCCESS {
-                return Ok(result);
+            if !default_flatpaks_succeeded(&result) {
+                // Documented contract (kyth-default-flatpaks.service): a flaky
+                // first-online pull exits 0 and leaves the sentinel unset, so
+                // the next boot retries. Failing here put the unit in
+                // `systemctl --failed` on every boot where DNS was not up yet
+                // ("Could not resolve hostname" 8 s after boot).
+                eprintln!("default-flatpaks: install did not complete; will retry next boot");
+                return Ok(ExitCode::SUCCESS);
             }
             let sentinel = kyth_shared::default_flatpaks::sentinel_path();
             write_atomic(Path::new(&sentinel), b"done\n")?;
             println!("Default Flatpaks installed.");
             Ok(ExitCode::SUCCESS)
         }
-        "flathub-setup" => run(
-            "flatpak",
-            &[
-                "remote-add".into(),
-                "--if-not-exists".into(),
-                "--system".into(),
-                "flathub".into(),
-                "https://dl.flathub.org/repo/flathub.flatpakrepo".into(),
-            ],
-        ),
+        "flathub-setup" => flathub_setup(),
         "mok-status" => run("mokutil", &["--list-enrolled".into()]),
         "enroll-mok" => {
             let cert = Path::new("/usr/share/kyth/secureboot/kyth-secureboot.cer");
@@ -2142,7 +2295,7 @@ fn delegate(name: &str, args: &[String]) -> io::Result<ExitCode> {
         }
         "rotate-mok" => run("mokutil", &["--list-enrolled".into()]),
         "greenboot-success" | "greenboot-required" | "greenboot-failure" => {
-            let state = Path::new("/run/kyth/greenboot-state");
+            let state = Path::new("/run/kyth-state/greenboot-state");
             write_atomic(state, format!("{name}\n").as_bytes())?;
             Ok(ExitCode::SUCCESS)
         }
@@ -2190,6 +2343,121 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_flatpaks_only_stamps_on_a_clean_install() {
+        assert!(default_flatpaks_succeeded(&ExitCode::SUCCESS));
+        assert!(!default_flatpaks_succeeded(&ExitCode::from(1)));
+        assert!(!default_flatpaks_succeeded(&ExitCode::from(2)));
+    }
+
+    #[test]
+    fn flathub_setup_is_idempotent_and_offline_safe() {
+        let online =
+            "Iface\tDestination\tGateway\nenp1\t00000000\t0166AC0A\nenp1\t0066AC0A\t00000000\n";
+        let local_only = "Iface\tDestination\tGateway\nenp1\t0066AC0A\t00000000\n";
+        assert_eq!(
+            flathub_setup_plan("fedora\nflathub\n", online),
+            FlathubSetup::AlreadyPresent
+        );
+        // Present wins even when offline: nothing needs fetching.
+        assert_eq!(
+            flathub_setup_plan("flathub\n", ""),
+            FlathubSetup::AlreadyPresent
+        );
+        assert_eq!(flathub_setup_plan("fedora\n", online), FlathubSetup::Add);
+        assert_eq!(
+            flathub_setup_plan("fedora\n", local_only),
+            FlathubSetup::Offline
+        );
+        assert_eq!(flathub_setup_plan("", ""), FlathubSetup::Offline);
+        // A remote merely containing the name is not Flathub.
+        assert_eq!(
+            flathub_setup_plan("flathub-beta\n", online),
+            FlathubSetup::Add
+        );
+    }
+
+    #[test]
+    fn gaming_hint_is_per_user_and_any_user_counts() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(!gaming_hint_active(dir.path()));
+        assert!(!gaming_hint_active(&dir.path().join("missing")));
+        fs::write(dir.path().join("unrelated"), "1").unwrap();
+        assert!(!gaming_hint_active(dir.path()));
+        // Live hint: the test process's own PID is necessarily alive.
+        let live_pid = std::process::id().to_string();
+        fs::write(dir.path().join("hint-1000"), &live_pid).unwrap();
+        assert!(gaming_hint_active(dir.path()));
+    }
+
+    #[test]
+    fn gaming_hint_with_dead_pid_is_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        // u32::MAX can never be a live PID.
+        fs::write(dir.path().join("hint-1000"), u32::MAX.to_string()).unwrap();
+        assert!(!gaming_hint_active(dir.path()));
+    }
+
+    #[test]
+    fn gaming_hint_unparseable_content_fails_safe_to_active() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("hint-1000"), "not-a-pid").unwrap();
+        assert!(gaming_hint_active(dir.path()));
+    }
+
+    #[test]
+    fn root_boot_markers_stay_out_of_the_privileged_runtime_directory() {
+        // /run/kyth is kyth-privileged's RuntimeDirectory; pre-existing root
+        // files there break its first start (RUNTIME_DIRECTORY, SELinux setattr).
+        let source = include_str!("runtime_bin.rs");
+        let shipped = source.split("#[cfg(test)]").next().unwrap();
+        for marker in [
+            "greenboot-state",
+            "boot-branding-last-refresh",
+            "session-splash-last-refresh",
+        ] {
+            assert!(
+                !shipped.contains(&format!("/run/kyth/{marker}")),
+                "{marker} must not be written under /run/kyth"
+            );
+            assert!(
+                shipped.contains(&format!("{BOOT_STATE_DIR}/{marker}"))
+                    || shipped.contains(&format!("/run/kyth-state/{marker}"))
+            );
+        }
+    }
+
+    #[test]
+    fn boot_branding_marker_never_depends_on_home() {
+        use std::ffi::OsStr;
+        // System unit: HOME unset or "/" must not route to a read-only path.
+        for home in [None, Some(OsStr::new("")), Some(OsStr::new("/"))] {
+            assert_eq!(
+                refresh_marker_path("boot-branding-guard", home),
+                PathBuf::from("/run/kyth-state/boot-branding-last-refresh")
+            );
+        }
+        assert_eq!(
+            refresh_marker_path("session-splash-guard", Some(OsStr::new("/var/home/u"))),
+            PathBuf::from("/var/home/u/.config/kyth/runtime-last-refresh")
+        );
+        assert_eq!(
+            refresh_marker_path("session-splash-guard", None),
+            PathBuf::from("/run/kyth-state/session-splash-last-refresh")
+        );
+    }
+
+    #[test]
+    fn hardware_setup_applies_policy_instead_of_starting_the_daemon() {
+        let (program, args) = hardware_apply_command(&[]).unwrap();
+        assert_eq!(program, "/usr/bin/kyth-hardware-policy");
+        assert_eq!(args, ["apply", "--force"]);
+        // Caller args are never forwarded to the root policy binary.
+        let err = hardware_apply_command(&["--policy".into(), "x".into()]).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        assert_ne!(program, "/usr/bin/kyth-privileged");
+    }
 
     #[test]
     fn prime_run_and_game_session_reject_missing_separator() {

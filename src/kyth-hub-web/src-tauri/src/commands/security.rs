@@ -174,17 +174,31 @@ pub(crate) struct SecHostToolResponse {
     installed: bool,
 }
 
+/// Async + one scan, same reasoning as `gaming_tools`.
 #[tauri::command]
-pub(crate) fn sec_host_tools() -> Vec<SecHostToolResponse> {
-    security_container::SEC_HOST_TOOLS
-        .iter()
-        .map(|tool| SecHostToolResponse {
-            flatpak: tool.flatpak.to_string(),
-            name: tool.name.to_string(),
-            desc: tool.desc.to_string(),
-            installed: kyth_shared::system::software_catalog::is_flatpak_installed(tool.flatpak),
-        })
-        .collect()
+pub(crate) async fn sec_host_tools() -> Vec<SecHostToolResponse> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let ids: Vec<&str> = security_container::SEC_HOST_TOOLS
+            .iter()
+            .map(|tool| tool.flatpak)
+            .collect();
+        let flags = kyth_shared::system::software_catalog::installed_flags(
+            &ids,
+            kyth_shared::system::software_catalog::installed_flatpaks,
+        );
+        security_container::SEC_HOST_TOOLS
+            .iter()
+            .zip(flags)
+            .map(|(tool, installed)| SecHostToolResponse {
+                flatpak: tool.flatpak.to_string(),
+                name: tool.name.to_string(),
+                desc: tool.desc.to_string(),
+                installed,
+            })
+            .collect()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 fn validated_sec_tool(

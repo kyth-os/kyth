@@ -97,7 +97,10 @@ DefaultDependencies=no
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-TimeoutStartSec=300
+# Must exceed the binary's own budget: up to two dracut runs at 600s each
+# plus lsinitrd inspections, or systemd SIGTERMs dracut mid-run (masked
+# by '-' below, leaving a half-written initramfs).
+TimeoutStartSec=1260
 # '-' so a dracut/inspect failure cannot list this unit as failed every
 # boot. refresh() already no-ops when /boot stays read-only.
 ExecStart=-/usr/libexec/kyth-refresh-boot-splash-initramfs

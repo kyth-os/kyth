@@ -41,7 +41,7 @@ done
 # vacuously with zero symlinks created. Cross-check the registry's own
 # declared size (source of truth: build_files/config/tunables.toml, bind-
 # mounted at /ctx/config) so a build can't silently ship a dispatcher that
-# answers nothing for 94 tunables.
+# answers nothing for 91 tunables.
 expected_count="$(grep -c '^\[tunables\.' /ctx/config/tunables.toml)"
 if (( ${#tunables[@]} != expected_count )); then
     echo "tunable-dispatcher: /usr/bin/kyth-tunable-rs --list returned ${#tunables[@]} entries, expected ${expected_count} from tunables.toml — wrong or stale binary installed at /usr/bin/kyth-tunable-rs?" >&2

@@ -223,6 +223,18 @@ EOF
 echo "==> systemd units"
 output="$(systemd-analyze verify build_files/*.service build_files/*.timer 2>&1 || true)"
 printf '%s\n' "${output}"
+# systemd-analyze verify loads the host's installed units alongside ours. A
+# KythOS machine that has not yet booted an image with the fixed
+# kyth-system-accounts.service still carries its old Before=systemd-sysusers
+# edge, which forms an ordering cycle with local-fs.target. That cycle belongs
+# to the stale installed unit, not to this tree (no build_files unit references
+# those targets), so tolerate it only while the installed copy still has the
+# edge. Once the host is updated this stops matching and the gate is strict.
+host_accounts_unit=/usr/lib/systemd/system/kyth-system-accounts.service
+stale_host_cycle_filter='^$^'
+if grep -qE '^Before=.*systemd-sysusers\.service' "${host_accounts_unit}" 2>/dev/null; then
+	stale_host_cycle_filter='^(local-fs(-pre)?\.target|systemd-(tmpfiles-setup-dev|sysusers)\.service|kyth-system-accounts\.service): .*'
+fi
 unexpected="$(printf '%s\n' "${output}" |
 	grep -Ev \
 		-e '^[^:]+: Command .+ is not executable: No such file or directory$' \
@@ -230,7 +242,9 @@ unexpected="$(printf '%s\n' "${output}" |
 		-e '^Failed to enable SO_PASSCRED on handoff timestamp socket(, ignoring)?: Operation not permitted$' \
 		-e '^ERROR: ld\.so: object .* cannot be preloaded .* ignored\.$' \
 		-e '^Configuration file .* is marked world-writable\. Please remove world writability permission bits\. Proceeding anyway\.$' \
-		-e '^(local-fs(-pre)?\.target|systemd-(tmpfiles-setup-dev|sysusers)\.service|kyth-system-accounts\.service): .*' ||
+		-e "${stale_host_cycle_filter}" \
+		-e '^(motd-news|apt-daily|apt-daily-upgrade)\.timer: Timer unit lacks value setting\. Refusing\.$' \
+		-e '^multi-user\.target: Wants dependency dropin .*syslog\.service target .*rsyslog\.service has different name$' ||
 	true)"
 if [[ -n "${unexpected}" ]]; then
 	printf 'Unexpected systemd verification errors:\n%s\n' "${unexpected}" >&2
@@ -246,7 +260,7 @@ fi
 # Non-blocking security audit — warn, don't fail (thresholds are advisory while
 # the demonolith is being split). Surfaces hardening regressions early.
 if command -v systemd-analyze >/dev/null 2>&1; then
-	output_sec="$(systemd-analyze security build_files/kyth-ai-perfd.service build_files/kyth-guardian.service build_files/kyth-sched.service build_files/kyth-sched-arbiter.service build_files/kyth-batteryd.service build_files/kyth-probe.service build_files/kyth-probe-user.service build_files/kyth-update-watcher.service 2>&1 || true)"
+	output_sec="$(systemd-analyze security build_files/kyth-ai-perfd.service build_files/kyth-guardian.service build_files/kyth-sched.service build_files/kyth-batteryd.service build_files/kyth-probe.service build_files/kyth-probe-user.service build_files/kyth-update-watcher.service 2>&1 || true)"
 	printf '%s\n' "${output_sec}" | grep -E "^(build_files|Overall exposure)" || true
 fi
 # Supply-chain audit — non-blocking, surfaces cargo/pip advisories

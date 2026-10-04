@@ -1,0 +1,41 @@
+#!/bin/bash
+# kyth-kwallet-pam-ensure — idempotent boot-time verification of the KWallet
+# PAM bridge. The build-time script (26-kwallet-pam-bridge-...) wires
+# pam_kwallet into the plasmalogin stack, but on bootc/ostree upgrades the
+# /etc overlay can preserve a stale PAM file without the bridge. If the
+# bridge is missing, the wallet never unlocks at login and the user gets
+# prompted on every reboot. This runs on every boot; it does nothing when
+# the bridge is already in place.
+set -euo pipefail
+
+# Resolve the module from the installed package; never hardcode it.
+KWALLET_PAM_SO="$(rpm -ql pam-kwallet 2>/dev/null | grep -E '/pam_kwallet[^/]*\.so$' | sort -V | tail -n 1 || true)"
+if [[ -z "${KWALLET_PAM_SO}" ]]; then
+    # pam-kwallet not installed; nothing to wire.
+    exit 0
+fi
+KWALLET_PAM_MODULE="$(basename "${KWALLET_PAM_SO}")"
+
+for PAM_FILE in /etc/pam.d/plasmalogin /usr/lib/pam.d/plasmalogin; do
+    [ -f "${PAM_FILE}" ] || continue
+
+    # Single secrets provider: neutralize any ACTIVE pam_oo7 line.
+    if grep -qE '^[[:space:]]*(auth|session)[[:space:]]+.*pam_oo7' "${PAM_FILE}"; then
+        sed -i -E 's/^([[:space:]]*)((auth|session)[[:space:]]+.*pam_oo7.*)$/\1# \2  # kyth: KWallet is the single secrets provider/' "${PAM_FILE}"
+    fi
+
+    # Wire the bridge if not present. Only UNCOMMENTED lines count.
+    if ! grep -qE "^[[:space:]]*(auth|session)[[:space:]]+.*${KWALLET_PAM_MODULE}" "${PAM_FILE}"; then
+        printf '\nauth     optional     %s\nsession  optional     pam_exec.so /usr/libexec/kyth-kwallet-relabel\nsession  optional     %s auto_start\n' \
+            "${KWALLET_PAM_MODULE}" "${KWALLET_PAM_MODULE}" >>"${PAM_FILE}"
+    elif ! grep -q kyth-kwallet-relabel "${PAM_FILE}"; then
+        awk -v mod="${KWALLET_PAM_MODULE}" '!done && $0 ~ mod && /auto_start/ {
+            print "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel"
+            done=1
+        } { print }' "${PAM_FILE}" >/tmp/kyth-pam-ensure.tmp && mv /tmp/kyth-pam-ensure.tmp "${PAM_FILE}"
+    fi
+    # Only the first existing file is the live one.
+    break
+done
+
+exit 0

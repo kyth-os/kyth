@@ -435,6 +435,25 @@ impl NativeJournalRegistry {
                 )
             }
             "/api/disk/commit" => {
+                let confirmed = value
+                    .get("confirm_erase")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true);
+                let acknowledged = value
+                    .get("acknowledged-irreversible")
+                    .and_then(serde_json::Value::as_bool)
+                    .or_else(|| {
+                        value
+                            .get("acknowledged_irreversible")
+                            .and_then(serde_json::Value::as_bool)
+                    })
+                    == Some(true);
+                if !confirmed || !acknowledged {
+                    return (
+                        400,
+                        serde_json::json!({"ok": false, "message": "Confirm erase and acknowledge the irreversible partition change before committing."}),
+                    );
+                }
                 let mut journal = match Self::journal_for(&mut active, &disk) {
                     Ok(journal) => journal.clone(),
                     Err(error) => return (400, error),
@@ -472,8 +491,10 @@ impl NativeJournalRegistry {
                     Ok(journal) => journal,
                     Err(error) => return (400, error),
                 };
-                journal.rollback_metadata();
-                (200, serde_json::json!({"ok": true}))
+                match journal.rollback_metadata() {
+                    Ok(()) => (200, serde_json::json!({"ok": true})),
+                    Err(error) => (400, serde_json::json!({"ok": false, "message": error})),
+                }
             }
             _ => (
                 404,

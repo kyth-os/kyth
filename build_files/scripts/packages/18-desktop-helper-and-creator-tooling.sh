@@ -44,7 +44,8 @@ dnf5 install -y --skip-unavailable \
 	git-delta \
 	direnv \
 	jq \
-	yq
+	yq \
+	just
 
 # gum (TUI menu builder used by interactive ujust recipes) lives in Terra, whose
 # repo file is written and then disabled by packages/12; enable it for just this

@@ -52,7 +52,7 @@ def generate_thp_collapse(cfg: dict[str,Any]|None=None, dest: Path|None=None) ->
         except OSError:
             pass
         return None
-    content="# Kyth THP collapse gaming — generated\nkernel.khugepaged_defrag=0\n"
+    content="# Kyth THP collapse gaming — generated\n-kernel.khugepaged_defrag=0\n"
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp=dest.with_suffix(".tmp")
     tmp.write_text(content,encoding="utf-8")

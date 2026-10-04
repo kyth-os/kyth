@@ -439,10 +439,6 @@ gpu-power *args:
     exec /usr/bin/kyth-runtime recipe "gpu-power" {{ args }}
 
 [group('KythOS')]
-sched-latency *args:
-    exec /usr/bin/kyth-runtime recipe "sched-latency" {{ args }}
-
-[group('KythOS')]
 readahead *args:
     exec /usr/bin/kyth-runtime recipe "readahead" {{ args }}
 
@@ -591,10 +587,6 @@ sched-autogroup *args:
     exec /usr/bin/kyth-runtime recipe "sched-autogroup" {{ args }}
 
 [group('KythOS')]
-sched-nr-migrate *args:
-    exec /usr/bin/kyth-runtime recipe "sched-nr-migrate" {{ args }}
-
-[group('KythOS')]
 page-cluster *args:
     exec /usr/bin/kyth-runtime recipe "page-cluster" {{ args }}
 
@@ -605,10 +597,6 @@ tcp-retries2 *args:
 [group('KythOS')]
 tcp-keepalive *args:
     exec /usr/bin/kyth-runtime recipe "tcp-keepalive" {{ args }}
-
-[group('KythOS')]
-sched-child *args:
-    exec /usr/bin/kyth-runtime recipe "sched-child" {{ args }}
 
 [group('KythOS')]
 vm-stat *args:

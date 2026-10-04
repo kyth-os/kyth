@@ -1,8 +1,16 @@
 # Pull the upstream Fedora bootc base and apply KythOS branding.
 # Build with: docker build -t localhost/kyth-base:stable build_base/
-# Override the base via: docker build --build-arg BASE_IMAGE=ghcr.io/ublue-os/kinoite-main:44 build_base/
-ARG BASE_IMAGE=ghcr.io/ublue-os/kinoite-main:44@sha256:cab4b50650d4f1e07273b27bd8e6dd785a6b8c596e5bbe1b7ee2e18d3ecb2709
+# Override the base via: docker build --build-arg BASE_IMAGE=quay.io/fedora/fedora-kinoite:45 build_base/
+ARG BASE_IMAGE=quay.io/fedora/fedora-kinoite:45@sha256:d993a3364b8bbbd1689111aa1fb9b04669da36b0d8fe7f5494eb3b318a65f031
 FROM ${BASE_IMAGE}
+
+# testing is the Fedora 45 line. main's build.yml (which GitHub runs for
+# workflow_run events) passes its own F44 base through --build-arg BASE_IMAGE,
+# so the pin above alone cannot stop an F44 build of this tree. Fail the build
+# instead of publishing an F44 image as :testing.
+RUN . /etc/os-release \
+    && [ "${VERSION_ID}" = "45" ] \
+    || { echo "testing must build on Fedora 45 but the base is Fedora ${VERSION_ID:-unknown}" >&2; exit 1; }
 
 # Fedora is the default kernel flavor. CachyOS is an advanced image
 # variant built from the same tree and exposed to users through bootc switches.

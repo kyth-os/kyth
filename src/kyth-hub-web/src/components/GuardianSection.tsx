@@ -1,3 +1,4 @@
+import { isCancelledResult } from "../services/jobResults";
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
@@ -57,9 +58,10 @@ export function GuardianSection({ section }: { section: HubSection }) {
 
   async function refreshGuardian(investigate: boolean): Promise<string> {
     const job = await runGuardianCheck(investigate);
-    await waitGuardianCheck(job);
+    const outcome = await waitGuardianCheck(job);
     const next = await fetchGuardianSnapshot();
     if (next) setSnapshot(next);
+    if (isCancelledResult(outcome)) return outcome;
     return investigate ? "Guardian investigation finished." : "Guardian health check finished.";
   }
 

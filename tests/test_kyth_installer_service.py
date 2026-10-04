@@ -35,6 +35,15 @@ class TestInstallerService(unittest.TestCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
+    def test_record_partition_step_persists_context_and_transaction(self):
+        with patch.object(self.context, "record_partition_step") as record_step, patch(
+            "kyth_installer.phases.common._record_transaction"
+        ) as record_transaction:
+            self.service._record_partition_step("format", "started", "/dev/sda2")
+
+        record_step.assert_called_once_with("format", "started", "/dev/sda2")
+        record_transaction.assert_called_once_with(self.context, "partitioning")
+
     @patch("kyth_installer.disk.list_disks")
     def test_new_table(self, mock_list_disks):
         mock_list_disks.return_value = [{"name": "/dev/sda"}]
@@ -195,6 +204,39 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertFalse(res.get("ok"))
         self.assertIn("Unsupported filesystem", res.get("message", ""))
 
+    @patch("kyth_installer.disk.list_disks")
+    def test_create_partition_rejects_non_text_label(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.create_partition({
+            "disk": "/dev/sda", "start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/", "label": [],
+        })
+        self.assertFalse(res["ok"])
+        self.assertIn("label must be text", res["message"])
+        self.assertFalse(any(op["kind"] == "create" for op in partition_ops.get_journal(self.context).ops))
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_create_partition_rejects_unsafe_mountpoint(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.create_partition({
+            "disk": "/dev/sda", "start_bytes": 4 * 1024**2,
+            "size_bytes": 10 * 1024**3, "fs_type": "btrfs",
+            "mountpoint": "/home/../../etc",
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("traversal", res.get("message", ""))
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_invalid_create_partition_is_removed_from_pending_journal(self, mock_list_disks):
+        self._new_table(mock_list_disks)
+        res = self.service.create_partition({
+            "disk": "/dev/sda", "start_bytes": 1536 * 1024, "size_bytes": 2 * 1024**2,
+            "fs_type": "btrfs", "mountpoint": "/home",
+        })
+        self.assertFalse(res["ok"])
+        self.assertTrue(any("overlaps" in error for error in res["errors"]))
+        self.assertFalse(any(op["kind"] == "create" for op in partition_ops.get_journal(self.context).ops))
+
     # ── delete_partition ─────────────────────────────────────────────
 
     @patch("kyth_installer.disk.list_partitions")
@@ -310,6 +352,18 @@ class InstallerServiceCrudTests(unittest.TestCase):
         journal = partition_ops.get_journal(self.context)
         self.assertEqual(journal.ops[-1]["kind"], "format")
 
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_format_partition_rejects_non_text_label(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.format_partition({
+            "disk": "/dev/sda", "partition": "/dev/sda1", "fs_type": "btrfs", "label": {},
+        })
+        self.assertFalse(res["ok"])
+        self.assertIn("label must be text", res["message"])
+        self.assertFalse(any(op["kind"] == "format" for op in partition_ops.get_journal(self.context).ops))
+
     # ── set_mountpoint ───────────────────────────────────────────────
 
     @patch("kyth_installer.disk._parent_disk")
@@ -322,6 +376,18 @@ class InstallerServiceCrudTests(unittest.TestCase):
         })
         self.assertFalse(res.get("ok"))
         self.assertIn("absolute path", res.get("message", ""))
+
+    @patch("kyth_installer.disk._parent_disk")
+    @patch("kyth_installer.disk.list_disks")
+    def test_set_mountpoint_rejects_traversal(self, mock_list_disks, mock_parent):
+        self._new_table(mock_list_disks)
+        mock_parent.return_value = "/dev/sda"
+        res = self.service.set_mountpoint({
+            "disk": "/dev/sda", "partition": "/dev/sda1",
+            "mountpoint": "/home/../../etc",
+        })
+        self.assertFalse(res.get("ok"))
+        self.assertIn("traversal", res.get("message", ""))
 
     @patch("kyth_installer.disk._parent_disk")
     @patch("kyth_installer.disk.list_disks")
@@ -390,6 +456,32 @@ class InstallerServiceCrudTests(unittest.TestCase):
         self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
 
     @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_handles_native_process_start_failure(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "commit", side_effect=OSError("executable not found")), \
+             patch.object(journal, "rollback") as mock_rollback:
+            res = self.service.commit_partitions(
+                {"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True}
+            )
+        self.assertFalse(res.get("ok"))
+        self.assertIn("executable not found", res.get("message", ""))
+        mock_rollback.assert_called_once()
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.IDLE)
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_commit_partitions_marks_session_failed_when_rollback_fails(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "commit", side_effect=RuntimeError("partition write failed")), \
+             patch.object(journal, "rollback", side_effect=OSError("backup unavailable")):
+            res = self.service.commit_partitions(
+                {"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True}
+            )
+        self.assertFalse(res.get("ok"))
+        self.assertTrue(res.get("rollback_failed"))
+        self.assertIn("backup unavailable", res.get("message", ""))
+        self.assertEqual(self.context.lifecycle, context_module.InstallLifecycle.FAILED)
+
+    @patch("kyth_installer.disk.list_disks")
     def test_commit_partitions_can_be_retried_after_a_failure(self, mock_list_disks):
         journal = self._committable_journal(mock_list_disks)
         with patch.object(journal, "commit", side_effect=RuntimeError("sgdisk failed")), \
@@ -438,6 +530,31 @@ class InstallerServiceCrudTests(unittest.TestCase):
         mock_commit.assert_not_called()
 
     @patch("kyth_installer.disk.list_disks")
+    def test_committed_journal_cannot_be_replayed_or_edited(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        journal._committed = True
+        with patch.object(journal, "commit") as mock_commit:
+            response = self.service.commit_partitions({"disk": "/dev/sda", "confirm_erase": True, "confirm_backup": True})
+        self.assertFalse(response["ok"])
+        self.assertIn("already been committed", response["message"])
+        mock_commit.assert_not_called()
+
+        with patch("kyth_installer.disk._parent_disk", return_value="/dev/sda"):
+            response = self.service.set_mountpoint({
+                "disk": "/dev/sda", "partition": "/dev/sda1", "mountpoint": "/home",
+            })
+        self.assertFalse(response["ok"])
+        self.assertIn("already been committed", response["message"])
+
+        # JSON strings are truthy but are not checkbox confirmations.
+        with patch.object(journal, "commit") as mock_commit:
+            res = self.service.commit_partitions({
+                "disk": "/dev/sda", "confirm_erase": "false", "confirm_backup": "false",
+            })
+        self.assertFalse(res.get("ok"))
+        mock_commit.assert_not_called()
+
+    @patch("kyth_installer.disk.list_disks")
     def test_commit_partitions_allows_nondestructive_journal_without_confirmations(
         self, mock_list_disks,
     ):
@@ -466,6 +583,14 @@ class InstallerServiceCrudTests(unittest.TestCase):
             res = self.service.rollback_partitions({"disk": "/dev/sda"})
         self.assertFalse(res.get("ok"))
         self.assertEqual(res.get("message"), "sgdisk restore failed")
+
+    @patch("kyth_installer.disk.list_disks")
+    def test_rollback_partitions_reports_os_error(self, mock_list_disks):
+        journal = self._committable_journal(mock_list_disks)
+        with patch.object(journal, "rollback", side_effect=OSError("backup unavailable")):
+            res = self.service.rollback_partitions({"disk": "/dev/sda"})
+        self.assertFalse(res.get("ok"))
+        self.assertEqual(res.get("message"), "backup unavailable")
 
     def test_partition_actions_return_missing_journal_error_consistently(self):
         body = {"disk": "/dev/sda", "partition": "/dev/sda1"}

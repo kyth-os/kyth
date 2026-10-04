@@ -3,6 +3,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -22,7 +23,7 @@ class InstallerRecoveryTests(unittest.TestCase):
         context = InstallerContext()
         context.register_mount("/target")
         context.register_mount("/target/boot/efi")
-        run = MagicMock()
+        run = MagicMock(return_value=SimpleNamespace(returncode=0))
 
         cleanup_registered_mounts(context, run=run)
 

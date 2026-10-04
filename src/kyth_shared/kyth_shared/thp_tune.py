@@ -82,9 +82,9 @@ def generate_thp_conf(cfg: dict[str, Any] | None = None, dest: Path | None = Non
     content = (
         "# Kyth THP — generated\n"
         "vm.compaction_proactiveness = 0\n"
-        f"kernel.khugepaged_scan_sleep_millisecs = {sl}\n"
-        "kernel.khugepaged_alloc_sleep_millisecs = 60000\n"
-        "kernel.khugepaged_max_ptes_none = 511\n"
+        f"-kernel.khugepaged_scan_sleep_millisecs = {sl}\n"
+        "-kernel.khugepaged_alloc_sleep_millisecs = 60000\n"
+        "-kernel.khugepaged_max_ptes_none = 511\n"
     )
     dest.parent.mkdir(parents=True, exist_ok=True)
     atomic_write_text(dest, content, mode=0o644)

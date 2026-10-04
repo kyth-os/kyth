@@ -29,6 +29,25 @@ fn read_link(path: &Path) -> Option<String> {
         .map(|target| target.to_string_lossy().into_owned())
 }
 
+/// Atomically replace (or create) a symlink. The new link is built at a
+/// sibling temp path and renamed over the target, so a failure can never
+/// leave the path missing — the old link stays in place until the rename
+/// succeeds. Returns `true` on success.
+fn replace_symlink(path: &Path, target: &str) -> bool {
+    let tmp = path.with_extension("tmp-link");
+    let _ = std::fs::remove_file(&tmp);
+    if std::os::unix::fs::symlink(target, &tmp).is_err() {
+        return false;
+    }
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => true,
+        Err(_) => {
+            let _ = std::fs::remove_file(&tmp);
+            false
+        }
+    }
+}
+
 /// Run the migration against `etc`/`lib` roots. The `run` closure executes
 /// argv and returns stdout on success; production passes [`systemctl_output`]
 /// while tests pass a stub so no live systemd state is touched.
@@ -41,10 +60,10 @@ pub fn migrate(etc: &Path, lib: &Path, run: &dyn Fn(&[String]) -> Option<String>
     let mut changed = false;
 
     let plasmalogin_etc = etc.join("systemd/system").join(PLM_UNIT_NAME);
-    if read_link(&plasmalogin_etc).as_deref() == Some(DEV_NULL) {
-        if std::fs::remove_file(&plasmalogin_etc).is_ok() {
-            changed = true;
-        }
+    if read_link(&plasmalogin_etc).as_deref() == Some(DEV_NULL)
+        && std::fs::remove_file(&plasmalogin_etc).is_ok()
+    {
+        changed = true;
     }
     let enabled = run(&[
         "systemctl".to_string(),
@@ -70,22 +89,19 @@ pub fn migrate(etc: &Path, lib: &Path, run: &dyn Fn(&[String]) -> Option<String>
         if let Some(parent) = graphical_wants.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::remove_file(&dm_link);
-        if std::os::unix::fs::symlink(PLM_TARGET, &dm_link).is_ok() {
+        if replace_symlink(&dm_link, PLM_TARGET) {
             changed = true;
         }
-        let _ = std::fs::remove_file(&graphical_wants);
-        if std::os::unix::fs::symlink(&dm_link, &graphical_wants).is_ok() {
+        if replace_symlink(&graphical_wants, &dm_link.to_string_lossy()) {
             changed = true;
         }
     }
 
     let default_link = etc.join("systemd/system/default.target");
-    if read_link(&default_link).as_deref() != Some(GRAPHICAL_TARGET) {
-        let _ = std::fs::remove_file(&default_link);
-        if std::os::unix::fs::symlink(GRAPHICAL_TARGET, &default_link).is_ok() {
-            changed = true;
-        }
+    if read_link(&default_link).as_deref() != Some(GRAPHICAL_TARGET)
+        && replace_symlink(&default_link, GRAPHICAL_TARGET)
+    {
+        changed = true;
     }
 
     let sddm_etc = etc.join("systemd/system/sddm.service");
@@ -94,8 +110,7 @@ pub fn migrate(etc: &Path, lib: &Path, run: &dyn Fn(&[String]) -> Option<String>
         // manual enables. Already masked: nothing to do.
         Some(DEV_NULL) => {}
         _ => {
-            let _ = std::fs::remove_file(&sddm_etc);
-            if std::os::unix::fs::symlink(DEV_NULL, &sddm_etc).is_ok() {
+            if replace_symlink(&sddm_etc, DEV_NULL) {
                 changed = true;
             }
         }
@@ -103,11 +118,9 @@ pub fn migrate(etc: &Path, lib: &Path, run: &dyn Fn(&[String]) -> Option<String>
     if read_link(&graphical_wants)
         .as_deref()
         .is_some_and(|target| target.contains("sddm"))
+        && replace_symlink(&graphical_wants, &dm_link.to_string_lossy())
     {
-        let _ = std::fs::remove_file(&graphical_wants);
-        if std::os::unix::fs::symlink(&dm_link, &graphical_wants).is_ok() {
-            changed = true;
-        }
+        changed = true;
     }
     let sddm_state = run(&[
         "systemctl".to_string(),
