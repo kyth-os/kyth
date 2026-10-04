@@ -129,7 +129,7 @@ def _source_imgref(image: str) -> str:
     image = (image or "").strip()
     if not image:
         return SOURCE_IMAGE
-    if image.startswith(("docker://", "containers-storage:", "oci:", "ostree:")):
+    if image.startswith(("docker://", "containers-storage:", "oci:", "ostree:", "dir:")):
         return image
     return f"docker://{image}"
 
@@ -186,7 +186,7 @@ def _read_source_metadata(path: Path = SOURCE_METADATA_FILE) -> dict:
         if path.is_symlink() or not path.is_file():
             raise RuntimeError(f"source metadata is missing or unsafe: {path}")
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"could not read embedded-image metadata: {exc}") from exc
     if not isinstance(payload, dict):
         raise RuntimeError("embedded-image metadata must be a JSON object")

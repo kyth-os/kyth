@@ -114,6 +114,21 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertNotIn("DXVK_ASYNC", body)
         self.assertNotRegex(body, r"^DXVK_FRAME_RATE=", re.M)
 
+    def test_wifi_regdom_maps_each_south_american_timezone_to_its_country(self):
+        body = (FRAG_DIR / "network" / "17-wifi-driver-tweaks.sh").read_text(encoding="utf-8")
+        expected = {
+            "America/La_Paz": "BO",
+            "America/Asuncion": "PY",
+            "America/Montevideo": "UY",
+            "America/Guayaquil": "EC",
+        }
+        for zone, country in expected.items():
+            self.assertIn(f'{zone}) cc="{country}"', body)
+        self.assertNotIn(
+            'America/La_Paz|America/Asuncion|America/Montevideo|America/Guayaquil',
+            body,
+        )
+
     def test_nvme_readahead_udev_triggers_can_restart_the_hint_service(self):
         body = (FRAG_DIR / "storage" / "50-nvme-readahead.sh").read_text(encoding="utf-8")
         self.assertIn('SYSTEMD_WANTS}="kyth-readahead-hint.service"', body)

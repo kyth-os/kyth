@@ -350,11 +350,24 @@ def _prepare_ntfs_install_plan(state: dict | InstallRequest, log, cancel_event=N
         cancel_event=cancel_event, register_mount=register_mount, release_mount=release_mount,
     )
 
-def _prepare_free_space_install_plan(state: dict | InstallRequest, log) -> InstallPlan:
-    return _plan_commit.prepare_guided_install_plan(
-        state, log, validate_target=_validate_free_space_target,
-        prepare_target=_prepare_free_space_target,
-    )
+def _prepare_free_space_install_plan(
+    state: dict | InstallRequest,
+    log,
+    cancel_event=None,
+    register_mount=None,
+    release_mount=None,
+) -> InstallPlan:
+    kwargs = {
+        "validate_target": _validate_free_space_target,
+        "prepare_target": _prepare_free_space_target,
+    }
+    if cancel_event is not None:
+        kwargs["cancel_event"] = cancel_event
+    if register_mount is not None:
+        kwargs["register_mount"] = register_mount
+    if release_mount is not None:
+        kwargs["release_mount"] = release_mount
+    return _plan_commit.prepare_guided_install_plan(state, log, **kwargs)
 
 def _prepare_explicit_install_plan(
     plan: InstallPlan,
