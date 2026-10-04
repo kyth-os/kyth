@@ -3374,12 +3374,63 @@ fn dispatch_pcie(action: &str) -> ExitCode {
     }
 }
 
+fn bluetooth_audio_output(output: &str) -> bool {
+    let output = output.to_ascii_lowercase();
+    output.contains("bluez") || output.contains("bluetooth")
+}
+
+fn has_connected_bluetooth_devices(output: &str) -> bool {
+    output.lines().any(|line| {
+        let line = line.trim().to_ascii_lowercase();
+        !line.is_empty() && !line.contains("no default controller")
+    })
+}
+
+fn bluetooth_audio_active_with<F>(mut probe: F) -> bool
+where
+    F: FnMut(&[String]) -> Option<String>,
+{
+    for (program, args) in [
+        ("pactl", ["list", "sinks", "short"].as_slice()),
+        ("pw-cli", ["list-objects", "Node"].as_slice()),
+    ] {
+        let argv = std::iter::once(program.to_string())
+            .chain(args.iter().map(|arg| (*arg).to_string()))
+            .collect::<Vec<_>>();
+        if probe(&argv).is_some_and(|output| bluetooth_audio_output(&output)) {
+            return true;
+        }
+    }
+    let argv = [
+        "bluetoothctl".to_string(),
+        "devices".into(),
+        "Connected".into(),
+    ];
+    probe(&argv).is_some_and(|output| has_connected_bluetooth_devices(&output))
+}
+
+fn bluetooth_audio_active() -> bool {
+    bluetooth_audio_active_with(|argv| {
+        let output =
+            kyth_shared::system::process::run_bounded(argv, Duration::from_secs(10)).ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    })
+}
+
 fn dispatch_pipewire_gaming(action: &str) -> ExitCode {
     let config_path = module_config_path("pipewire-gaming.toml", "/etc/kyth/pipewire-gaming.toml");
     let destination = generated_path(
         "wireplumber/main.lua.d",
         "99-kyth-gaming.lua",
         "/etc/wireplumber/main.lua.d/99-kyth-gaming.lua",
+    );
+    let quantum_destination = generated_path(
+        "pipewire",
+        "99-kyth-gaming.conf",
+        "/etc/pipewire/pipewire.conf.d/99-kyth-gaming.conf",
     );
     match action {
         "status" => {
@@ -3403,10 +3454,16 @@ fn dispatch_pipewire_gaming(action: &str) -> ExitCode {
                 profile: action.into(),
                 quantum: 128,
             };
+            let bluetooth_active = action == "gaming" && bluetooth_audio_active();
             if let Err(error) = extended_preferences::save_pipewire_gaming(&config_path, &config)
                 .and_then(|_| {
-                    extended_preferences::generate_pipewire_gaming(&config, &destination)
-                        .map(|_| ())
+                    extended_preferences::generate_pipewire_gaming(
+                        &config,
+                        &destination,
+                        &quantum_destination,
+                        bluetooth_active,
+                    )
+                    .map(|_| ())
                 })
             {
                 eprintln!("kyth-pipewire-gaming: {error}");
@@ -3420,9 +3477,13 @@ fn dispatch_pipewire_gaming(action: &str) -> ExitCode {
                 return code;
             }
             let config = extended_preferences::load_pipewire_gaming(&config_path);
-            if let Err(error) =
-                extended_preferences::generate_pipewire_gaming(&config, &destination)
-            {
+            let bluetooth_active = config.profile == "gaming" && bluetooth_audio_active();
+            if let Err(error) = extended_preferences::generate_pipewire_gaming(
+                &config,
+                &destination,
+                &quantum_destination,
+                bluetooth_active,
+            ) {
                 eprintln!("kyth-pipewire-gaming: {error}");
                 return ExitCode::from(1);
             }
@@ -3746,6 +3807,74 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bluetooth_sink_probe_matches_bluez_and_bluetooth_labels_case_insensitively() {
+        assert!(bluetooth_audio_output("bluez_output.00_11_22"));
+        assert!(bluetooth_audio_output("Bluetooth Headset"));
+        assert!(!bluetooth_audio_output("alsa_output.pci-analog-stereo"));
+    }
+
+    #[test]
+    fn bluetooth_connected_probe_ignores_no_controller_message() {
+        assert!(has_connected_bluetooth_devices(
+            "Device 00:11:22:33:44:55 Wireless Headset\n"
+        ));
+        assert!(!has_connected_bluetooth_devices(
+            "No default controller available\n"
+        ));
+        assert!(!has_connected_bluetooth_devices("\n"));
+    }
+
+    #[test]
+    fn bluetooth_probe_detects_sink_before_fallback_commands() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let active = bluetooth_audio_active_with(|argv| {
+            calls.push(argv.to_vec());
+            (argv.first().map(String::as_str) == Some("pactl"))
+                .then(|| "bluez_output.00_11_22".to_string())
+        });
+
+        assert!(active);
+        assert_eq!(
+            calls,
+            vec![vec![
+                "pactl".to_string(),
+                "list".to_string(),
+                "sinks".to_string(),
+                "short".to_string()
+            ]]
+        );
+    }
+
+    #[test]
+    fn bluetooth_probe_uses_connected_device_fallback_after_sink_probes() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let active = bluetooth_audio_active_with(|argv| {
+            calls.push(argv.to_vec());
+            (argv.first().map(String::as_str) == Some("bluetoothctl"))
+                .then(|| "Device 00:11:22:33:44:55 Wireless Headset".to_string())
+        });
+
+        assert!(active);
+        assert_eq!(
+            calls,
+            vec![
+                vec![
+                    "pactl".to_string(),
+                    "list".into(),
+                    "sinks".into(),
+                    "short".into()
+                ],
+                vec!["pw-cli".to_string(), "list-objects".into(), "Node".into()],
+                vec![
+                    "bluetoothctl".to_string(),
+                    "devices".into(),
+                    "Connected".into()
+                ]
+            ]
+        );
+    }
 
     #[test]
     fn generated_unit_activation_reloads_enables_and_restarts_units() {

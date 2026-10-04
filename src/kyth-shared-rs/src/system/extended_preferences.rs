@@ -208,10 +208,14 @@ pub fn save_pipewire_gaming(
 pub fn generate_pipewire_gaming(
     config: &PipewireGamingConfig,
     destination: impl AsRef<Path>,
+    quantum_destination: impl AsRef<Path>,
+    bluetooth_audio_active: bool,
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
+    let quantum_destination = quantum_destination.as_ref();
     if config.profile != "gaming" {
         crate::atomic_io::remove_if_exists(destination)?;
+        crate::atomic_io::remove_if_exists(quantum_destination)?;
         return Ok(None);
     }
     let content = r#"-- Kyth PipeWire gaming — generated
@@ -225,6 +229,15 @@ table.insert(alsa_monitor.rules, {
 "#
     .replace("__Q__", &config.quantum.to_string());
     crate::atomic_io::atomic_write_text(destination, &content, Some(0o644))?;
+    if bluetooth_audio_active {
+        crate::atomic_io::remove_if_exists(quantum_destination)?;
+    } else {
+        let quantum = format!(
+            "# Kyth PipeWire gaming — applied only while the gaming profile is active\ncontext.properties = {{\n    default.clock.rate          = 48000\n    default.clock.quantum       = {}\n    default.clock.min-quantum   = 64\n    default.clock.max-quantum   = 8192\n    default.clock.allowed-rates = [ 44100 48000 ]\n}}\n",
+            config.quantum
+        );
+        crate::atomic_io::atomic_write_text(quantum_destination, &quantum, Some(0o644))?;
+    }
     Ok(Some(destination.to_path_buf()))
 }
 
@@ -974,6 +987,75 @@ mod tests {
 
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn pipewire_gaming_writes_global_quantum_and_wireplumber_rules() {
+        let dir = tempdir().unwrap();
+        let wireplumber = dir.path().join("wireplumber/99-kyth-gaming.lua");
+        let quantum = dir.path().join("pipewire/99-kyth-gaming.conf");
+        let config = PipewireGamingConfig {
+            profile: "gaming".into(),
+            quantum: 128,
+        };
+
+        generate_pipewire_gaming(&config, &wireplumber, &quantum, false).unwrap();
+
+        assert!(std::fs::read_to_string(&wireplumber)
+            .unwrap()
+            .contains("api.alsa.period-size"));
+        assert_eq!(
+            std::fs::read_to_string(&quantum).unwrap(),
+            r#"# Kyth PipeWire gaming — applied only while the gaming profile is active
+context.properties = {
+    default.clock.rate          = 48000
+    default.clock.quantum       = 128
+    default.clock.min-quantum   = 64
+    default.clock.max-quantum   = 8192
+    default.clock.allowed-rates = [ 44100 48000 ]
+}
+"#
+        );
+    }
+
+    #[test]
+    fn balanced_pipewire_profile_removes_both_generated_files() {
+        let dir = tempdir().unwrap();
+        let wireplumber = dir.path().join("wireplumber/99-kyth-gaming.lua");
+        let quantum = dir.path().join("pipewire/99-kyth-gaming.conf");
+        std::fs::create_dir_all(wireplumber.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(quantum.parent().unwrap()).unwrap();
+        std::fs::write(&wireplumber, "stale").unwrap();
+        std::fs::write(&quantum, "stale").unwrap();
+
+        generate_pipewire_gaming(
+            &PipewireGamingConfig::default(),
+            &wireplumber,
+            &quantum,
+            false,
+        )
+        .unwrap();
+
+        assert!(!wireplumber.exists());
+        assert!(!quantum.exists());
+    }
+
+    #[test]
+    fn bluetooth_audio_skips_and_clears_global_gaming_quantum() {
+        let dir = tempdir().unwrap();
+        let wireplumber = dir.path().join("wireplumber/99-kyth-gaming.lua");
+        let quantum = dir.path().join("pipewire/99-kyth-gaming.conf");
+        std::fs::create_dir_all(quantum.parent().unwrap()).unwrap();
+        std::fs::write(&quantum, "stale").unwrap();
+        let config = PipewireGamingConfig {
+            profile: "gaming".into(),
+            quantum: 128,
+        };
+
+        generate_pipewire_gaming(&config, &wireplumber, &quantum, true).unwrap();
+
+        assert!(wireplumber.exists());
+        assert!(!quantum.exists());
+    }
 
     #[test]
     fn fan_curve_interpolates_sorted_points() {

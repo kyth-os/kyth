@@ -6,6 +6,7 @@
 //! point touches the live filesystem.
 
 use std::collections::BTreeMap;
+use std::os::unix::fs::{symlink, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 pub const DEFAULT_RATE: i64 = 48000;
@@ -100,13 +101,63 @@ pub fn render_env_map(named: &BTreeMap<String, i64>, rate: i64) -> String {
     text
 }
 
+enum DropinSnapshot {
+    Missing,
+    File { contents: Vec<u8>, mode: u32 },
+    Symlink(PathBuf),
+}
+
+fn snapshot_dropin(path: &Path) -> std::io::Result<DropinSnapshot> {
+    let metadata = match std::fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(DropinSnapshot::Missing)
+        }
+        Err(error) => return Err(error),
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(DropinSnapshot::Symlink(std::fs::read_link(path)?));
+    }
+    if !metadata.is_file() {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "PipeWire latency drop-in is not a regular file",
+        ));
+    }
+    Ok(DropinSnapshot::File {
+        contents: std::fs::read(path)?,
+        mode: metadata.permissions().mode() & 0o7777,
+    })
+}
+
+fn restore_dropin(path: &Path, snapshot: DropinSnapshot) -> std::io::Result<()> {
+    match snapshot {
+        DropinSnapshot::Missing => match std::fs::remove_file(path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        },
+        DropinSnapshot::File { contents, mode } => {
+            crate::atomic_io::atomic_write_bytes(path, &contents, Some(mode))
+        }
+        DropinSnapshot::Symlink(target) => {
+            match std::fs::remove_file(path) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => return Err(error),
+            }
+            symlink(target, path)
+        }
+    }
+}
+
 /// Applies the preset under `xdg` (drop-in + env map), returning the
-/// launcher notes. Mirrors `apply_pipewire_latency`: write failures abort
-/// (the Python launcher raised instead of stamping TTL), the stale drop-in
-/// removal stays best-effort, and the env-map note is always present.
+/// launcher notes. A failed env-map write restores the prior quantum
+/// drop-in so a partial apply is never reported as a failed no-op.
 pub fn apply(xdg: &Path, apps: &BTreeMap<String, i64>, rate: i64) -> std::io::Result<Vec<String>> {
     let dropin = xdg.join("pipewire/pipewire.conf.d/99-kyth-latency.conf");
     let env_path = xdg.join("kyth/pipewire-latency.env");
+    let previous_dropin = snapshot_dropin(&dropin)?;
     let mut applied = Vec::new();
     match default_quantum(apps) {
         Some(quantum) => {
@@ -126,7 +177,17 @@ pub fn apply(xdg: &Path, apps: &BTreeMap<String, i64>, rate: i64) -> std::io::Re
     {
         ordered.insert(name.clone(), *quantum);
     }
-    crate::atomic_io::atomic_write_text(&env_path, &render_env_map(&ordered, rate), None)?;
+    if let Err(error) =
+        crate::atomic_io::atomic_write_text(&env_path, &render_env_map(&ordered, rate), None)
+    {
+        if let Err(restore_error) = restore_dropin(&dropin, previous_dropin) {
+            return Err(std::io::Error::new(
+                error.kind(),
+                format!("{error}; failed to restore prior PipeWire drop-in: {restore_error}"),
+            ));
+        }
+        return Err(error);
+    }
     applied.push(format!("{} apps → {}", ordered.len(), env_path.display()));
     Ok(applied)
 }
@@ -188,6 +249,72 @@ mod tests {
         assert!(rendered.contains("evil\\nINJECTED=1=PIPEWIRE_LATENCY=64/48000\n"));
         assert!(rendered.contains("cr\\rev=PIPEWIRE_LATENCY=128/48000\n"));
         assert!(!rendered.contains("INJECTED=1\n"));
+    }
+
+    #[test]
+    fn failed_env_write_removes_new_quantum_dropin() {
+        let dir = tempdir().unwrap();
+        let blocker = dir.path().join("kyth");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        let mut apps = BTreeMap::new();
+        apps.insert("default".into(), 256);
+
+        assert!(apply(dir.path(), &apps, DEFAULT_RATE).is_err());
+
+        assert!(!dir
+            .path()
+            .join("pipewire/pipewire.conf.d/99-kyth-latency.conf")
+            .exists());
+    }
+
+    #[test]
+    fn failed_env_write_restores_existing_quantum_dropin() {
+        let dir = tempdir().unwrap();
+        let dropin = dir
+            .path()
+            .join("pipewire/pipewire.conf.d/99-kyth-latency.conf");
+        std::fs::create_dir_all(dropin.parent().unwrap()).unwrap();
+        std::fs::write(&dropin, "previous quantum configuration").unwrap();
+        let mut permissions = std::fs::metadata(&dropin).unwrap().permissions();
+        permissions.set_mode(0o600);
+        std::fs::set_permissions(&dropin, permissions).unwrap();
+        let blocker = dir.path().join("kyth");
+        std::fs::write(&blocker, "not a directory").unwrap();
+        let mut apps = BTreeMap::new();
+        apps.insert("default".into(), 256);
+
+        assert!(apply(dir.path(), &apps, DEFAULT_RATE).is_err());
+
+        assert_eq!(
+            std::fs::read_to_string(&dropin).unwrap(),
+            "previous quantum configuration"
+        );
+        assert_eq!(
+            std::fs::metadata(dropin).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn failed_env_write_restores_removed_quantum_symlink() {
+        let dir = tempdir().unwrap();
+        let target = dir.path().join("shared-pipewire.conf");
+        std::fs::write(&target, "shared configuration").unwrap();
+        let dropin = dir
+            .path()
+            .join("pipewire/pipewire.conf.d/99-kyth-latency.conf");
+        std::fs::create_dir_all(dropin.parent().unwrap()).unwrap();
+        std::os::unix::fs::symlink(&target, &dropin).unwrap();
+        let blocker = dir.path().join("kyth");
+        std::fs::write(&blocker, "not a directory").unwrap();
+
+        assert!(apply(dir.path(), &BTreeMap::new(), DEFAULT_RATE).is_err());
+
+        assert!(std::fs::symlink_metadata(&dropin)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(std::fs::read_link(dropin).unwrap(), target);
     }
 
     #[test]
