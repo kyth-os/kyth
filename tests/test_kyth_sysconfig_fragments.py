@@ -114,6 +114,12 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertNotIn("DXVK_ASYNC", body)
         self.assertNotRegex(body, r"^DXVK_FRAME_RATE=", re.M)
 
+    def test_nvme_readahead_udev_triggers_can_restart_the_hint_service(self):
+        body = (FRAG_DIR / "storage" / "50-nvme-readahead.sh").read_text(encoding="utf-8")
+        self.assertIn('SYSTEMD_WANTS}="kyth-readahead-hint.service"', body)
+        service = body.split("[Service]", 1)[1].split("READAHEADEOF", 1)[0]
+        self.assertIn("RemainAfterExit=no", service)
+
     def test_journald_cap_has_headroom_and_bounded_file_size(self):
         """A tight cap with no per-file bound left normal growth sitting right at
         the ceiling: systemd-journal-flush.service (stock, unavoidable, early in

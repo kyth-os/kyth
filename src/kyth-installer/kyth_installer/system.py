@@ -326,6 +326,14 @@ def _hash_password(password: str) -> str:
     # would surface as a confusing "invalid SHA-512 crypt value" error.
     if not password:
         raise RuntimeError("Password cannot be empty. Return to the Configure step and re-enter it.")
+    # openssl reads the password as a C string, so a NUL silently truncates it:
+    # the installed login password would be shorter than what was typed.
+    if "\0" in password:
+        raise RuntimeError("Password cannot contain a NUL character.")
+    # `openssl passwd -stdin` drops a trailing newline, so "ab\n" would be
+    # stored as "ab". The Rust daemon rejects line breaks outright; match it.
+    if "\n" in password or "\r" in password:
+        raise RuntimeError("Password cannot contain a line break.")
     result = run_command(
         ["openssl", "passwd", "-6", "-stdin"],
         input=password,

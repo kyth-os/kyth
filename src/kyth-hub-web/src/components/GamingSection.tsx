@@ -1,3 +1,4 @@
+import { createLatestGate } from "../services/jobResults";
 import { useEffect, useRef, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
@@ -341,9 +342,13 @@ export function GamingSection({ section }: { section: HubSection }) {
     return () => { c = true; };
   }, []);
 
+  const protonGate = useRef(createLatestGate());
   async function lookupProtonDb() {
     const ids = gameId.split(/[ ,]+/).map((id) => id.trim()).filter(Boolean).slice(0, 20);
-    setProton((await fetchProtonDbMany(ids)) ?? []);
+    // Last lookup wins: a slow earlier response must not overwrite a newer one.
+    const token = protonGate.current.start();
+    const results = (await fetchProtonDbMany(ids)) ?? [];
+    if (protonGate.current.isCurrent(token)) setProton(results);
   }
   const live = audit !== null || launchers !== null;
   return (

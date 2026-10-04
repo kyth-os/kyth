@@ -221,7 +221,9 @@ def _mount_sources(path: str, recursive: bool = False) -> set[str]:
         _logger.debug("_mount_sources probe failed for %s: %s", path, exc, exc_info=True)
         out = ""
     for line in out.splitlines():
-        source = line.strip()
+        # Drop the "[/subvol]" suffix findmnt adds for btrfs subvolume and bind
+        # mounts, or the device never resolves and its disk is not protected.
+        source = line.strip().split("[", 1)[0].strip()
         if source.startswith("/dev/"):
             sources.add(os.path.realpath(source))
     return sources

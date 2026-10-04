@@ -1,3 +1,4 @@
+import { CANCELLED_RESULT } from "./jobResults";
 import { invoke as tauriInvoke } from "@tauri-apps/api/core";
 import { inTauriShell } from "./tauriEnv";
 
@@ -225,7 +226,7 @@ export async function waitGuardianCheck(job: string): Promise<string> {
  * anything else throws so useSectionAction reports the failure. */
 function resolveTerminalJob(state: InstallStatus): string {
   if (state.state === "complete") return state.detail;
-  if (state.state === "cancelled") return "Cancelled.";
+  if (state.state === "cancelled") return CANCELLED_RESULT;
   throw new Error(state.detail);
 }
 
@@ -1326,7 +1327,9 @@ export async function fetchAudioPresets(): Promise<string[] | null> {
 }
 export async function applyPipewireQuantum(preset: string, dryRun = false): Promise<{ ok: boolean; detail: string } | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<{ ok: boolean; detail: string }>("apply_pipewire_quantum", { preset, dryRun }); } catch { return null; }
+  // No catch: a failed write inside the Hub shell must surface as a failure,
+  // not as null ("outside the Hub shell").
+  return await invoke<{ ok: boolean; detail: string }>("apply_pipewire_quantum", { preset, dryRun });
 }
 
 // Deployment history — bootc timeline (Repair)

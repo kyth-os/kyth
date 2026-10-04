@@ -1555,6 +1555,10 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
                 eprintln!("kyth-selinux-gaming: {error}");
                 return ExitCode::from(1);
             }
+            if let Err(error) = preference_presets::apply_selinux_gaming(true) {
+                eprintln!("kyth-selinux-gaming: {error}");
+                return ExitCode::from(1);
+            }
             println!("selinux-gaming gaming");
             ExitCode::SUCCESS
         }
@@ -1567,6 +1571,10 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
                 eprintln!("kyth-selinux-gaming: {error}");
                 return ExitCode::from(1);
             }
+            if let Err(error) = preference_presets::apply_selinux_gaming(false) {
+                eprintln!("kyth-selinux-gaming: {error}");
+                return ExitCode::from(1);
+            }
             println!("selinux-gaming balanced");
             ExitCode::SUCCESS
         }
@@ -1574,7 +1582,14 @@ fn dispatch_selinux_gaming(action: &str) -> ExitCode {
             if let Err(code) = ensure_root("selinux-gaming", &[action.to_string()]) {
                 return code;
             }
-            ExitCode::SUCCESS
+            let config = preference_presets::load_selinux_gaming(&config_path);
+            match preference_presets::apply_selinux_gaming(config.allow_execheap) {
+                Ok(_) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("kyth-selinux-gaming: {error}");
+                    ExitCode::from(1)
+                }
+            }
         }
         _ => {
             eprintln!("Usage: kyth-selinux-gaming [gaming|balanced|apply|status]");

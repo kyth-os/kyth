@@ -1,3 +1,4 @@
+import { CANCELLED_RESULT, installInOrder } from "../services/jobResults";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
@@ -219,12 +220,14 @@ export function AppStoreSection({ section }: { section: HubSection }) {
     // installed before it must still show as installed — refresh always,
     // not only on the all-succeeded path — and the failure itself must
     // still surface instead of being swallowed.
+    let cancelled = false;
     try {
-      for (const app of pack.apps) await install(app.id);
+      ({ cancelled } = await installInOrder(pack.apps.map((app) => app.id), install));
     } finally {
       await refreshInstalled().catch(() => undefined);
     }
-    return `${pack.name} apps installed.`;
+    // Cancel stops the pack; do not report the remaining apps as installed.
+    return cancelled ? CANCELLED_RESULT : `${pack.name} apps installed.`;
   }
   async function installAndRefresh(id: string): Promise<string> { const result = await install(id); await refreshInstalled(); return result; }
 

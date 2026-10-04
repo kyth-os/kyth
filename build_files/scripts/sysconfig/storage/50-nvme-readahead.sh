@@ -28,5 +28,5 @@ Description=Kyth readahead hint (gaming 2048 else 512)
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-readahead-hint apply
-RemainAfterExit=yes
+RemainAfterExit=no
 READAHEADEOF

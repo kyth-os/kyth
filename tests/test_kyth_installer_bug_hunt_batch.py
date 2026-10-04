@@ -15,12 +15,22 @@ sys.path.insert(0, str(ROOT / "build_files" / "kyth_shared"))
 from kyth_installer.context import InstallRequest, InstallerContext  # noqa: E402
 from kyth_installer import imagesrc, validation  # noqa: E402
 from kyth_installer.disk import _probe  # noqa: E402
+from kyth_installer.disk import _util as disk_utils  # noqa: E402
+from kyth_installer import system as installer_system  # noqa: E402
 from kyth_installer.mount_registry import MountRegistry  # noqa: E402
 from kyth_installer.partition_ops_journal import Journal  # noqa: E402
 from kyth_installer import recovery  # noqa: E402
 
 
 class InstallerBugHuntBatchTests(unittest.TestCase):
+    def test_safe_int_rejects_non_finite_json_numbers(self):
+        for value in (json.loads("1e999"), json.loads("-1e999"), float("nan")):
+            self.assertEqual(disk_utils._safe_int(value, -1), -1)
+
+    def test_password_rejects_nul_instead_of_hashing_a_truncated_value(self):
+        with self.assertRaisesRegex(RuntimeError, "NUL"):
+            installer_system._hash_password("pa\x00ss-tail")
+
     def test_immutable_request_preserves_guided_storage_fields(self):
         request = InstallRequest.from_state({
             "install_mode": "free_space",
