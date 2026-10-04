@@ -842,6 +842,10 @@ fn dispatch_flatpak_trim(action: &str) -> ExitCode {
                 eprintln!("kyth-flatpak-trim: {error}");
                 return ExitCode::from(1);
             }
+            if let Err(error) = activate_systemd_units(&["kyth-flatpak-trim.timer"]) {
+                eprintln!("kyth-flatpak-trim: {error}");
+                return ExitCode::from(1);
+            }
             println!("flatpak trim on");
             ExitCode::SUCCESS
         }
@@ -850,12 +854,32 @@ fn dispatch_flatpak_trim(action: &str) -> ExitCode {
                 return code;
             }
             let config = flatpak_trim::FlatpakTrimConfig { enabled: false };
+            let had_service = service.is_file();
+            let had_timer = timer.is_file();
+            if had_timer {
+                if let Err(error) = disable_systemd_units(&["kyth-flatpak-trim.timer"]) {
+                    eprintln!("kyth-flatpak-trim: {error}");
+                    return ExitCode::from(1);
+                }
+            }
+            if had_service {
+                if let Err(error) = run_systemctl_command(&["stop", "kyth-flatpak-trim.service"]) {
+                    eprintln!("kyth-flatpak-trim: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = flatpak_trim::generate(config, &service, &timer)
                 .map(|_| ())
                 .and_then(|_| flatpak_trim::save(&config_path, config))
             {
                 eprintln!("kyth-flatpak-trim: {error}");
                 return ExitCode::from(1);
+            }
+            if had_service || had_timer {
+                if let Err(error) = reload_systemd_manager() {
+                    eprintln!("kyth-flatpak-trim: {error}");
+                    return ExitCode::from(1);
+                }
             }
             println!("flatpak trim off");
             ExitCode::SUCCESS
@@ -865,7 +889,36 @@ fn dispatch_flatpak_trim(action: &str) -> ExitCode {
                 return code;
             }
             let config = flatpak_trim::load(&config_path);
+            let had_service = service.is_file();
+            let had_timer = timer.is_file();
+            if !config.enabled {
+                if had_timer {
+                    if let Err(error) = disable_systemd_units(&["kyth-flatpak-trim.timer"]) {
+                        eprintln!("kyth-flatpak-trim: {error}");
+                        return ExitCode::from(1);
+                    }
+                }
+                if had_service {
+                    if let Err(error) =
+                        run_systemctl_command(&["stop", "kyth-flatpak-trim.service"])
+                    {
+                        eprintln!("kyth-flatpak-trim: {error}");
+                        return ExitCode::from(1);
+                    }
+                }
+            }
             if let Err(error) = flatpak_trim::generate(config, &service, &timer) {
+                eprintln!("kyth-flatpak-trim: {error}");
+                return ExitCode::from(1);
+            }
+            let systemd_result = if config.enabled {
+                activate_systemd_units(&["kyth-flatpak-trim.timer"])
+            } else if had_service || had_timer {
+                reload_systemd_manager()
+            } else {
+                Ok(())
+            };
+            if let Err(error) = systemd_result {
                 eprintln!("kyth-flatpak-trim: {error}");
                 return ExitCode::from(1);
             }
