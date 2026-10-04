@@ -85,10 +85,28 @@ optimization-report runtime="0":
     if [[ "{{ runtime }}" == "1" ]]; then args+=(--runtime); fi
     python3 build_files/scripts/optimization-report.py "${args[@]}"
 
-# Create/update the local pinned quality-tool environment.
+# Provision Rust and the pinned local validation tools for a fresh checkout.
+[group('Quality')]
+setup-test-tools:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v rustup >/dev/null 2>&1; then
+        echo "rustup is required; install Rust via rustup, then rerun 'just setup-test-tools'." >&2
+        exit 1
+    fi
+    rustup toolchain install stable --profile minimal --component clippy --component rustfmt
+    ./build_files/scripts/install-validation-tools.sh
+    PATH="$PWD/.cache/kyth-ci-tools/bin:$PATH" "$PWD/.cache/kyth-ci-tools/bin/just" setup-quality
+
+# Create/update the local pinned quality-tool environment. Rebuild it if its
+# interpreter is missing (for example, after restoring a partial workspace).
 [group('Quality')]
 setup-quality:
-    python3 -m venv .venv-quality
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ ! -x .venv-quality/bin/python ]]; then
+        python3 -m venv --clear .venv-quality
+    fi
     .venv-quality/bin/python -m pip install --disable-pip-version-check -r requirements-quality.txt
     .venv-quality/bin/coverage --version
     .venv-quality/bin/ruff --version

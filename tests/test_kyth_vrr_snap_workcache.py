@@ -1,8 +1,10 @@
 """Cover vrr, window_snap, work_cache — off 0% to lift floor."""
+import os
 import pathlib
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -96,6 +98,16 @@ class WindowSnapTests(unittest.TestCase):
 
 
 class WorkCacheTests(unittest.TestCase):
+    def setUp(self):
+        # generate_work_cache() clamps size to RAM/4 unless KYTH_TEST_MODE=1;
+        # pin test mode so the size assertions are deterministic on small
+        # machines (CI runners have 16G, small dev boxes do not).
+        self._env_patcher = unittest.mock.patch.dict(os.environ, {"KYTH_TEST_MODE": "1"})
+        self._env_patcher.start()
+
+    def tearDown(self):
+        self._env_patcher.stop()
+
     def test_load_default(self):
         with tempfile.TemporaryDirectory() as td:
             p = Path(td) / "wc.toml"

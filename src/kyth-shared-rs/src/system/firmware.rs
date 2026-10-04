@@ -126,7 +126,19 @@ pub fn stage_firmware_batch() -> (bool, i32, String) {
     if flock(&lock, FlockOperation::NonBlockingLockExclusive).is_err() {
         return (false, 0, String::new());
     }
-    let _ = run_firmware_refresh(60);
+    let (refreshed, refresh_output) = run_firmware_refresh(60);
+    if !refreshed {
+        let _ = flock(&lock, FlockOperation::Unlock);
+        return (
+            false,
+            0,
+            if refresh_output.is_empty() {
+                "fwupdmgr refresh failed".to_string()
+            } else {
+                refresh_output
+            },
+        );
+    }
     let count = check_firmware_updates(20);
     if count <= 0 {
         let _ = flock(&lock, FlockOperation::Unlock);

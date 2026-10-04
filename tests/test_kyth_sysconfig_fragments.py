@@ -59,6 +59,53 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertIn('TEST=="charge_control_start_threshold"', guards)
         self.assertNotIn('TEST{0002}!="/sys%p/charge_', guards)
 
+    def test_gamemode_hooks_use_keys_gamemode_actually_reads(self):
+        """gamemode 1.8 ignores [general] startscript/endscript and [gpu] nv_perf_level.
+
+        The performance-profile switch lived in startscript, so it never ran, and
+        every launch logged "Config: Value ignored" for all three keys.
+        """
+        body = (FRAG_DIR / "gaming" / "14-gamemode-configuration.sh").read_text(
+            encoding="utf-8"
+        )
+        ini = body.split("<<'GAMEMODEEOF'\n", 1)[1].split("\nGAMEMODEEOF", 1)[0]
+        sections: dict[str, list[str]] = {}
+        current = ""
+        for line in ini.splitlines():
+            if line.startswith("[") and line.endswith("]"):
+                current = line[1:-1]
+                sections[current] = []
+            elif current and "=" in line and not line.lstrip().startswith("#"):
+                sections[current].append(line.split("=", 1)[0].strip())
+        for ignored in ("startscript", "endscript"):
+            self.assertNotIn(ignored, sections.get("general", []))
+        self.assertNotIn("nv_perf_level", sections.get("gpu", []))
+        self.assertIn("start", sections.get("custom", []))
+        self.assertIn("end", sections.get("custom", []))
+        start = next(l for l in ini.splitlines() if l.startswith("start="))
+        end = next(l for l in ini.splitlines() if l.startswith("end="))
+        self.assertIn("kyth-performance-mode save", start)
+        self.assertIn("kyth-performance-mode gaming", start)
+        self.assertIn("kyth-performance-mode restore", end)
+
+    def test_gamemode_helpers_are_authorized_for_the_admin_user(self):
+        """Nothing adds a KythOS user to the "gamemode" group, so its polkit rule never applied.
+
+        Every launch logged ~150 "pkexec ... cpugovctl set performance: Not authorized".
+        The admin (wheel) user must get exactly the four GameMode helper actions.
+        """
+        body = (FRAG_DIR / "gaming" / "14-gamemode-configuration.sh").read_text(
+            encoding="utf-8"
+        )
+        rule = body.split("<<'GAMEMODEPOLKITEOF'\n", 1)[1].split("\nGAMEMODEPOLKITEOF", 1)[0]
+        for helper in ("governor", "gpu", "cpu", "procsys"):
+            self.assertIn(f"com.feralinteractive.GameMode.{helper}-helper", rule)
+        self.assertIn('subject.isInGroup("wheel")', rule)
+        self.assertEqual(rule.count("com.feralinteractive.GameMode."), 4, "no extra actions")
+        self.assertNotIn("polkit.Result.AUTH", rule)
+        self.assertIn("/usr/share/polkit-1/rules.d/49-kyth-gamemode.rules", body)
+        self.assertIn("@wheel - nice -10", body)
+
     def test_dxvk_defaults_do_not_enable_async(self):
         body = (FRAG_DIR / "gaming" / "47-dxvk-async.sh").read_text(encoding="utf-8")
         self.assertIn("DXVK_CONFIG_FILE=/etc/dxvk.conf", body)
@@ -66,6 +113,27 @@ class SysconfigFragmentTests(unittest.TestCase):
         self.assertNotIn("dxvk.enableAsync", body)
         self.assertNotIn("DXVK_ASYNC", body)
         self.assertNotRegex(body, r"^DXVK_FRAME_RATE=", re.M)
+
+    def test_wifi_regdom_maps_each_south_american_timezone_to_its_country(self):
+        body = (FRAG_DIR / "network" / "17-wifi-driver-tweaks.sh").read_text(encoding="utf-8")
+        expected = {
+            "America/La_Paz": "BO",
+            "America/Asuncion": "PY",
+            "America/Montevideo": "UY",
+            "America/Guayaquil": "EC",
+        }
+        for zone, country in expected.items():
+            self.assertIn(f'{zone}) cc="{country}"', body)
+        self.assertNotIn(
+            'America/La_Paz|America/Asuncion|America/Montevideo|America/Guayaquil',
+            body,
+        )
+
+    def test_nvme_readahead_udev_triggers_can_restart_the_hint_service(self):
+        body = (FRAG_DIR / "storage" / "50-nvme-readahead.sh").read_text(encoding="utf-8")
+        self.assertIn('SYSTEMD_WANTS}="kyth-readahead-hint.service"', body)
+        service = body.split("[Service]", 1)[1].split("READAHEADEOF", 1)[0]
+        self.assertIn("RemainAfterExit=no", service)
 
     def test_journald_cap_has_headroom_and_bounded_file_size(self):
         """A tight cap with no per-file bound left normal growth sitting right at

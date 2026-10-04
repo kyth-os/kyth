@@ -28,7 +28,13 @@ wifi.scan-rand-mac-address=yes
 
 [connection]
 wifi.cloned-mac-address=stable
-ethernet.cloned-mac-address=stable
+# Wired keeps the hardware address. NM's "stable" hash includes the interface
+# name, and a USB dock NIC's name embeds its port path (enp198s0f3u1u4 vs
+# ...f4u1u4), so every dock re-enumeration minted a new MAC and a new DHCP
+# lease. The HP dock also passes the laptop's MAC through (ethtool -P), which
+# NAC / DHCP reservations on wired networks key on; hashing it away made the
+# link intermittent until another interface re-registered the host.
+ethernet.cloned-mac-address=permanent
 ipv6.addr-gen-mode=stable-privacy
 NMEOF
 
@@ -66,17 +72,34 @@ if [[ -f /etc/kyth/wifi-powersave.conf ]]; then
     esac
 fi
 
-# Gaming opts out of powersave: kyth-game-launch marks /run/kyth/gaming-hint.
-if [[ -f /run/kyth/gaming-hint ]]; then
+# Gaming opts out of powersave: kyth-game-launch drops a per-user
+# /run/kyth-gaming/hint-<uid> holding the game PID (not under root-only /run/kyth).
+# The launcher execs the game, so the PID lives exactly as long as the session;
+# a hint whose PID is gone is stale and ignored. Unparseable content fails
+# toward gaming mode (legacy constant-content hints predate the PID format).
+gaming_live=0
+for hint in /run/kyth-gaming/hint-*; do
+    [[ -f "${hint}" ]] || continue
+    pid="$(cat "${hint}" 2>/dev/null)" || continue
+    case "${pid}" in
+        ''|*[!0-9]*) gaming_live=1; break ;;
+    esac
+    if kill -0 "${pid}" 2>/dev/null; then gaming_live=1; break; fi
+done
+if ((gaming_live)); then
     iw dev "${iface}" set power_save off >/dev/null 2>&1 || true
     exit 0
 fi
 
-# On AC power the latency win is free; on battery keep the radio throttled.
-on_ac=1
+# Treat a battery-only machine as battery power.  Do not default to AC when
+# /sys/class/power_supply contains only BAT* entries (common on laptops).
+on_ac=0
 for psu in /sys/class/power_supply/AC* /sys/class/power_supply/ADP*; do
     [[ -f "${psu}/online" ]] || continue
-    [[ "$(cat "${psu}/online" 2>/dev/null)" == "1" ]] || on_ac=0
+    if [[ "$(cat "${psu}/online" 2>/dev/null)" == "1" ]]; then
+        on_ac=1
+        break
+    fi
 done
 if [[ "${on_ac}" -eq 1 ]]; then
     iw dev "${iface}" set power_save off >/dev/null 2>&1 || true

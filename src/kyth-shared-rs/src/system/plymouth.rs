@@ -155,20 +155,44 @@ pub fn inspect_listing(
     errors
 }
 
+const DRACUT_ADD_LINE: &str = "add_dracutmodules+=\" kyth-plymouth \"";
+const DRACUT_FORCE_LINE: &str = "force_add_dracutmodules+=\" kyth-plymouth \"";
+
+/// True when a non-comment line sets `directive` and mentions kyth-plymouth.
+fn dracut_line_sets(text: &str, directive: &str) -> bool {
+    text.lines().any(|line| {
+        let line = line.trim();
+        !line.starts_with('#')
+            && line.starts_with(directive)
+            && line[directive.len()..].starts_with('+')
+            && line.contains("kyth-plymouth")
+    })
+}
+
 /// Pure dracut-conf reconciliation, mirroring `ensure_dracut_config`.
+///
+/// Idempotent per directive: it appends a line only when no real
+/// (non-comment) `add_dracutmodules` / `force_add_dracutmodules` line already
+/// carries kyth-plymouth. The previous substring test ("add_dracutmodules"
+/// anywhere AND "kyth-plymouth" anywhere) treated `force_add_dracutmodules`
+/// as satisfying the `add` check and could re-append the same block on
+/// every boot - the live file had grown to 228 lines of it.
 pub fn reconcile_dracut_config(current: Option<&str>) -> String {
     let mut text = current
         .unwrap_or("add_dracutmodules+=\" ostree drm plymouth kyth-plymouth \"\n")
         .to_string();
-    if !text.contains("add_dracutmodules") || !text.contains("kyth-plymouth") {
-        text += "\nadd_dracutmodules+=\" kyth-plymouth \"\n";
+    if !text.is_empty() && !text.ends_with('\n') {
+        text.push('\n');
     }
-    let after_force = text
-        .find("force_add_dracutmodules")
-        .map(|index| &text[index..])
-        .unwrap_or("");
-    if !text.contains("force_add_dracutmodules") || !after_force.contains("kyth-plymouth") {
-        text += "force_add_dracutmodules+=\" kyth-plymouth \"\n";
+    // `force_add_dracutmodules` also starts with "add_"-like text only after
+    // "force_", so a plain prefix test on the trimmed line keeps them distinct.
+    if !dracut_line_sets(&text, "add_dracutmodules") {
+        text.push_str(DRACUT_ADD_LINE);
+        text.push('\n');
+    }
+    if !dracut_line_sets(&text, "force_add_dracutmodules") {
+        text.push_str(DRACUT_FORCE_LINE);
+        text.push('\n');
     }
     text
 }
@@ -327,6 +351,37 @@ mod tests {
         assert!(reconciled.contains("force_add_dracutmodules+=\" kyth-plymouth \""));
         let stable = "add_dracutmodules+=\" ostree kyth-plymouth \"\nforce_add_dracutmodules+=\" kyth-plymouth \"\n";
         assert_eq!(reconcile_dracut_config(Some(stable)), stable);
+    }
+
+    #[test]
+    fn dracut_config_reconciliation_never_grows_on_repeat() {
+        // The shipped 5-line file, plus the exact block that used to pile up.
+        let shipped = "add_dracutmodules+=\" ostree drm plymouth kyth-plymouth \"\n\
+force_add_dracutmodules+=\" kyth-plymouth \"\n\
+add_drivers+=\" virtio_blk nvme \"\n\
+install_items+=\" /etc/passwd /etc/group \"\n\
+do_hardlink=\"no\"\n";
+        let once = reconcile_dracut_config(Some(shipped));
+        assert_eq!(once, shipped, "a complete file must be left alone");
+        let mut text = shipped.to_string();
+        for _ in 0..50 {
+            text = reconcile_dracut_config(Some(&text));
+        }
+        assert_eq!(text, shipped);
+        // A comment that merely mentions the directive does not count.
+        let commented = "# add_dracutmodules+=\" kyth-plymouth \"\n# force_add_dracutmodules+=\" kyth-plymouth \"\n";
+        let fixed = reconcile_dracut_config(Some(commented));
+        assert!(fixed.lines().any(|l| l == DRACUT_ADD_LINE));
+        assert!(fixed.lines().any(|l| l == DRACUT_FORCE_LINE));
+        assert_eq!(reconcile_dracut_config(Some(&fixed)), fixed);
+        // Missing trailing newline is repaired without duplicating the last line.
+        let no_newline = "add_dracutmodules+=\" kyth-plymouth \"";
+        let fixed = reconcile_dracut_config(Some(no_newline));
+        assert_eq!(fixed.matches("force_add_dracutmodules").count(), 1);
+        assert_eq!(reconcile_dracut_config(Some(&fixed)), fixed);
+        // The pre-fix 228-line file collapses to a stable fixed point.
+        let polluted = format!("{shipped}{}", "\nadd_dracutmodules+=\" kyth-plymouth \"\nforce_add_dracutmodules+=\" kyth-plymouth \"\n".repeat(74));
+        assert_eq!(reconcile_dracut_config(Some(&polluted)), polluted);
     }
 
     #[test]

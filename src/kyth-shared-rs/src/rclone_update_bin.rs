@@ -35,7 +35,13 @@ fn run(argv: &[String], timeout_secs: u64) -> Option<(i32, String)> {
         })
 }
 
-fn fail(message: String) -> ! {
+fn fail(message: String, work: Option<&TempWorkdir>) -> ! {
+    // process::exit() skips destructors, so TempWorkdir's Drop never runs:
+    // remove the workdir explicitly or every failed update leaks hundreds
+    // of MB into /tmp.
+    if let Some(work) = work {
+        let _ = std::fs::remove_dir_all(work.path());
+    }
     eprintln!("{message}");
     std::process::exit(1);
 }
@@ -86,18 +92,23 @@ fn main() -> std::process::ExitCode {
                     .unwrap_or("")
                     .to_string();
             }
-            Err(error) => fail(format!(
-                "ERROR: Could not determine latest rclone release tag: {error}"
-            )),
+            Err(error) => fail(
+                format!("ERROR: Could not determine latest rclone release tag: {error}"),
+                None,
+            ),
         }
     }
     if rclone_ver.is_empty() {
-        fail("ERROR: Could not determine latest rclone release tag".to_string());
+        fail(
+            "ERROR: Could not determine latest rclone release tag".to_string(),
+            None,
+        );
     }
     if validate_version(&rclone_ver, VERSION_PATTERN, "rclone").is_err() {
-        fail(format!(
-            "ERROR: Unexpected rclone version format: {rclone_ver}"
-        ));
+        fail(
+            format!("ERROR: Unexpected rclone version format: {rclone_ver}"),
+            None,
+        );
     }
     let target_ver = rclone_ver.trim_start_matches('v').to_string();
     if let Some(installed) = installed_version() {
@@ -111,7 +122,10 @@ fn main() -> std::process::ExitCode {
     let base_url = format!("https://downloads.rclone.org/{rclone_ver}");
     let work = match TempWorkdir::create("kyth-rclone") {
         Ok(work) => work,
-        Err(error) => fail(format!("ERROR: Failed to download rclone assets: {error}")),
+        Err(error) => fail(
+            format!("ERROR: Failed to download rclone assets: {error}"),
+            None,
+        ),
     };
     let headers = std::collections::BTreeMap::new();
     let zip_dest = work.path().join(&zip_name);
@@ -132,16 +146,22 @@ fn main() -> std::process::ExitCode {
             120,
             limit,
         ) {
-            fail(format!("ERROR: Failed to download rclone assets: {error}"));
+            fail(
+                format!("ERROR: Failed to download rclone assets: {error}"),
+                Some(&work),
+            );
         }
     }
     println!("Verifying checksum...");
     if let Err(error) = verify_checksum_file(&sums_dest, &zip_dest, "sha256") {
-        fail(format!("ERROR: Checksum verification failed: {error}"));
+        fail(
+            format!("ERROR: Checksum verification failed: {error}"),
+            Some(&work),
+        );
     }
     println!("Extracting archive...");
     if let Err(error) = extract_archive(&run, &zip_dest, work.path()) {
-        fail(format!("ERROR: Extraction failed: {error}"));
+        fail(format!("ERROR: Extraction failed: {error}"), Some(&work));
     }
     let mut extracted = work.path().join(&basename).join("rclone");
     if !extracted.is_file() {
@@ -150,10 +170,10 @@ fn main() -> std::process::ExitCode {
     let target = PathBuf::from(RCLONE_BIN);
     if let Some(parent) = target.parent() {
         if let Err(error) = std::fs::create_dir_all(parent) {
-            fail(format!(
-                "ERROR: Failed to create {}: {error}",
-                parent.display()
-            ));
+            fail(
+                format!("ERROR: Failed to create {}: {error}", parent.display()),
+                Some(&work),
+            );
         }
     }
     // Same-dir temp + fsync + atomic rename: copying directly over the live
@@ -194,10 +214,13 @@ fn main() -> std::process::ExitCode {
         Ok(())
     })() {
         let _ = std::fs::remove_file(&staging);
-        fail(format!(
-            "ERROR: Failed to install rclone binary to {}: {error}",
-            target.display()
-        ));
+        fail(
+            format!(
+                "ERROR: Failed to install rclone binary to {}: {error}",
+                target.display()
+            ),
+            Some(&work),
+        );
     }
     // Verify the installed binary reports the target version — a short or
     // corrupt write must fail loudly, never print "installed".
@@ -206,18 +229,25 @@ fn main() -> std::process::ExitCode {
             let first = stdout.lines().next().unwrap_or("");
             println!("rclone installed: {first}");
             if !version_line_matches(first, &rclone_ver) {
-                fail(format!(
-                    "ERROR: installed rclone version mismatch (expected {rclone_ver}, got {first})"
-                ));
+                fail(
+                    format!(
+                        "ERROR: installed rclone version mismatch (expected {rclone_ver}, got {first})"
+                    ),
+                    Some(&work),
+                );
             }
         }
         Some((code, _)) => {
-            fail(format!(
-                "ERROR: installed rclone failed its version check (exit {code})"
-            ));
+            fail(
+                format!("ERROR: installed rclone failed its version check (exit {code})"),
+                Some(&work),
+            );
         }
         None => {
-            fail("ERROR: installed rclone could not be executed".to_string());
+            fail(
+                "ERROR: installed rclone could not be executed".to_string(),
+                Some(&work),
+            );
         }
     }
     std::process::ExitCode::SUCCESS

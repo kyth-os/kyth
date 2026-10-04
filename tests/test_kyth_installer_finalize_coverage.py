@@ -114,7 +114,7 @@ class FstabFailureTests(unittest.TestCase):
                 ):
                     self.assertFalse(finalize._append_fstab_line("/target/etc", "line\n", log, "data"))
 
-    def test_alongside_without_uuid_skips_fstab(self):
+    def test_alongside_without_uuid_fails_configuration(self):
         with (
             mock.patch("kyth_installer.install.run_command"),
             mock.patch("kyth_installer.install._as_root", side_effect=lambda cmd: cmd),
@@ -122,7 +122,8 @@ class FstabFailureTests(unittest.TestCase):
             mock.patch.object(finalize, "_blkid_uuid", return_value=None),
             mock.patch.object(finalize, "_append_fstab_line") as append,
         ):
-            finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", mock.Mock())
+            with self.assertRaisesRegex(RuntimeError, "Could not read the UUID"):
+                finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", mock.Mock())
         append.assert_not_called()
 
     def test_native_alongside_mount_reports_success_and_failure(self):
@@ -146,22 +147,22 @@ class FstabFailureTests(unittest.TestCase):
             mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"fstab_written": false}')),
             mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
         ):
-            finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", log)
-        self.assertTrue(any("fstab update failed" in call.args[0] for call in log.call_args_list))
+            with self.assertRaisesRegex(RuntimeError, "did not write the @home fstab entry"):
+                finalize._configure_alongside_fstab("/target", "/dev/sda3", "/target/etc", log)
 
-    def test_native_manual_mounts_collects_uuids_and_reports_skips(self):
+    def test_native_manual_mounts_fails_if_requested_uuid_is_missing(self):
         context = InstallerContext()
         mounts = [{"partition": "/dev/sda2", "mountpoint": "/home"}, {"partition": "/dev/sda3", "mountpoint": "swap"}]
         with (
             mock.patch("kyth_installer.install._get_manual_mounts", return_value=mounts),
             mock.patch.object(finalize, "_blkid_uuid", side_effect=["uuid-home", None]),
             mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
-            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"skipped": 1}')) as run,
+            mock.patch("kyth_installer.install.run_command") as run,
             mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
         ):
-            finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), context)
-        payload = json.loads(run.call_args.kwargs["input"])
-        self.assertEqual(payload["mounts"][0]["uuid"], "uuid-home")
+            with self.assertRaisesRegex(RuntimeError, "Could not read the UUID"):
+                finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), context)
+        run.assert_not_called()
 
     def test_native_manual_mounts_failure_is_reported(self):
         with (
@@ -175,13 +176,42 @@ class FstabFailureTests(unittest.TestCase):
         with (
             mock.patch("kyth_installer.install._get_manual_mounts", return_value=[]),
             mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
-            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout="{}")),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"configured": 0, "skipped": 0}')),
             mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
         ):
             finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), InstallerContext())
 
+    def test_native_manual_mounts_rejects_incomplete_result(self):
+        with (
+            mock.patch("kyth_installer.install._get_manual_mounts", return_value=[{"partition": "/dev/sda2", "mountpoint": "/data"}]),
+            mock.patch.object(finalize, "_blkid_uuid", return_value="uuid-data"),
+            mock.patch.object(finalize.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch("kyth_installer.install.run_command", return_value=SimpleNamespace(stdout='{"configured": 0, "skipped": 1}')),
+            mock.patch("kyth_installer.install._as_root", side_effect=lambda command: command),
+        ):
+            with self.assertRaisesRegex(RuntimeError, "did not configure every requested mount"):
+                finalize._configure_manual_mounts("/target", "/target/etc", mock.Mock(), InstallerContext())
+
 
 class UserCreationTests(unittest.TestCase):
+    def test_alongside_fstab_fails_if_uuid_or_fstab_write_is_missing(self):
+        log = mock.Mock()
+        dependencies = (
+            mock.patch("kyth_installer.install.ensure_directory"),
+            mock.patch("kyth_installer.install._safe_umount"),
+            mock.patch("kyth_installer.install.mount_filesystem"),
+        )
+        with dependencies[0], dependencies[1], dependencies[2], self.assertRaisesRegex(RuntimeError, "Could not read the UUID"):
+            finalize.configure_alongside_fstab(
+                "/target", "/dev/sda3", "/target/etc", log,
+                uuid_lookup=lambda _part, _log: None, append_line=mock.Mock(),
+            )
+        with dependencies[0], dependencies[1], dependencies[2], self.assertRaisesRegex(RuntimeError, "Could not write the fstab entry"):
+            finalize.configure_alongside_fstab(
+                "/target", "/dev/sda3", "/target/etc", log,
+                uuid_lookup=lambda _part, _log: "uuid-root", append_line=mock.Mock(return_value=False),
+            )
+
     def test_user_creation_relocks_accounts_and_reports_progress(self):
         progress = mock.Mock()
         with (
@@ -254,7 +284,7 @@ class ConfigureSystemTests(unittest.TestCase):
             mock.patch("kyth_installer.install.run_command") as run,
             mock.patch("kyth_installer.install.find_deploy_etc", return_value=None),
             mock.patch("kyth_installer.install.ensure_system_accounts"),
-            mock.patch.object(finalize, "unmount_configuration") as unmount,
+            mock.patch.object(finalize, "unmount_configuration", return_value=("/config",)) as unmount,
         ):
             with self.assertRaisesRegex(RuntimeError, "deployment could not be located"):
                 finalize._configure_installed_system(
@@ -304,7 +334,7 @@ class ConfigureSystemTests(unittest.TestCase):
             mock.patch.object(finalize, "_create_installer_user"),
             mock.patch.object(finalize, "validate_installed_target", return_value=[]),
             mock.patch.object(finalize, "_persist_artifacts_to_target"),
-            mock.patch.object(finalize, "unmount_configuration"),
+            mock.patch.object(finalize, "unmount_configuration", return_value=("/alongside",)),
         ):
             finalize._configure_installed_system(
                 "/dev/sda3", "/dev/sda3", "/dev/sda", "fedora", "alongside",
@@ -449,15 +479,14 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
             "raised": raised,
         }
 
-    def test_fstab_read_oserror_sets_backup_none(self):
+    def test_fstab_read_oserror_aborts_before_configuration_or_deletion(self):
         result = self._call(fstab_is_file=True, read_bytes_error=True)
-        self.assertIsNone(result["raised"])
-        # Should not have raised; backup was None due to OSError then continued
+        self.assertIsInstance(result["raised"], RuntimeError)
+        self.assertIn("Could not back up the installed fstab", str(result["raised"]))
         result["mock_fstab"].read_bytes.assert_called_once()
+        result["mock_fstab"].unlink.assert_not_called()
 
-    def test_rollback_unlinks_when_backup_none_and_file_exists(self):
-        # Exercise rollback path where backup is restored via write or unlink
-        # (previous _call helper already validates the OSError backup path)
+    def test_fstab_read_failure_does_not_unlink_original_file(self):
         from kyth_installer.phases import finalize_configure as fc
 
         context = InstallerContext()
@@ -465,15 +494,11 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         log = mock.Mock()
         progress = mock.Mock()
         mock_fstab = mock.Mock()
-        # First is_file check returns False? Actually we need read_bytes not called then backup None
-        # Simulate: fstab does not exist at backup time, but does exist at rollback (partial write)
-        # Simpler: force backup None via OSError, then during rollback is_file True -> unlink
         call_count = {"is_file": 0}
 
         def is_file_side_effect():
             call_count["is_file"] += 1
-            # First call: backup check -> True but read will raise OSError -> backup None
-            # Second call: rollback check -> True -> unlink
+            # The file exists, but its backup cannot be read.
             return True
 
         mock_fstab.is_file.side_effect = is_file_side_effect
@@ -484,7 +509,7 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_path_cls = mock.Mock(return_value=mock_etc_path)
 
         with mock.patch.object(fc, "Path", mock_path_cls):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "Could not back up the installed fstab"):
                 fc.configure_installed_system(
                     target_part="/dev/sda3",
                     install_mode="wipe",
@@ -505,8 +530,8 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
                     unmount_configuration=mock.Mock(),
                     run_command=mock.Mock(),
                 )
-        mock_fstab.unlink.assert_called_once()
-        self.assertTrue(any("Rolled back" in c.args[0] for c in log.call_args_list))
+        mock_fstab.unlink.assert_not_called()
+        self.assertEqual(call_count["is_file"], 1)
 
     def test_rollback_restores_backup_when_present(self):
         from kyth_installer.phases import finalize_configure as fc
@@ -518,13 +543,14 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_fstab = mock.Mock()
         mock_fstab.is_file.return_value = True
         mock_fstab.read_bytes.return_value = b"orig"
-        mock_tmp = mock.Mock()
-        mock_fstab.with_suffix.return_value = mock_tmp
         mock_etc_path = mock.MagicMock()
         mock_etc_path.__truediv__.return_value = mock_fstab
         mock_etc_path.parent = pathlib.Path("/config/deploy")
         mock_path_cls = mock.Mock(return_value=mock_etc_path)
-        with mock.patch.object(fc, "Path", mock_path_cls):
+        restore = mock.Mock()
+        with mock.patch.object(fc, "Path", mock_path_cls), mock.patch.object(
+            fc, "_restore_fstab_atomically", restore,
+        ):
             with self.assertRaises(RuntimeError):
                 fc.configure_installed_system(
                     target_part="/dev/sda3",
@@ -546,8 +572,7 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
                     unmount_configuration=mock.Mock(),
                     run_command=mock.Mock(),
                 )
-        mock_tmp.write_bytes.assert_called_once_with(b"orig")
-        mock_tmp.replace.assert_called_once_with(mock_fstab)
+        restore.assert_called_once_with(mock_fstab, b"orig")
         self.assertTrue(any("Rolled back" in c.args[0] for c in log.call_args_list))
 
     def test_rollback_write_oserror_is_logged(self):
@@ -560,14 +585,13 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_fstab = mock.Mock()
         mock_fstab.is_file.return_value = True
         mock_fstab.read_bytes.return_value = b"orig"
-        mock_tmp = mock.Mock()
-        mock_tmp.write_bytes.side_effect = OSError("write fail")
-        mock_fstab.with_suffix.return_value = mock_tmp
         mock_etc_path = mock.MagicMock()
         mock_etc_path.__truediv__.return_value = mock_fstab
         mock_etc_path.parent = pathlib.Path("/config/deploy")
         mock_path_cls = mock.Mock(return_value=mock_etc_path)
-        with mock.patch.object(fc, "Path", mock_path_cls):
+        with mock.patch.object(fc, "Path", mock_path_cls), mock.patch.object(
+            fc, "_restore_fstab_atomically", side_effect=OSError("write fail"),
+        ):
             with self.assertRaises(RuntimeError):
                 fc.configure_installed_system(
                     target_part="/dev/sda3",
@@ -590,6 +614,60 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
                     run_command=mock.Mock(),
                 )
         self.assertTrue(any("rollback failed" in c.args[0] for c in log.call_args_list))
+
+    def test_fstab_rollback_does_not_follow_preplanted_tmp_symlink(self):
+        from kyth_installer.phases import finalize_configure as fc
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            etc = root / "etc"
+            etc.mkdir()
+            fstab = etc / "fstab"
+            fstab.write_bytes(b"original fstab\n")
+            victim = root / "victim"
+            victim.write_bytes(b"must not change\n")
+            planted_tmp = fstab.with_suffix(".tmp")
+            planted_tmp.symlink_to(victim)
+
+            with self.assertRaisesRegex(RuntimeError, "configure failed"):
+                fc.configure_installed_system(
+                    target_part="/dev/sda3", install_mode="wipe", config_root=str(root),
+                    alongside_mount="", log=mock.Mock(), progress=mock.Mock(),
+                    context=InstallerContext(), request=_request(),
+                    find_deploy_etc=mock.Mock(return_value=str(etc)),
+                    ensure_system_accounts=mock.Mock(), configure_alongside_fstab=mock.Mock(),
+                    configure_manual_mounts=mock.Mock(),
+                    configure_hostname_timezone=mock.Mock(side_effect=RuntimeError("configure failed")),
+                    create_installer_user=mock.Mock(), validate_installed_target=mock.Mock(return_value=[]),
+                    persist_artifacts=mock.Mock(), unmount_configuration=mock.Mock(), run_command=mock.Mock(),
+                )
+
+            self.assertEqual(fstab.read_bytes(), b"original fstab\n")
+            self.assertEqual(victim.read_bytes(), b"must not change\n")
+            self.assertTrue(planted_tmp.is_symlink())
+
+    def test_installed_symlinked_fstab_is_rejected(self):
+        from kyth_installer.phases import finalize_configure as fc
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            etc = root / "etc"
+            etc.mkdir()
+            victim = root / "victim"
+            victim.write_bytes(b"external file\n")
+            (etc / "fstab").symlink_to(victim)
+            with self.assertRaisesRegex(RuntimeError, "fstab is a symlink"):
+                fc.configure_installed_system(
+                    target_part="/dev/sda3", install_mode="wipe", config_root=str(root),
+                    alongside_mount="", log=mock.Mock(), progress=mock.Mock(),
+                    context=InstallerContext(), request=_request(),
+                    find_deploy_etc=mock.Mock(return_value=str(etc)),
+                    ensure_system_accounts=mock.Mock(), configure_alongside_fstab=mock.Mock(),
+                    configure_manual_mounts=mock.Mock(), configure_hostname_timezone=mock.Mock(),
+                    create_installer_user=mock.Mock(), validate_installed_target=mock.Mock(return_value=[]),
+                    persist_artifacts=mock.Mock(), unmount_configuration=mock.Mock(), run_command=mock.Mock(),
+                )
+            self.assertEqual(victim.read_bytes(), b"external file\n")
 
     def test_rollback_no_file_when_backup_none_skips_unlink(self):
         from kyth_installer.phases import finalize_configure as fc
@@ -630,7 +708,7 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_fstab.unlink.assert_not_called()
         mock_fstab.write_bytes.assert_not_called()
 
-    def test_rollback_unlink_oserror_is_logged(self):
+    def test_fstab_read_failure_does_not_attempt_unlink(self):
         from kyth_installer.phases import finalize_configure as fc
 
         context = InstallerContext()
@@ -646,7 +724,7 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
         mock_etc_path.parent = pathlib.Path("/config/deploy")
         mock_path_cls = mock.Mock(return_value=mock_etc_path)
         with mock.patch.object(fc, "Path", mock_path_cls):
-            with self.assertRaises(RuntimeError):
+            with self.assertRaisesRegex(RuntimeError, "Could not back up the installed fstab"):
                 fc.configure_installed_system(
                     target_part="/dev/sda3",
                     install_mode="wipe",
@@ -667,7 +745,7 @@ class ConfigureInstalledSystemRollbackTests(unittest.TestCase):
                     unmount_configuration=mock.Mock(),
                     run_command=mock.Mock(),
                 )
-        self.assertTrue(any("rollback failed" in c.args[0] for c in log.call_args_list))
+        mock_fstab.unlink.assert_not_called()
 
 
 class InstallFailureTests(unittest.TestCase):

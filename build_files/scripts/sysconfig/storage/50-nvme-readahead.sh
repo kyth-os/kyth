@@ -5,8 +5,9 @@ set -euo pipefail
 source "../../lib/config-helpers.sh"
 
 # ── NVMe Read-Ahead Tuning ───────────────────────────────────────────────────
-# Gaming hint-aware: 2048 KB when /run/kyth/gaming-hint present (game active),
-# 512 KB otherwise (desktop random I/O). Reduces read amplification for asset
+# Gaming hint-aware: 2048 KB when a live /run/kyth-gaming/hint-<uid> is present
+# (game active — the hint holds the game PID and kyth-runtime treats a hint
+# whose PID is gone as stale), 512 KB otherwise (desktop random I/O). Reduces read amplification for asset
 # streaming while keeping sequential load benefit. Single flag file avoids
 # per-device hotplug races.
 write_config /etc/udev/rules.d/60-nvme-readahead.rules <<'EOF'
@@ -27,5 +28,5 @@ Description=Kyth readahead hint (gaming 2048 else 512)
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-readahead-hint apply
-RemainAfterExit=yes
+RemainAfterExit=no
 READAHEADEOF

@@ -57,7 +57,7 @@ def _battery_check(power_root: Path = Path("/sys/class/power_supply")) -> Assura
     return AssuranceCheck("power", "pass", f"Battery is {capacity}% ({status})")
 
 
-def _encryption_check(disk: str | None = None, snapshot=None) -> AssuranceCheck | None:
+def _encryption_check(disk: str | None = None, snapshot=None, *, strict: bool = False) -> AssuranceCheck | None:
     """Detect BitLocker/LUKS/LVM on the target that would block install.
 
     When snapshot is given, scan StorageSnapshot.fstype/parttype/children directly (R-07).
@@ -85,7 +85,10 @@ def _encryption_check(disk: str | None = None, snapshot=None) -> AssuranceCheck 
         return None
     try:
         from .disk import list_partitions
-        for part in list_partitions(disk):
+        parts = list_partitions(disk, strict=strict)
+        if strict and not parts:
+            raise RuntimeError(f"No partitions could be verified on {disk}.")
+        for part in parts:
             fstype = (part.get("fstype") or "").lower()
             in_use = bool(part.get("in_use") or part.get("children"))
             # LUKS is fstype crypto_LUKS, LVM is children with type lvm
@@ -101,9 +104,15 @@ def _encryption_check(disk: str | None = None, snapshot=None) -> AssuranceCheck 
                     if "BitLocker" in (r.stdout or ""):
                         return AssuranceCheck("encryption", "warn", f"Partition {part['name']} appears BitLocker-locked — suspend BitLocker in Windows (manage-bde -off) before resizing.")
                 except (OSError, ValueError, AttributeError, RuntimeError) as exc:
+                    if strict:
+                        raise
                     _logger.debug("blkid probe failed for %s: %s", part.get("name"), exc, exc_info=True)
     except (OSError, ValueError, AttributeError, RuntimeError) as exc:
+        if strict:
+            raise
         _logger.debug("encryption disk probe failed for %s: %s", disk, exc, exc_info=True)
+    if strict:
+        return AssuranceCheck("encryption", "pass", "No blocking encryption detected")
     return None
 
 

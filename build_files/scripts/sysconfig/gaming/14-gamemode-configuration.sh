@@ -27,13 +27,14 @@ softrealtime = auto
 # via GameMode, and restore the previous state on exit.
 # kyth-performance-mode: saves current powerprofile + KWin blur/animation state,
 # switches to performance power profile + reduced animations, then restores on exit.
-# GameMode runs startscript/endscript via /bin/sh -c as the game user.
+# GameMode runs [custom] start/end via the shell as the game user. They are NOT
+# [general] startscript/endscript: gamemode 1.8 has no such keys, logged
+# "Config: Value ignored [general] startscript=..." on every run, and so this
+# hook - and the performance-profile switch it performs - never executed.
 # DBUS_SESSION_BUS_ADDRESS may not be inherited (depends on how the game was
 # launched), so we set it explicitly via the logind socket path as a fallback.
 # unix:path=/run/user/UID/bus is guaranteed present for any logged-in user.
-startscript=export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"; /usr/bin/kyth-performance-mode save && /usr/bin/kyth-performance-mode gaming
-endscript=DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}" /usr/bin/kyth-performance-mode restore
-
+# Hooks are kept in [custom] below, after [cpu]/[gpu], to match the vendor file.
 [cpu]
 park_cores = no
 pin_cores = no
@@ -44,8 +45,40 @@ pin_cores = no
 [gpu]
 apply_gpu_optimisations = accept-responsibility
 amd_performance_level = high
-nv_perf_level = 5
+# nv_perf_level is not a gamemode key (the vendor file documents
+# nv_powermizer_mode); it was ignored with a warning on every run.
+
+[custom]
+start=export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}"; /usr/bin/kyth-performance-mode save && /usr/bin/kyth-performance-mode gaming
+end=DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/$(id -u)/bus}" /usr/bin/kyth-performance-mode restore
 GAMEMODEEOF
+
+# GameMode's polkit rule and nice limit are keyed on membership of the
+# "gamemode" group, which nothing adds a KythOS user to (installer accounts get
+# wheel,video,audio,render). Without it every game launch logged ~150
+# "pkexec: Not authorized ... cpugovctl set performance" denials in a few
+# seconds, and the CPU-governor / renice / GPU helpers GameMode exists to run
+# never ran. The wheel group is the admin group on KythOS, so grant exactly the
+# four GameMode helper actions to it, and the same negative-nice allowance.
+write_config /usr/share/polkit-1/rules.d/49-kyth-gamemode.rules <<'GAMEMODEPOLKITEOF'
+/* KythOS: let the admin (wheel) user run GameMode's helpers without a prompt,
+   same grant the stock rule gives the "gamemode" group. Only these actions. */
+polkit.addRule(function (action, subject) {
+    if ((action.id == "com.feralinteractive.GameMode.governor-helper" ||
+         action.id == "com.feralinteractive.GameMode.gpu-helper" ||
+         action.id == "com.feralinteractive.GameMode.cpu-helper" ||
+         action.id == "com.feralinteractive.GameMode.procsys-helper") &&
+        subject.isInGroup("wheel"))
+    {
+        return polkit.Result.YES;
+    }
+});
+GAMEMODEPOLKITEOF
+write_config /etc/security/limits.d/11-kyth-gamemode.conf <<'GAMEMODELIMITSEOF'
+# GameMode renices game processes to -10; stock limits only allow the
+# "gamemode" group (see 10-gamemode.conf), which KythOS users are not in.
+@wheel - nice -10
+GAMEMODELIMITSEOF
 
 # Restore on crash: if GameMode (or the game session) dies before endscript
 # runs, the saved pre-game power state would stick. This login-time user unit

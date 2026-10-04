@@ -290,7 +290,7 @@ class SmokeCheck:
             ("gamemoderun", "GameMode wrapper"), ("gamescope", "Gamescope"),
             ("mangohud", "MangoHud"), ("kyth-gamescope", "KythOS Gamescope presets"),
             ("kyth-performance-mode", "KythOS performance modes"),
-            ("kyth-proton-cachyos-update", "Proton-CachyOS updater"), ("umu-run", "umu launcher"),
+            ("kyth-proton-cachyos-update", "GE-Proton updater"), ("umu-run", "umu launcher"),
         ):
             self.check_command(command, label, optional=True)
         for path, label in (
@@ -333,7 +333,7 @@ class SmokeCheck:
             ("kyth-hw-setup.service", "First-boot hardware setup"),
             ("kyth-flathub-setup.service", "Flathub setup"),
             ("kyth-default-flatpaks.service", "Default Flatpaks"),
-            ("kyth-proton-cachyos-update.timer", "Proton-CachyOS timer"),
+            ("kyth-proton-cachyos-update.timer", "GE-Proton timer"),
             ("kyth-duperemove.timer", "Game cache dedupe timer"),
             ("kyth-local-bin-migrate.service", "Local bin migration"),
         ):

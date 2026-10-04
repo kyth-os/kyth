@@ -107,7 +107,7 @@ def _configure_alongside_fstab(config_root, target_part, etc, log) -> None:
             )
             response = json.loads(result.stdout or "{}")
             if not response.get("fstab_written", False):
-                log("Warning: alongside @home mounted but fstab update failed")
+                raise RuntimeError("native alongside configuration did not write the @home fstab entry")
             else:
                 log("Fstab updated for @home subvolume")
             return
@@ -125,8 +125,12 @@ def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -
         native_mounts = []
         for mount in mounts:
             uuid_out = _blkid_uuid(mount["partition"], log)
-            if uuid_out is not None:
-                native_mounts.append({**mount, "uuid": uuid_out})
+            if uuid_out is None:
+                raise RuntimeError(
+                    f"Could not read the UUID for requested manual mount {mount['partition']} "
+                    f"at {mount['mountpoint']}; refusing to omit it from the installed system."
+                )
+            native_mounts.append({**mount, "uuid": uuid_out})
         run_command = phase_dependency("run_command")
         as_root = phase_dependency("_as_root")
         try:
@@ -140,6 +144,17 @@ def _configure_manual_mounts(config_root, etc, log, context: InstallerContext) -
                 capture_output=True, text=True, check=True, timeout=120,
             )
             response = json.loads(result.stdout or "{}")
+            configured = response.get("configured")
+            skipped = response.get("skipped")
+            if (
+                not isinstance(configured, int)
+                or isinstance(configured, bool)
+                or configured != len(native_mounts)
+                or not isinstance(skipped, int)
+                or isinstance(skipped, bool)
+                or skipped != 0
+            ):
+                raise RuntimeError("native manual-mounts did not configure every requested mount")
             if response.get("skipped"):
                 log(f"Warning: {response['skipped']} manual mount(s) could not be mounted")
             return

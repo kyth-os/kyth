@@ -92,10 +92,9 @@ pub fn choose_policy(sample: &PerfSample) -> PerfPolicy {
         }
         return PerfPolicy::new(
             DEFAULT_SCX_FOR_GAMING,
-            &[
-                ("vm.swappiness", "10"),
-                ("kernel.sched_latency_ns", "8000000"),
-            ],
+            // kernel.sched_latency_ns was removed with EEVDF; scx_rusty
+            // owns scheduling latency now.
+            &[("vm.swappiness", "10")],
             gpu,
             "gaming active — scx_rusty + low swappiness".to_string(),
         );
@@ -142,6 +141,30 @@ pub fn should_rollback(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn policies_never_ask_for_sysctls_the_kernel_no_longer_has() {
+        // kernel.sched_latency_ns is gone (EEVDF); the daemon wrote it into
+        // /etc/sysctl.d every cycle, so `sysctl --system` errored every boot.
+        let sample = PerfSample {
+            is_gaming: true,
+            pressure_some_avg10: 0.0,
+            power_profile: "balanced".to_string(),
+            battery_percent: None,
+            has_nvidia: false,
+            has_amd: true,
+            hdr_active: false,
+        };
+        let policy = choose_policy(&sample);
+        assert!(
+            policy
+                .sysctl
+                .iter()
+                .all(|(key, _)| !key.contains("sched_latency")),
+            "{:?}",
+            policy.sysctl
+        );
+    }
+
     use super::*;
 
     fn sample() -> PerfSample {

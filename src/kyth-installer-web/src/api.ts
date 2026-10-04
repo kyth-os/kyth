@@ -58,7 +58,7 @@ async function ensureConnection(): Promise<void> {
           {
             headers: {
               Accept: "application/json",
-              Authorization: `Bearer ${value.bootstrap_token}`,
+              Authorization: "Bearer " + value.bootstrap_token,
             },
           },
           30_000,
@@ -163,7 +163,7 @@ export const installerApi = {
   formatPartition: (disk: string, partition: string, fs_type: string, label: string) => post("/api/disk/format", { disk, partition, fs_type, label }),
   setMountpoint: (disk: string, partition: string, mountpoint: string) => post("/api/disk/set-mountpoint", { disk, partition, mountpoint }),
   removePending: (disk: string, index: number) => post("/api/disk/pending/remove", { disk, index }),
-  commitPartitions: (disk: string) => post<{ ok: boolean; root_partition?: string; errors?: string[] }>("/api/disk/commit", { disk }),
+  commitPartitions: (disk: string, acknowledgements: { confirm_erase: boolean; acknowledged_irreversible: boolean }) => post<{ ok: boolean; root_partition?: string; errors?: string[] }>("/api/disk/commit", { disk, confirm_erase: acknowledgements.confirm_erase, "acknowledged-irreversible": acknowledgements.acknowledged_irreversible }),
   rollbackPartitions: (disk: string) => post("/api/disk/rollback", { disk }),
 };
 
@@ -214,8 +214,10 @@ export function subscribeToInstallEvents(onEvent: (event: InstallerEvent) => voi
       }
     };
     source.onerror = () => {
-      source?.close();
-      onDisconnect();
+      // EventSource reconnects automatically, preserving Last-Event-ID.
+      // Only report a terminal close; closing here would turn a transient
+      // network blip into a false install failure.
+      if (source?.readyState === EventSource.CLOSED) onDisconnect();
     };
   }).catch(onDisconnect);
   return () => {

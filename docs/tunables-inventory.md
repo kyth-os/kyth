@@ -4,10 +4,10 @@ Generated: 2026-08-18. Source: `build_files/kyth-*` (257 files) + `src/kyth_shar
 
 ## Summary
 
-- **Thin bash wrappers**: 94 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
-- **Sysctl-kind wrappers**: 49 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
+- **Thin bash wrappers**: 91 files matching `#!/usr/bin/env bash` + `python3 -c "from kyth_shared.<mod> import ..."` with identical `set -euo pipefail` / `need_root()` / `case status|gaming|balanced|apply` scaffolding.
+- **Sysctl-kind wrappers**: 46 (write `/etc/sysctl.d/99-kyth-*.conf` via `generate_*`, call `sysctl --system`).
 - **Other-kind wrappers**: 45 (write `/etc/kyth/*.toml`, `/etc/default/*`, kargs, systemd, etc. — not via sysctl composer).
-- **Native Rust dispatcher**: 94 (all 49 sysctl wrappers plus all 45 other-kind wrappers); no tunable wrapper remains on the compatibility dispatcher.
+- **Native Rust dispatcher**: 91 (all 46 sysctl wrappers plus all 45 other-kind wrappers); no tunable wrapper remains on the compatibility dispatcher.
 - **Already migrated to composer**: `build_files/config/sysctl/base.toml` (24 keys) + `network.toml` (20 keys). `gaming.toml` is empty — the per-tunable gaming overrides are still in individual modules and duplicate the composer tiers.
 
 ## Duplicate-key risk
@@ -88,45 +88,42 @@ The composer exists to prevent the CAKE/bbr clobber. Several per-tunable keys **
 | 53 | kyth-sccache | sccache_preset | other | sccache | native Rust dispatcher |
 | 54 | kyth-sched-arbiter | sched_arbiter | other | sched arbiter | native Rust dispatcher |
 | 55 | kyth-sched-autogroup | sched_autogroup | sysctl | `kernel.sched_autogroup_enabled=0` — **dup base** | gaming.toml |
-| 56 | kyth-sched-child | sched_child | sysctl | `kernel.sched_child_runs_first=0` | gaming.toml |
-| 57 | kyth-sched-latency | sched_latency | sysctl | 5 keys `kernel.sched_*` | gaming.toml |
-| 58 | kyth-sched-nr-migrate | sched_nr_migrate | sysctl | `kernel.sched_nr_migrate=64` | gaming.toml |
-| 59 | kyth-selinux-gaming | selinux_gaming | other | selinux | native Rust dispatcher |
-| 60 | kyth-shader-cache-size | shader_cache_size | other | shader cache size | native Rust dispatcher |
-| 61 | kyth-shader-tmpfs | shader_tmpfs | other | shader tmpfs | native Rust dispatcher |
-| 62 | kyth-somaxconn | somaxconn | sysctl | `net.core.somaxconn=8192` | gaming.toml |
-| 63 | kyth-steam-deadzone | steam_deadzone | other | steam | native Rust dispatcher |
-| 64 | kyth-swappiness | swappiness | sysctl | `vm.swappiness=10` — **dup base** (base 180) | gaming.toml |
-| 65 | kyth-system-audit | system_audit | other | system audit | native Rust dispatcher |
-| 66 | kyth-tcp-ecn | tcp_ecn | sysctl | `net.ipv4.tcp_ecn=1` — **dup network** | gaming.toml vs network |
-| 67 | kyth-tcp-fastopen | tcp_fastopen | sysctl | `net.ipv4.tcp_fastopen=3` — **dup network** | gaming.toml vs network |
-| 68 | kyth-tcp-fin-timeout | tcp_fin_timeout | sysctl | `net.ipv4.tcp_fin_timeout=30` | gaming.toml |
-| 69 | kyth-tcp-keepalive | tcp_keepalive | sysctl | `net.ipv4.tcp_keepalive_time=120` | gaming.toml |
-| 70 | kyth-tcp-mtu-probing | tcp_mtu_probing | sysctl | `net.ipv4.tcp_mtu_probing=1` — **dup network** | gaming.toml vs network |
-| 71 | kyth-tcp-no-metrics-save | tcp_no_metrics_save | sysctl | `net.ipv4.tcp_no_metrics_save=1` | gaming.toml |
-| 72 | kyth-tcp-notsent | tcp_notsent | sysctl | `net.ipv4.tcp_notsent_lowat=16384` | gaming.toml |
-| 73 | kyth-tcp-orphan-retries | tcp_orphan_retries | sysctl | `net.ipv4.tcp_orphan_retries=0` | gaming.toml |
-| 74 | kyth-tcp-retries1 | tcp_retries1 | sysctl | `net.ipv4.tcp_retries1=3` | gaming.toml |
-| 75 | kyth-tcp-retries2 | tcp_retries2 | sysctl | `net.ipv4.tcp_retries2=8` | gaming.toml |
-| 76 | kyth-tcp-sack | tcp_sack | sysctl | `net.ipv4.tcp_sack=1` | gaming.toml |
-| 77 | kyth-tcp-slow-start | tcp_slow_start | sysctl | `net.ipv4.tcp_slow_start_after_idle=0` — **dup network** | gaming.toml vs network |
-| 78 | kyth-tcp-timestamps | tcp_timestamps | sysctl | `net.ipv4.tcp_timestamps=1` | gaming.toml |
-| 79 | kyth-tcp-window-scaling | tcp_window_scaling | sysctl | `net.ipv4.tcp_window_scaling=1` | gaming.toml |
-| 80 | kyth-telemetry-opt | telemetry_opt | other | telemetry | native Rust dispatcher |
-| 81 | kyth-thp-collapse | thp_collapse | sysctl | `kernel.khugepaged_defrag=0` | gaming.toml |
-| 82 | kyth-thp-tune | thp_tune | sysctl | 4 keys including `vm.compaction_proactiveness` — **dup base** | gaming.toml |
-| 83 | kyth-trim-tune | trim_preset | other | trim | native Rust dispatcher |
-| 84 | kyth-uksmd | uksmd_preset | other | uksmd | native Rust dispatcher |
-| 85 | kyth-vfs-cache | vfs_cache_pressure | sysctl | `vm.vfs_cache_pressure=50` — **dup base** | gaming.toml |
-| 86 | kyth-vm-stat | vm_stat | sysctl | `vm.stat_interval=10` — **dup base** | gaming.toml |
-| 87 | kyth-vm-watermark | vm_watermark | sysctl | `vm.watermark_scale_factor=500` — **dup base** | gaming.toml |
-| 88 | kyth-windows-verify | windows_verify | other | windows | native Rust dispatcher |
-| 89 | kyth-wine-sync | wine_sync | other | wine sync | native Rust dispatcher |
-| 90 | kyth-wmem-default | wmem_default | sysctl | `net.core.wmem_default=262144` | gaming.toml |
-| 91 | kyth-wmem-max | wmem_max | sysctl | `net.core.wmem_max=16777216` — **dup network** | gaming.toml vs network |
-| 92 | kyth-work-cache | work_cache | other | work cache | native Rust dispatcher |
-| 93 | kyth-zswap | zswap_preset | sysctl | `vm.zswap_*` (modprobe not sysctl) — actually `options zswap` | registry (other, not sysctl.d) |
-| 94 | kyth-zswap (duplicate row handling) | — | — | — | — |
+| 56 | kyth-selinux-gaming | selinux_gaming | other | selinux | native Rust dispatcher |
+| 57 | kyth-shader-cache-size | shader_cache_size | other | shader cache size | native Rust dispatcher |
+| 58 | kyth-shader-tmpfs | shader_tmpfs | other | shader tmpfs | native Rust dispatcher |
+| 59 | kyth-somaxconn | somaxconn | sysctl | `net.core.somaxconn=8192` | gaming.toml |
+| 60 | kyth-steam-deadzone | steam_deadzone | other | steam | native Rust dispatcher |
+| 61 | kyth-swappiness | swappiness | sysctl | `vm.swappiness=10` — **dup base** (base 180) | gaming.toml |
+| 62 | kyth-system-audit | system_audit | other | system audit | native Rust dispatcher |
+| 63 | kyth-tcp-ecn | tcp_ecn | sysctl | `net.ipv4.tcp_ecn=1` — **dup network** | gaming.toml vs network |
+| 64 | kyth-tcp-fastopen | tcp_fastopen | sysctl | `net.ipv4.tcp_fastopen=3` — **dup network** | gaming.toml vs network |
+| 65 | kyth-tcp-fin-timeout | tcp_fin_timeout | sysctl | `net.ipv4.tcp_fin_timeout=30` | gaming.toml |
+| 66 | kyth-tcp-keepalive | tcp_keepalive | sysctl | `net.ipv4.tcp_keepalive_time=120` | gaming.toml |
+| 67 | kyth-tcp-mtu-probing | tcp_mtu_probing | sysctl | `net.ipv4.tcp_mtu_probing=1` — **dup network** | gaming.toml vs network |
+| 68 | kyth-tcp-no-metrics-save | tcp_no_metrics_save | sysctl | `net.ipv4.tcp_no_metrics_save=1` | gaming.toml |
+| 69 | kyth-tcp-notsent | tcp_notsent | sysctl | `net.ipv4.tcp_notsent_lowat=16384` | gaming.toml |
+| 70 | kyth-tcp-orphan-retries | tcp_orphan_retries | sysctl | `net.ipv4.tcp_orphan_retries=0` | gaming.toml |
+| 71 | kyth-tcp-retries1 | tcp_retries1 | sysctl | `net.ipv4.tcp_retries1=3` | gaming.toml |
+| 72 | kyth-tcp-retries2 | tcp_retries2 | sysctl | `net.ipv4.tcp_retries2=8` | gaming.toml |
+| 73 | kyth-tcp-sack | tcp_sack | sysctl | `net.ipv4.tcp_sack=1` | gaming.toml |
+| 74 | kyth-tcp-slow-start | tcp_slow_start | sysctl | `net.ipv4.tcp_slow_start_after_idle=0` — **dup network** | gaming.toml vs network |
+| 75 | kyth-tcp-timestamps | tcp_timestamps | sysctl | `net.ipv4.tcp_timestamps=1` | gaming.toml |
+| 76 | kyth-tcp-window-scaling | tcp_window_scaling | sysctl | `net.ipv4.tcp_window_scaling=1` | gaming.toml |
+| 77 | kyth-telemetry-opt | telemetry_opt | other | telemetry | native Rust dispatcher |
+| 78 | kyth-thp-collapse | thp_collapse | sysctl | `kernel.khugepaged_defrag=0` | gaming.toml |
+| 79 | kyth-thp-tune | thp_tune | sysctl | 4 keys including `vm.compaction_proactiveness` — **dup base** | gaming.toml |
+| 80 | kyth-trim-tune | trim_preset | other | trim | native Rust dispatcher |
+| 81 | kyth-uksmd | uksmd_preset | other | uksmd | native Rust dispatcher |
+| 82 | kyth-vfs-cache | vfs_cache_pressure | sysctl | `vm.vfs_cache_pressure=50` — **dup base** | gaming.toml |
+| 83 | kyth-vm-stat | vm_stat | sysctl | `vm.stat_interval=10` — **dup base** | gaming.toml |
+| 84 | kyth-vm-watermark | vm_watermark | sysctl | `vm.watermark_scale_factor=500` — **dup base** | gaming.toml |
+| 85 | kyth-windows-verify | windows_verify | other | windows | native Rust dispatcher |
+| 86 | kyth-wine-sync | wine_sync | other | wine sync | native Rust dispatcher |
+| 87 | kyth-wmem-default | wmem_default | sysctl | `net.core.wmem_default=262144` | gaming.toml |
+| 88 | kyth-wmem-max | wmem_max | sysctl | `net.core.wmem_max=16777216` — **dup network** | gaming.toml vs network |
+| 89 | kyth-work-cache | work_cache | other | work cache | native Rust dispatcher |
+| 90 | kyth-zswap | zswap_preset | sysctl | `vm.zswap_*` (modprobe not sysctl) — actually `options zswap` | registry (other, not sysctl.d) |
+| 91 | kyth-zswap (duplicate row handling) | — | — | — | — |
 
 Note: `kyth-net-tune` (net_latency) is already fully represented in `network.toml` — the wrapper is now redundant and should become a compat alias that no-ops or maps to `network` tier status.
 

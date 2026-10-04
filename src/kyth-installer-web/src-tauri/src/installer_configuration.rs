@@ -76,6 +76,18 @@ fn safe_component(value: &str, label: &str, allow_slash: bool) -> Result<String,
     Ok(value.to_string())
 }
 
+/// Installer contract (`validation_rules.json`): one RFC 1123 label.
+fn valid_hostname(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && bytes.len() <= 63
+        && bytes[0] != b'-'
+        && bytes[bytes.len() - 1] != b'-'
+        && bytes
+            .iter()
+            .all(|b| b.is_ascii_alphanumeric() || *b == b'-')
+}
+
 fn safe_root(value: &str) -> Result<String, String> {
     let value = value.trim();
     if !value.starts_with('/') || value.contains("..") || value.len() > 4096 {
@@ -178,9 +190,12 @@ pub(crate) fn restore_fstab(snapshot: FstabSnapshot) -> Result<(), String> {
 
 pub(crate) fn build_plan(input: ConfigurationInput) -> Result<ConfigurationPlan, String> {
     let target_root = safe_root(&input.target_root)?;
-    let hostname = safe_component(&input.hostname, "hostname", false)?;
-    if hostname.starts_with('-') || hostname.ends_with('-') {
-        return Err("hostname cannot start or end with '-'.".to_string());
+    let hostname = input.hostname.trim().to_string();
+    if !valid_hostname(&hostname) {
+        return Err(
+            "hostname must be 1-63 letters, digits or '-', and cannot start or end with '-'."
+                .to_string(),
+        );
     }
     let timezone = safe_component(&input.timezone, "timezone", true)?;
     if timezone.starts_with('/') || timezone.ends_with('/') || timezone.contains("//") {
@@ -363,12 +378,32 @@ pub(crate) fn append_fstab(input: FstabAppendInput) -> Result<(), String> {
     validate_fstab_line(&input.line)?;
     let mut file = OpenOptions::new();
     file.create(true)
+        .read(true)
         .append(true)
         .custom_flags(libc::O_NOFOLLOW)
         .mode(0o644);
     let mut file = file
         .open(&path)
         .map_err(|error| format!("could not open installed fstab: {error}"))?;
+    let length = file
+        .metadata()
+        .map_err(|error| format!("could not inspect installed fstab: {error}"))?
+        .len();
+    if length > 0 {
+        let mut last = [0u8; 1];
+        use std::os::unix::fs::FileExt;
+        if file
+            .read_at(&mut last, length - 1)
+            .map_err(|error| format!("could not inspect installed fstab ending: {error}"))?
+            != 1
+        {
+            return Err("could not inspect installed fstab ending".to_string());
+        }
+        if last[0] != b'\n' {
+            file.write_all(b"\n")
+                .map_err(|error| format!("could not separate installed fstab entries: {error}"))?;
+        }
+    }
     file.write_all(input.line.as_bytes())
         .map_err(|error| format!("could not append installed fstab: {error}"))?;
     file.flush()
@@ -424,6 +459,46 @@ mod tests {
             ..base
         })
         .is_err());
+    }
+
+    #[test]
+    fn hostname_follows_the_rfc_1123_label_contract() {
+        let base = ConfigurationInput {
+            target_root: "/mnt/target".to_string(),
+            hostname: "kyth".to_string(),
+            timezone: "UTC".to_string(),
+            locale: "en_US.UTF-8".to_string(),
+            keymap: "us".to_string(),
+        };
+        for bad in [
+            "my_host",
+            "a.b",
+            "-a",
+            "a-",
+            "",
+            &"a".repeat(64),
+            "host@x",
+            "h+1",
+        ] {
+            assert!(
+                build_plan(ConfigurationInput {
+                    hostname: bad.to_string(),
+                    ..base.clone()
+                })
+                .is_err(),
+                "{bad:?}"
+            );
+        }
+        for good in ["k", "kyth-box", "Host1", &"a".repeat(63)] {
+            assert!(
+                build_plan(ConfigurationInput {
+                    hostname: good.to_string(),
+                    ..base.clone()
+                })
+                .is_ok(),
+                "{good:?}"
+            );
+        }
     }
 
     #[test]
@@ -531,6 +606,24 @@ mod tests {
             line: "UUID=ABCD /data ext4 defaults 0 2\n".into(),
         })
         .is_err());
+    }
+
+    #[test]
+    fn append_separates_entries_when_existing_fstab_has_no_final_newline() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let etc = directory.path().join("etc");
+        std::fs::create_dir(&etc).expect("etc directory");
+        let path = etc.join("fstab");
+        std::fs::write(&path, b"UUID=ABCD /old ext4 defaults 0 2").expect("initial fstab");
+        append_fstab(FstabAppendInput {
+            path: path.to_string_lossy().into_owned(),
+            line: "UUID=BEEF /new ext4 defaults 0 2\n".into(),
+        })
+        .expect("entry should append on a new line");
+        assert_eq!(
+            std::fs::read(&path).unwrap(),
+            b"UUID=ABCD /old ext4 defaults 0 2\nUUID=BEEF /new ext4 defaults 0 2\n"
+        );
     }
 
     #[test]

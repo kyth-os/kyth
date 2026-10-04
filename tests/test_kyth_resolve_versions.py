@@ -26,12 +26,12 @@ class ResolveVersionsTests(unittest.TestCase):
     @mock.patch("sys.stdout", new_callable=io.StringIO)
     def test_cmd_proton_cachyos(self, mock_stdout, mock_urlopen) -> None:
         mock_response = mock.Mock()
-        mock_response.read.return_value = b'{"tag_name": "cachyos-11.0-20260602-slr"}'
+        mock_response.read.return_value = b'{"tag_name": "GE-Proton11-7"}'
         mock_urlopen.return_value.__enter__.return_value = mock_response
 
         ret = resolve_versions.cmd_proton_cachyos()
         self.assertEqual(ret, 0)
-        self.assertEqual(mock_stdout.getvalue().strip(), "cachyos-11.0-20260602-slr")
+        self.assertEqual(mock_stdout.getvalue().strip(), "GE-Proton11-7")
 
     @mock.patch("urllib.request.urlopen")
     @mock.patch("sys.stdout", new_callable=io.StringIO)

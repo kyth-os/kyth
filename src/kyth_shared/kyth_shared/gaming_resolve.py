@@ -36,7 +36,7 @@ _GAMING_VERSIONS_PATHS = (
 class GamingVersions:
     umu_version: str = ""
     proton_cachyos_version: str = ""
-    proton_cachyos_repo: str = "CachyOS/proton-cachyos"
+    proton_cachyos_repo: str = "GloriousEggroll/proton-ge-custom"
     mesa_git_copr: str = ""  # empty = disabled (ENABLE_MESA_GIT=0)
 
     def is_pinned(self) -> bool:
@@ -71,7 +71,7 @@ def gaming_versions() -> GamingVersions:
     gv = GamingVersions(
         umu_version=os.environ.get("UMU_VERSION") or file_vals.get("umu_version", ""),
         proton_cachyos_version=os.environ.get("PROTON_CACHYOS_VER") or file_vals.get("proton_cachyos_version", ""),
-        proton_cachyos_repo=file_vals.get("proton_cachyos_repo", "CachyOS/proton-cachyos"),
+        proton_cachyos_repo=file_vals.get("proton_cachyos_repo", "GloriousEggroll/proton-ge-custom"),
         mesa_git_copr=file_vals.get("mesa_git_copr", ""),
     )
     # Write back to cache when we have a pinned version and cache is missing/stale

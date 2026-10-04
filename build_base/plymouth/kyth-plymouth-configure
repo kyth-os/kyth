@@ -45,6 +45,23 @@ install_items+=" /etc/passwd /etc/group "
 do_hardlink="no"
 DRACUTEOF
 
+# dracut 111 (Fedora 45) ships 70crypt/crypt-generator.sh with top-level
+# `return` statements. The file is installed as a systemd generator and is
+# *executed*, not sourced, so every `return` fails with "can only return from a
+# function or sourced script" (exit 2). systemd then logs
+# "dracut-crypt-generator failed with exit status 2" on every boot even though
+# there is no crypttab to process. `exit` is what the script means there.
+# Idempotent and exact: only the three known-bad statements are rewritten, and
+# a script that already uses `exit` (a fixed dracut) is left alone.
+crypt_generator="$(host_path /usr/lib/dracut/modules.d/70crypt/crypt-generator.sh)"
+if [[ -f "${crypt_generator}" ]]; then
+	sed -i \
+		-e 's/^\(\[ -e \/etc\/crypttab \] || \)return 0$/\1exit 0/' \
+		-e 's/^\(\[ -n "\$GENERATOR_DIR" \] || \)return 1$/\1exit 1/' \
+		-e '/^if ! getargbool 1 rd\.luks; then$/,/^fi$/ s/^\(    \)return 0$/\1exit 0/' \
+		"${crypt_generator}"
+fi
+
 rm -rf "${dracut_modules_dir}/46kyth-plymouth"
 module_dir="${dracut_modules_dir}/99kyth-plymouth"
 mkdir -p "${module_dir}"

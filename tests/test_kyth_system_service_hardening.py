@@ -141,7 +141,8 @@ ONESHOT_TASK_UNITS = (
     "kyth-local-bin-migrate.service",
     "kyth-mok-rotate.service",
     "kyth-power-arbiter.service",
-    "kyth-sched-arbiter.service",
+    # kyth-sched-arbiter.service is generated at build time by
+    # 15-sched-arbiter.sh; no repo copy exists to audit.
 )
 
 

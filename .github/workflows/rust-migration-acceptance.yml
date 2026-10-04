@@ -152,7 +152,10 @@ jobs:
             exit 1
           fi
           iso="${isos[0]}"
-          sha256sum --check --strict "${iso}-CHECKSUM"
+          (
+            cd "$(dirname "${iso}")"
+            sha256sum --check --strict "$(basename "${iso}")-CHECKSUM"
+          )
           printf 'iso=%s\n' "${iso}" >>"${GITHUB_OUTPUT}"
 
       - name: Run exact-image acceptance and preserve evidence
@@ -256,7 +259,10 @@ jobs:
           set -euo pipefail
           iso="${RUNNER_TEMP}/kyth-acceptance/iso/kyth-live-testing.iso"
           test -s "${iso}"
-          sha256sum --check --strict "${iso}-CHECKSUM"
+          (
+            cd "$(dirname "${iso}")"
+            sha256sum --check --strict "$(basename "${iso}")-CHECKSUM"
+          )
           printf 'iso=%s\n' "${iso}" >>"${GITHUB_OUTPUT}"
 
       # A nonzero acceptance exit fails this job by design: the nightly run

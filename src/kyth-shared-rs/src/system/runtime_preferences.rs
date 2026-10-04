@@ -74,9 +74,7 @@ pub fn generate_trim_marker(
 ) -> std::io::Result<Option<PathBuf>> {
     let marker = marker.as_ref();
     if config.profile != "kyth" {
-        match std::fs::remove_file(marker) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(marker)?;
         return Ok(None);
     }
     crate::atomic_io::atomic_write_text(marker, "kyth-nodiscard,weekly\n", Some(0o644))?;
@@ -217,9 +215,7 @@ pub fn generate_journal(
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
     if !config.perf {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         return Ok(None);
     }
     crate::atomic_io::atomic_write_text(destination, &format!("# Kyth journal perf — generated, disable via journal.toml perf=false\n[Journal]\nSystemMaxUse={}\nRuntimeMaxUse={}\nMaxRetentionSec=14day\nForwardToSyslog=no\nCompress=yes\n", config.system_max_use, config.runtime_max_use), Some(0o644))?;
@@ -298,9 +294,7 @@ pub fn generate_irq(
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
     if config.profile != "kyth" {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         return Ok(None);
     }
     let banned = if valid_cpu_list(&config.isolated_cpus) {
@@ -359,9 +353,7 @@ pub fn generate_fscache(
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
     if !config.enabled {
-        match std::fs::remove_file(destination) {
-            Ok(()) | Err(_) => {}
-        }
+        crate::atomic_io::remove_if_exists(destination)?;
         return Ok(None);
     }
     crate::atomic_io::atomic_write_text(

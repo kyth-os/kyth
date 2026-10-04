@@ -158,8 +158,8 @@ class PartitionStepBracketingTests(unittest.TestCase):
 
         self.assertIn("create_label", service.calls)
 
-    def test_recorder_failure_never_aborts_a_live_commit(self):
-        """Bookkeeping must not destroy a disk mid-partition."""
+    def test_started_record_failure_aborts_before_partition_mutation(self):
+        """Never begin a destructive step if its recovery marker cannot persist."""
         journal, service = build_journal()
         journal.add_op("new_table", {"table_type": "gpt"})
         # commit() validates before mutating: the journal needs a root (see
@@ -170,10 +170,10 @@ class PartitionStepBracketingTests(unittest.TestCase):
         def explode(*_args):
             raise OSError("read-only transaction report")
 
-        journal.commit(lambda _msg: None, record=explode)
-
-        self.assertTrue(journal.committed)
-        self.assertIn("create_label", service.calls)
+        with self.assertRaisesRegex(RuntimeError, "Could not persist recovery state"):
+            journal.commit(lambda _msg: None, record=explode)
+        self.assertFalse(journal.committed)
+        self.assertNotIn("create_label", service.calls)
 
 
 class TransactionStatePersistenceTests(unittest.TestCase):

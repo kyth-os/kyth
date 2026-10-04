@@ -422,6 +422,9 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             self.send_error(400, "Invalid JSON")
             return
+        if not isinstance(body, dict):
+            self.send_error(400, "JSON request body must be an object")
+            return
 
         route_name = next((name for name, spec in ROUTES.items() if spec is route), "")
         response = PostRouteService(self.context).dispatch(route_name, body)
@@ -457,19 +460,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.end_headers()
         try:
-            sent = int(self.headers.get("Last-Event-ID", "-1")) + 1
+            last_event_id = int(self.headers.get("Last-Event-ID", "-1"))
         except ValueError:
-            sent = 0
-        sent = max(0, sent)
+            last_event_id = -1
+        sent = max(0, last_event_id + 1)
+        with self.context.events.condition:
+            # A cursor ahead of the broker's sequence can never become
+            # readable. Restart from the oldest retained event instead of
+            # pinning an SSE slot until its idle timeout.
+            if sent > self.context.events.next_event_id:
+                sent = self.context.events.base_event_id
         # Idle bound: a client that reads keepalives but never sees done /
         # error would otherwise pin a thread (and an SSE slot) forever.
         # 960 event-less keepalives ≈ 4h — far past any real install phase.
         idle_keepalives = 0
         while True:
             with self.context.events.condition:
-                while sent >= len(self.context.events.events):
+                while sent >= self.context.events.next_event_id:
                     self.context.events.condition.wait(timeout=15)
-                    if sent >= len(self.context.events.events):
+                    if sent >= self.context.events.next_event_id:
                         idle_keepalives += 1
                         if idle_keepalives > 960:
                             return
@@ -478,7 +487,9 @@ class Handler(BaseHTTPRequestHandler):
                             self.wfile.flush()
                         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
                             return
-                batch = self.context.events.events[sent:]
+                sent = max(sent, self.context.events.base_event_id)
+                offset = sent - self.context.events.base_event_id
+                batch = self.context.events.events[offset:]
                 idle_keepalives = 0
             for event in batch:
                 try:

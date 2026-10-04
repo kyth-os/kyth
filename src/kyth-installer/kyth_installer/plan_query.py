@@ -137,7 +137,12 @@ def get_manual_mounts(context, *, get_journal, list_partitions) -> list[dict]:
             raise RuntimeError("Committed partition journal contains malformed operations.")
         if op.get("kind") not in ("create", "set_mountpoint"):
             continue
-        mountpoint = str(op["params"].get("mountpoint", "")).strip()
+        from .mountpoint import normalize_manual_mountpoint
+
+        try:
+            mountpoint = normalize_manual_mountpoint(op["params"].get("mountpoint", ""))
+        except ValueError as exc:
+            raise RuntimeError("Committed partition journal contains an unsafe mount point.") from exc
         partition = str(op["params"].get("partition", "")).strip()
         if not mountpoint or mountpoint in ("/", "/boot/efi") or not partition:
             continue

@@ -82,7 +82,6 @@ def collect_audit(force: bool = False) -> dict[str, Any]:
         ("trim", "trim_preset", "trim_status"),
         ("ananicy", "ananicy_preset", "ananicy_status"),
         ("zswap", "zswap_preset", "zswap_status"),
-        ("sched", "sched_latency", "sched_latency_status"),
         ("wine", "wine_sync", "wine_sync_status"),
         ("kwin", "kwin_latency", "kwin_latency_status"),
         ("pipewire_gaming", "pipewire_gaming", "pipewire_gaming_status"),
@@ -94,11 +93,9 @@ def collect_audit(force: bool = False) -> dict[str, Any]:
         ("tcp_ecn", "tcp_ecn", "tcp_ecn_status"),
         ("tcp_slow_start", "tcp_slow_start", "tcp_slow_start_status"),
         ("autogroup", "sched_autogroup", "autogroup_status"),
-        ("nr_migrate", "sched_nr_migrate", "nr_migrate_status"),
         ("page_cluster", "page_cluster", "page_cluster_status"),
         ("tcp_retries2", "tcp_retries2", "tcp_retries2_status"),
         ("tcp_keepalive", "tcp_keepalive", "tcp_keepalive_status"),
-        ("sched_child", "sched_child", "sched_child_status"),
         ("vm_stat", "vm_stat", "vm_stat_status"),
         ("numa_balancing", "numa_balancing", "numa_balancing_status"),
         ("tcp_fastopen", "tcp_fastopen", "tcp_fastopen_status"),
@@ -154,7 +151,7 @@ def collect_audit(force: bool = False) -> dict[str, Any]:
 
 def format_audit(a: dict[str, Any]) -> str:
     lines = ["# Kyth perf audit — 46-140"]
-    for k in ("master", "loader", "oom_gaming", "shader_tmpfs", "gaming_cfs", "thp", "irq", "btrfs", "trim", "ananicy", "zswap", "sched", "wine", "kwin", "pipewire_gaming", "vm_watermark", "tcp_notsent", "max_map_count", "dirty_ratio", "vfs_cache", "tcp_ecn", "tcp_slow_start", "autogroup", "nr_migrate", "page_cluster", "tcp_retries2", "tcp_keepalive", "sched_child", "vm_stat", "numa_balancing", "tcp_fastopen", "tcp_mtu_probing", "dirty_expire", "file_max", "perf_cpu", "swappiness", "tcp_fin_timeout", "somaxconn", "inotify_watches", "min_free_kbytes", "rmem_max", "wmem_max", "aio_max", "overcommit_memory", "netdev_budget", "rmem_default", "wmem_default", "tcp_window_scaling", "tcp_sack", "tcp_timestamps", "busy_read", "busy_poll", "tcp_no_metrics_save", "tcp_retries1", "tcp_orphan_retries"):
+    for k in ("master", "loader", "oom_gaming", "shader_tmpfs", "gaming_cfs", "thp", "irq", "btrfs", "trim", "ananicy", "zswap", "wine", "kwin", "pipewire_gaming", "vm_watermark", "tcp_notsent", "max_map_count", "dirty_ratio", "vfs_cache", "tcp_ecn", "tcp_slow_start", "autogroup", "page_cluster", "tcp_retries2", "tcp_keepalive", "vm_stat", "numa_balancing", "tcp_fastopen", "tcp_mtu_probing", "dirty_expire", "file_max", "perf_cpu", "swappiness", "tcp_fin_timeout", "somaxconn", "inotify_watches", "min_free_kbytes", "rmem_max", "wmem_max", "aio_max", "overcommit_memory", "netdev_budget", "rmem_default", "wmem_default", "tcp_window_scaling", "tcp_sack", "tcp_timestamps", "busy_read", "busy_poll", "tcp_no_metrics_save", "tcp_retries1", "tcp_orphan_retries"):
         lines.append(f"{k}: {a.get(k)}")
     lines.append(f"systemd-analyze: {a.get('systemd_analyze')}")
     return "\n".join(lines) + "\n"

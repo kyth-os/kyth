@@ -11,6 +11,8 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "${repo_root}"
 
+# The installer build mounts the complete helper tree. Hash that same tree,
+# rather than maintaining a partial list of helpers that silently goes stale.
 git ls-files -z \
 	installer/Containerfile \
 	installer/build.sh \
@@ -18,11 +20,12 @@ git ls-files -z \
 	installer/calamares \
 	src/kyth-installer-web \
 	src/kyth-shared-rs \
-	build_files/exe-handler-apps.json \
+	third_party/gtk-glib-0.18.5 \
+	build_files/scripts \
 	build_files/kyth-launch-installer \
 	build_files/kyth-installerd.service \
 	build_files/kyth-vm-acceptance.service \
-	build_files/kyth_shared/kyth_shared/vm_acceptance.py \
+	build_files/exe-handler-apps.json \
 	| sort -z \
 	| xargs -0 -r sh -c '
 		for f in "$@"; do

@@ -290,6 +290,13 @@ fn run_operation(spec: ExecSpec) -> Result<String, String> {
         .args(&spec.argv[1..])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    // This daemon runs as root: never let children inherit its environment.
+    // LD_PRELOAD / LD_LIBRARY_PATH / PYTHONPATH etc. from the daemon's
+    // environment would apply to every privileged helper. Start from a
+    // minimal explicit set instead (allowlist, not denylist).
+    command.env_clear();
+    command.env("PATH", "/usr/sbin:/usr/bin:/sbin:/bin");
+    command.env("LANG", "C.UTF-8");
     // Stdin is /dev/null unless the op carries explicit input: a pipe held
     // open forever turns any unexpected helper prompt (new fwupd flow,
     // recipe confirmation) into a 900s hang. Fail fast instead; ops that

@@ -1,6 +1,6 @@
 import '../common.just'
 
-# Download and install the latest Proton-CachyOS.
+# Download and install the latest GE-Proton.
 [group('KythOS')]
 update-proton-cachyos:
     #!/usr/bin/env bash

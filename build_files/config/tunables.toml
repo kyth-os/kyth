@@ -283,21 +283,6 @@ module = "sched_autogroup"
 wrapper = "kyth-sched-autogroup"
 kind = "sysctl"
 
-[tunables."sched-child"]
-module = "sched_child"
-wrapper = "kyth-sched-child"
-kind = "sysctl"
-
-[tunables."sched-latency"]
-module = "sched_latency"
-wrapper = "kyth-sched-latency"
-kind = "sysctl"
-
-[tunables."sched-nr-migrate"]
-module = "sched_nr_migrate"
-wrapper = "kyth-sched-nr-migrate"
-kind = "sysctl"
-
 [tunables."selinux-gaming"]
 module = "selinux_gaming"
 wrapper = "kyth-selinux-gaming"

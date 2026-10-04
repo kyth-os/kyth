@@ -5,7 +5,7 @@ import logging
 import os, tomllib, json
 from pathlib import Path
 from typing import Any
-from datetime import datetime
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ def ledger_path(path: Path | None = None) -> Path:
 def append_ledger(entry: dict[str, Any], path: Path | None = None) -> Path:
     p=ledger_path(path)
     p.parent.mkdir(parents=True, exist_ok=True)
-    entry["ts"]=datetime.utcnow().isoformat()
+    entry["ts"]=datetime.now(timezone.utc).isoformat()
     with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps(entry)+"\n")
     return p

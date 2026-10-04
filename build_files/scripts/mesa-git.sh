@@ -53,8 +53,10 @@ else
 	# Some base images carry negativo17 Mesa packages with newer or equal EVRs
 	# than Fedora, which can make a normal upgrade leave the intended mesa-git
 	# layer unused. Multimedia repos are already removed in packages/03; sync
-	# the Mesa stack so xxmitsu's COPR wins when this layer is enabled.
-	dnf5 distro-sync -y --refresh --allowerasing \
+	# the Mesa stack so xxmitsu's COPR wins when this layer is enabled. DNF5 does
+	# not switch package vendor by default, so allow it explicitly — otherwise
+	# the Fedora mesa stays and the origin guard below fails the build.
+	dnf5 distro-sync -y --refresh --allowerasing --allow-vendor-change \
 		mesa\* \
 		libdrm \
 		libva\* \

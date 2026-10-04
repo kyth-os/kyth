@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from collections.abc import Callable
 from datetime import datetime, timezone
@@ -10,6 +11,8 @@ from typing import Any
 
 from .context import InstallerContext
 from .system import _as_root
+
+_logger = logging.getLogger(__name__)
 
 RunCommand = Callable[..., Any]
 
@@ -53,11 +56,29 @@ def cleanup_registered_mounts(context: InstallerContext, *, run: RunCommand) -> 
     for mountpoint in reversed(context.cleanup_mounts.copy()):
         from .system import unmount_filesystem
 
-        unmount_filesystem(
-            mountpoint, recursive=True, lazy=True,
-            run=run, as_root=_as_root, check=False, capture_output=True,
-        )
-        context.release_mount(mountpoint)
+        try:
+            result = unmount_filesystem(
+                mountpoint, recursive=True, lazy=True,
+                run=run, as_root=_as_root, check=False, capture_output=True,
+            )
+        except (OSError, ValueError, RuntimeError, AttributeError, KeyError) as exc:
+            _logger.warning(
+                "could not unmount registered installer mount %s (%s); keeping it registered",
+                mountpoint,
+                exc,
+            )
+            continue
+        # Keep failed unmounts registered so a later cleanup/retry can still
+        # see the live mount instead of treating it as released.
+        returncode = getattr(result, "returncode", 0)
+        if not isinstance(returncode, int) or returncode == 0:
+            context.release_mount(mountpoint)
+        else:
+            _logger.warning(
+                "could not unmount registered installer mount %s (exit %s); keeping it registered",
+                mountpoint,
+                returncode,
+            )
 
 
 def write_failure_summary(

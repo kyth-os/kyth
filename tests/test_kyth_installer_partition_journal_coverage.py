@@ -34,6 +34,30 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         with mock.patch.object(journal_mod, "_normal_device_path", side_effect=lambda value: value):
             return journal_mod.Journal("/dev/sda", disk_service=service)
 
+    def test_journal_validation_rejects_unsafe_manual_mountpoint(self):
+        journal = self._journal()
+        journal.add_op("create", {
+            "start_bytes": 4 * 1024**2, "size_bytes": 1024**3,
+            "fs_type": "btrfs", "mountpoint": "/home/../../etc",
+        })
+        errors = journal.validate()
+        self.assertTrue(any("absolute safe path" in error for error in errors))
+
+    def test_journal_rejects_empty_and_out_of_disk_partition_geometry(self):
+        for start, size in ((0, 1024), (4 * 1024**2, 0), (4 * 1024**2, 20 * 1024**2)):
+            with self.subTest(start=start, size=size):
+                journal = self._journal()
+                journal.add_op("new_table", {"table_type": "gpt"})
+                journal.add_op("create", {
+                    "start_bytes": start, "size_bytes": size,
+                    "fs_type": "btrfs", "mountpoint": "/",
+                })
+                with mock.patch.object(journal_mod, "list_disks", return_value=[{
+                    "name": "/dev/sda", "partition_table": "gpt", "size_bytes": 10 * 1024**2,
+                }]):
+                    errors = journal.validate()
+                self.assertTrue(errors)
+
     def test_journal_rejects_invalid_disk_and_exposes_queue_safely(self):
         with mock.patch.object(journal_mod, "_normal_device_path", return_value=None):
             with self.assertRaisesRegex(RuntimeError, "Invalid disk path"):
@@ -78,7 +102,7 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         self.assertTrue((Path(journal._backup_dir.name) / "partition-table.backup").exists())
         journal._discard_snapshot()
 
-    def test_restore_without_snapshot_or_backup_is_safe(self):
+    def test_restore_without_snapshot_or_backup_fails_closed(self):
         journal = self._journal(dry_run=False)
         journal._restore_snapshot()
         journal._disk_service.restore_table.assert_not_called()
@@ -87,9 +111,11 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         backup_dir.name = "/definitely/missing"
         journal._backup_dir = backup_dir
         with mock.patch.object(journal_mod, "_require_sgdisk"):
-            journal._restore_snapshot()
+            with self.assertRaisesRegex(RuntimeError, "snapshot file is missing"):
+                journal._restore_snapshot()
         journal._disk_service.restore_table.assert_not_called()
-        backup_dir.cleanup.assert_called_once()
+        backup_dir.cleanup.assert_not_called()
+        self.assertTrue(journal._snapshot_saved)
 
     def test_root_partition_prefers_created_root_then_existing_assignment(self):
         journal = self._journal()
@@ -145,6 +171,25 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
             self.assertEqual(journal.validate(), [])
             self.assertEqual(journal._find_root_partition(), "/dev/sda2")
 
+    def test_removing_an_earlier_op_does_not_reuse_indices_or_restore_stale_root(self):
+        journal = self._journal()
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda1", "mountpoint": "/home"})
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/"})
+        self.assertTrue(journal.remove_op(0))
+        journal.add_op("set_mountpoint", {"partition": "/dev/sda2", "mountpoint": "/home"})
+
+        parts = [
+            {"name": "/dev/sda1", "fstype": "btrfs"},
+            {"name": "/dev/sda2", "fstype": "btrfs"},
+        ]
+        with mock.patch.object(journal_mod, "list_partitions", return_value=parts), \
+             mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
+            errors = journal.validate()
+            root = journal._find_root_partition()
+        self.assertTrue(any("No root partition" in error for error in errors))
+        self.assertIsNone(root)
+        self.assertEqual([1, 2], [op["index"] for op in journal.ops])
+
     def test_genuine_duplicate_root_assignment_is_still_rejected(self):
         # A real conflict (two partitions BOTH finally assigned "/") must
         # still be caught — the fix above must not weaken this check.
@@ -189,6 +234,36 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
              mock.patch.object(journal_mod, "_parent_disk", return_value="/dev/sda"):
             errors = journal.validate()
         self.assertTrue(any("currently mounted or in use" in error for error in errors))
+
+    def test_incomplete_partition_probe_rows_are_ignored_by_in_use_guard(self):
+        journal = self._journal()
+        self.assertEqual(
+            journal._validate_not_in_use([{"current": True, "in_use": True}]),
+            [],
+        )
+
+    def test_native_journal_validator_accepts_consistent_success_response(self):
+        journal = self._journal(dry_run=False)
+        with (
+            mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
+            mock.patch(
+                "kyth_installer.runner.run_command",
+                return_value=SimpleNamespace(stdout='{"valid": true, "errors": []}'),
+            ),
+            mock.patch("kyth_installer.system._as_root", side_effect=lambda argv: argv),
+        ):
+            self.assertEqual(journal._rust_validate([], "gpt", 128 * 1024**3), [])
+
+    def test_validate_returns_native_validator_errors_without_python_fallback(self):
+        journal = self._journal()
+        journal.add_op("new_table", {"table_type": "gpt"})
+        native_errors = ["native validator rejected journal"]
+        with (
+            mock.patch.object(journal_mod, "list_partitions", return_value=[]),
+            mock.patch.object(journal_mod, "list_disks", return_value=[]),
+            mock.patch.object(journal, "_rust_validate", return_value=native_errors),
+        ):
+            self.assertIs(journal.validate(), native_errors)
 
     def test_commit_create_dry_run_records_root_and_skips_swap_format(self):
         journal = self._journal()
@@ -436,12 +511,13 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
         with mock.patch.object(journal_mod, "_require_sgdisk") as req, mock.patch.object(journal, "_discard_snapshot"):
             journal._save_snapshot()
             req.assert_called()
-        # restore without backup dir returns early (185)
+        # A recorded snapshot without a backup directory cannot be restored.
         journal = self._journal(dry_run=False)
         journal._snapshot_saved = True
         journal._backup_dir = None
         with mock.patch.object(journal_mod, "_require_sgdisk"):
-            journal._restore_snapshot()
+            with self.assertRaisesRegex(RuntimeError, "snapshot is unavailable"):
+                journal._restore_snapshot()
             journal._disk_service.restore_table.assert_not_called()
         # _find_root_partition returns None when no root (238)
         journal = self._journal()
@@ -496,7 +572,7 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "malformed journal metadata"):
                 journal._rust_commit(mock.Mock())
 
-    def test_native_commit_does_not_abort_for_transaction_event_write_failure(self):
+    def test_native_commit_stops_if_started_transaction_event_cannot_be_persisted(self):
         journal = self._journal(dry_run=False)
 
         class FakeRunner:
@@ -514,8 +590,8 @@ class InstallerPartitionJournalCoverageTests(unittest.TestCase):
             mock.patch.object(journal_mod.shutil, "which", return_value="/usr/bin/kyth-installer-exec"),
             mock.patch("kyth_installer.streaming.StreamingCommandRunner", FakeRunner),
         ):
-            response = journal._rust_commit(mock.Mock(), record=broken_record)
-        self.assertTrue(response["ok"])
+            with self.assertRaisesRegex(RuntimeError, "Could not persist recovery state"):
+                journal._rust_commit(mock.Mock(), record=broken_record)
 
     def test_native_target_validation_covers_success_failure_and_fail_closed_paths(self):
         journal = self._journal(dry_run=False)

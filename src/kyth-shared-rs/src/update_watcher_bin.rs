@@ -18,24 +18,45 @@ fn run(program: &str, args: &[&str], timeout: Duration) -> Option<(bool, String)
     Some((output.status.success(), text))
 }
 
+/// A missing file means "use the defaults". A file that exists but cannot be
+/// parsed must NOT: a typo used to discard the whole file, so `enabled = false`
+/// was silently ignored and updates ran anyway. Fail closed instead.
+fn config_from(raw: Option<&str>) -> toml::Value {
+    match raw {
+        None => default_config(),
+        Some(raw) => raw.parse().unwrap_or_else(|error| {
+            eprintln!("kyth-update-watcher: {DEFAULT_CONFIG} is not valid TOML ({error}); auto-update stays off until it is fixed");
+            toml::Value::Table(toml::toml! { auto_update = { enabled = false } })
+        }),
+    }
+}
+
+/// bootc may legitimately run for a long time, but a config value must never be
+/// able to overflow the deadline arithmetic — and must never exceed the
+/// systemd unit's `TimeoutStartSec` (build_files/kyth-update-watcher.service,
+/// currently 2400s), or systemd SIGTERMs the watcher mid-upgrade. Keep the
+/// clamp in sync with the unit file.
+fn bootc_timeout_secs(value: i64) -> u64 {
+    value.clamp(1, 2400) as u64
+}
+
+fn default_config() -> toml::Value {
+    toml::Value::Table(toml::toml! {
+        auto_update = {
+            enabled = true,
+            rollout_ring = "follow-image",
+            quiet_hours_start = "02:00",
+            quiet_hours_end = "07:00",
+            skip_if_metered = true,
+            skip_if_gaming = true,
+            startup_grace_minutes = 20,
+            bootc_timeout = 1800,
+        }
+    })
+}
+
 fn config() -> toml::Value {
-    std::fs::read_to_string(DEFAULT_CONFIG)
-        .ok()
-        .and_then(|raw| raw.parse().ok())
-        .unwrap_or_else(|| {
-            toml::Value::Table(toml::toml! {
-                auto_update = {
-                    enabled = true,
-                    rollout_ring = "follow-image",
-                    quiet_hours_start = "02:00",
-                    quiet_hours_end = "07:00",
-                    skip_if_metered = true,
-                    skip_if_gaming = true,
-                    startup_grace_minutes = 20,
-                    bootc_timeout = 1800,
-                }
-            })
-        })
+    config_from(std::fs::read_to_string(DEFAULT_CONFIG).ok().as_deref())
 }
 
 fn settings<'a>(config: &'a toml::Value) -> &'a toml::Value {
@@ -544,7 +565,7 @@ fn main() -> std::process::ExitCode {
         let _ = kyth_shared::system::update_status::write_update_snapshot(&status);
         return std::process::ExitCode::from(1);
     }
-    let timeout = integer_setting(&config, "bootc_timeout", 1800).max(1) as u64;
+    let timeout = bootc_timeout_secs(integer_setting(&config, "bootc_timeout", 1800));
     let upgrade = run_bootc_upgrade(Duration::from_secs(timeout));
     if !upgrade.ok {
         let output = if firmware_output.is_empty() {
@@ -570,12 +591,23 @@ fn main() -> std::process::ExitCode {
         let _ = kyth_shared::system::update_status::write_update_snapshot(&status);
         return std::process::ExitCode::from(1);
     }
-    if !remote.is_empty() {
+    // Re-read bootc status after the upgrade: `remote` was captured from the
+    // registry *before* the upgrade ran and can be up to 24h stale if the
+    // registry moved mid-upgrade. The staged digest must reflect the actual
+    // post-upgrade state, so re-query rather than trusting the pre-upgrade
+    // value. Falls back to `remote` if the re-query fails.
+    let staged_digest = kyth_shared::system::bootc_query::fetch_status_data()
+        .and_then(|status_data| {
+            kyth_shared::system::bootc_query::image_digest_from_status(&status_data, "staged")
+        })
+        .filter(|digest| !digest.is_empty())
+        .unwrap_or_else(|| remote.clone());
+    if !staged_digest.is_empty() {
         let coordinator = kyth_shared::system::update_coordinator::UpdateCoordinator::new(
             kyth_shared::system::boot_health::DEFAULT_STATE_PATH,
         );
         let _ = coordinator.record_staged(
-            &remote,
+            &staged_digest,
             kyth_shared::system::boot_health::image_ring(&image_ref).unwrap_or(ring),
             now(),
         );
@@ -591,7 +623,7 @@ fn main() -> std::process::ExitCode {
         output,
         image_ref,
         booted,
-        remote.clone(),
+        staged_digest.clone(),
         remote,
         flatpaks,
     );
@@ -603,6 +635,29 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unparsable_config_disables_auto_update_instead_of_using_defaults() {
+        // A typo (unquoted time) used to discard the whole file, so a user's
+        // `enabled = false` was ignored and updates ran anyway.
+        let bad = "[auto_update]\nenabled = false\nquiet_hours_start = 02:00\n";
+        let config = config_from(Some(bad));
+        assert!(!bool_setting(&config, "enabled", true));
+        assert!(skip_reason(&config).is_some());
+        // A missing file is the only case that falls back to the defaults.
+        assert!(bool_setting(&config_from(None), "enabled", false));
+    }
+
+    #[test]
+    fn bootc_timeout_is_clamped_to_a_sane_range() {
+        // Upper bound is the systemd unit's TimeoutStartSec (2400s); the
+        // clamp and the unit file must stay in sync.
+        assert_eq!(bootc_timeout_secs(i64::MAX), 2400);
+        assert_eq!(bootc_timeout_secs(5000), 2400);
+        assert_eq!(bootc_timeout_secs(0), 1);
+        assert_eq!(bootc_timeout_secs(-5), 1);
+        assert_eq!(bootc_timeout_secs(1800), 1800);
+    }
 
     #[test]
     fn parses_df_available_bytes() {

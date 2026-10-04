@@ -16,9 +16,11 @@ write_config /etc/sysconfig/irqbalance <<'IRQBALANCE'
 # KythOS: one-shot mode is cheaper than the daemon on gaming desktops;
 # the kernel's default affinity is already optimal for most IRQs.
 # --deepestcache=2 keeps IRQs inside a CCD on Ryzen X3D / multi-CCD.
+# Do not add --hintpolicy: irqbalance 1.9.x rejects it ("unrecognized
+# option") and exits 1 before balancing, failing the unit on every boot.
 IRQBALANCE_ONESHOT=yes
 IRQBALANCE_BANNED_CPUS=
-IRQBALANCE_ARGS="--hintpolicy=subset --deepestcache=2"
+IRQBALANCE_ARGS="--deepestcache=2"
 IRQBALANCE
 
 # Fedora's irqbalance.service is Type=simple. IRQBALANCE_ONESHOT=yes

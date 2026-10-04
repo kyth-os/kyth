@@ -82,6 +82,70 @@ class WorkflowArtifactContracts(unittest.TestCase):
 
 
 class ReleaseChainingContracts(unittest.TestCase):
+    def test_testing_base_stage_refuses_a_non_f45_base(self):
+        """A workflow_run build uses main's build.yml and passes an F44 base arg."""
+        dockerfile = (ROOT / "build_base/Dockerfile").read_text(encoding="utf-8")
+        guard = dockerfile.split("FROM ${BASE_IMAGE}", 1)[1]
+        self.assertIn(". /etc/os-release", guard)
+        self.assertIn('[ "${VERSION_ID}" = "45" ]', guard)
+        self.assertIn("exit 1", guard)
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        # push builds use their own concurrency group so a doomed main-copy
+        # workflow_run build can never cancel the real F45 one.
+        self.assertIn("github.event_name == 'push' && 'push-'", build)
+
+    def test_every_testing_push_builds_with_testings_own_workflow(self):
+        """workflow_run runs main's copy of build.yml, so testing pushes built F44.
+
+        A push trigger runs the pushed branch's own build.yml (which pins F45).
+        The gate must wait for that exact commit's Validation, the plan must pin
+        the pushed SHA, and the build must refuse any non-F45 base on testing.
+        """
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        on_block = build.split("\npermissions:", 1)[0]
+        self.assertRegex(on_block, r"(?m)^  push:\n    branches: \[testing\]$")
+        # main must not gain a push build: it is promoted by a human, not pushed.
+        self.assertNotRegex(on_block, r"push:\n    branches: \[[^\]]*main")
+        gate = build.split("  plan:", 1)[0]
+        self.assertIn("eventName === 'push'", gate)
+        self.assertIn("head_sha: sha", gate)
+        self.assertIn("r.name === 'Validation'", gate)
+        self.assertIn("validation.conclusion === 'success'", gate)
+        plan = build.split("  plan:", 1)[1].split("  build_push:", 1)[0]
+        self.assertIn('elif [[ "${EVENT_NAME}" == push ]]', plan)
+        self.assertIn('echo "head_sha=${HEAD_SHA}" >&3', plan.split("== push ]]", 1)[1])
+        step = build.split("- name: Resolve upstream base image digest", 1)[1].split(
+            "- name: Build base image", 1
+        )[0]
+        self.assertIn('"${MATRIX_BRANCH}" == testing', step)
+        self.assertIn("!= quay.io/fedora/fedora-kinoite:45", step)
+
+    def test_upstream_base_comes_from_the_dockerfile_pin(self):
+        """build.yml must not hardcode the base: --build-arg overrides the pin.
+
+        A hardcoded ublue F44 image here kept :testing on F44 even after
+        build_base/Dockerfile moved to Fedora Kinoite 45. The supply-chain
+        gate must also accept whichever base the branch pins.
+        """
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        step = build.split("- name: Resolve upstream base image digest", 1)[1].split(
+            "- name: Build base image", 1
+        )[0]
+        self.assertIn("build_base/Dockerfile", step)
+        self.assertNotIn('IMAGE="ghcr.io/ublue-os/kinoite-main:44"', step)
+        dockerfile = (ROOT / "build_base/Dockerfile").read_text(encoding="utf-8")
+        pinned = next(
+            line.split("=", 1)[1].split("@", 1)[0]
+            for line in dockerfile.splitlines()
+            if line.startswith("ARG BASE_IMAGE=")
+        )
+        # Every base the Dockerfile may pin is allowed by both workflows.
+        self.assertIn(pinned.replace(".", "\\."), step)
+        supply = (ROOT / ".github/workflows/supply-chain.yml").read_text(encoding="utf-8")
+        self.assertIn(pinned.replace(".", "\\."), supply)
+        for label in ('image.version="45"', 'osbuild.version="45"', 'KythOS 45"'):
+            self.assertIn(label, (ROOT / "Dockerfile").read_text(encoding="utf-8"))
+
     def test_r2_public_base_url_is_single_sourced(self):
         """The R2 download host lives in release_identity.py exactly once.
 
@@ -130,6 +194,30 @@ class ReleaseChainingContracts(unittest.TestCase):
         self.assertNotIn("::warning::No SBOM", workflow)
         self.assertIn("Wait for source image SBOM", workflow)
         self.assertIn("Fail if source image has no SBOM", workflow)
+
+    def test_iso_dispatch_waits_for_verified_container_signature(self):
+        """The live ISO must not race the serialized supply-chain signer."""
+        workflow = (
+            ROOT / ".github/workflows/supply-chain.yml"
+        ).read_text(encoding="utf-8")
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        publish = workflow.split("  publish:", 1)[1]
+        verify_at = publish.index(
+            "- name: Verify published signatures and build provenance"
+        )
+        dispatch_at = publish.index(
+            "- name: Dispatch Live ISO after image verification"
+        )
+        self.assertLess(verify_at, dispatch_at)
+        dispatch_inputs = workflow.split("  workflow_dispatch:", 1)[1].split(
+            "permissions:", 1
+        )[0]
+        self.assertIn("dispatch_iso", dispatch_inputs)
+        self.assertIn('"dispatch_iso": "true"', build)
+        self.assertIn("inputs.dispatch_iso", publish)
+        # Preserve stable-channel VM acceptance without racing image signing;
+        # the testing/F45 channel remains acceptance-free.
+        self.assertIn('"run_acceptance": "${{ inputs.source_tag == \'latest\' && \'true\' || \'false\' }}"', publish)
 
 
 if __name__ == "__main__":

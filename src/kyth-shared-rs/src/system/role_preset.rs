@@ -190,7 +190,7 @@ pub fn distrobox_create_argv(name: &str) -> Vec<String> {
         "--name".to_string(),
         name.to_string(),
         "--image".to_string(),
-        "registry.fedoraproject.org/fedora-toolbox:44".to_string(),
+        "registry.fedoraproject.org/fedora-toolbox:45".to_string(),
     ]
 }
 

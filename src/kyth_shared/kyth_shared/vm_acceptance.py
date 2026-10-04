@@ -146,6 +146,19 @@ def _installer_target_ref() -> str:
     return default
 
 
+def _installer_source_ref() -> str:
+    try:
+        for line in INSTALLER_ENV_FILE.read_text(encoding="utf-8").splitlines():
+            if line.startswith("KYTH_SOURCE_IMAGE="):
+                value = line.partition("=")[2].strip().strip("'\"")
+                if value:
+                    return value
+    except OSError:
+        pass
+    fail("pinned installer source is missing from live image")
+    return ""
+
+
 def install_from_live_iso() -> None:
     if not wait_for_desktop("live"):
         fail("live Plasma desktop did not become ready")
@@ -161,10 +174,8 @@ def install_from_live_iso() -> None:
         fail("dedicated acceptance disk not found")
     if not target.is_block_device():
         fail("acceptance disk symlink did not resolve to a block device")
-    source_ref = "oci:/usr/share/kyth/image:latest"
+    source_ref = _installer_source_ref()
     target_ref = _installer_target_ref()
-    if not Path("/usr/share/kyth/image").is_dir():
-        fail("bundled OCI image is missing from live media")
     emit("INSTALL_STARTED", str(target))
     try:
         with LOG_FILE.open("a", encoding="utf-8") as log:

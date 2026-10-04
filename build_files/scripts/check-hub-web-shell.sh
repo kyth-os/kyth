@@ -34,6 +34,12 @@ echo "== kyth-hub-web: frontend/Rust contract tests =="
 echo "== kyth-hub-web: VPN SAML handoff regression =="
 (cd "$hub_web" && npm run test:vpn-handoff)
 
+echo "== kyth-hub-web: installer-dialog poll cap regression =="
+(cd "$hub_web" && npm run test:exe-poll)
+
+echo "== kyth-hub-web: job outcome regressions =="
+(cd "$hub_web" && npm run test:job-results)
+
 echo "== kyth-hub-web: headless section construction smoke =="
 (cd "$hub_web" && npm run test:smoke)
 

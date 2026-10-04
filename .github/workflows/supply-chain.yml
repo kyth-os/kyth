@@ -19,6 +19,11 @@ on:
         description: Immutable image digest to process (required for manual runs)
         required: true
         type: string
+      dispatch_iso:
+        description: Dispatch the live ISO build after the image signature and provenance verify
+        required: false
+        default: false
+        type: boolean
       source_sha:
         description: Source commit recorded in the image (required for manual runs)
         required: true
@@ -49,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     permissions:
-      contents: read
+      contents: write
       packages: read
     concurrency:
       group: supply-chain-prepare-${{ inputs.source_tag }}
@@ -128,7 +133,7 @@ jobs:
           test "${BASE_NAME}" = "${IMAGE}:base-${TAG}"
           [[ "${BASE_NAME}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+$ ]]
           build_files/scripts/validate-digest.sh "${BASE_DIGEST}"
-          [[ "${UPSTREAM_BASE}" =~ ^ghcr\.io/ublue-os/kinoite-main:44@sha256:[0-9a-f]{64}$ ]]
+          [[ "${UPSTREAM_BASE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)@sha256:[0-9a-f]{64}$ ]]
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
           test "${KERNEL_FLAVOR}" = fedora
 
@@ -315,6 +320,35 @@ jobs:
             --output "${NOTES}"
           echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
 
+      # The channel tag becomes available before the signature/attestation
+      # approval gate. Publish its digest-bound notes during preparation so
+      # users checking for that image never race the later gated publish job.
+      - name: Publish image changelog release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.image.outputs.current_version }}
+          SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
+          NOTES: ${{ steps.changelog.outputs.path }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          RELEASE_TAG="image-${VERSION//./-}"
+          TITLE="Kyth Image - ${VERSION}"
+          PRERELEASE=""
+          if [[ "${SOURCE_TAG}" != "latest" ]]; then
+            PRERELEASE="--prerelease"
+          fi
+
+          if gh release view "${RELEASE_TAG}" &>/dev/null; then
+            gh release edit "${RELEASE_TAG}" --title "${TITLE}" --notes-file "${NOTES}" ${PRERELEASE}
+          else
+            gh release create "${RELEASE_TAG}" \
+              --target "${SOURCE_SHA}" \
+              --title "${TITLE}" \
+              --notes-file "${NOTES}" \
+              ${PRERELEASE}
+          fi
+
       - name: Package publish inputs
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
@@ -423,7 +457,7 @@ jobs:
           build_files/scripts/validate-digest.sh "${DIGEST}"
           [[ "${VERSION}" =~ ^[a-z0-9._-]+$ ]]
           [[ "${BUILD_BASE}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+@sha256:[0-9a-f]{64}$ ]]
-          [[ "${UPSTREAM_BASE}" =~ ^ghcr\.io/ublue-os/kinoite-main:44@sha256:[0-9a-f]{64}$ ]]
+          [[ "${UPSTREAM_BASE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)@sha256:[0-9a-f]{64}$ ]]
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
           test "${KERNEL_FLAVOR}" = fedora
           [[ "${SBOM}" == "$(basename "${SBOM}")" && -s "output/supply-chain/${SBOM}" ]]
@@ -510,31 +544,20 @@ jobs:
           echo "::error::Build provenance could not be verified for ${IMAGE}@${DIGEST}"
           exit 1
 
-      - name: Publish image changelog release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          VERSION: ${{ steps.meta.outputs.version }}
-          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
-          NOTES: output/supply-chain/${{ steps.meta.outputs.notes }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
-        run: |
-          RELEASE_TAG="image-${VERSION//./-}"
-          TITLE="Kyth Image - ${VERSION}"
-          PRERELEASE=""
-          if [[ "${SOURCE_TAG}" != "latest" ]]; then
-            PRERELEASE="--prerelease"
-          fi
-
-          if gh release view "${RELEASE_TAG}" &>/dev/null; then
-            gh release edit "${RELEASE_TAG}" --title "${TITLE}" --notes-file "${NOTES}" ${PRERELEASE}
-          else
-            gh release create "${RELEASE_TAG}" \
-              --target "${SOURCE_SHA}" \
-              --title "${TITLE}" \
-              --notes-file "${NOTES}" \
-              ${PRERELEASE}
-          fi
+      - name: Dispatch Live ISO after image verification
+        if: inputs.dispatch_iso == 'true' || inputs.dispatch_iso == true
+        uses: ./.github/actions/dispatch-workflow
+        with:
+          workflow: build-live-iso.yml
+          ref: ${{ github.ref_name }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          fields-json: |
+            {
+              "source_tag": ${{ toJSON(inputs.source_tag) }},
+              "source_digest": ${{ toJSON(inputs.source_digest) }},
+              "source_sha": ${{ toJSON(inputs.source_sha) }},
+              "run_acceptance": "${{ inputs.source_tag == 'latest' && 'true' || 'false' }}"
+            }
 
       - name: Trigger CVE scan
         uses: ./.github/actions/dispatch-workflow

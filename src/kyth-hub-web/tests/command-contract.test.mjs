@@ -21,6 +21,7 @@ const gaming = await readFile(resolve(root, "src/components/GamingSection.tsx"),
 const actions = await readFile(resolve(root, "src/components/SectionActions.tsx"), "utf8");
 const rust = await readFile(resolve(root, "src-tauri/src/main.rs"), "utf8");
 const updatesRust = await readFile(resolve(root, "src-tauri/src/commands/updates.rs"), "utf8");
+const safeUpgradeRust = await readFile(resolve(root, "../kyth-shared-rs/src/safe_upgrade_bin.rs"), "utf8");
 const privilegeRust = await readFile(resolve(root, "src-tauri/src/commands/privilege.rs"), "utf8");
 const parity = await readFile(resolve(root, "PARITY.md"), "utf8");
 const appShell = await readFile(resolve(root, "src/App.tsx"), "utf8");
@@ -93,6 +94,28 @@ test("Dashboard wrappers are present and used by the page", () => {
     assert.match(service, new RegExp(`export async function ${wrapper}\\b`), wrapper);
     assert.match(dashboard, new RegExp(`\\b${wrapper}\\b`), wrapper);
   }
+});
+
+test("Hub action payloads use the canonical snake_case IPC field names", () => {
+  const expected = [
+    ['"uninstall_flatpak", { app_id: id }', "uninstall_flatpak"],
+    ['"install_flatpak", { app_id: appId }', "install_flatpak"],
+    ['"exe_handler_flatpak_installed", { app_id: appId }', "exe_handler_flatpak_installed"],
+    ['"exe_handler_launch_flatpak", { app_id: appId }', "exe_handler_launch_flatpak"],
+    ['"sec_host_tool_install", { flatpak_id: flatpakId }', "sec_host_tool_install"],
+    ['"sec_host_tool_uninstall", { flatpak_id: flatpakId }', "sec_host_tool_uninstall"],
+    ['"sec_host_tool_launch", { flatpak_id: flatpakId }', "sec_host_tool_launch"],
+    ['"gaming_tool_install", { flatpak_id: flatpakId }', "gaming_tool_install"],
+    ['"gaming_tool_uninstall", { flatpak_id: flatpakId }', "gaming_tool_uninstall"],
+    ['"gaming_tool_launch", { flatpak_id: flatpakId }', "gaming_tool_launch"],
+    ['"apply_pipewire_quantum", { preset, dry_run: dryRun }', "apply_pipewire_quantum"],
+    ['"apply_plasma_preset", { preset, dry_run: dryRun }', "apply_plasma_preset"],
+    ['"guardian_execute_recipe", { recipe_id: recipeId }', "guardian_execute_recipe"],
+    ['"guardian_dismiss", { recipe_id: recipeId }', "guardian_dismiss"],
+    ['"dev_tools_install_selection", { selected_ids: selectedIds }', "dev_tools_install_selection"],
+  ];
+  for (const [snippet, command] of expected) assert.ok(service.includes(snippet), `${command} must use ${snippet}`);
+  assert.match(service, /"install_flatpak", \{ app_id: appId \}/, "startExeHandlerFlatpakInstall must use app_id");
 });
 
 test("native bridge calls have a default deadline and polling uses a shorter probe deadline", () => {
@@ -236,7 +259,38 @@ test("release summary is tied to the checked image and explains unavailable note
   assert.match(updatesOverview, /Checking official release notes for this image/);
   assert.match(updatesOverview, /Release notes aren’t available for this image yet/);
   assert.match(updatesOverview, /releaseSummary\.release_url/);
+  assert.match(updatesOverview, /RELEASE_SUMMARY_RETRY_DELAY_MS/);
+  assert.match(updatesOverview, /setTimeout/);
+  assert.match(updatesOverview, /clearTimeout/);
   assert.match(updatesRust, /body\.lines\(\)\.any\(\|line\| line\.trim\(\) == expected_digest_line\)/);
+});
+
+test("image build notes are digest-bound and required before publishing", async () => {
+  const build = await readFile(resolve(root, "../../.github/workflows/build.yml"), "utf8");
+  const supplyChain = await readFile(resolve(root, "../../.github/workflows/supply-chain.yml"), "utf8");
+  const prepare = supplyChain.slice(supplyChain.indexOf("  prepare:"), supplyChain.indexOf("\n  publish:"));
+  const publish = supplyChain.slice(supplyChain.indexOf("\n  publish:"));
+  assert.match(build, /workflow: supply-chain\.yml/);
+  assert.match(build, /"source_digest": \$\{\{ toJSON\(steps\.image\.outputs\.digest\) \}\}/);
+  assert.match(supplyChain, /Generate SBOM-powered changelog/);
+  assert.match(supplyChain, /--current-digest "\$\{CURRENT_DIGEST\}"/);
+  assert.match(supplyChain, /-s "output\/supply-chain\/\$\{NOTES\}"/);
+  assert.match(prepare, /Publish image changelog release/);
+  assert.match(prepare, /gh release (?:create|edit)/);
+  assert.match(prepare, /--notes-file "\$\{NOTES\}"/);
+  assert.doesNotMatch(publish, /Publish image changelog release/);
+});
+
+test("staging announces download before bootc begins pulling the image", () => {
+  const runUpgrade = safeUpgradeRust.slice(
+    safeUpgradeRust.indexOf("fn run_upgrade()"),
+    safeUpgradeRust.indexOf("\nfn upgrade()"),
+  );
+  const download = runUpgrade.indexOf('emit_stage_phase(1, "download"');
+  const bootc = runUpgrade.indexOf("run_bootc_child()");
+  assert.ok(download !== -1, "the helper must emit an initial download-phase marker");
+  assert.ok(bootc !== -1, "the helper must still run bootc upgrade");
+  assert.ok(download < bootc, "the download phase must be visible before bootc starts");
 });
 
 test("Privileged-helper outage is not reported as a network problem", () => {
@@ -502,7 +556,8 @@ test("VPN polling stops on terminal states and is capped with backoff", () => {
 });
 
 test("exe handler dialog caps polls and stays cancellable while running", () => {
-  assert.match(exeDialog, /polls >= 240/, "exe handler polls must cap at 240");
+  assert.match(exeDialog, /const MAX_STATUS_POLLS = 240/, "exe handler polls must cap at 240");
+  assert.match(exeDialog, /polls >= MAX_STATUS_POLLS/, "cap must use the named constant");
   assert.match(exeDialog, /still running after several minutes/, "cap must surface a terminal error");
   assert.doesNotMatch(exeDialog, /setInspection\(null\)\} disabled/, "Cancel must stay enabled while a job runs");
   assert.match(exeDialog, /cancelExeHandlerBottles\(job\.job\)/, "Cancel must reach the backend Bottles job, not just close the dialog");

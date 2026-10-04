@@ -106,14 +106,37 @@ class TestSysctlCompose(unittest.TestCase):
         self.assertIn("vm.max_map_count = 16777216", rendered["base"])
         self.assertNotIn("vm.max_map_count = 2147483642", rendered["base"])
 
+    def test_gaming_tier_has_no_keys_that_cannot_exist(self):
+        """Every sysctl key either exists on a mainline kernel or is '-' optional.
+
+        sysctl.d logs a failure per missing key on every boot, so a key that the
+        shipped kernel lacks must be '-'-prefixed, and keys that are not sysctls
+        at all must not be listed.
+        """
+        gaming = compose(Path("build_files/config/sysctl"))["gaming"]
+        for dead in ("vm.pressure_poll", "kernel.khugepaged_defrag"):
+            self.assertNotIn(dead, gaming)
+        # The CFS scheduler-latency knobs were removed from the kernel with
+        # EEVDF; they must be gone entirely, not just '-'-optional.
+        for key in ("sched_latency_ns", "sched_min_granularity_ns",
+                    "sched_wakeup_granularity_ns", "sched_migration_cost_ns",
+                    "sched_nr_migrate", "sched_child_runs_first"):
+            self.assertNotIn(key, gaming)
+        # BORE is CachyOS-only: still present but '-'-optional.
+        self.assertRegex(gaming, r"(?m)^-kernel\.sched_bore\b")
+        self.assertNotRegex(gaming, r"(?m)^kernel\.sched_bore\b")
+        script = Path("build_files/scripts/sysconfig/kernel/52-khugepaged-intervals.sh").read_text()
+        self.assertIn("khugepaged/defrag - - - - 0", script)
+
     def test_gaming_slice3_keys(self):
         rendered = compose(Path("build_files/config/sysctl"))
         gaming = rendered["gaming"]
-        # Slice 3+4: 26 wrappers → 31 keys (bore 2, sched-latency 5)
+        # 23 keys after dropping two that are not sysctls and the 6 dead CFS
+        # scheduler-latency knobs (removed from the kernel with EEVDF).
         expected = {
             "fs.aio-max-nr": "1048576",
-            "kernel.sched_bore": "1",
-            "kernel.sched_bore_burst_penalty_offset": "12",
+            "-kernel.sched_bore": "1",
+            "-kernel.sched_bore_burst_penalty_offset": "12",
             "net.core.busy_poll": "50",
             "net.core.busy_read": "50",
             "vm.min_free_kbytes": "131072",
@@ -122,14 +145,7 @@ class TestSysctlCompose(unittest.TestCase):
             "vm.overcommit_memory": "1",
             "kernel.perf_cpu_time_max_percent": "5",
             "net.core.rmem_default": "262144",
-            # Slice 4: 16 wrappers / 20 keys
-            "vm.pressure_poll": "500",
-            "kernel.sched_child_runs_first": "0",
-            "kernel.sched_latency_ns": "6000000",
-            "kernel.sched_min_granularity_ns": "1000000",
-            "kernel.sched_wakeup_granularity_ns": "1000000",
-            "kernel.sched_migration_cost_ns": "500000",
-            "kernel.sched_nr_migrate": "32",
+            # Slice 4: 13 wrappers / 12 keys
             "net.core.somaxconn": "8192",
             "net.ipv4.tcp_fin_timeout": "30",
             "net.ipv4.tcp_keepalive_time": "120",
@@ -141,12 +157,11 @@ class TestSysctlCompose(unittest.TestCase):
             "net.ipv4.tcp_sack": "1",
             "net.ipv4.tcp_timestamps": "1",
             "net.ipv4.tcp_window_scaling": "1",
-            "kernel.khugepaged_defrag": "0",
             "net.core.wmem_default": "262144",
         }
         for k, v in expected.items():
             self.assertIn(f"{k} = {v}", gaming, f"missing {k}")
-        # exactly 31 key lines
+        # exactly 23 key lines
         key_lines = [l for l in gaming.splitlines() if "=" in l and not l.startswith("#")]
         self.assertEqual(len(key_lines), len(expected))
         # no duplicates across tiers

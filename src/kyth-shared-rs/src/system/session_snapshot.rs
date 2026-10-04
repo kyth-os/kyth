@@ -65,13 +65,36 @@ pub fn gaming_paths(home: &Path) -> Vec<PathBuf> {
     .collect()
 }
 
+fn open_private_snapshot(path: &Path, append: bool) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.create(true);
+    if append {
+        options.append(true);
+    } else {
+        options.write(true).truncate(true);
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
+    }
+    let file = options.open(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    Ok(file)
+}
+
+fn write_private_snapshot(path: &Path, text: &str) -> std::io::Result<()> {
+    use std::io::Write;
+    open_private_snapshot(path, false)?.write_all(text.as_bytes())
+}
+
 fn append(out: &Path, text: &str) {
     use std::io::Write;
-    if let Ok(mut file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(out)
-    {
+    if let Ok(mut file) = open_private_snapshot(out, true) {
         let _ = file.write_all(text.as_bytes());
     }
 }
@@ -94,7 +117,7 @@ pub fn snapshot(
         .unwrap_or_else(|| default_out_dir(home));
     let _ = std::fs::create_dir_all(&out_dir);
     let out = out_dir.join(snapshot_name(timestamp));
-    let _ = std::fs::write(&out, render_header(now_iso, user, host));
+    let _ = write_private_snapshot(&out, &render_header(now_iso, user, host));
     let run_cmd = |args: &[&str]| {
         let argv: Vec<String> = args.iter().map(|arg| arg.to_string()).collect();
         append(&out, &format!("$ {}\n", argv.join(" ")));
@@ -221,6 +244,68 @@ pub fn current_host() -> String {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn snapshot_file_has_owner_only_permissions_even_if_it_already_exists() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dir = tempdir().unwrap();
+        let home = dir.path().join("home");
+        let out = dir.path().join(snapshot_name("20240101-000000"));
+        std::fs::write(&out, "previous contents").unwrap();
+        std::fs::set_permissions(&out, std::fs::Permissions::from_mode(0o644)).unwrap();
+
+        let actual = snapshot(
+            &home,
+            Some(dir.path()),
+            "20240101-000000",
+            "2024-01-01T00:00:00.000000+00:00",
+            "tester",
+            "testhost",
+            &|_| Ok((String::new(), String::new())),
+            &|_| false,
+        );
+
+        assert_eq!(actual, out);
+        assert_eq!(
+            std::fs::metadata(actual).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[test]
+    fn snapshot_does_not_follow_a_preexisting_symlink() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+
+        let directory = tempdir().unwrap();
+        let output_dir = directory.path().join("reports");
+        std::fs::create_dir(&output_dir).unwrap();
+        let target = directory.path().join("outside.txt");
+        std::fs::write(&target, "untouched sentinel").unwrap();
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let output = output_dir.join(snapshot_name("20240101-000000"));
+        symlink(&target, &output).unwrap();
+
+        let _ = snapshot(
+            directory.path(),
+            Some(&output_dir),
+            "20240101-000000",
+            "2024-01-01T00:00:00.000000+00:00",
+            "tester",
+            "testhost",
+            &|_| Ok((String::new(), String::new())),
+            &|_| false,
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(&target).unwrap(),
+            "untouched sentinel"
+        );
+        assert_eq!(
+            std::fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+    }
 
     #[test]
     fn renders_snapshot_structure_with_stubbed_commands() {

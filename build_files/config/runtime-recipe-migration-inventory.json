@@ -9,19 +9,19 @@
     "build_files/just/kyth/**/*.just"
   ],
   "purpose": "Per-recipe Rust migration ledger for the supported native ujust manifest.",
-  "recipe_count": 202,
+  "recipe_count": 199,
   "summary": {
-    "routed": 202,
+    "routed": 199,
     "explicit_dispatch": 106,
     "explicit_retirement": 3,
-    "native_fallback": 93,
+    "native_fallback": 90,
     "missing_owner": 0,
     "open_assessments": 0,
     "verification_status": {
       "behavior-tested": 20,
       "disposable-media-verified": 0,
       "image-verified": 0,
-      "not-assessed": 182,
+      "not-assessed": 179,
       "retired": 0,
       "routed-only": 0
     }
@@ -3446,45 +3446,14 @@
       "retirement": "retain recipe until the Rust owner has parity coverage and image validation"
     },
     {
-      "name": "sched-latency",
-      "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 442,
-      "manifest_command": "exec /usr/bin/kyth-runtime recipe \"sched-latency\" <args>",
-      "legacy_sources": [
-        {
-          "path": "build_files/just/kyth/performance.just",
-          "line": 208
-        }
-      ],
-      "source_provenance": "legacy-recipe",
-      "current_route": "kyth-runtime recipe sched-latency",
-      "route_kind": "native-fallback",
-      "rust_owner": "native::kyth-tunable-rs",
-      "rust_target": "kyth-tunable-rs::sched-latency",
-      "assessment": "covered",
-      "status": "routed",
-      "risk_tier": "user-session-writer",
-      "risk_basis": "user-session, package, or application mutation",
-      "verification_status": "not-assessed",
-      "route_contract_tests": [
-        "tests/test_runtime_recipe_dispatch.py"
-      ],
-      "behavioral_tests": [],
-      "acceptance_evidence": [],
-      "verification_blocking_reason": "no verification record exists",
-      "migration_priority": 3,
-      "parity_tests": [],
-      "retirement": "retain recipe until the Rust owner has parity coverage and image validation"
-    },
-    {
       "name": "readahead",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 446,
+      "manifest_line": 442,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"readahead\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 215
+          "line": 208
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3510,12 +3479,12 @@
     {
       "name": "readahead-run",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 450,
+      "manifest_line": 446,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"readahead-run\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 221
+          "line": 214
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3541,12 +3510,12 @@
     {
       "name": "gaming-master",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 454,
+      "manifest_line": 450,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"gaming-master\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 228
+          "line": 221
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3572,12 +3541,12 @@
     {
       "name": "wine-sync",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 458,
+      "manifest_line": 454,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"wine-sync\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 235
+          "line": 228
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3603,12 +3572,12 @@
     {
       "name": "kwin-latency",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 462,
+      "manifest_line": 458,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"kwin-latency\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 242
+          "line": 235
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3634,12 +3603,12 @@
     {
       "name": "pipewire-gaming",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 466,
+      "manifest_line": 462,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"pipewire-gaming\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 251
+          "line": 244
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3665,12 +3634,12 @@
     {
       "name": "btrfs-autotune",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 470,
+      "manifest_line": 466,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"btrfs-autotune\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 258
+          "line": 251
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3696,12 +3665,12 @@
     {
       "name": "boot-timeout",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 474,
+      "manifest_line": 470,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"boot-timeout\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 265
+          "line": 258
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3727,12 +3696,12 @@
     {
       "name": "oom-gaming",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 478,
+      "manifest_line": 474,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"oom-gaming\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 272
+          "line": 265
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3758,12 +3727,12 @@
     {
       "name": "shader-tmpfs",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 482,
+      "manifest_line": 478,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"shader-tmpfs\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 279
+          "line": 272
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3789,12 +3758,12 @@
     {
       "name": "gaming-cfs",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 486,
+      "manifest_line": 482,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"gaming-cfs\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 286
+          "line": 279
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3820,12 +3789,12 @@
     {
       "name": "gaming-audit",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 490,
+      "manifest_line": 486,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"gaming-audit\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 293
+          "line": 286
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3851,12 +3820,12 @@
     {
       "name": "steam-deadzone",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 494,
+      "manifest_line": 490,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"steam-deadzone\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 300
+          "line": 293
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3882,12 +3851,12 @@
     {
       "name": "selinux-gaming",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 498,
+      "manifest_line": 494,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"selinux-gaming\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 307
+          "line": 300
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3913,12 +3882,12 @@
     {
       "name": "fcitx-latency",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 502,
+      "manifest_line": 498,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"fcitx-latency\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 314
+          "line": 307
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3944,12 +3913,12 @@
     {
       "name": "hdr-store",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 506,
+      "manifest_line": 502,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"hdr-store\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 321
+          "line": 314
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -3975,12 +3944,12 @@
     {
       "name": "system-audit",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 510,
+      "manifest_line": 506,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"system-audit\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 328
+          "line": 321
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4006,12 +3975,12 @@
     {
       "name": "psi-gaming",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 514,
+      "manifest_line": 510,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"psi-gaming\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 335
+          "line": 328
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4037,12 +4006,12 @@
     {
       "name": "numa",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 518,
+      "manifest_line": 514,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"numa\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 342
+          "line": 335
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4068,12 +4037,12 @@
     {
       "name": "pcie",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 522,
+      "manifest_line": 518,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"pcie\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 349
+          "line": 342
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4099,12 +4068,12 @@
     {
       "name": "thp-collapse",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 526,
+      "manifest_line": 522,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"thp-collapse\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 356
+          "line": 349
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4130,12 +4099,12 @@
     {
       "name": "psi-poll",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 530,
+      "manifest_line": 526,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"psi-poll\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 363
+          "line": 356
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4161,12 +4130,12 @@
     {
       "name": "compaction",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 534,
+      "manifest_line": 530,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"compaction\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 370
+          "line": 363
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4192,12 +4161,12 @@
     {
       "name": "fscache",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 538,
+      "manifest_line": 534,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"fscache\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 377
+          "line": 370
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4223,12 +4192,12 @@
     {
       "name": "hdr-per-game",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 542,
+      "manifest_line": 538,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"hdr-per-game\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 384
+          "line": 377
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4254,12 +4223,12 @@
     {
       "name": "bore",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 546,
+      "manifest_line": 542,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"bore\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 391
+          "line": 384
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4285,12 +4254,12 @@
     {
       "name": "shader-cache-size",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 550,
+      "manifest_line": 546,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"shader-cache-size\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 398
+          "line": 391
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4316,12 +4285,12 @@
     {
       "name": "podman-overlay",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 554,
+      "manifest_line": 550,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"podman-overlay\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 405
+          "line": 398
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4347,12 +4316,12 @@
     {
       "name": "net-backlog",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 558,
+      "manifest_line": 554,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"net-backlog\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 412
+          "line": 405
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4378,12 +4347,12 @@
     {
       "name": "vm-watermark",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 562,
+      "manifest_line": 558,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"vm-watermark\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 419
+          "line": 412
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4409,12 +4378,12 @@
     {
       "name": "tcp-notsent",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 566,
+      "manifest_line": 562,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-notsent\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 426
+          "line": 419
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4440,12 +4409,12 @@
     {
       "name": "max-map-count",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 570,
+      "manifest_line": 566,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"max-map-count\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 433
+          "line": 426
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4471,12 +4440,12 @@
     {
       "name": "dirty-ratio",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 574,
+      "manifest_line": 570,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"dirty-ratio\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 440
+          "line": 433
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4502,12 +4471,12 @@
     {
       "name": "vfs-cache",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 578,
+      "manifest_line": 574,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"vfs-cache\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 447
+          "line": 440
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4533,12 +4502,12 @@
     {
       "name": "tcp-ecn",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 582,
+      "manifest_line": 578,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-ecn\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 454
+          "line": 447
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4564,12 +4533,12 @@
     {
       "name": "tcp-slow-start",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 586,
+      "manifest_line": 582,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-slow-start\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 461
+          "line": 454
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4595,12 +4564,12 @@
     {
       "name": "sched-autogroup",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 590,
+      "manifest_line": 586,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"sched-autogroup\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 468
+          "line": 461
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4624,45 +4593,14 @@
       "retirement": "retain recipe until the Rust owner has parity coverage and image validation"
     },
     {
-      "name": "sched-nr-migrate",
-      "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 594,
-      "manifest_command": "exec /usr/bin/kyth-runtime recipe \"sched-nr-migrate\" <args>",
-      "legacy_sources": [
-        {
-          "path": "build_files/just/kyth/performance.just",
-          "line": 475
-        }
-      ],
-      "source_provenance": "legacy-recipe",
-      "current_route": "kyth-runtime recipe sched-nr-migrate",
-      "route_kind": "native-fallback",
-      "rust_owner": "native::kyth-tunable-rs",
-      "rust_target": "kyth-tunable-rs::sched-nr-migrate",
-      "assessment": "covered",
-      "status": "routed",
-      "risk_tier": "user-session-writer",
-      "risk_basis": "user-session, package, or application mutation",
-      "verification_status": "not-assessed",
-      "route_contract_tests": [
-        "tests/test_runtime_recipe_dispatch.py"
-      ],
-      "behavioral_tests": [],
-      "acceptance_evidence": [],
-      "verification_blocking_reason": "no verification record exists",
-      "migration_priority": 3,
-      "parity_tests": [],
-      "retirement": "retain recipe until the Rust owner has parity coverage and image validation"
-    },
-    {
       "name": "page-cluster",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 598,
+      "manifest_line": 590,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"page-cluster\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 482
+          "line": 468
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4688,12 +4626,12 @@
     {
       "name": "tcp-retries2",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 602,
+      "manifest_line": 594,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-retries2\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 489
+          "line": 475
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4719,12 +4657,12 @@
     {
       "name": "tcp-keepalive",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 606,
+      "manifest_line": 598,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-keepalive\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 496
+          "line": 482
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4748,45 +4686,14 @@
       "retirement": "retain recipe until the Rust owner has parity coverage and image validation"
     },
     {
-      "name": "sched-child",
-      "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 610,
-      "manifest_command": "exec /usr/bin/kyth-runtime recipe \"sched-child\" <args>",
-      "legacy_sources": [
-        {
-          "path": "build_files/just/kyth/performance.just",
-          "line": 503
-        }
-      ],
-      "source_provenance": "legacy-recipe",
-      "current_route": "kyth-runtime recipe sched-child",
-      "route_kind": "native-fallback",
-      "rust_owner": "native::kyth-tunable-rs",
-      "rust_target": "kyth-tunable-rs::sched-child",
-      "assessment": "covered",
-      "status": "routed",
-      "risk_tier": "user-session-writer",
-      "risk_basis": "user-session, package, or application mutation",
-      "verification_status": "not-assessed",
-      "route_contract_tests": [
-        "tests/test_runtime_recipe_dispatch.py"
-      ],
-      "behavioral_tests": [],
-      "acceptance_evidence": [],
-      "verification_blocking_reason": "no verification record exists",
-      "migration_priority": 3,
-      "parity_tests": [],
-      "retirement": "retain recipe until the Rust owner has parity coverage and image validation"
-    },
-    {
       "name": "vm-stat",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 614,
+      "manifest_line": 602,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"vm-stat\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 510
+          "line": 489
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4812,12 +4719,12 @@
     {
       "name": "numa-balancing",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 618,
+      "manifest_line": 606,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"numa-balancing\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 517
+          "line": 496
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4843,12 +4750,12 @@
     {
       "name": "tcp-fastopen",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 622,
+      "manifest_line": 610,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-fastopen\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 524
+          "line": 503
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4874,12 +4781,12 @@
     {
       "name": "tcp-mtu-probing",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 626,
+      "manifest_line": 614,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-mtu-probing\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 531
+          "line": 510
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4905,12 +4812,12 @@
     {
       "name": "dirty-expire",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 630,
+      "manifest_line": 618,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"dirty-expire\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 538
+          "line": 517
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4936,12 +4843,12 @@
     {
       "name": "file-max",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 634,
+      "manifest_line": 622,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"file-max\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 545
+          "line": 524
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4967,12 +4874,12 @@
     {
       "name": "perf-cpu",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 638,
+      "manifest_line": 626,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"perf-cpu\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 552
+          "line": 531
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -4998,12 +4905,12 @@
     {
       "name": "swappiness",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 642,
+      "manifest_line": 630,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"swappiness\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 559
+          "line": 538
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5029,12 +4936,12 @@
     {
       "name": "tcp-fin-timeout",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 646,
+      "manifest_line": 634,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-fin-timeout\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 566
+          "line": 545
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5060,12 +4967,12 @@
     {
       "name": "somaxconn",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 650,
+      "manifest_line": 638,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"somaxconn\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 573
+          "line": 552
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5091,12 +4998,12 @@
     {
       "name": "inotify-watches",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 654,
+      "manifest_line": 642,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"inotify-watches\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 580
+          "line": 559
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5122,12 +5029,12 @@
     {
       "name": "min-free-kbytes",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 658,
+      "manifest_line": 646,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"min-free-kbytes\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 587
+          "line": 566
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5153,12 +5060,12 @@
     {
       "name": "rmem-max",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 662,
+      "manifest_line": 650,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"rmem-max\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 594
+          "line": 573
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5184,12 +5091,12 @@
     {
       "name": "wmem-max",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 666,
+      "manifest_line": 654,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"wmem-max\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 601
+          "line": 580
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5215,12 +5122,12 @@
     {
       "name": "aio-max",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 670,
+      "manifest_line": 658,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"aio-max\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 608
+          "line": 587
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5246,12 +5153,12 @@
     {
       "name": "overcommit-memory",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 674,
+      "manifest_line": 662,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"overcommit-memory\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 615
+          "line": 594
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5277,12 +5184,12 @@
     {
       "name": "netdev-budget",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 678,
+      "manifest_line": 666,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"netdev-budget\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 622
+          "line": 601
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5308,12 +5215,12 @@
     {
       "name": "rmem-default",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 682,
+      "manifest_line": 670,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"rmem-default\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 629
+          "line": 608
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5339,12 +5246,12 @@
     {
       "name": "wmem-default",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 686,
+      "manifest_line": 674,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"wmem-default\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 636
+          "line": 615
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5370,12 +5277,12 @@
     {
       "name": "tcp-window-scaling",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 690,
+      "manifest_line": 678,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-window-scaling\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 643
+          "line": 622
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5401,12 +5308,12 @@
     {
       "name": "tcp-sack",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 694,
+      "manifest_line": 682,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-sack\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 650
+          "line": 629
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5432,12 +5339,12 @@
     {
       "name": "tcp-timestamps",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 698,
+      "manifest_line": 686,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-timestamps\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 657
+          "line": 636
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5463,12 +5370,12 @@
     {
       "name": "busy-read",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 702,
+      "manifest_line": 690,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"busy-read\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 664
+          "line": 643
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5494,12 +5401,12 @@
     {
       "name": "busy-poll",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 706,
+      "manifest_line": 694,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"busy-poll\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 671
+          "line": 650
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5525,12 +5432,12 @@
     {
       "name": "tcp-no-metrics-save",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 710,
+      "manifest_line": 698,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-no-metrics-save\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 678
+          "line": 657
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5556,12 +5463,12 @@
     {
       "name": "tcp-retries1",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 714,
+      "manifest_line": 702,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-retries1\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 685
+          "line": 664
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5587,12 +5494,12 @@
     {
       "name": "tcp-orphan-retries",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 718,
+      "manifest_line": 706,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"tcp-orphan-retries\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 692
+          "line": 671
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5618,12 +5525,12 @@
     {
       "name": "epp-ac",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 722,
+      "manifest_line": 710,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"epp-ac\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 699
+          "line": 678
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5649,12 +5556,12 @@
     {
       "name": "zink-run",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 726,
+      "manifest_line": 714,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"zink-run\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 706
+          "line": 685
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5680,12 +5587,12 @@
     {
       "name": "low-latency",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 730,
+      "manifest_line": 718,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"low-latency\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 718
+          "line": 697
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5711,12 +5618,12 @@
     {
       "name": "enable-bpftune",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 734,
+      "manifest_line": 722,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"enable-bpftune\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 732
+          "line": 711
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5742,12 +5649,12 @@
     {
       "name": "disable-bpftune",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 738,
+      "manifest_line": 726,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"disable-bpftune\" <args>",
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/performance.just",
-          "line": 763
+          "line": 742
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -5773,7 +5680,7 @@
     {
       "name": "probe-json",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 742,
+      "manifest_line": 730,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"probe-json\" <args>",
       "legacy_sources": [
         {
@@ -5804,7 +5711,7 @@
     {
       "name": "apply-preset",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 746,
+      "manifest_line": 734,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"apply-preset\" <args>",
       "legacy_sources": [
         {
@@ -5835,7 +5742,7 @@
     {
       "name": "list-presets",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 750,
+      "manifest_line": 738,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"list-presets\" <args>",
       "legacy_sources": [
         {
@@ -5866,7 +5773,7 @@
     {
       "name": "secureboot-status",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 754,
+      "manifest_line": 742,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"secureboot-status\" <args>",
       "legacy_sources": [
         {
@@ -5897,7 +5804,7 @@
     {
       "name": "enroll-secureboot",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 758,
+      "manifest_line": 746,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"enroll-secureboot\" <args>",
       "legacy_sources": [
         {
@@ -5928,7 +5835,7 @@
     {
       "name": "setup-sunshine",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 762,
+      "manifest_line": 750,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"setup-sunshine\" <args>",
       "legacy_sources": [
         {
@@ -5959,7 +5866,7 @@
     {
       "name": "setup-vr",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 766,
+      "manifest_line": 754,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"setup-vr\" <args>",
       "legacy_sources": [
         {
@@ -5995,7 +5902,7 @@
     {
       "name": "setup-tailscale",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 770,
+      "manifest_line": 758,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"setup-tailscale\" <args>",
       "legacy_sources": [
         {
@@ -6026,7 +5933,7 @@
     {
       "name": "update",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 774,
+      "manifest_line": 762,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"update\" <args>",
       "legacy_sources": [
         {
@@ -6057,7 +5964,7 @@
     {
       "name": "kyth-upgrade",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 778,
+      "manifest_line": 766,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"kyth-upgrade\" <args>",
       "legacy_sources": [
         {
@@ -6088,7 +5995,7 @@
     {
       "name": "apply-staged",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 782,
+      "manifest_line": 770,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"apply-staged\" <args>",
       "legacy_sources": [
         {
@@ -6119,7 +6026,7 @@
     {
       "name": "status",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 786,
+      "manifest_line": 774,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"status\" <args>",
       "legacy_sources": [
         {
@@ -6150,7 +6057,7 @@
     {
       "name": "update-health",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 790,
+      "manifest_line": 778,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"update-health\" <args>",
       "legacy_sources": [
         {
@@ -6181,7 +6088,7 @@
     {
       "name": "retry-quarantined-update",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 794,
+      "manifest_line": 782,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"retry-quarantined-update\" <args>",
       "legacy_sources": [
         {
@@ -6217,7 +6124,7 @@
     {
       "name": "rebase",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 798,
+      "manifest_line": 786,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"rebase\" <args>",
       "legacy_sources": [
         {
@@ -6253,7 +6160,7 @@
     {
       "name": "switch-channel",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 802,
+      "manifest_line": 790,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"switch-channel\" <args>",
       "legacy_sources": [
         {
@@ -6289,7 +6196,7 @@
     {
       "name": "switch-channel-impl",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 806,
+      "manifest_line": 794,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"switch-channel-impl\" <args>",
       "legacy_sources": [
         {
@@ -6325,7 +6232,7 @@
     {
       "name": "switch-kernel",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 810,
+      "manifest_line": 798,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"switch-kernel\" <args>",
       "legacy_sources": [
         {
@@ -6361,7 +6268,7 @@
     {
       "name": "flatpak-trim",
       "manifest": "build_files/just/kyth/native.just",
-      "manifest_line": 814,
+      "manifest_line": 802,
       "manifest_command": "exec /usr/bin/kyth-runtime recipe \"flatpak-trim\" <args>",
       "legacy_sources": [
         {

@@ -26,6 +26,27 @@ def _base_body(**overrides):
 
 
 class ValidationGapJTests(unittest.TestCase):
+    def test_non_text_identity_and_secret_fields_are_rejected(self):
+        for field in ("password", "username", "hostname", "timezone", "mok_password", "locale", "keymap", "kernel"):
+            with self.subTest(field=field), self.assertRaisesRegex(InstallRequestError, "must be text"):
+                validate_install_request(_base_body(**{field: []}), InstallerContext())
+
+        for field in ("disk", "install_mode", "target_partition", "resize_partition", "efi_partition"):
+            with self.subTest(field=field), self.assertRaisesRegex(InstallRequestError, "must be text"):
+                validate_install_request(_base_body(**{field: []}), InstallerContext())
+
+        with self.assertRaisesRegex(InstallRequestError, "must be an object"):
+            validate_install_request([], InstallerContext())
+
+    def test_confirmation_fields_require_json_true(self):
+        for field in ("confirm_backup", "confirm_erase"):
+            body = _base_body(**{field: "false"})
+            with self.subTest(field=field), patch(
+                "kyth_installer.validation._storage_state",
+                return_value=({"install_mode": "wipe"}, {"current": False}),
+            ), self.assertRaisesRegex(InstallRequestError, "cannot be undone"):
+                validate_install_request(body, InstallerContext())
+
     @patch("kyth_installer.validation.plan._validate_storage_intent")
     @patch("kyth_installer.validation.system._hash_password", return_value="hashed")
     @patch("kyth_installer.validation.system.list_timezones", return_value=["UTC"])

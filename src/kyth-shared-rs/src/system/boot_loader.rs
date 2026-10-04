@@ -1,8 +1,10 @@
-//! Read-only boot-loader fast-path configuration.
+//! Boot-loader fast-path configuration.
 //!
-//! The privileged `/boot/loader/loader.conf` writer remains outside this
-//! module. Rust consumers can safely inspect the configuration and present
-//! its effective state without changing boot behavior.
+//! Reads the Kyth loader TOML config and applies the `timeout` setting to the
+//! systemd-boot `/boot/loader/loader.conf`. Writes are line surgery only:
+//! the `timeout` line is replaced or appended while `default`,
+//! `console-mode`, and every other existing setting is preserved — the file
+//! is never wholesale regenerated.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -94,25 +96,61 @@ pub fn generate_loader_conf(
     destination: impl AsRef<Path>,
 ) -> std::io::Result<Option<PathBuf>> {
     let destination = destination.as_ref();
+    let timeout = config.timeout.clamp(0, 10);
     if !config.fast {
+        // Not fast-path: only touch a file we previously generated (marked
+        // "Kyth"), reset its timeout to the default, drop our marker so we
+        // stop managing it — but preserve every other line.
         if destination.is_file()
             && fs::read_to_string(destination)
                 .ok()
                 .is_some_and(|text| text.contains("Kyth"))
         {
-            crate::atomic_io::atomic_write_text(destination, "timeout 2\n", Some(0o644))?;
+            set_timeout_line(destination, 2, false)?;
         }
         return Ok(None);
     }
-    crate::atomic_io::atomic_write_text(
-        destination,
-        &format!(
-            "# Kyth loader fast-path — generated, greenboot-aware\ntimeout {}\n",
-            config.timeout
-        ),
-        Some(0o644),
-    )?;
+    set_timeout_line(destination, timeout, true)?;
     Ok(Some(destination.to_path_buf()))
+}
+
+/// Replace (or append) only the `timeout` line in loader.conf, preserving
+/// every other line (`default`, `console-mode`, ...). When `manage` is true
+/// our marker comment is ensured; when false it is removed so future runs
+/// stop touching the file. Writes atomically.
+fn set_timeout_line(destination: &Path, timeout: i64, manage: bool) -> std::io::Result<()> {
+    let lines: Vec<String> = fs::read_to_string(destination)
+        .map(|text| text.lines().map(str::to_string).collect())
+        .unwrap_or_default();
+    let mut kept = Vec::with_capacity(lines.len() + 1);
+    let mut found = false;
+    for line in lines {
+        let trimmed = line.trim_start();
+        if trimmed.len() > "timeout".len()
+            && trimmed.starts_with("timeout")
+            && trimmed["timeout".len()..].starts_with([' ', '\t'])
+        {
+            kept.push(format!("timeout {timeout}"));
+            found = true;
+        } else if !manage && trimmed.starts_with("# Kyth loader") {
+            // Un-managing: drop our marker comment, keep everything else.
+            continue;
+        } else {
+            kept.push(line);
+        }
+    }
+    if !found {
+        kept.push(format!("timeout {timeout}"));
+    }
+    if manage && !kept.iter().any(|line| line.contains("Kyth")) {
+        kept.insert(
+            0,
+            "# Kyth loader fast-path — generated, greenboot-aware".to_string(),
+        );
+    }
+    let mut text = kept.join("\n");
+    text.push('\n');
+    crate::atomic_io::atomic_write_text(destination, &text, Some(0o644))
 }
 
 #[cfg(test)]
@@ -148,5 +186,81 @@ mod tests {
         fs::write(&fast, "timeout 2\n").unwrap();
         assert_eq!(loader_status(&fast), "balanced");
         assert_eq!(loader_status(directory.path().join("missing")), "balanced");
+    }
+
+    #[test]
+    fn generate_preserves_unrelated_lines() {
+        let directory = tempdir().unwrap();
+        let conf = directory.path().join("loader.conf");
+        fs::write(
+            &conf,
+            "default kyth.conf\ntimeout 10\nconsole-mode max\n# a comment\n",
+        )
+        .unwrap();
+        let config = LoaderConfig {
+            fast: true,
+            timeout: 0,
+        };
+        generate_loader_conf(&config, &conf).unwrap();
+        let text = fs::read_to_string(&conf).unwrap();
+        assert!(text.contains("default kyth.conf"), "{text}");
+        assert!(text.contains("console-mode max"), "{text}");
+        assert!(text.contains("# a comment"), "{text}");
+        assert!(text.contains("timeout 0"), "{text}");
+        assert!(!text.contains("timeout 10"), "{text}");
+        assert!(text.contains("Kyth"), "{text}");
+    }
+
+    #[test]
+    fn generate_appends_timeout_when_missing() {
+        let directory = tempdir().unwrap();
+        let conf = directory.path().join("loader.conf");
+        fs::write(&conf, "default kyth.conf\n").unwrap();
+        let config = LoaderConfig {
+            fast: true,
+            timeout: 3,
+        };
+        generate_loader_conf(&config, &conf).unwrap();
+        let text = fs::read_to_string(&conf).unwrap();
+        assert!(text.contains("default kyth.conf"), "{text}");
+        assert!(text.contains("timeout 3"), "{text}");
+    }
+
+    #[test]
+    fn unmanage_resets_timeout_and_drops_marker_but_keeps_other_lines() {
+        let directory = tempdir().unwrap();
+        let conf = directory.path().join("loader.conf");
+        fs::write(
+            &conf,
+            "# Kyth loader fast-path — generated, greenboot-aware\ndefault kyth.conf\ntimeout 0\nconsole-mode max\n",
+        )
+        .unwrap();
+        let config = LoaderConfig {
+            fast: false,
+            timeout: 2,
+        };
+        generate_loader_conf(&config, &conf).unwrap();
+        let text = fs::read_to_string(&conf).unwrap();
+        assert!(text.contains("timeout 2"), "{text}");
+        assert!(!text.contains("timeout 0"), "{text}");
+        assert!(text.contains("default kyth.conf"), "{text}");
+        assert!(text.contains("console-mode max"), "{text}");
+        assert!(!text.contains("Kyth loader fast-path"), "{text}");
+    }
+
+    #[test]
+    fn unmanage_leaves_unowned_files_alone() {
+        let directory = tempdir().unwrap();
+        let conf = directory.path().join("loader.conf");
+        fs::write(&conf, "default kyth.conf\ntimeout 5\n").unwrap();
+        let config = LoaderConfig {
+            fast: false,
+            timeout: 2,
+        };
+        generate_loader_conf(&config, &conf).unwrap();
+        assert_eq!(
+            fs::read_to_string(&conf).unwrap(),
+            "default kyth.conf\ntimeout 5\n"
+        );
     }
 }

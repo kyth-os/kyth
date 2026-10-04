@@ -3,6 +3,7 @@ from __future__ import annotations
 import os, tomllib
 from pathlib import Path
 from typing import Any
+from .atomic_io import atomic_write_text
 DEFAULT_PATH=Path("/etc/kyth/swappiness.toml")
 DEFAULT_CONF=Path("/etc/sysctl.d/99-kyth-swappiness.conf")
 def config_path(path: Path|None=None) -> Path:
@@ -32,6 +33,6 @@ def generate_swappiness(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> P
         except OSError: pass
         return None
     dest.parent.mkdir(parents=True, exist_ok=True)
-    tmp=dest.with_suffix(".tmp")
-    tmp.write_text("# Kyth swappiness gaming — generated\nvm.swappiness=10\n",encoding="utf-8"); tmp.replace(dest); return dest
+    atomic_write_text(dest, "# Kyth swappiness gaming — generated\nvm.swappiness=10\n", mode=0o644)
+    return dest
 def swappiness_status(conf: Path=DEFAULT_CONF) -> str: return "gaming" if conf.exists() else "balanced"

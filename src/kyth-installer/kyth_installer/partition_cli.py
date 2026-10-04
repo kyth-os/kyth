@@ -43,12 +43,14 @@ def _prompt_identity(
     default_timezone = os.environ.get("KYTH_TIMEZONE", "UTC")
     hostname = input_fn(f"Hostname [{default_hostname}]: ").strip() or default_hostname
     timezone = input_fn(f"Timezone [{default_timezone}]: ").strip() or default_timezone
-    username = input_fn("Create admin username (blank to skip): ").strip()
-    password = ""
-    if username:
-        password = password_fn(f"Password for {username}: ")
-        if password != password_fn("Confirm password: "):
-            raise InstallRequestError("Passwords do not match.")
+    username = input_fn("Admin username (required): ").strip()
+    if not username:
+        raise InstallRequestError(
+            "An admin username is required to create a login account on the installed system."
+        )
+    password = password_fn(f"Password for {username}: ")
+    if password != password_fn("Confirm password: "):
+        raise InstallRequestError("Passwords do not match.")
     return hostname, timezone, username, password
 
 

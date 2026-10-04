@@ -41,7 +41,7 @@ class PlanCommitTests(unittest.TestCase):
             "required_tools": ("ntfsresize", "parted"),
             "which": lambda command: f"/usr/bin/{command}",
             "unmount_target_disk": mock.Mock(),
-            "partition_size": mock.Mock(side_effect=[100, 80]),
+            "partition_size": mock.Mock(side_effect=[100, 100, 80]),
             "partition_number": lambda _partition: 2,
             "block_size": lambda _disk: 1,
             "partition_start": lambda _partition: 1000,
@@ -186,12 +186,12 @@ class PlanCommitTests(unittest.TestCase):
         )
         self.assertEqual(result, ("/dev/sda", "/dev/sda3"))
         self.assertEqual(dependencies["validate_target"].call_count, 2)
-        dependencies["shrink_filesystem_guarded"].assert_called_once_with(
-            "/dev/sda2", 80, 20, mock.ANY, cancel_event=None, register_mount=None, release_mount=None,
-        )
         commit_call = dependencies["commit_partition"].call_args
         self.assertEqual(commit_call.args[:3], ("/dev/sda", 1080, 1100))
         commit_call.kwargs["before_partition"]()
+        dependencies["shrink_filesystem_guarded"].assert_called_once_with(
+            "/dev/sda2", 80, 20, mock.ANY, cancel_event=None, register_mount=None, release_mount=None,
+        )
         command = dependencies["run_command"].call_args
         self.assertEqual(command.args[0][-3:], ["resizepart", "2", "1079B"])
         self.assertEqual(command.kwargs["input"], "Yes\n")
@@ -214,14 +214,15 @@ class PlanCommitTests(unittest.TestCase):
             )
         dependencies["unmount_target_disk"].assert_not_called()
 
-    def test_ntfs_preparation_continues_when_marker_probe_is_unavailable(self):
+    def test_ntfs_preparation_fails_closed_when_marker_probe_is_unavailable(self):
         dependencies = self.ntfs_dependencies(
             normal_device_path=mock.Mock(side_effect=OSError("device lookup failed")),
         )
-        result = plan_commit.prepare_ntfs_resize_target(
-            {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
-        )
-        self.assertEqual(result, ("/dev/sda", "/dev/sda3"))
+        with self.assertRaisesRegex(RuntimeError, "Cannot verify whether"):
+            plan_commit.prepare_ntfs_resize_target(
+                {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+            )
+        dependencies["unmount_target_disk"].assert_not_called()
 
         dependencies = self.ntfs_dependencies(normal_device_path=lambda _value: "")
         result = plan_commit.prepare_ntfs_resize_target(
@@ -240,9 +241,35 @@ class PlanCommitTests(unittest.TestCase):
             )
         dependencies["shrink_filesystem_guarded"].assert_not_called()
 
+    def test_ntfs_preparation_rejects_target_drift_under_lock_before_shrink(self):
+        dependencies = self.ntfs_dependencies(validate_target=mock.Mock(side_effect=[
+            ("/dev/sda", "/dev/sda2", 20),
+            ("/dev/sda", "/dev/sda2", 20),
+            ("/dev/sda", "/dev/sda3", 20),
+        ]))
+        plan_commit.prepare_ntfs_resize_target(
+            {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+        )
+        callback = dependencies["commit_partition"].call_args.kwargs["before_partition"]
+        with self.assertRaisesRegex(RuntimeError, "target changed before the disk lock"):
+            callback()
+        dependencies["shrink_filesystem_guarded"].assert_not_called()
+
+    def test_ntfs_preparation_rejects_geometry_drift_under_lock_before_shrink(self):
+        dependencies = self.ntfs_dependencies(
+            partition_size=mock.Mock(side_effect=[100, 99]),
+        )
+        plan_commit.prepare_ntfs_resize_target(
+            {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
+        )
+        callback = dependencies["commit_partition"].call_args.kwargs["before_partition"]
+        with self.assertRaisesRegex(RuntimeError, "geometry changed before the disk lock"):
+            callback()
+        dependencies["shrink_filesystem_guarded"].assert_not_called()
+
     def test_ntfs_boundary_mismatch_and_post_shrink_failure_propagate(self):
         dependencies = self.ntfs_dependencies(
-            partition_size=mock.Mock(side_effect=[100, 70]),
+            partition_size=mock.Mock(side_effect=[100, 100, 70]),
         )
         plan_commit.prepare_ntfs_resize_target(
             {"resize_partition": "/dev/sda2"}, mock.Mock(), **dependencies,
@@ -251,8 +278,12 @@ class PlanCommitTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "requested NTFS boundary"):
             callback()
 
+        def commit_then_fail(*_args, **kwargs):
+            kwargs["before_partition"]()
+            raise RuntimeError("mkfs failed")
+
         dependencies = self.ntfs_dependencies(
-            commit_partition=mock.Mock(side_effect=RuntimeError("mkfs failed")),
+            commit_partition=mock.Mock(side_effect=commit_then_fail),
         )
         with self.assertRaisesRegex(RuntimeError, "mkfs failed"):
             plan_commit.prepare_ntfs_resize_target(

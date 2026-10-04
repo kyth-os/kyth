@@ -282,6 +282,119 @@ const DEPLOY_KEYWORDS: &[&str] = &[
     "staged update",
 ];
 
+/// File descriptor handed to `bootc upgrade --progress-fd`. Any value above
+/// stderr works; bootc rejects 0..=2.
+const BOOTC_PROGRESS_FD: libc::c_int = 3;
+
+/// State for bootc's machine-readable progress stream (`--progress-fd`).
+///
+/// With stderr piped, bootc's indicatif bars are hidden, so the stderr
+/// parser above sees no byte counts at all and the Hub bar sat at the initial
+/// 1% for the whole download. The JSON stream carries the real numbers.
+#[derive(Debug, Default)]
+struct JsonProgress {
+    last_pct: u8,
+    last_detail: String,
+}
+
+/// Download is allotted the first 85% of the bar; importing/deploying the rest
+/// (same split as the stderr parser, so the two streams never fight).
+const DOWNLOAD_SHARE_PCT: f64 = 85.0;
+
+fn mib(bytes: u64) -> f64 {
+    bytes as f64 / 1024.0 / 1024.0
+}
+
+/// Translate one bootc progress JSON line into a `KYTH_STAGE_PROGRESS` marker.
+/// Returns `None` for unknown/garbled lines and for updates that would not
+/// change what the Hub shows. Never moves the percentage backwards.
+fn classify_progress_json(line: &str, state: &mut JsonProgress) -> Option<String> {
+    let event: serde_json::Value = serde_json::from_str(line.trim()).ok()?;
+    let kind = event.get("type")?.as_str()?;
+    let task = event
+        .get("task")
+        .and_then(|value| value.as_str())
+        .unwrap_or("");
+    let num = |key: &str| event.get(key).and_then(|value| value.as_u64()).unwrap_or(0);
+
+    let (pct, phase, detail) = match (kind, task) {
+        ("ProgressBytes", "pulling") => {
+            let (bytes, total) = (num("bytes"), num("bytesTotal"));
+            let (steps, steps_total) = (num("steps"), num("stepsTotal"));
+            let fraction = if total > 0 {
+                bytes as f64 / total as f64
+            } else if steps_total > 0 {
+                steps as f64 / steps_total as f64
+            } else {
+                0.0
+            };
+            // Never show 0% (the stage already announced 1%) or more than the
+            // download share: the rest belongs to import and deploy.
+            let pct = ((DOWNLOAD_SHARE_PCT * fraction.clamp(0.0, 1.0)) as u8).max(1);
+            let layer = (steps + 1).min(steps_total.max(1));
+            let detail = if total > 0 {
+                format!(
+                    "Downloading layer {layer} of {} · {:.0} MiB of {:.0} MiB",
+                    steps_total.max(1),
+                    mib(bytes.min(total)),
+                    mib(total)
+                )
+            } else if steps_total > 0 {
+                format!("Downloading layer {layer} of {steps_total}")
+            } else {
+                "Downloading the update".to_string()
+            };
+            (pct, "download", detail)
+        }
+        // A retried pull announces itself here; keep the bar where it was.
+        ("ProgressSteps", "pulling") => {
+            let description = event.get("description").and_then(|value| value.as_str())?;
+            (state.last_pct.max(1), "download", description.to_string())
+        }
+        ("ProgressSteps", "importing") => {
+            if num("steps") >= num("stepsTotal").max(1) {
+                (88, "install", "Image downloaded, staging it".to_string())
+            } else {
+                (86, "install", "Importing the image".to_string())
+            }
+        }
+        _ => return None,
+    };
+
+    if pct < state.last_pct {
+        return None;
+    }
+    if pct == state.last_pct && detail == state.last_detail {
+        return None;
+    }
+    state.last_pct = pct;
+    state.last_detail = detail.clone();
+    Some(format!(
+        "KYTH_STAGE_PROGRESS pct={pct} phase={phase} detail={detail}"
+    ))
+}
+
+/// Read bootc's JSON progress lines from the pipe and forward them to the Hub
+/// as marker lines. Ends at EOF (child exit).
+fn drain_json_progress(pipe: std::fs::File) {
+    let mut reader = std::io::BufReader::new(pipe);
+    let mut line = Vec::new();
+    let mut state = JsonProgress::default();
+    loop {
+        match read_progress_fragment(&mut reader, &mut line, 256 * 1024) {
+            Ok(Some(false)) => {}
+            // Oversized record: skipped, never interpreted.
+            Ok(Some(true)) => continue,
+            Ok(None) | Err(_) => break,
+        }
+        let text = String::from_utf8_lossy(&line);
+        if let Some(marker) = classify_progress_json(&text, &mut state) {
+            println!("{marker}");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+    }
+}
+
 /// Classify one stderr fragment (split on both `\n` and `\r`, ANSI
 /// stripped). Returns a marker line when progress visibly moved.
 fn classify_bootc_fragment(fragment: &str, state: &mut StageProgress) -> Option<String> {
@@ -457,8 +570,12 @@ fn classify_bootc_fragment(fragment: &str, state: &mut StageProgress) -> Option<
 }
 
 fn emit_stage_phase(pct: u8, phase: &str, detail: &str) {
-    println!("KYTH_STAGE_PROGRESS pct={pct} phase={phase} detail={detail}");
+    println!("{}", stage_phase_marker(pct, phase, detail));
     let _ = std::io::Write::flush(&mut std::io::stdout());
+}
+
+fn stage_phase_marker(pct: u8, phase: &str, detail: &str) -> String {
+    format!("KYTH_STAGE_PROGRESS pct={pct} phase={phase} detail={detail}")
 }
 
 /// Run `bootc upgrade` as its own process group so termination reaches
@@ -466,16 +583,105 @@ fn emit_stage_phase(pct: u8, phase: &str, detail: &str) {
 /// exit gracefully, then SIGKILL; the caller reports failure and records
 /// nothing.
 fn run_bootc_child() -> Result<std::process::Output, String> {
+    match run_bootc_child_with(true) {
+        // A bootc that predates `--progress-fd` rejects it before doing any
+        // work. Staging without live byte progress beats not staging at all.
+        Ok(output)
+            if !output.status.success()
+                && String::from_utf8_lossy(&output.stderr)
+                    .contains("unexpected argument '--progress-fd'") =>
+        {
+            run_bootc_child_with(false)
+        }
+        other => other,
+    }
+}
+
+/// Create the pipe bootc writes its JSON progress to. Both ends are
+/// close-on-exec; the child gets the write end re-exposed as fd 3 below.
+fn progress_pipe() -> Option<(std::fs::File, libc::c_int)> {
+    use std::os::fd::FromRawFd;
+    let mut fds = [0 as libc::c_int; 2];
+    // SAFETY: `fds` is a valid 2-element array for pipe2 to fill.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return None;
+    }
+    // SAFETY: fds[0] is a fresh descriptor we own exclusively.
+    Some((unsafe { std::fs::File::from_raw_fd(fds[0]) }, fds[1]))
+}
+
+/// Make `write_fd` appear as fd `BOOTC_PROGRESS_FD` in the child.
+fn expose_progress_fd(command: &mut std::process::Command, write_fd: libc::c_int) {
+    // SAFETY: only async-signal-safe calls (dup2/fcntl) between fork and exec.
+    unsafe {
+        command.pre_exec(move || {
+            if write_fd == BOOTC_PROGRESS_FD {
+                // dup2 onto itself is a no-op and would keep CLOEXEC set.
+                let flags = libc::fcntl(write_fd, libc::F_GETFD);
+                if flags < 0 || libc::fcntl(write_fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) < 0
+                {
+                    return Err(std::io::Error::last_os_error());
+                }
+            } else if libc::dup2(write_fd, BOOTC_PROGRESS_FD) < 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+/// Undo the parent's SIGTERM block in the upgrade child.
+/// `arm_sigterm_forwarder` blocks SIGTERM process-wide for its sigwait-based
+/// cancel watcher; the child inherits the blocked mask across fork+exec, which
+/// would make the cancel path's `killpg(pgid, SIGTERM)` a no-op and force
+/// every cancel through the SIGKILL grace wait. Unblocking here (between fork
+/// and exec) lets the child die promptly on cancel.
+fn unblock_sigterm_for_child(command: &mut std::process::Command) {
+    // SAFETY: pthread_sigmask/sigemptyset/sigaddset are async-signal-safe and
+    // only touch stack memory between fork and exec.
+    unsafe {
+        command.pre_exec(|| {
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut set);
+            libc::sigaddset(&mut set, libc::SIGTERM);
+            if libc::pthread_sigmask(libc::SIG_UNBLOCK, &set, std::ptr::null_mut()) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+}
+
+fn run_bootc_child_with(live_progress: bool) -> Result<std::process::Output, String> {
     let mut command = std::process::Command::new("/usr/bin/bootc");
+    command.arg("upgrade");
+    // bootc hides its progress bars when stderr is not a terminal, so the
+    // stderr parser never sees byte counts. `--progress-fd` is the supported
+    // machine-readable channel for exactly this.
+    let progress = if live_progress { progress_pipe() } else { None };
+    if let Some((_, write_fd)) = &progress {
+        command
+            .arg("--progress-fd")
+            .arg(BOOTC_PROGRESS_FD.to_string());
+        expose_progress_fd(&mut command, *write_fd);
+    }
+    // Unconditional: the progress-fd pre_exec above only runs when live
+    // progress is on, but the inherited SIGTERM block affects every spawn.
+    unblock_sigterm_for_child(&mut command);
     command
-        .arg("upgrade")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     command.process_group(0);
-    let mut child = command
-        .spawn()
-        .map_err(|error| format!("bootc upgrade could not start: {error}"))?;
+    let spawned = command.spawn();
+    // The parent must drop its copy of the write end or the reader never sees
+    // EOF. Do this whether or not the spawn worked.
+    let json_reader = progress.map(|(read, write_fd)| {
+        // SAFETY: write_fd is the descriptor pipe2 returned; closed exactly once.
+        unsafe { libc::close(write_fd) };
+        std::thread::spawn(move || drain_json_progress(read))
+    });
+    let mut child = spawned.map_err(|error| format!("bootc upgrade could not start: {error}"))?;
     // Drain pipes on helper threads: bootc is chatty and a full pipe would
     // wedge the child while we poll below.
     let mut stdout = child.stdout.take();
@@ -491,6 +697,9 @@ fn run_bootc_child() -> Result<std::process::Output, String> {
         {
             let stdout = stdout_reader.join().unwrap_or_default();
             let stderr = stderr_reader.join().unwrap_or_default();
+            if let Some(reader) = json_reader {
+                let _ = reader.join();
+            }
             if CANCELLED.load(Ordering::SeqCst) {
                 scrub_dracut_scratch();
                 return Err(
@@ -544,15 +753,18 @@ fn run_upgrade() -> Result<String, String> {
     check_free("/sysroot", REQUIRED_FREE_BYTES)?;
     check_free("/boot", BOOT_FREE_MIN_BYTES)?;
     check_free("/var/tmp", REQUIRED_FREE_BYTES)?;
-    kyth_shared::system::bootc_guard::with_bootc_lock(|| match run_bootc_child() {
-        Ok(output) if output.status.success() => Ok(output_text(&output)),
-        Ok(output) => {
-            scrub_dracut_scratch();
-            Err(output_text(&output))
-        }
-        Err(error) => {
-            scrub_dracut_scratch();
-            Err(error)
+    kyth_shared::system::bootc_guard::with_bootc_lock(|| {
+        emit_stage_phase(1, "download", "Starting image download");
+        match run_bootc_child() {
+            Ok(output) if output.status.success() => Ok(output_text(&output)),
+            Ok(output) => {
+                scrub_dracut_scratch();
+                Err(output_text(&output))
+            }
+            Err(error) => {
+                scrub_dracut_scratch();
+                Err(error)
+            }
         }
     })
 }
@@ -706,6 +918,121 @@ fn main() -> std::process::ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bootc_download_json_drives_a_real_percentage() {
+        // Event shapes from bootc's progress_jsonl.rs (task "pulling").
+        let mut state = JsonProgress::default();
+        let pull = |bytes: u64, steps: u64| {
+            format!(
+                "{{\"type\":\"ProgressBytes\",\"task\":\"pulling\",\"description\":\"Pulling Image: sha256:ab\",\"id\":\"sha256:ab\",\"bytesCached\":0,\"bytes\":{bytes},\"bytesTotal\":4000000000,\"stepsCached\":30,\"steps\":{steps},\"stepsTotal\":39,\"subtasks\":[]}}"
+            )
+        };
+        let first = classify_progress_json(&pull(40_000_000, 0), &mut state).unwrap();
+        assert!(
+            first.starts_with("KYTH_STAGE_PROGRESS pct=1 phase=download "),
+            "{first}"
+        );
+        let half = classify_progress_json(&pull(2_000_000_000, 20), &mut state).unwrap();
+        assert!(
+            half.starts_with("KYTH_STAGE_PROGRESS pct=42 phase=download "),
+            "{half}"
+        );
+        assert!(half.contains("Downloading layer 21 of 39"), "{half}");
+        assert!(half.contains("1907 MiB of 3815 MiB"), "{half}");
+        let done = classify_progress_json(&pull(4_000_000_000, 39), &mut state).unwrap();
+        assert!(
+            done.starts_with("KYTH_STAGE_PROGRESS pct=85 phase=download "),
+            "{done}"
+        );
+        // A stale, lower reading must never drag the bar backwards.
+        assert!(classify_progress_json(&pull(1_000_000_000, 10), &mut state).is_none());
+        // Identical repeat is suppressed.
+        assert!(classify_progress_json(&pull(4_000_000_000, 39), &mut state).is_none());
+    }
+
+    #[test]
+    fn bootc_import_json_moves_past_download_only_after_the_download_share() {
+        let mut state = JsonProgress::default();
+        let importing = |steps: u64| {
+            format!(
+                "{{\"type\":\"ProgressSteps\",\"task\":\"importing\",\"description\":\"Importing Image\",\"id\":\"x\",\"stepsCached\":0,\"steps\":{steps},\"stepsTotal\":1,\"subtasks\":[]}}"
+            )
+        };
+        let start = classify_progress_json(&importing(0), &mut state).unwrap();
+        assert!(
+            start.starts_with("KYTH_STAGE_PROGRESS pct=86 phase=install "),
+            "{start}"
+        );
+        let end = classify_progress_json(&importing(1), &mut state).unwrap();
+        assert!(
+            end.starts_with("KYTH_STAGE_PROGRESS pct=88 phase=install "),
+            "{end}"
+        );
+    }
+
+    #[test]
+    fn bootc_json_ignores_unknown_and_garbled_lines() {
+        let mut state = JsonProgress::default();
+        for line in [
+            "",
+            "not json",
+            "{\"type\":\"Start\",\"version\":\"0.1.0\"}",
+            "{\"type\":\"ProgressSteps\",\"task\":\"deploying\"}",
+            "{\"task\":\"pulling\"}",
+            "[1,2,3]",
+        ] {
+            assert!(classify_progress_json(line, &mut state).is_none(), "{line}");
+        }
+        assert_eq!(state.last_pct, 0);
+    }
+
+    #[test]
+    fn bootc_json_pull_retry_keeps_the_bar_where_it_was() {
+        let mut state = JsonProgress::default();
+        let bytes = "{\"type\":\"ProgressBytes\",\"task\":\"pulling\",\"description\":\"d\",\"id\":\"i\",\"bytesCached\":0,\"bytes\":2000,\"bytesTotal\":4000,\"stepsCached\":0,\"steps\":1,\"stepsTotal\":2,\"subtasks\":[]}";
+        classify_progress_json(bytes, &mut state).unwrap();
+        let retry = "{\"type\":\"ProgressSteps\",\"task\":\"pulling\",\"description\":\"Container image pull failed; retrying in 5 seconds (1/3)\",\"id\":\"pull-retry\",\"stepsCached\":0,\"steps\":1,\"stepsTotal\":3,\"subtasks\":[]}";
+        let marker = classify_progress_json(retry, &mut state).unwrap();
+        assert!(
+            marker.starts_with("KYTH_STAGE_PROGRESS pct=42 phase=download "),
+            "{marker}"
+        );
+        assert!(marker.contains("retrying in 5 seconds"), "{marker}");
+    }
+
+    #[test]
+    fn progress_fd_reaches_a_real_child_and_ends_at_eof() {
+        // Same pipe + dup2 wiring as the bootc spawn, with sh standing in.
+        let (read, write_fd) = progress_pipe().expect("pipe");
+        let mut command = std::process::Command::new("sh");
+        command.args([
+            "-c",
+            "printf '%s\\n' '{\"type\":\"ProgressBytes\",\"task\":\"pulling\",\"description\":\"d\",\"id\":\"i\",\"bytesCached\":0,\"bytes\":1,\"bytesTotal\":2,\"stepsCached\":0,\"steps\":0,\"stepsTotal\":1,\"subtasks\":[]}' >&3",
+        ]);
+        expose_progress_fd(&mut command, write_fd);
+        let mut child = command.spawn().expect("spawn sh");
+        // Parent closes its write end, as run_bootc_child_with does.
+        unsafe { libc::close(write_fd) };
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut std::io::BufReader::new(read), &mut text)
+            .expect("reader reaches EOF once the child exits");
+        assert!(child.wait().unwrap().success());
+        let mut state = JsonProgress::default();
+        let marker = classify_progress_json(text.trim(), &mut state).expect("marker");
+        assert!(
+            marker.starts_with("KYTH_STAGE_PROGRESS pct=42 phase=download "),
+            "{marker}"
+        );
+    }
+
+    #[test]
+    fn download_phase_marker_uses_the_frontend_progress_contract() {
+        assert_eq!(
+            stage_phase_marker(1, "download", "Starting image download"),
+            "KYTH_STAGE_PROGRESS pct=1 phase=download detail=Starting image download"
+        );
+    }
 
     #[test]
     fn space_minimums_match_policy() {

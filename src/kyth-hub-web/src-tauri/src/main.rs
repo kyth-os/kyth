@@ -1342,7 +1342,7 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             // A stalled mirror must surface as a timeout, not a forever
             // "running" job: bound like every other Hub recipe action.
             let mut command = std::process::Command::new("flatpak");
-            command.args(["uninstall", "--user", "-y", &app_id]);
+            command.args(["uninstall", "--user", "-y", "--", &app_id]);
             kyth_shared::system::process::run_bounded_command_cancel(
                 command,
                 timeout_for(JobTimeoutClass::HubAction),
@@ -1504,7 +1504,7 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
         // Unbounded `.output()` hangs on a stalled mirror with no way to
         // cancel; run bounded and cancellable like the other install paths.
         let mut command = std::process::Command::new("flatpak");
-        command.args(["install", "--user", "-y", "flathub", &app_id]);
+        command.args(["install", "--user", "-y", "flathub", "--", &app_id]);
         let result = kyth_shared::system::process::run_bounded_command_cancel(
             command,
             timeout_for(JobTimeoutClass::HubAction),
@@ -2002,6 +2002,7 @@ fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
             "flatpak".to_string(),
             "info".to_string(),
             "--user".to_string(),
+            "--".to_string(),
             app_id,
         ],
         std::time::Duration::from_secs(15),
@@ -2018,7 +2019,7 @@ fn exe_handler_launch_flatpak(app_id: String) -> Result<(), String> {
         return Err("That Linux application is not installed.".to_string());
     }
     let mut run = Command::new("flatpak");
-    run.args(["run", "--user", &app_id])
+    run.args(["run", "--user", "--", &app_id])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null());

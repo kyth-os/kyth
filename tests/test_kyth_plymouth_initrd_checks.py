@@ -54,6 +54,42 @@ class PlymouthInitrdChecksTests(unittest.TestCase):
         self.assertEqual(first["etc/plymouth/plymouthd.conf"].decode(), daemon)
         self.assertIn(b'force_add_dracutmodules+=" kyth-plymouth "', first["etc/dracut.conf.d/99-kyth.conf"])
 
+    def test_crypt_generator_uses_exit_not_return(self):
+        """dracut 111's crypt-generator.sh is executed, so top-level `return` is exit 2."""
+        shipped = (
+            "#!/usr/bin/sh\n\ncommand -v getargbool > /dev/null || . /lib/dracut-lib.sh\n\n"
+            "if ! getargbool 1 rd.luks; then\n"
+            "    # crypto LUKS detection is disabled\n"
+            "    return 0\n"
+            "fi\n\n"
+            "[ -e /etc/crypttab ] || return 0\n\n"
+            'GENERATOR_DIR="$1"\n'
+            '[ -n "$GENERATOR_DIR" ] || return 1\n'
+            'f() {\n    return 0\n}\n'
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            script = root / "usr/lib/dracut/modules.d/70crypt/crypt-generator.sh"
+            script.parent.mkdir(parents=True)
+            script.write_text(shipped, encoding="utf-8")
+            env = {**os.environ, "KYTH_PLYMOUTH_ROOT": str(root)}
+            subprocess.run([str(OWNER)], env=env, check=True)
+            once = script.read_text(encoding="utf-8")
+            subprocess.run([str(OWNER)], env=env, check=True)
+            twice = script.read_text(encoding="utf-8")
+            self.assertEqual(once, twice, "must be idempotent")
+            self.assertIn("[ -e /etc/crypttab ] || exit 0", once)
+            self.assertIn('[ -n "$GENERATOR_DIR" ] || exit 1', once)
+            self.assertIn("    exit 0\nfi", once)
+            # A real function body keeps its `return`.
+            self.assertIn("f() {\n    return 0\n}", once)
+            # The patched script must actually run clean when executed (no crypttab).
+            gen = pathlib.Path(tmp) / "gen.sh"
+            gen.write_text(once.replace("command -v getargbool > /dev/null || . /lib/dracut-lib.sh",
+                                        "getargbool() { return 0; }"), encoding="utf-8")
+            result = subprocess.run(["bash", str(gen), tempfile.gettempdir()], capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_every_entry_point_delegates_to_canonical_owner(self):
         base = (ROOT / "build_base" / "build.sh").read_text(encoding="utf-8")
         setup = (ROOT / "build_files" / "scripts" / "plymouth-setup.sh").read_text(encoding="utf-8")

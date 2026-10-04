@@ -27,11 +27,12 @@ class RootfulPodmanWrapperTests(unittest.TestCase):
             text = (ROOT / relative).read_text(encoding="utf-8")
             self.assertIn("rootful-podman.sh", text, relative)
 
-    def test_local_live_iso_exports_image_for_nested_builder(self):
+    def test_local_live_iso_requires_registry_source_without_exporting_layers(self):
         text = (ROOT / "build_files" / "build-live-iso.sh").read_text(encoding="utf-8")
-        self.assertIn("containers-storage:${BASE_IMAGE}", text)
-        self.assertIn("oci:${LOCAL_IMAGE_DIR}:latest", text)
-        self.assertIn("/src/kyth-installer-image:ro", text)
+        self.assertNotIn("skopeo copy", text)
+        self.assertNotIn("LOCAL_IMAGE_DIR", text)
+        self.assertIn("INSTALL_SOURCE_IMAGE to a signed registry digest", text)
+        self.assertIn('INSTALL_SOURCE_IMAGE="${INSTALL_SOURCE_IMAGE:-${BASE_IMAGE}}"', text)
         self.assertIn("INSTALLER_BUILD_HASH", text)
 
 

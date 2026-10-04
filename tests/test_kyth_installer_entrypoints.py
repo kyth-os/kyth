@@ -73,8 +73,9 @@ class InstallerEntrypointTests(unittest.TestCase):
     def test_launcher_preserves_only_fixed_installer_transport_settings(self):
         launcher = (ROOT / "build_files" / "kyth-launch-installer").read_text()
         sudoers = (ROOT / "installer" / "build.sh").read_text()
-        for name in ("KYTH_INSTALLER_SOCKET", "KYTH_INSTALLER_SESSION_TOKEN"):
-            self.assertIn(name, launcher)
+        self.assertIn("KYTH_INSTALLER_SOCKET", launcher)
+        self.assertNotIn("KYTH_INSTALLER_SESSION_TOKEN", launcher)
+        self.assertIn("--tokens-file", launcher)
         for name in ("KYTH_INSTALLER_SOCKET", "KYTH_INSTALLER_SOCKET_GROUP", "KYTH_INSTALLER_TOKEN_FILE"):
             self.assertIn(name, sudoers)
 

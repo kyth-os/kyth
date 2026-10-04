@@ -18,51 +18,259 @@ struct Spec {
 }
 
 const SPECS: &[Spec] = &[
-    Spec { config: "aio-max.toml", drop_in: "99-kyth-aio-max.conf", comment: "Kyth aio max", payload: "fs.aio-max-nr=1048576\n" },
-    Spec { config: "inotify-watches.toml", drop_in: "99-kyth-inotify-watches.conf", comment: "Kyth inotify watches", payload: "fs.inotify.max_user_watches=1048576\n" },
-    Spec { config: "rmem-default.toml", drop_in: "99-kyth-rmem-default.conf", comment: "Kyth rmem default", payload: "net.core.rmem_default=262144\n" },
-    Spec { config: "rmem-max.toml", drop_in: "99-kyth-rmem-max.conf", comment: "Kyth rmem max", payload: "net.core.rmem_max=16777216\n" },
-    Spec { config: "vfs-cache.toml", drop_in: "99-kyth-vfs-cache.conf", comment: "Kyth vfs cache", payload: "vm.vfs_cache_pressure=50\n" },
-    Spec { config: "overcommit-memory.toml", drop_in: "99-kyth-overcommit-memory.conf", comment: "Kyth overcommit memory", payload: "vm.overcommit_memory=1\n" },
-    Spec { config: "page-cluster.toml", drop_in: "99-kyth-page-cluster.conf", comment: "Kyth page cluster", payload: "vm.page-cluster=0\n" },
-    Spec { config: "dirty-ratio.toml", drop_in: "99-kyth-dirty-ratio.conf", comment: "Kyth dirty ratio", payload: "vm.dirty_ratio=5\nvm.dirty_background_ratio=5\nvm.dirty_writeback_centisecs=500\n" },
-    Spec { config: "dirty-expire.toml", drop_in: "99-kyth-dirty-expire.conf", comment: "Kyth dirty expire", payload: "vm.dirty_expire_centisecs=100\n" },
-    Spec { config: "netdev-budget.toml", drop_in: "99-kyth-netdev-budget.conf", comment: "Kyth netdev budget", payload: "net.core.netdev_budget=600\n" },
-    Spec { config: "net-backlog.toml", drop_in: "99-kyth-net-backlog.conf", comment: "Kyth net backlog", payload: "net.core.netdev_max_backlog=5000\n" },
-    Spec { config: "swappiness.toml", drop_in: "99-kyth-swappiness.conf", comment: "Kyth swappiness", payload: "vm.swappiness=10\n" },
-    Spec { config: "busy-poll.toml", drop_in: "99-kyth-busy-poll.conf", comment: "Kyth busy poll", payload: "net.core.busy_poll=50\n" },
-    Spec { config: "busy-read.toml", drop_in: "99-kyth-busy-read.conf", comment: "Kyth busy read", payload: "net.core.busy_read=50\n" },
-    Spec { config: "compaction.toml", drop_in: "99-kyth-compaction.conf", comment: "Kyth compaction", payload: "vm.compaction_proactiveness=0\n" },
-    Spec { config: "thp-collapse.toml", drop_in: "99-kyth-thp-collapse.conf", comment: "Kyth THP collapse", payload: "kernel.khugepaged_defrag=0\n" },
-    Spec { config: "numa-balancing.toml", drop_in: "99-kyth-numa-balancing.conf", comment: "Kyth numa balancing", payload: "kernel.numa_balancing=0\n" },
-    Spec { config: "psi-poll.toml", drop_in: "99-kyth-psi-poll.conf", comment: "Kyth PSI poll", payload: "vm.pressure_poll=500\n" },
-    Spec { config: "tcp-ecn.toml", drop_in: "99-kyth-tcp-ecn.conf", comment: "Kyth tcp ecn", payload: "net.ipv4.tcp_ecn=1\n" },
-    Spec { config: "tcp-fastopen.toml", drop_in: "99-kyth-tcp-fastopen.conf", comment: "Kyth tcp fastopen", payload: "net.ipv4.tcp_fastopen=3\n" },
-    Spec { config: "tcp-fin-timeout.toml", drop_in: "99-kyth-tcp-fin-timeout.conf", comment: "Kyth tcp fin timeout", payload: "net.ipv4.tcp_fin_timeout=30\n" },
-    Spec { config: "tcp-keepalive.toml", drop_in: "99-kyth-tcp-keepalive.conf", comment: "Kyth tcp keepalive", payload: "net.ipv4.tcp_keepalive_time=120\n" },
-    Spec { config: "tcp-no-metrics-save.toml", drop_in: "99-kyth-tcp-no-metrics-save.conf", comment: "Kyth tcp no metrics save", payload: "net.ipv4.tcp_no_metrics_save=1\n" },
-    Spec { config: "tcp-notsent.toml", drop_in: "99-kyth-tcp-notsent.conf", comment: "Kyth tcp notsent", payload: "net.ipv4.tcp_notsent_lowat=16384\n" },
-    Spec { config: "tcp-orphan-retries.toml", drop_in: "99-kyth-tcp-orphan-retries.conf", comment: "Kyth tcp orphan retries", payload: "net.ipv4.tcp_orphan_retries=0\n" },
-    Spec { config: "tcp-retries1.toml", drop_in: "99-kyth-tcp-retries1.conf", comment: "Kyth tcp retries1", payload: "net.ipv4.tcp_retries1=3\n" },
-    Spec { config: "tcp-retries2.toml", drop_in: "99-kyth-tcp-retries2.conf", comment: "Kyth tcp retries2", payload: "net.ipv4.tcp_retries2=8\n" },
-    Spec { config: "tcp-sack.toml", drop_in: "99-kyth-tcp-sack.conf", comment: "Kyth tcp sack", payload: "net.ipv4.tcp_sack=1\n" },
-    Spec { config: "tcp-slow-start.toml", drop_in: "99-kyth-tcp-slow-start.conf", comment: "Kyth tcp slow start", payload: "net.ipv4.tcp_slow_start_after_idle=0\n" },
-    Spec { config: "tcp-timestamps.toml", drop_in: "99-kyth-tcp-timestamps.conf", comment: "Kyth tcp timestamps", payload: "net.ipv4.tcp_timestamps=1\n" },
-    Spec { config: "tcp-window-scaling.toml", drop_in: "99-kyth-tcp-window-scaling.conf", comment: "Kyth tcp window scaling", payload: "net.ipv4.tcp_window_scaling=1\n" },
-    Spec { config: "vm-stat.toml", drop_in: "99-kyth-vm-stat.conf", comment: "Kyth vm stat", payload: "vm.stat_interval=10\n" },
-    Spec { config: "wmem-default.toml", drop_in: "99-kyth-wmem-default.conf", comment: "Kyth wmem default", payload: "net.core.wmem_default=262144\n" },
-    Spec { config: "wmem-max.toml", drop_in: "99-kyth-wmem-max.conf", comment: "Kyth wmem max", payload: "net.core.wmem_max=16777216\n" },
-    Spec { config: "max-map-count.toml", drop_in: "99-kyth-max-map-count.conf", comment: "Kyth max map count", payload: "vm.max_map_count=2147483642\n" },
-    Spec { config: "min-free-kbytes.toml", drop_in: "99-kyth-min-free-kbytes.conf", comment: "Kyth min free kbytes", payload: "vm.min_free_kbytes=131072\n" },
-    Spec { config: "somaxconn.toml", drop_in: "99-kyth-somaxconn.conf", comment: "Kyth somaxconn", payload: "net.core.somaxconn=8192\n" },
-    Spec { config: "sched-autogroup.toml", drop_in: "99-kyth-sched-autogroup.conf", comment: "Kyth autogroup", payload: "kernel.sched_autogroup_enabled=0\n" },
-    Spec { config: "sched-child.toml", drop_in: "99-kyth-sched-child.conf", comment: "Kyth sched child", payload: "kernel.sched_child_runs_first=0\n" },
-    Spec { config: "sched-nr-migrate.toml", drop_in: "99-kyth-sched-nr-migrate.conf", comment: "Kyth nr migrate", payload: "kernel.sched_nr_migrate=64\n" },
-    Spec { config: "sched-latency.toml", drop_in: "99-kyth-sched-latency.conf", comment: "Kyth sched latency", payload: "kernel.sched_latency_ns = 6000000\nkernel.sched_min_granularity_ns = 1000000\nkernel.sched_wakeup_granularity_ns = 1000000\nkernel.sched_migration_cost_ns = 500000\nkernel.sched_nr_migrate = 32\n" },
-    Spec { config: "file-max.toml", drop_in: "99-kyth-file-max.conf", comment: "Kyth file max", payload: "fs.file-max=2097152\n" },
-    Spec { config: "tcp-mtu-probing.toml", drop_in: "99-kyth-tcp-mtu-probing.conf", comment: "Kyth tcp mtu probing", payload: "net.ipv4.tcp_mtu_probing=1\n" },
-    Spec { config: "vm-watermark.toml", drop_in: "99-kyth-vm-watermark.conf", comment: "Kyth vm watermark", payload: "vm.watermark_scale_factor=500\n" },
-    Spec { config: "perf-cpu.toml", drop_in: "99-kyth-perf-cpu.conf", comment: "Kyth perf cpu", payload: "kernel.perf_cpu_time_max_percent=5\n" },
+    Spec {
+        config: "aio-max.toml",
+        drop_in: "99-kyth-aio-max.conf",
+        comment: "Kyth aio max",
+        payload: "fs.aio-max-nr=1048576\n",
+    },
+    Spec {
+        config: "inotify-watches.toml",
+        drop_in: "99-kyth-inotify-watches.conf",
+        comment: "Kyth inotify watches",
+        payload: "fs.inotify.max_user_watches=1048576\n",
+    },
+    Spec {
+        config: "rmem-default.toml",
+        drop_in: "99-kyth-rmem-default.conf",
+        comment: "Kyth rmem default",
+        payload: "net.core.rmem_default=262144\n",
+    },
+    Spec {
+        config: "rmem-max.toml",
+        drop_in: "99-kyth-rmem-max.conf",
+        comment: "Kyth rmem max",
+        payload: "net.core.rmem_max=16777216\n",
+    },
+    Spec {
+        config: "vfs-cache.toml",
+        drop_in: "99-kyth-vfs-cache.conf",
+        comment: "Kyth vfs cache",
+        payload: "vm.vfs_cache_pressure=50\n",
+    },
+    Spec {
+        config: "overcommit-memory.toml",
+        drop_in: "99-kyth-overcommit-memory.conf",
+        comment: "Kyth overcommit memory",
+        payload: "vm.overcommit_memory=1\n",
+    },
+    Spec {
+        config: "page-cluster.toml",
+        drop_in: "99-kyth-page-cluster.conf",
+        comment: "Kyth page cluster",
+        payload: "vm.page-cluster=0\n",
+    },
+    Spec {
+        config: "dirty-ratio.toml",
+        drop_in: "99-kyth-dirty-ratio.conf",
+        comment: "Kyth dirty ratio",
+        payload:
+            "vm.dirty_ratio=5\nvm.dirty_background_ratio=5\nvm.dirty_writeback_centisecs=500\n",
+    },
+    Spec {
+        config: "dirty-expire.toml",
+        drop_in: "99-kyth-dirty-expire.conf",
+        comment: "Kyth dirty expire",
+        payload: "vm.dirty_expire_centisecs=100\n",
+    },
+    Spec {
+        config: "netdev-budget.toml",
+        drop_in: "99-kyth-netdev-budget.conf",
+        comment: "Kyth netdev budget",
+        payload: "net.core.netdev_budget=600\n",
+    },
+    Spec {
+        config: "net-backlog.toml",
+        drop_in: "99-kyth-net-backlog.conf",
+        comment: "Kyth net backlog",
+        payload: "net.core.netdev_max_backlog=5000\n",
+    },
+    Spec {
+        config: "swappiness.toml",
+        drop_in: "99-kyth-swappiness.conf",
+        comment: "Kyth swappiness",
+        payload: "vm.swappiness=10\n",
+    },
+    Spec {
+        config: "busy-poll.toml",
+        drop_in: "99-kyth-busy-poll.conf",
+        comment: "Kyth busy poll",
+        payload: "net.core.busy_poll=50\n",
+    },
+    Spec {
+        config: "busy-read.toml",
+        drop_in: "99-kyth-busy-read.conf",
+        comment: "Kyth busy read",
+        payload: "net.core.busy_read=50\n",
+    },
+    Spec {
+        config: "compaction.toml",
+        drop_in: "99-kyth-compaction.conf",
+        comment: "Kyth compaction",
+        payload: "vm.compaction_proactiveness=0\n",
+    },
+    Spec {
+        config: "thp-collapse.toml",
+        drop_in: "99-kyth-thp-collapse.conf",
+        comment: "Kyth THP collapse",
+        payload: "-kernel.khugepaged_defrag=0\n",
+    },
+    Spec {
+        config: "numa-balancing.toml",
+        drop_in: "99-kyth-numa-balancing.conf",
+        comment: "Kyth numa balancing",
+        payload: "kernel.numa_balancing=0\n",
+    },
+    Spec {
+        config: "psi-poll.toml",
+        drop_in: "99-kyth-psi-poll.conf",
+        comment: "Kyth PSI poll",
+        payload: "-vm.pressure_poll=500\n",
+    },
+    Spec {
+        config: "tcp-ecn.toml",
+        drop_in: "99-kyth-tcp-ecn.conf",
+        comment: "Kyth tcp ecn",
+        payload: "net.ipv4.tcp_ecn=1\n",
+    },
+    Spec {
+        config: "tcp-fastopen.toml",
+        drop_in: "99-kyth-tcp-fastopen.conf",
+        comment: "Kyth tcp fastopen",
+        payload: "net.ipv4.tcp_fastopen=3\n",
+    },
+    Spec {
+        config: "tcp-fin-timeout.toml",
+        drop_in: "99-kyth-tcp-fin-timeout.conf",
+        comment: "Kyth tcp fin timeout",
+        payload: "net.ipv4.tcp_fin_timeout=30\n",
+    },
+    Spec {
+        config: "tcp-keepalive.toml",
+        drop_in: "99-kyth-tcp-keepalive.conf",
+        comment: "Kyth tcp keepalive",
+        payload: "net.ipv4.tcp_keepalive_time=120\n",
+    },
+    Spec {
+        config: "tcp-no-metrics-save.toml",
+        drop_in: "99-kyth-tcp-no-metrics-save.conf",
+        comment: "Kyth tcp no metrics save",
+        payload: "net.ipv4.tcp_no_metrics_save=1\n",
+    },
+    Spec {
+        config: "tcp-notsent.toml",
+        drop_in: "99-kyth-tcp-notsent.conf",
+        comment: "Kyth tcp notsent",
+        payload: "net.ipv4.tcp_notsent_lowat=16384\n",
+    },
+    Spec {
+        config: "tcp-orphan-retries.toml",
+        drop_in: "99-kyth-tcp-orphan-retries.conf",
+        comment: "Kyth tcp orphan retries",
+        payload: "net.ipv4.tcp_orphan_retries=0\n",
+    },
+    Spec {
+        config: "tcp-retries1.toml",
+        drop_in: "99-kyth-tcp-retries1.conf",
+        comment: "Kyth tcp retries1",
+        payload: "net.ipv4.tcp_retries1=3\n",
+    },
+    Spec {
+        config: "tcp-retries2.toml",
+        drop_in: "99-kyth-tcp-retries2.conf",
+        comment: "Kyth tcp retries2",
+        payload: "net.ipv4.tcp_retries2=8\n",
+    },
+    Spec {
+        config: "tcp-sack.toml",
+        drop_in: "99-kyth-tcp-sack.conf",
+        comment: "Kyth tcp sack",
+        payload: "net.ipv4.tcp_sack=1\n",
+    },
+    Spec {
+        config: "tcp-slow-start.toml",
+        drop_in: "99-kyth-tcp-slow-start.conf",
+        comment: "Kyth tcp slow start",
+        payload: "net.ipv4.tcp_slow_start_after_idle=0\n",
+    },
+    Spec {
+        config: "tcp-timestamps.toml",
+        drop_in: "99-kyth-tcp-timestamps.conf",
+        comment: "Kyth tcp timestamps",
+        payload: "net.ipv4.tcp_timestamps=1\n",
+    },
+    Spec {
+        config: "tcp-window-scaling.toml",
+        drop_in: "99-kyth-tcp-window-scaling.conf",
+        comment: "Kyth tcp window scaling",
+        payload: "net.ipv4.tcp_window_scaling=1\n",
+    },
+    Spec {
+        config: "vm-stat.toml",
+        drop_in: "99-kyth-vm-stat.conf",
+        comment: "Kyth vm stat",
+        payload: "vm.stat_interval=10\n",
+    },
+    Spec {
+        config: "wmem-default.toml",
+        drop_in: "99-kyth-wmem-default.conf",
+        comment: "Kyth wmem default",
+        payload: "net.core.wmem_default=262144\n",
+    },
+    Spec {
+        config: "wmem-max.toml",
+        drop_in: "99-kyth-wmem-max.conf",
+        comment: "Kyth wmem max",
+        payload: "net.core.wmem_max=16777216\n",
+    },
+    Spec {
+        config: "max-map-count.toml",
+        drop_in: "99-kyth-max-map-count.conf",
+        comment: "Kyth max map count",
+        payload: "vm.max_map_count=2147483642\n",
+    },
+    Spec {
+        config: "min-free-kbytes.toml",
+        drop_in: "99-kyth-min-free-kbytes.conf",
+        comment: "Kyth min free kbytes",
+        payload: "vm.min_free_kbytes=131072\n",
+    },
+    Spec {
+        config: "somaxconn.toml",
+        drop_in: "99-kyth-somaxconn.conf",
+        comment: "Kyth somaxconn",
+        payload: "net.core.somaxconn=8192\n",
+    },
+    Spec {
+        config: "sched-autogroup.toml",
+        drop_in: "99-kyth-sched-autogroup.conf",
+        comment: "Kyth autogroup",
+        payload: "kernel.sched_autogroup_enabled=0\n",
+    },
+    Spec {
+        config: "file-max.toml",
+        drop_in: "99-kyth-file-max.conf",
+        comment: "Kyth file max",
+        payload: "fs.file-max=2097152\n",
+    },
+    Spec {
+        config: "tcp-mtu-probing.toml",
+        drop_in: "99-kyth-tcp-mtu-probing.conf",
+        comment: "Kyth tcp mtu probing",
+        payload: "net.ipv4.tcp_mtu_probing=1\n",
+    },
+    Spec {
+        config: "vm-watermark.toml",
+        drop_in: "99-kyth-vm-watermark.conf",
+        comment: "Kyth vm watermark",
+        payload: "vm.watermark_scale_factor=500\n",
+    },
+    Spec {
+        config: "perf-cpu.toml",
+        drop_in: "99-kyth-perf-cpu.conf",
+        comment: "Kyth perf cpu",
+        payload: "kernel.perf_cpu_time_max_percent=5\n",
+    },
 ];
 
 fn spec(config: &str) -> &'static Spec {
@@ -456,27 +664,9 @@ profile_module!(
     autogroup_status,
     "sched-autogroup.toml"
 );
-profile_module!(
-    load_sched_child,
-    save_sched_child,
-    generate_sched_child,
-    sched_child_status,
-    "sched-child.toml"
-);
-profile_module!(
-    load_nr_migrate,
-    save_nr_migrate,
-    generate_nr_migrate,
-    nr_migrate_status,
-    "sched-nr-migrate.toml"
-);
-profile_module!(
-    load_sched_latency,
-    save_sched_latency,
-    generate_sched_latency,
-    sched_latency_status,
-    "sched-latency.toml"
-);
+// NOTE: the CFS scheduler-latency tunables (sched-child.toml,
+// sched-nr-migrate.toml, sched-latency.toml) were removed — their sysctls
+// were deleted from the kernel with EEVDF and every key was a silent no-op.
 profile_module!(
     load_file_max,
     save_file_max,
@@ -513,6 +703,26 @@ pub fn normalize_profile(value: Option<&str>) -> Profile {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn kernel_scheduler_keys_removed_in_6_6_are_optional_in_every_profile() {
+        // The CFS knobs (sched_latency_ns, sched_nr_migrate, ...) were removed
+        // with EEVDF, so an unprefixed line makes `sysctl --system` print an
+        // error on every boot. Each must carry the `-` ignore-missing prefix.
+        for spec in SPECS {
+            for line in spec.payload.lines() {
+                let key = line.split('=').next().unwrap_or("").trim();
+                let bare = key.trim_start_matches('-');
+                if bare.starts_with("kernel.sched_") && bare != "kernel.sched_autogroup_enabled" {
+                    assert!(
+                        key.starts_with('-'),
+                        "{}: {key} must be -prefixed",
+                        spec.config
+                    );
+                }
+            }
+        }
+    }
+
     use super::*;
     use std::fs;
     use tempfile::tempdir;
@@ -549,7 +759,7 @@ mod tests {
         generate_thp_collapse(Some(&thp_config), Some(&thp_drop_in), None).unwrap();
         assert_eq!(
             fs::read_to_string(&thp_drop_in).unwrap(),
-            "# Kyth THP collapse gaming — generated\nkernel.khugepaged_defrag=0\n"
+            "# Kyth THP collapse gaming — generated\n-kernel.khugepaged_defrag=0\n"
         );
     }
 

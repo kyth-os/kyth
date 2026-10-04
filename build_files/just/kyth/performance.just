@@ -203,13 +203,6 @@ gpu-power profile="status":
     set -euo pipefail
     /usr/bin/kyth-gpu-power "{{ profile }}"
 
-# Sched latency (sched-latency.toml) — 6ms gaming jitter cut
-[group('KythOS')]
-sched-latency profile="status":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    /usr/bin/kyth-sched-latency "{{ profile }}"
-
 # Readahead ephemeral (readahead.toml)
 [group('KythOS')]
 readahead path="":
@@ -470,13 +463,6 @@ sched-autogroup mode="status":
     set -euo pipefail
     /usr/bin/kyth-sched-autogroup "{{ mode }}"
 
-# Sched nr_migrate 64 gaming (sched-nr-migrate.toml)
-[group('KythOS')]
-sched-nr-migrate mode="status":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    /usr/bin/kyth-sched-nr-migrate "{{ mode }}"
-
 # Page cluster 0 gaming (page-cluster.toml)
 [group('KythOS')]
 page-cluster mode="status":
@@ -497,13 +483,6 @@ tcp-keepalive mode="status":
     #!/usr/bin/env bash
     set -euo pipefail
     /usr/bin/kyth-tcp-keepalive "{{ mode }}"
-
-# Sched child runs first 0 gaming (sched-child.toml)
-[group('KythOS')]
-sched-child mode="status":
-    #!/usr/bin/env bash
-    set -euo pipefail
-    /usr/bin/kyth-sched-child "{{ mode }}"
 
 # VM stat 10 gaming (vm-stat.toml)
 [group('KythOS')]

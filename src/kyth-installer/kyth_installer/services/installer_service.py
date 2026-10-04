@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 
 from kyth_installer import context as context_module
 from kyth_installer import disk, execution, partition_ops, runner, system, validation
+from kyth_installer.mountpoint import normalize_manual_mountpoint
 
 if TYPE_CHECKING:
     from kyth_installer.context import InstallerContext
@@ -40,6 +41,11 @@ class InstallerService:
         partition = disk._normal_device_path(body.get("partition", ""))
         if error or not partition:
             return None, None, None, error or {"ok": False, "message": "Disk and partition are required."}
+        if journal.committed:
+            return None, None, None, {
+                "ok": False,
+                "message": "Partition changes have already been committed and cannot be edited.",
+            }
         native_error = journal.rust_validate_target(partition)
         if native_error is not None:
             return None, None, None, {"ok": False, "message": native_error}
@@ -64,6 +70,8 @@ class InstallerService:
         _disk, journal, error = self._journal_for(body)
         if error:
             return error
+        if journal.committed:
+            return {"ok": False, "message": "Partition changes have already been committed."}
         start = disk._safe_int(body.get("start_bytes"), -1)
         size = disk._safe_int(body.get("size_bytes"), -1)
         if start < 0 or size < 1:
@@ -72,14 +80,23 @@ class InstallerService:
         fs_error = _validate_fs_type(fs_type)
         if fs_error:
             return fs_error
-        journal.add_op("create", {
+        label = body.get("label", "")
+        if not isinstance(label, str):
+            return {"ok": False, "message": "Partition label must be text."}
+        try:
+            mountpoint = normalize_manual_mountpoint(body.get("mountpoint", ""))
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
+        op = journal.add_op("create", {
             "start_bytes": start,
             "size_bytes": size,
             "fs_type": fs_type,
-            "label": body.get("label", ""),
-            "mountpoint": body.get("mountpoint", ""),
+            "label": label,
+            "mountpoint": mountpoint,
         })
         errors = journal.validate()
+        if errors:
+            journal.remove_op(op["index"])
         return {"ok": not errors, "pending": len(journal.ops), "errors": errors}
 
     def delete_partition(self, body: dict) -> dict:
@@ -117,8 +134,11 @@ class InstallerService:
         fs_error = _validate_fs_type(fs_type)
         if fs_error:
             return fs_error
+        label = body.get("label", "")
+        if not isinstance(label, str):
+            return {"ok": False, "message": "Partition label must be text."}
         journal.add_op("format", {
-            "partition": partition, "fs_type": fs_type, "label": body.get("label", ""),
+            "partition": partition, "fs_type": fs_type, "label": label,
         })
         return {"ok": True, "pending": len(journal.ops)}
 
@@ -137,7 +157,10 @@ class InstallerService:
         _disk, journal, partition, error = self._partition_for(body)
         if error:
             return error
-        mountpoint = body.get("mountpoint", "").strip()
+        try:
+            mountpoint = normalize_manual_mountpoint(body.get("mountpoint", ""))
+        except ValueError as exc:
+            return {"ok": False, "message": str(exc)}
         if mountpoint and mountpoint != "swap" and not mountpoint.startswith("/"):
             return {"ok": False, "message": "Mount point must be an absolute path (e.g. /, /home)."}
         journal.add_op("set_mountpoint", {"partition": partition, "mountpoint": mountpoint})
@@ -159,6 +182,8 @@ class InstallerService:
         _disk, journal, error = self._journal_for(body)
         if error:
             return error
+        if journal.committed:
+            return {"ok": False, "message": "Partition changes have already been committed."}
         # Destructive journals (fresh table, partition deletion, format, or
         # resize) need the same on-screen acknowledgements as start_install:
         # committing without them would erase data the user never confirmed
@@ -171,12 +196,11 @@ class InstallerService:
         # Canonical acknowledgement: "acknowledged-irreversible" (kebab,
         # matching the native shell wire key and start_install). Legacy
         # "confirm_backup" answer files keep working.
-        acknowledged = (
-            body.get("acknowledged-irreversible")
-            or body.get("acknowledged_irreversible")
-            or body.get("confirm_backup")
+        acknowledged = any(
+            body.get(key) is True
+            for key in ("acknowledged-irreversible", "acknowledged_irreversible", "confirm_backup")
         )
-        if destructive and not (body.get("confirm_erase") and acknowledged):
+        if destructive and not (body.get("confirm_erase") is True and acknowledged):
             return {
                 "ok": False,
                 "message": "Please confirm the on-screen acknowledgements before starting the install.",
@@ -192,7 +216,7 @@ class InstallerService:
             )
             self.context.transition(context_module.InstallLifecycle.IDLE)
             return {"ok": True, "root_partition": root_part}
-        except RuntimeError as exc:
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
             irreversible = bool(getattr(journal, "irreversible_completed", False))
             if irreversible:
                 # Format/shrink already mutated filesystems. Reloading GPT
@@ -207,7 +231,18 @@ class InstallerService:
                         "Those partitions no longer contain their original contents."
                     ),
                 }
-            journal.rollback(lambda _msg: None)
+            try:
+                journal.rollback(lambda _msg: None)
+            except (OSError, RuntimeError, ValueError, TypeError) as rollback_exc:
+                # The disk state is uncertain when recovery itself fails. Keep
+                # this installer session terminal instead of leaving it stuck
+                # in PARTITIONING or offering an unsafe retry.
+                self.context.transition(context_module.InstallLifecycle.FAILED)
+                return {
+                    "ok": False,
+                    "rollback_failed": True,
+                    "message": f"{exc}. Partition rollback also failed: {rollback_exc}",
+                }
             # IDLE, not FAILED: journal.rollback() has already restored the
             # partition table, so the disk is back to a known-good state and
             # there is nothing unsafe about trying again. FAILED is a strict
@@ -232,7 +267,7 @@ class InstallerService:
             journal.rollback(lambda _msg: None)
             partition_ops.reset_journal(self.context)
             return {"ok": True}
-        except RuntimeError as exc:
+        except (OSError, RuntimeError, ValueError, TypeError) as exc:
             return {"ok": False, "message": str(exc)}
 
     def start_install(self, body: dict, *, strict_locale: bool = True) -> dict:
@@ -246,7 +281,18 @@ class InstallerService:
         try:
             state = validation.validate_install_request(body, self.context, strict_locale=strict_locale)
         except validation.InstallRequestError as exc:
-            return {"started": False, "message": str(exc)}
+            # Validation happens before the worker owns the transaction, but
+            # it is still an attempted install and must survive a reboot for
+            # Rescue/support diagnostics.
+            message = str(exc)
+            try:
+                from ..config import FAILURE_SUMMARY_FILE, TRANSACTION_FILE
+                from ..recovery import write_failure_summary, write_transaction_state
+                write_transaction_state(TRANSACTION_FILE, context=self.context, status="failed", message=message)
+                write_failure_summary(FAILURE_SUMMARY_FILE, context=self.context, message=message)
+            except (OSError, RuntimeError, ValueError):
+                pass
+            return {"started": False, "message": message}
         try:
             if not execution.start_installation(self.context, state, install._run_install):
                 return {"started": False, "message": "An installation is already running."}

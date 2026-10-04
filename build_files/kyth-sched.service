@@ -41,6 +41,10 @@ PrivateTmp=yes
 # breaks the escalation ("unable to open /etc/sudoers: Invalid argument"),
 # so scheduler switching silently never applies.
 ProtectSystem=strict
+# Profile switches go through `sudo -n kyth-scx set`, which writes
+# /etc/scx/scx_loader.conf; sudo does not escape the unit's mount namespace,
+# so allow that path or switching silently never applies.
+ReadWritePaths=/etc/scx
 ProtectHome=read-only
 ProtectClock=yes
 ProtectKernelTunables=yes

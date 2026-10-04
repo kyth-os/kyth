@@ -23,6 +23,9 @@ ProtectSystem=strict
 ProtectHome=read-only
 ProtectClock=yes
 ProtectKernelTunables=yes
+# The arbiter's job is writing EPP via kyth-set-epp, so punch a hole for
+# the cpufreq sysfs subtree (ProtectKernelTunables makes /sys read-only).
+ReadWritePaths=/sys/devices/system/cpu
 ProtectKernelModules=yes
 ProtectControlGroups=yes
 LockPersonality=yes

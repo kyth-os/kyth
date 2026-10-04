@@ -9,7 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 OUTPUT_DIR="${KYTH_ISO_OUTPUT:-${REPO_ROOT}/output/live-iso}"
 BASE_IMAGE="${INSTALLER_BASE_IMAGE:-ghcr.io/kyth-os/kyth:${SOURCE_TAG}}"
-INSTALL_SOURCE_IMAGE="${BASE_IMAGE}"
+INSTALL_SOURCE_IMAGE="${INSTALL_SOURCE_IMAGE:-${BASE_IMAGE}}"
 IS_LOCAL_IMAGE=false
 if [[ "${BASE_IMAGE}" == localhost/* || "${BASE_IMAGE}" == localhost:*/* ]]; then
 	IS_LOCAL_IMAGE=true
@@ -27,11 +27,7 @@ done
 
 ROOTFUL_PODMAN="${REPO_ROOT}/build_files/scripts/rootful-podman.sh"
 mkdir -p "${OUTPUT_DIR}"
-build_volume_args=()
-INSTALLER_BUILD_HASH="${INSTALLER_BUILD_HASH:-$(sha256sum \
-	installer/build.sh \
-	build_files/kyth_shared/kyth_shared/vm_acceptance.py \
-	build_files/kyth-vm-acceptance.service | sha256sum | awk '{print $1}')}"
+INSTALLER_BUILD_HASH="${INSTALLER_BUILD_HASH:-$("${SCRIPT_DIR}/scripts/installer-build-hash.sh")}"
 
 if [[ "${IS_LOCAL_IMAGE}" == true ]] &&
 	! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}" &&
@@ -41,30 +37,14 @@ if [[ "${IS_LOCAL_IMAGE}" == true ]] &&
 	docker save "${BASE_IMAGE}" | "${ROOTFUL_PODMAN}" load
 fi
 
-# The live VM cannot access the host's local image storage, so the installer
-# builder embeds the local image into the ISO through the OCI layout.  Keep the
-# public registry reference as the update target, but never publish a local
-# test image as a side effect of a local ISO build.
+# An ISO cannot install from the host's local container store. For local payload
+# builds, require a separately signed, network-accessible image as the install
+# source; never copy that multi-gigabyte image into the ISO.
 if [[ "${IS_LOCAL_IMAGE}" == true ]]; then
-	if ! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}"; then
-		echo "ERROR: local installer image is unavailable to Podman: ${BASE_IMAGE}" >&2
+	if [[ "${INSTALL_SOURCE_IMAGE}" == "${BASE_IMAGE}" ]]; then
+		echo "ERROR: set INSTALL_SOURCE_IMAGE to a signed registry digest when building an ISO from a local payload image." >&2
 		exit 1
 	fi
-	LOCAL_IMAGE_DIR="${OUTPUT_DIR}/.kyth-installer-image"
-	mkdir -p "${LOCAL_IMAGE_DIR}"
-	if [[ -n "${CONTAINER_ID:-}" ]] && command -v distrobox-host-exec >/dev/null 2>&1; then
-		SKOPEO=(distrobox-host-exec skopeo)
-	else
-		SKOPEO=(skopeo)
-	fi
-	echo "==> Exporting ${BASE_IMAGE} to a local OCI layout for the installer builder"
-	"${SKOPEO[@]}" copy --retry-times 3 \
-		"containers-storage:${BASE_IMAGE}" \
-		"oci:${LOCAL_IMAGE_DIR}:latest"
-	# Podman build containers have their own containers-storage namespace. Mount
-	# the exported layout into the build and use the OCI transport from there.
-	INSTALL_SOURCE_IMAGE="oci:/src/kyth-installer-image:latest"
-	build_volume_args+=(--volume "${LOCAL_IMAGE_DIR}:/src/kyth-installer-image:ro")
 fi
 
 echo "==> Fetching Titanoboa (background) and building KythOS live payload (foreground) in parallel"
@@ -101,7 +81,6 @@ pull_flag=(--pull=newer)
 	--cap-add SYS_ADMIN \
 	--security-opt label=disable \
 	--network host \
-	"${build_volume_args[@]}" \
 	--build-arg "BASE_IMAGE=${BASE_IMAGE}" \
 	--build-arg "INSTALL_SOURCE_IMAGE=${INSTALL_SOURCE_IMAGE}" \
 	--build-arg "INSTALLER_BUILD_HASH=${INSTALLER_BUILD_HASH}" \
@@ -134,8 +113,8 @@ echo "==> Assembling ISO with Titanoboa"
 	-v "${REPO_ROOT}/installer/iso.yaml:/kyth/iso.yaml:ro" \
 	--mount type=image,source="${LIVE_TAG}",dst=/rootfs \
 	-v "${WORK}:/output" \
-	quay.io/fedora/fedora:44 /src/build_iso.sh
-mv "${WORK}/KYTHOS-44-LIVE.iso" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
+	quay.io/fedora/fedora:45@sha256:dbb22055c0c19f4eba2afbbb717667b0c76aa956c4283700041980ad3710bb73 /src/build_iso.sh
+mv "${WORK}/KYTHOS-45-LIVE.iso" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 sudo chown "$(id -u):$(id -g)" "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 test -r "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"
 test -w "${OUTPUT_DIR}/kyth-live-${SOURCE_TAG}.iso"

@@ -33,5 +33,5 @@ def generate_psi_poll(cfg: dict[str,Any]|None=None, dest: Path|None=None) -> Pat
         return None
     dest.parent.mkdir(parents=True, exist_ok=True)
     tmp=dest.with_suffix(".tmp")
-    tmp.write_text("# Kyth PSI poll gaming — generated\nvm.pressure_poll=500\n",encoding="utf-8"); tmp.replace(dest); return dest
+    tmp.write_text("# Kyth PSI poll gaming — generated\n-vm.pressure_poll=500\n",encoding="utf-8"); tmp.replace(dest); return dest
 def psi_poll_status(conf: Path=DEFAULT_CONF) -> str: return "gaming" if conf.exists() else "balanced"

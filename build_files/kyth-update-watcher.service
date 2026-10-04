@@ -31,7 +31,10 @@ RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CacheDirectory=kyth
 CacheDirectoryMode=0700
 
-# Give the upgrade plenty of time (large container layers on slow connections)
+# Give the upgrade plenty of time (large container layers on slow connections).
+# Coupled to bootc_timeout_secs() in update_watcher_bin.rs, which clamps the
+# configured bootc timeout to this value — raising this requires raising the
+# clamp too, or systemd SIGTERMs the watcher mid-upgrade.
 TimeoutStartSec=2400
 # Keep automatic staging from competing with the foreground desktop.
 Nice=10

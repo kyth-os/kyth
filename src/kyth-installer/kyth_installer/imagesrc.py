@@ -3,12 +3,14 @@ reachability preflight, and kernel-flavor image derivation.
 """
 
 import hashlib
+import ipaddress
 import json
 import logging
 import os
 import socket
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from .config import SOURCE_DIGEST, SOURCE_IMAGE, SOURCE_METADATA_FILE, TARGET_IMAGE
 from .runner import run_command
@@ -29,11 +31,13 @@ def _registry_signed_source(source_image: str) -> bool:
     image = source_image.removeprefix("docker://")
     if image.startswith(("oci:", "containers-storage:", "dir:", "ostree:")):
         return False
-    return not (
-        image.startswith(("localhost:", "localhost/"))
-        or image.startswith("127.0.0.1")
-        or image.startswith("[::1]")
-    )
+    authority = image.split("/", 1)[0].split("@", 1)[-1]
+    host = urlsplit(f"https://{authority}").hostname or ""
+    try:
+        loopback = ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        loopback = host.lower() == "localhost"
+    return not loopback
 
 
 def _valid_base64_signature(value: object) -> bool:
@@ -96,7 +100,11 @@ def _verify_signature_bundle(
             "embedded signature bundle does not cover this ISO release digest"
         )
     signatures = bundle.get("signatures")
-    if not signatures or not all(_valid_base64_signature(entry) for entry in signatures):
+    if (
+        not isinstance(signatures, list)
+        or not signatures
+        or not all(_valid_base64_signature(entry) for entry in signatures)
+    ):
         raise RuntimeError(
             "embedded signature bundle carries no verifiable signature"
         )
@@ -121,7 +129,7 @@ def _source_imgref(image: str) -> str:
     image = (image or "").strip()
     if not image:
         return SOURCE_IMAGE
-    if image.startswith(("docker://", "containers-storage:", "oci:", "ostree:")):
+    if image.startswith(("docker://", "containers-storage:", "oci:", "ostree:", "dir:")):
         return image
     return f"docker://{image}"
 
@@ -131,8 +139,17 @@ def _imgref_needs_network(imgref: str) -> bool:
 
 
 def _registry_host(imgref: str) -> str:
-    image = imgref.removeprefix("docker://")
-    return image.split("/", 1)[0].split("@", 1)[0].rsplit(":", 1)[0]
+    return _registry_endpoint(imgref)[0]
+
+
+def _registry_endpoint(imgref: str) -> tuple[str, int]:
+    """Return a registry DNS host and its port (443 when none is specified)."""
+    authority = imgref.removeprefix("docker://").split("/", 1)[0].split("@", 1)[0]
+    try:
+        parsed = urlsplit(f"https://{authority}")
+        return parsed.hostname or "", parsed.port or 443
+    except ValueError:
+        return "", 443
 
 
 def _friendly_network_error(extra: str = "") -> str:
@@ -169,8 +186,10 @@ def _read_source_metadata(path: Path = SOURCE_METADATA_FILE) -> dict:
         if path.is_symlink() or not path.is_file():
             raise RuntimeError(f"source metadata is missing or unsafe: {path}")
         payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"could not read embedded-image metadata: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("embedded-image metadata must be a JSON object")
     if payload.get("schema_version") != 1:
         raise RuntimeError("embedded-image metadata has an unsupported schema")
     return payload
@@ -188,14 +207,26 @@ def _verify_oci_source(
     try:
         if root.is_symlink() or not root.is_dir():
             raise RuntimeError(f"embedded OCI layout is missing or unsafe: {root}")
-        layout = json.loads((root / "oci-layout").read_text(encoding="utf-8"))
-        index = json.loads((root / "index.json").read_text(encoding="utf-8"))
+        layout_path = root / "oci-layout"
+        index_path = root / "index.json"
+        if any(path.is_symlink() or not path.is_file() for path in (layout_path, index_path)):
+            raise RuntimeError("embedded OCI layout metadata is missing or unsafe")
+        layout = json.loads(layout_path.read_text(encoding="utf-8"))
+        index = json.loads(index_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise RuntimeError(f"could not read embedded OCI image: {exc}") from exc
-    if layout.get("imageLayoutVersion") != "1.0.0":
+    if not isinstance(layout, dict) or layout.get("imageLayoutVersion") != "1.0.0":
         raise RuntimeError("embedded OCI image has an unsupported layout version")
+    if not isinstance(index, dict):
+        raise RuntimeError("embedded OCI index must be a JSON object")
 
     manifests = index.get("manifests") or []
+    if not isinstance(manifests, list) or any(not isinstance(item, dict) for item in manifests):
+        raise RuntimeError("embedded OCI index has an invalid manifest list")
+    for item in manifests:
+        annotations = item.get("annotations")
+        if annotations is not None and not isinstance(annotations, dict):
+            raise RuntimeError("embedded OCI manifest has invalid annotations")
     descriptor = next(
         (
             item for item in manifests
@@ -204,7 +235,9 @@ def _verify_oci_source(
         manifests[0] if len(manifests) == 1 else None,
     )
     digest = str((descriptor or {}).get("digest") or "")
-    if not digest.startswith("sha256:") or len(digest) != 71:
+    if not digest.startswith("sha256:") or len(digest) != 71 or any(
+        char not in "0123456789abcdef" for char in digest.removeprefix("sha256:")
+    ):
         raise RuntimeError("embedded OCI image has no valid manifest digest")
     manifest_blob = root / "blobs" / "sha256" / digest.removeprefix("sha256:")
     if manifest_blob.is_symlink() or not manifest_blob.is_file():
@@ -229,7 +262,7 @@ def _verify_oci_source(
         )
     _verify_signature_bundle(digest, release_digest, metadata, bundle_path=bundle_path)
     metadata_target = str(metadata.get("target_image") or "")
-    if metadata_target and metadata_target != TARGET_IMAGE:
+    if not metadata_target or metadata_target != TARGET_IMAGE:
         raise RuntimeError("embedded-image metadata does not match the configured update target")
     return digest
 
@@ -240,7 +273,7 @@ def _network_preflight(imgref: str) -> str | None:
     if not _imgref_needs_network(imgref):
         return None
 
-    host = _registry_host(imgref)
+    host, port = _registry_endpoint(imgref)
     if not host:
         return _friendly_network_error("The selected image registry could not be determined.")
 
@@ -256,7 +289,7 @@ def _network_preflight(imgref: str) -> str | None:
         _logger.debug("_network_preflight: default-route check failed: %s", exc, exc_info=True)
 
     try:
-        socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     except socket.gaierror:
         return _friendly_network_error(
             f"The live session is not resolving {host}. Wi-Fi may not be connected yet."
@@ -265,11 +298,11 @@ def _network_preflight(imgref: str) -> str | None:
         return _friendly_network_error(f"DNS check for {host} failed: {exc}")
 
     try:
-        with socket.create_connection((host, 443), timeout=5):
+        with socket.create_connection((host, port), timeout=5):
             return None
     except OSError:
         return _friendly_network_error(
-            f"The live session cannot reach {host}:443 yet."
+            f"The live session cannot reach {host}:{port} yet."
         )
 
 
@@ -280,11 +313,17 @@ def _install_images(kernel: str) -> tuple[str, str]:
     OCI transport for embedded ISOs).  CachyOS always pulls from the
     registry, deriving the tag by appending the kernel suffix to the base tag.
     """
+    if kernel == "cachyos":
+        kernel = "cachy"
+    if kernel not in {"fedora", "cachy"}:
+        raise RuntimeError(f"Unsupported kernel flavor: {kernel!r}")
     if kernel == "fedora":
         return _source_imgref(SOURCE_IMAGE), TARGET_IMAGE
     # Derive registry and base tag from TARGET_IMAGE, stripping any existing suffix.
-    if ":" in TARGET_IMAGE:
-        registry, tag = TARGET_IMAGE.rsplit(":", 1)
+    final_component = TARGET_IMAGE.rsplit("/", 1)[-1]
+    if ":" in final_component:
+        tag = final_component.rsplit(":", 1)[1]
+        registry = TARGET_IMAGE.rsplit(":", 1)[0]
     else:
         registry, tag = TARGET_IMAGE, "latest"
     if tag.endswith("-cachy"):

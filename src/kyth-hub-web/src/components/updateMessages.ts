@@ -120,6 +120,12 @@ export function friendlyActionNextStep(failure: string, action: string | null): 
     return "Check your connection, then choose “Try again”. Your current system is still safe to use.";
   }
   if (action === "apps") {
+    if (lower.includes("remain pinned")) {
+      return "Those updates are pinned and won't install until unpinned. Everything else is up to date.";
+    }
+    if (lower.includes("stuck apps")) {
+      return "Those specific apps couldn't be updated. Check their details above — you may need to update them individually or check for a mask.";
+    }
     if (lower.includes("updates remain") || lower.includes("update remains")) {
       return "Choose “Update apps” again to retry the remaining updates. Installed updates are already applied.";
     }

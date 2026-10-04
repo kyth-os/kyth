@@ -4,9 +4,11 @@ Documentation=https://github.com/kyth-os/kyth
 PartOf=graphical-session.target
 
 [Timer]
-# Shortly after login, then every few minutes while the session is up.
+# Shortly after login, then every 10 minutes while the session is up
+# (matches the documented interval in probe.rs; a shorter interval would
+# only duplicate the system service's work).
 OnStartupSec=20s
-OnUnitActiveSec=3min
+OnUnitActiveSec=10min
 AccuracySec=15s
 RandomizedDelaySec=30s
 Persistent=false

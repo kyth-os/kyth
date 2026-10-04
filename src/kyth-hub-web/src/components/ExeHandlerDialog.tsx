@@ -22,6 +22,9 @@ import { inTauriShell } from "../services/tauriEnv";
 /** Handles `kyth-exe-handler` launches forwarded from the native MIME
  * launcher. It intentionally has no browser fallback: files are opened only
  * by the installed Tauri shell, whose Rust commands validate the path. */
+/** Status polls (750 ms apart, about 3 minutes) before the dialog asks the user. */
+const MAX_STATUS_POLLS = 240;
+
 export function ExeHandlerDialog() {
   const [inspection, setInspection] = useState<ExeHandlerInspection | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -105,24 +108,37 @@ export function ExeHandlerDialog() {
     void startBottles();
   }, [inspection]); // Deliberately runs only for a new native MIME launch.
 
+  // Key the poll on the job's identity and state, NOT the job object: every
+  // poll that returns a job calls setJob with a fresh object, so depending on
+  // `job` tore this effect down and rebuilt it after every poll. The local
+  // `polls` counter then restarted at 0 each time and the 240-poll cap below
+  // could never fire while the backend kept answering "running".
+  const jobId = job?.job;
+  const jobState = job?.state;
   useEffect(() => {
-    if (!job || job.state !== "running") return;
+    if (!jobId || jobState !== "running") return;
     // Bottles provisioning can hang on a dead mirror: cap at 240 polls
     // (~3 minutes at 750ms) then surface a terminal error instead of
-    // spinning forever.
+    // spinning forever. "Keep waiting" bumps pollEpoch and starts a new window.
     let polls = 0;
     const timer = window.setInterval(async () => {
       polls += 1;
-      if (polls >= 240) {
+      if (polls >= MAX_STATUS_POLLS) {
         window.clearInterval(timer);
         setError("The installer is still running after several minutes. It may finish in the background — keep waiting, or close and re-open the file to resume tracking.");
         return;
       }
-      const next = await fetchInstallStatus(job.job);
-      if (next) setJob({ job: next.id, state: next.state, detail: next.detail });
+      const next = await fetchInstallStatus(jobId);
+      if (!next) return;
+      // Same state and detail: keep the existing object so nothing re-renders.
+      setJob((current) =>
+        current && current.job === next.id && current.state === next.state && current.detail === next.detail
+          ? current
+          : { job: next.id, state: next.state, detail: next.detail },
+      );
     }, 750);
     return () => window.clearInterval(timer);
-  }, [job, pollEpoch]);
+  }, [jobId, jobState, pollEpoch]);
 
   if (!inspection && !error) return null;
   const unsupported = inspection?.compatibility?.level === "unsupported";

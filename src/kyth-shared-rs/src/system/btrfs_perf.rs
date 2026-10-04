@@ -97,11 +97,35 @@ pub fn mount_options(compress: &str) -> String {
 }
 
 fn remove_if_present(path: &Path) -> std::io::Result<()> {
-    match std::fs::remove_file(path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error),
+    crate::atomic_io::remove_if_exists(path)
+}
+
+/// Apply `op` to every target; on the first failure, restore all targets to
+/// their pre-call state so the / and /var drop-ins can never diverge.
+fn apply_all(
+    targets: &[PathBuf],
+    op: impl Fn(&Path) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let snapshots: Vec<(PathBuf, Option<Vec<u8>>)> = targets
+        .iter()
+        .map(|target| (target.clone(), std::fs::read(target).ok()))
+        .collect();
+    for target in targets {
+        if let Err(error) = op(target) {
+            for (path, old) in &snapshots {
+                match old {
+                    Some(bytes) => {
+                        let _ = crate::atomic_io::atomic_write_bytes(path, bytes, Some(0o644));
+                    }
+                    None => {
+                        let _ = std::fs::remove_file(path);
+                    }
+                }
+            }
+            return Err(error);
+        }
     }
+    Ok(())
 }
 
 /// Render or remove the root mount drop-in.
@@ -123,18 +147,18 @@ pub fn generate(
         vec![root.clone(), PathBuf::from(DEFAULT_VAR_DROP_IN)]
     };
     if config.profile != "kyth" {
-        for target in &targets {
-            remove_if_present(target)?;
-        }
+        apply_all(&targets, remove_if_present)?;
         return Ok(None);
     }
     let content = format!(
         "# Kyth btrfs perf — generated\n[Mount]\nOptions={}\n",
         mount_options(&config.compress)
     );
-    for target in &targets {
-        crate::atomic_io::atomic_write_text(target, &content, Some(0o644))?;
-    }
+    // Both drop-ins carry identical content; a failure between the two writes
+    // must roll back rather than leave / and /var divergent.
+    apply_all(&targets, |target| {
+        crate::atomic_io::atomic_write_text(target, &content, Some(0o644))
+    })?;
     Ok(Some(root))
 }
 

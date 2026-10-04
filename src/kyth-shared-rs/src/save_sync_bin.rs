@@ -134,7 +134,14 @@ fn main() -> std::process::ExitCode {
         let mut argv = restic_prefix(&config);
         argv.push("backup".to_string());
         argv.extend(targets);
-        if !run(&argv, 60, "restic backup") {
+        // Sustained transfer tier: a restic backup over game saves and app
+        // data can legitimately run for a long time; killing it at 60s
+        // guarantees failure on any non-trivial backup set.
+        let long_secs = kyth_shared::system::jobs::timeout_for(
+            kyth_shared::system::jobs::JobTimeoutClass::LongTransfer,
+        )
+        .as_secs();
+        if !run(&argv, long_secs, "restic backup") {
             failed = true;
         }
     }
@@ -152,6 +159,14 @@ fn main() -> std::process::ExitCode {
             failed = true;
         } else {
             let repo_arg = repo.to_string_lossy().into_owned();
+            // Same sustained-transfer tier as the restic backup above:
+            // rclone sync of a snapshot repo is a long network transfer,
+            // not a quick command. A 120s kill mid-sync leaves the remote
+            // half-mirrored.
+            let long_secs = kyth_shared::system::jobs::timeout_for(
+                kyth_shared::system::jobs::JobTimeoutClass::LongTransfer,
+            )
+            .as_secs();
             if !run(
                 &[
                     "rclone".to_string(),
@@ -159,7 +174,7 @@ fn main() -> std::process::ExitCode {
                     repo_arg,
                     remote.clone(),
                 ],
-                120,
+                long_secs,
                 "rclone sync",
             ) {
                 failed = true;

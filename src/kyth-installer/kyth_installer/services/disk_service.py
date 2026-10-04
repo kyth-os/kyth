@@ -81,7 +81,7 @@ class DiskService:
         self, disk: str, start: int, size: int, fs: str, label: str
     ) -> None:
         from ..disk import _block_size_bytes
-        sector = 512 if self.dry_run else _block_size_bytes(disk)
+        sector = _block_size_bytes(disk)
         if self.dry_run:
             end_byte = start + size - sector
             self.execute(
@@ -103,7 +103,7 @@ class DiskService:
 
     def create_unformatted_partition(self, disk: str, start: int, size: int, label: str) -> None:
         from ..disk import _block_size_bytes
-        sector = 512 if self.dry_run else _block_size_bytes(disk)
+        sector = _block_size_bytes(disk)
         if self.dry_run:
             end_byte = start + size - sector
             self.execute(
@@ -155,7 +155,7 @@ class DiskService:
         if not self.dry_run and not shutil.which("parted"):
             raise RuntimeError("parted is required for partition operations.")
         from ..disk import _block_size_bytes
-        sector = 512 if self.dry_run else _block_size_bytes(disk)
+        sector = _block_size_bytes(disk)
         if self.dry_run:
             new_end = start + new_size - sector
             self.execute(

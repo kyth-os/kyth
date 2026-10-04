@@ -122,6 +122,7 @@ def _blkid_device(match: str) -> str:
 
 def _get_live_usb_disk() -> Optional[str]:
     for path in ("/run/initramfs/live", "/run/initramfs/iso"):
+        source = ""
         try:
             source = _disk._findmnt_source(path)
             if not source:
@@ -158,7 +159,8 @@ def _get_live_usb_disk() -> Optional[str]:
                 _logger.debug("_get_live_usb_disk: JSON lookup for %s failed", source, exc_info=True)
         except (OSError, ValueError, RuntimeError, AttributeError, KeyError):  # noqa: BLE001 -- narrow: best-effort production path
             _logger.debug("_get_live_usb_disk: findmnt probe of %s failed", path, exc_info=True)
-        _logger.warning("_get_live_usb_disk: all lsblk fallbacks failed for %s — live USB may be exposed as wipe candidate", source)
+        if source:
+            _logger.warning("_get_live_usb_disk: all lsblk fallbacks failed for %s — live USB may be exposed as wipe candidate", source)
     return None
 
 
@@ -219,7 +221,9 @@ def _mount_sources(path: str, recursive: bool = False) -> set[str]:
         _logger.debug("_mount_sources probe failed for %s: %s", path, exc, exc_info=True)
         out = ""
     for line in out.splitlines():
-        source = line.strip()
+        # Drop the "[/subvol]" suffix findmnt adds for btrfs subvolume and bind
+        # mounts, or the device never resolves and its disk is not protected.
+        source = line.strip().split("[", 1)[0].strip()
         if source.startswith("/dev/"):
             sources.add(os.path.realpath(source))
     return sources
@@ -254,6 +258,13 @@ def _protected_install_disks(tree: dict | None = None, running_disk: str | None 
             disk = _disk._parent_disk(source, tree=tree)
             if disk:
                 protected.add(disk)
+    # Overlay/loop boot media can evade the ordinary source ancestry walk.
+    if _IS_LIVE_SESSION:
+        live_usb = _disk._get_live_usb_disk()
+        if live_usb:
+            disk = _disk._parent_disk(live_usb, tree=tree)
+            if disk:
+                protected.add(disk)
     return protected
 
 
@@ -277,5 +288,4 @@ def partition_has_active_mount(partition: str) -> bool:
     except (OSError, ValueError, RuntimeError) as exc:
         _logger.debug("partition mount probe failed for %s: %s", partition, exc, exc_info=True)
         return False
-
 
