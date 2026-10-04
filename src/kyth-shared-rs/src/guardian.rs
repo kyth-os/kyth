@@ -303,6 +303,10 @@ pub fn apply_vpn_dns_exclusive_live() -> Result<String, &'static str> {
     Ok(format!("VPN DNS pinned on {}", links.join(",")))
 }
 
+fn maintenance_output_complete(output: &str) -> bool {
+    output.trim() == "Storage maintenance complete."
+}
+
 /// Rust equivalent of guardian_actions.py's bounded executors. Every command
 /// remains an argv invocation; no user-controlled text reaches a shell.
 fn run_executor(id: &str) -> Result<String, String> {
@@ -435,8 +439,11 @@ fn run_executor(id: &str) -> Result<String, String> {
             Ok("firmware metadata refreshed".to_string())
         }
         "storage.maint" => {
-            run_ok(&["/usr/bin/kyth-btrfs-maint"], Duration::from_secs(3600))?;
-            Ok("storage maintenance started".to_string())
+            let output = run_command(&["/usr/bin/kyth-btrfs-maint"], Duration::from_secs(3600))?;
+            if !maintenance_output_complete(&output) {
+                return Err(output);
+            }
+            Ok("storage maintenance complete".to_string())
         }
         _ => Err(NOT_ELIGIBLE.to_string()),
     }
@@ -956,6 +963,19 @@ pub fn recent_history(state: &Value, limit: usize) -> Vec<HistoryItem> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn guardian_storage_requires_completed_maintenance_output() {
+        assert!(maintenance_output_complete(
+            "Storage maintenance complete.\n"
+        ));
+        assert!(!maintenance_output_complete(
+            "Storage maintenance skipped: CPU pressure is high."
+        ));
+        assert!(!maintenance_output_complete(
+            "Storage maintenance completed with skipped operations: balance /."
+        ));
+    }
 
     #[test]
     fn concurrent_repair_is_refused_while_slot_is_held() {

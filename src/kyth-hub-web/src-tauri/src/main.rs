@@ -266,7 +266,7 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
 /// probes; a sync command pinned a Tauri worker (and the UI's await) for
 /// the whole run. The shared single-flight slot in `execute_recipe` makes
 /// a double-click return "already running" instead of a second repair.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = kyth_shared::guardian::load_state();
@@ -287,7 +287,7 @@ async fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
     .map_err(|error| format!("Guardian repair task failed: {error}"))?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn guardian_dismiss(recipe_id: String) -> Result<String, String> {
     kyth_shared::guardian::dismiss_recommendation(&recipe_id)
 }
@@ -1239,7 +1239,7 @@ struct PipewireApplyResponse {
     ok: bool,
     detail: String,
 }
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn apply_pipewire_quantum(preset: String, dry_run: bool) -> PipewireApplyResponse {
     let (ok, detail) = kyth_shared::system::pipewire::apply_pipewire_quantum(&preset, dry_run);
     PipewireApplyResponse { ok, detail }
@@ -1307,7 +1307,7 @@ async fn installed_flatpaks() -> Vec<kyth_shared::system::software_catalog::Inst
         .unwrap_or_default()
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     let job = format!(
@@ -1487,7 +1487,7 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     let job = format!(
@@ -1629,7 +1629,7 @@ struct PlasmaApplyResponse {
     ok: bool,
     detail: String,
 }
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn apply_plasma_preset(preset: String, dry_run: bool) -> PlasmaApplyResponse {
     let (ok, detail) = kyth_shared::system::plasma_hdr::apply_preset(&preset, dry_run);
     PlasmaApplyResponse { ok, detail }
@@ -1991,7 +1991,7 @@ fn exe_handler_open_flathub(search_term: String) -> Result<(), String> {
         .map_err(|error| format!("Could not open Flathub: {error}"))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     // Bounded lookup: a bare `status()` blocks this command for as long
@@ -2012,7 +2012,7 @@ fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn exe_handler_launch_flatpak(app_id: String) -> Result<(), String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     if !kyth_shared::system::software_catalog::is_flatpak_installed(&app_id) {

@@ -50,7 +50,7 @@ export function RepairSection({ section }: { section: HubSection }) {
   const [btrfs, setBtrfs] = useState<{ status: string; detail: string } | null>(null);
   const [memory, setMemory] = useState<{ status: string; detail: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("install");
+  const { status, busy, run } = useSectionAction(["update", "install", "hub-action"]);
 
   async function installBackup(): Promise<string> {
     const detail = await waitInstallJob(await installFlatpak("org.gnome.World.PikaBackup"));

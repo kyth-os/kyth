@@ -93,7 +93,7 @@ fn ensure_flathub_user_remote(cancel: &AtomicBool) -> Result<(), String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaunch, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
     let name = tool.name.to_string();
@@ -144,7 +144,7 @@ pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaun
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<GamingActionLaunch, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
     let name = tool.name.to_string();
@@ -181,7 +181,7 @@ pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<GamingActionLa
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn gaming_tool_launch(flatpak_id: String) -> Result<String, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
     // A detached `flatpak run` of a missing app fails where nobody reads

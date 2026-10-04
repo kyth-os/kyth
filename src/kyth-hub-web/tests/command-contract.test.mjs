@@ -19,8 +19,15 @@ const vpn = await readFile(resolve(root, "src/components/VpnSection.tsx"), "utf8
 const exeDialog = await readFile(resolve(root, "src/components/ExeHandlerDialog.tsx"), "utf8");
 const gaming = await readFile(resolve(root, "src/components/GamingSection.tsx"), "utf8");
 const actions = await readFile(resolve(root, "src/components/SectionActions.tsx"), "utf8");
+const repairSection = await readFile(resolve(root, "src/components/RepairSection.tsx"), "utf8");
+const channelsSection = await readFile(resolve(root, "src/components/ChannelsSection.tsx"), "utf8");
 const rust = await readFile(resolve(root, "src-tauri/src/main.rs"), "utf8");
 const updatesRust = await readFile(resolve(root, "src-tauri/src/commands/updates.rs"), "utf8");
+const gamingRust = await readFile(resolve(root, "src-tauri/src/commands/gaming.rs"), "utf8");
+const securityRust = await readFile(resolve(root, "src-tauri/src/commands/security.rs"), "utf8");
+const vpnRust = await readFile(resolve(root, "src-tauri/src/commands/vpn.rs"), "utf8");
+const devToolsRust = await readFile(resolve(root, "src-tauri/src/commands/dev_tools.rs"), "utf8");
+const sharedGuardianRust = await readFile(resolve(root, "../kyth-shared-rs/src/guardian.rs"), "utf8");
 const safeUpgradeRust = await readFile(resolve(root, "../kyth-shared-rs/src/safe_upgrade_bin.rs"), "utf8");
 const privilegeRust = await readFile(resolve(root, "src-tauri/src/commands/privilege.rs"), "utf8");
 const parity = await readFile(resolve(root, "PARITY.md"), "utf8");
@@ -116,6 +123,47 @@ test("Hub action payloads use the canonical snake_case IPC field names", () => {
   ];
   for (const [snippet, command] of expected) assert.ok(service.includes(snippet), `${command} must use ${snippet}`);
   assert.match(service, /"install_flatpak", \{ app_id: appId \}/, "startExeHandlerFlatpakInstall must use app_id");
+});
+
+test("sections resume only jobs from every domain their actions actually use", () => {
+  assert.ok(actions.includes("trackedDomain?: JobDomain | readonly JobDomain[]"), "the action hook must accept multiple job domains");
+  assert.ok(actions.includes(".map((domain) => ({ domain, job: getInFlightJob(domain) }))"), "resumption must search every configured action domain");
+  assert.ok(gaming.includes('useSectionAction(["hub-action", "gaming"])'));
+  assert.ok(repairSection.includes('useSectionAction(["update", "install", "hub-action"])'));
+  assert.ok(channelsSection.includes('useSectionAction("update")'));
+});
+
+test("Guardian storage verification runs only after an explicit completed maintenance result", () => {
+  const storage = sharedGuardianRust.match(/"storage\.maint"\s*=>\s*\{([\s\S]*?)\n\s*\}/)?.[1] ?? "";
+  assert.notEqual(storage, "", "storage Guardian executor not found");
+  assert.match(storage, /maintenance_output_complete/, "skipped or partial maintenance must not proceed to scrub verification");
+});
+
+test("snake_case frontend payloads match Tauri command argument deserialization", () => {
+  // Tauri's command macro defaults to camelCase, so these commands must
+  // explicitly bind the snake_case keys that liveData.ts sends.
+  const commands = [
+    [rust, "uninstall_flatpak"],
+    [rust, "install_flatpak"],
+    [rust, "exe_handler_flatpak_installed"],
+    [rust, "exe_handler_launch_flatpak"],
+    [securityRust, "sec_host_tool_install"],
+    [securityRust, "sec_host_tool_uninstall"],
+    [securityRust, "sec_host_tool_launch"],
+    [gamingRust, "gaming_tool_install"],
+    [gamingRust, "gaming_tool_uninstall"],
+    [gamingRust, "gaming_tool_launch"],
+    [rust, "apply_pipewire_quantum"],
+    [rust, "apply_plasma_preset"],
+    [rust, "guardian_execute_recipe"],
+    [rust, "guardian_dismiss"],
+    [devToolsRust, "dev_tools_install_selection"],
+    [vpnRust, "vpn_connect"],
+  ];
+  for (const [source, command] of commands) {
+    const annotation = new RegExp(`#\\[tauri::command\\(rename_all = "snake_case"\\)\\]\\s*(?:(?:pub(?:\\([^)]*\\))?)\\s+)?(?:async\\s+)?fn ${command}\\b`);
+    assert.match(source, annotation, `${command} must deserialize snake_case frontend argument names`);
+  }
 });
 
 test("native bridge calls have a default deadline and polling uses a shorter probe deadline", () => {
@@ -568,7 +616,7 @@ test("stale UI states recover without manual navigation", () => {
   assert.match(vpn, /onOnlineRefetch\(/, "mount-only VPN reads must re-run on reconnect");
   assert.match(service, /\} catch \{\n    return null;\n  \}\n\}/, "probe invoke failures must not be cached as null");
   assert.match(hubPage, /Unknown section/, "unknown ?section= must render a notice, not a blank page");
-  assert.match(actions, /getInFlightJob\(trackedDomain\) !== undefined/, "resumed note must read the tracked slot live");
+  assert.ok(actions.includes(".find((entry) => entry.job !== undefined)"), "resumed note must look for an active job in every configured domain");
 });
 
 test("routing and init failures stay visible", () => {

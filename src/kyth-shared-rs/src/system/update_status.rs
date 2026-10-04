@@ -68,7 +68,7 @@ pub fn read_update_snapshot_in(
 ) -> Option<UpdateSnapshot> {
     let text = std::fs::read_to_string(path).ok()?;
     let snapshot = serde_json::from_str::<UpdateSnapshot>(&text).ok()?;
-    if snapshot.ts <= 0 || now.saturating_sub(snapshot.ts) > max_age {
+    if snapshot.ts <= 0 || snapshot.ts > now || now.saturating_sub(snapshot.ts) > max_age {
         return None;
     }
     Some(snapshot)
@@ -236,6 +236,17 @@ mod tests {
         assert_eq!(snapshot.result, "staged");
         assert_eq!(snapshot.staged_digest, "sha256:test");
         assert_eq!(snapshot.system_state(), "staged");
+    }
+
+    #[test]
+    fn rejects_future_watcher_snapshot_timestamps() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("update-status.json");
+        fs::write(&path, r#"{"result":"staged","ts":4102444800}"#).unwrap();
+        assert!(
+            read_update_snapshot_in(&path, 600, 1_800_000_000).is_none(),
+            "a far-future timestamp must not make a watcher snapshot fresh forever"
+        );
     }
 
     #[test]
