@@ -85,7 +85,7 @@ pub fn generate(
         Some(0o644),
     )?;
     let size = normalize_size(Some(&config.size));
-    let content = format!("[Unit]\nDescription=Kyth work cache — Code/cargo tmpfs\nAfter=local-fs.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/sh -c 'mkdir -p /run/kyth-work-cache && mount -t tmpfs -o size={size},mode=0755 tmpfs /run/kyth-work-cache && mkdir -p /run/kyth-work-cache/vscode /run/kyth-work-cache/cargo'\nExecStop=/bin/sh -c 'umount /run/kyth-work-cache 2>/dev/null || true'\n[Install]\nWantedBy=multi-user.target\n");
+    let content = format!("[Unit]\nDescription=Kyth work cache — Code/cargo tmpfs\nAfter=local-fs.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/sh -c 'mkdir -p /run/kyth-work-cache && mount -t tmpfs -o size={size},mode=0755 tmpfs /run/kyth-work-cache && mkdir -p /run/kyth-work-cache/vscode /run/kyth-work-cache/cargo && chown 1000:1000 /run/kyth-work-cache/vscode /run/kyth-work-cache/cargo'\nExecStop=/bin/sh -c 'umount /run/kyth-work-cache 2>/dev/null || true'\n[Install]\nWantedBy=multi-user.target\n");
     crate::atomic_io::atomic_write_text(service, &content, Some(0o644))?;
     Ok(Some(service.to_path_buf()))
 }
@@ -102,6 +102,27 @@ pub fn status(service: impl AsRef<Path>) -> &'static str {
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn generated_cache_directories_are_owned_by_the_regular_user() {
+        let directory = tempdir().unwrap();
+        let tmpfiles = directory.path().join("tmpfiles");
+        let service = directory.path().join("service");
+        generate(
+            &WorkCacheConfig {
+                enabled: true,
+                ..WorkCacheConfig::default()
+            },
+            &tmpfiles,
+            &service,
+        )
+        .unwrap();
+        let unit = std::fs::read_to_string(service).unwrap();
+        assert!(
+            unit.contains("chown 1000:1000 /run/kyth-work-cache/vscode /run/kyth-work-cache/cargo"),
+            "mounted tmpfs children must be writable by the desktop user"
+        );
+    }
 
     #[test]
     fn defaults_and_clamps_cache_size() {

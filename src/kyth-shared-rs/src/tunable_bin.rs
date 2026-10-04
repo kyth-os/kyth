@@ -156,6 +156,65 @@ fn generated_path(test_subdirectory: &str, filename: &str, production: &str) -> 
     PathBuf::from(production)
 }
 
+fn run_systemctl_command(args: &[&str]) -> Result<(), String> {
+    let mut argv = vec!["systemctl".to_string()];
+    argv.extend(args.iter().map(|arg| (*arg).to_string()));
+    let output = kyth_shared::system::process::run_bounded(&argv, Duration::from_secs(30))
+        .map_err(|error| format!("systemctl failed to run: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let detail = String::from_utf8_lossy(&output.stderr)
+        .trim()
+        .chars()
+        .take(400)
+        .collect::<String>();
+    Err(if detail.is_empty() {
+        format!(
+            "systemctl {} failed",
+            args.first().copied().unwrap_or("operation")
+        )
+    } else {
+        detail
+    })
+}
+
+fn activate_systemd_units_with<F>(units: &[&str], runner: &mut F) -> Result<(), String>
+where
+    F: FnMut(&[&str]) -> Result<(), String>,
+{
+    runner(&["daemon-reload"])?;
+    for unit in units {
+        runner(&["enable", unit])?;
+        // Restart also starts inactive units; unlike `enable --now`, it applies
+        // a regenerated unit when the service was already active.
+        runner(&["restart", unit])?;
+    }
+    Ok(())
+}
+
+fn disable_systemd_units_with<F>(units: &[&str], runner: &mut F) -> Result<(), String>
+where
+    F: FnMut(&[&str]) -> Result<(), String>,
+{
+    for unit in units {
+        runner(&["disable", "--now", unit])?;
+    }
+    Ok(())
+}
+
+fn activate_systemd_units(units: &[&str]) -> Result<(), String> {
+    activate_systemd_units_with(units, &mut run_systemctl_command)
+}
+
+fn disable_systemd_units(units: &[&str]) -> Result<(), String> {
+    disable_systemd_units_with(units, &mut run_systemctl_command)
+}
+
+fn reload_systemd_manager() -> Result<(), String> {
+    run_systemctl_command(&["daemon-reload"])
+}
+
 fn dispatch_zswap(action: &str) -> ExitCode {
     let config_path = zswap::config_path(None::<&Path>);
     let sysctl_path = generated_path(
@@ -552,6 +611,10 @@ fn dispatch_distrobox_cache(action: &str) -> ExitCode {
                 eprintln!("kyth-distrobox-cache: {error}");
                 return ExitCode::from(1);
             }
+            if let Err(error) = activate_systemd_units(&["kyth-distrobox-cache.service"]) {
+                eprintln!("kyth-distrobox-cache: {error}");
+                return ExitCode::from(1);
+            }
             println!("distrobox cache on");
             ExitCode::SUCCESS
         }
@@ -561,12 +624,25 @@ fn dispatch_distrobox_cache(action: &str) -> ExitCode {
             }
             let mut config = distrobox_cache::load(&config_path);
             config.enabled = false;
+            let had_service = service.is_file();
+            if had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-distrobox-cache.service"]) {
+                    eprintln!("kyth-distrobox-cache: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = distrobox_cache::generate(&config, &tmpfiles, &service)
                 .map(|_| ())
                 .and_then(|_| distrobox_cache::save(&config_path, &config))
             {
                 eprintln!("kyth-distrobox-cache: {error}");
                 return ExitCode::from(1);
+            }
+            if had_service {
+                if let Err(error) = reload_systemd_manager() {
+                    eprintln!("kyth-distrobox-cache: {error}");
+                    return ExitCode::from(1);
+                }
             }
             println!("distrobox cache off");
             ExitCode::SUCCESS
@@ -576,7 +652,25 @@ fn dispatch_distrobox_cache(action: &str) -> ExitCode {
                 return code;
             }
             let config = distrobox_cache::load(&config_path);
+            let had_service = service.is_file();
+            if !config.enabled && had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-distrobox-cache.service"]) {
+                    eprintln!("kyth-distrobox-cache: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = distrobox_cache::generate(&config, &tmpfiles, &service) {
+                eprintln!("kyth-distrobox-cache: {error}");
+                return ExitCode::from(1);
+            }
+            let systemd_result = if config.enabled {
+                activate_systemd_units(&["kyth-distrobox-cache.service"])
+            } else if had_service {
+                reload_systemd_manager()
+            } else {
+                Ok(())
+            };
+            if let Err(error) = systemd_result {
                 eprintln!("kyth-distrobox-cache: {error}");
                 return ExitCode::from(1);
             }
@@ -625,6 +719,10 @@ fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
                 eprintln!("kyth-flatpak-prefetch: {error}");
                 return ExitCode::from(1);
             }
+            if let Err(error) = activate_systemd_units(&["flatpak-prefetch.timer"]) {
+                eprintln!("kyth-flatpak-prefetch: {error}");
+                return ExitCode::from(1);
+            }
             println!("flatpak prefetch on");
             ExitCode::SUCCESS
         }
@@ -634,12 +732,32 @@ fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
             }
             let mut config = flatpak_prefetch::load(&config_path);
             config.enabled = false;
+            let had_service = service.is_file();
+            let had_timer = timer.is_file();
+            if had_timer {
+                if let Err(error) = disable_systemd_units(&["flatpak-prefetch.timer"]) {
+                    eprintln!("kyth-flatpak-prefetch: {error}");
+                    return ExitCode::from(1);
+                }
+            }
+            if had_service {
+                if let Err(error) = run_systemctl_command(&["stop", "flatpak-prefetch.service"]) {
+                    eprintln!("kyth-flatpak-prefetch: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = flatpak_prefetch::generate(&config, &service, &timer)
                 .map(|_| ())
                 .and_then(|_| flatpak_prefetch::save(&config_path, &config))
             {
                 eprintln!("kyth-flatpak-prefetch: {error}");
                 return ExitCode::from(1);
+            }
+            if had_service || had_timer {
+                if let Err(error) = reload_systemd_manager() {
+                    eprintln!("kyth-flatpak-prefetch: {error}");
+                    return ExitCode::from(1);
+                }
             }
             println!("flatpak prefetch off");
             ExitCode::SUCCESS
@@ -649,7 +767,35 @@ fn dispatch_flatpak_prefetch(action: &str) -> ExitCode {
                 return code;
             }
             let config = flatpak_prefetch::load(&config_path);
+            let had_service = service.is_file();
+            let had_timer = timer.is_file();
+            if !config.enabled {
+                if had_timer {
+                    if let Err(error) = disable_systemd_units(&["flatpak-prefetch.timer"]) {
+                        eprintln!("kyth-flatpak-prefetch: {error}");
+                        return ExitCode::from(1);
+                    }
+                }
+                if had_service {
+                    if let Err(error) = run_systemctl_command(&["stop", "flatpak-prefetch.service"])
+                    {
+                        eprintln!("kyth-flatpak-prefetch: {error}");
+                        return ExitCode::from(1);
+                    }
+                }
+            }
             if let Err(error) = flatpak_prefetch::generate(&config, &service, &timer) {
+                eprintln!("kyth-flatpak-prefetch: {error}");
+                return ExitCode::from(1);
+            }
+            let systemd_result = if config.enabled {
+                activate_systemd_units(&["flatpak-prefetch.timer"])
+            } else if had_service || had_timer {
+                reload_systemd_manager()
+            } else {
+                Ok(())
+            };
+            if let Err(error) = systemd_result {
                 eprintln!("kyth-flatpak-prefetch: {error}");
                 return ExitCode::from(1);
             }
@@ -1639,6 +1785,10 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
                 eprintln!("kyth-shader-tmpfs: {error}");
                 return ExitCode::from(1);
             }
+            if let Err(error) = activate_systemd_units(&["kyth-shader-tmpfs.service"]) {
+                eprintln!("kyth-shader-tmpfs: {error}");
+                return ExitCode::from(1);
+            }
             println!("shader-tmpfs on");
             ExitCode::SUCCESS
         }
@@ -1647,12 +1797,25 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
                 return code;
             }
             let config = shader_tmpfs::ShaderTmpfsConfig::default();
+            let had_service = service.is_file();
+            if had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-shader-tmpfs.service"]) {
+                    eprintln!("kyth-shader-tmpfs: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin)
                 .map(|_| ())
                 .and_then(|_| shader_tmpfs::save(&config_path, &config))
             {
                 eprintln!("kyth-shader-tmpfs: {error}");
                 return ExitCode::from(1);
+            }
+            if had_service {
+                if let Err(error) = reload_systemd_manager() {
+                    eprintln!("kyth-shader-tmpfs: {error}");
+                    return ExitCode::from(1);
+                }
             }
             println!("shader-tmpfs off");
             ExitCode::SUCCESS
@@ -1662,7 +1825,25 @@ fn dispatch_shader_tmpfs(action: &str) -> ExitCode {
                 return code;
             }
             let config = shader_tmpfs::load(&config_path);
+            let had_service = service.is_file();
+            if !config.enabled && had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-shader-tmpfs.service"]) {
+                    eprintln!("kyth-shader-tmpfs: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = shader_tmpfs::generate(&config, &tmpfiles, &service, &env_dropin) {
+                eprintln!("kyth-shader-tmpfs: {error}");
+                return ExitCode::from(1);
+            }
+            let systemd_result = if config.enabled {
+                activate_systemd_units(&["kyth-shader-tmpfs.service"])
+            } else if had_service {
+                reload_systemd_manager()
+            } else {
+                Ok(())
+            };
+            if let Err(error) = systemd_result {
                 eprintln!("kyth-shader-tmpfs: {error}");
                 return ExitCode::from(1);
             }
@@ -1828,6 +2009,10 @@ fn dispatch_work_cache(action: &str) -> ExitCode {
                 eprintln!("kyth-work-cache: {error}");
                 return ExitCode::from(1);
             }
+            if let Err(error) = activate_systemd_units(&["kyth-work-cache.service"]) {
+                eprintln!("kyth-work-cache: {error}");
+                return ExitCode::from(1);
+            }
             println!("work-cache on");
             ExitCode::SUCCESS
         }
@@ -1836,12 +2021,25 @@ fn dispatch_work_cache(action: &str) -> ExitCode {
                 return code;
             }
             let config = work_cache::WorkCacheConfig::default();
+            let had_service = service.is_file();
+            if had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-work-cache.service"]) {
+                    eprintln!("kyth-work-cache: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = work_cache::generate(&config, &tmpfiles, &service)
                 .map(|_| ())
                 .and_then(|_| work_cache::save(&config_path, &config))
             {
                 eprintln!("kyth-work-cache: {error}");
                 return ExitCode::from(1);
+            }
+            if had_service {
+                if let Err(error) = reload_systemd_manager() {
+                    eprintln!("kyth-work-cache: {error}");
+                    return ExitCode::from(1);
+                }
             }
             println!("work-cache off");
             ExitCode::SUCCESS
@@ -1851,7 +2049,25 @@ fn dispatch_work_cache(action: &str) -> ExitCode {
                 return code;
             }
             let config = work_cache::load(&config_path);
+            let had_service = service.is_file();
+            if !config.enabled && had_service {
+                if let Err(error) = disable_systemd_units(&["kyth-work-cache.service"]) {
+                    eprintln!("kyth-work-cache: {error}");
+                    return ExitCode::from(1);
+                }
+            }
             if let Err(error) = work_cache::generate(&config, &tmpfiles, &service) {
+                eprintln!("kyth-work-cache: {error}");
+                return ExitCode::from(1);
+            }
+            let systemd_result = if config.enabled {
+                activate_systemd_units(&["kyth-work-cache.service"])
+            } else if had_service {
+                reload_systemd_manager()
+            } else {
+                Ok(())
+            };
+            if let Err(error) = systemd_result {
                 eprintln!("kyth-work-cache: {error}");
                 return ExitCode::from(1);
             }
@@ -3530,6 +3746,42 @@ fn main() -> ExitCode {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_unit_activation_reloads_enables_and_restarts_units() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let mut runner = |args: &[&str]| {
+            calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+            Ok(())
+        };
+
+        activate_systemd_units_with(&["kyth-work-cache.service"], &mut runner).unwrap();
+
+        assert_eq!(
+            calls,
+            vec![
+                vec!["daemon-reload"],
+                vec!["enable", "kyth-work-cache.service"],
+                vec!["restart", "kyth-work-cache.service"],
+            ]
+        );
+    }
+
+    #[test]
+    fn generated_unit_deactivation_stops_and_disables_units() {
+        let mut calls = Vec::<Vec<String>>::new();
+        let mut runner = |args: &[&str]| {
+            calls.push(args.iter().map(|arg| (*arg).to_string()).collect());
+            Ok(())
+        };
+
+        disable_systemd_units_with(&["kyth-work-cache.service"], &mut runner).unwrap();
+
+        assert_eq!(
+            calls,
+            vec![vec!["disable", "--now", "kyth-work-cache.service"]]
+        );
+    }
 
     #[test]
     fn registry_has_expected_complete_split() {

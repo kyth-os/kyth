@@ -96,7 +96,7 @@ pub fn render_tmpfiles() -> &'static str {
 
 pub fn render_service(config: &DistroboxCacheConfig) -> String {
     let config = normalize(config.clone());
-    format!("[Unit]\nDescription=Kyth distrobox cache — tmpfs for ccache/cargo\nAfter=local-fs.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/sh -c 'mkdir -p /run/kyth-distrobox-cache && mount -t tmpfs -o size={},mode=0755 tmpfs /run/kyth-distrobox-cache && mkdir -p /run/kyth-distrobox-cache/ccache /run/kyth-distrobox-cache/cargo && ccache --max-size={} 2>/dev/null || true'\nExecStop=/bin/sh -c 'umount /run/kyth-distrobox-cache 2>/dev/null || true'\n[Install]\nWantedBy=multi-user.target\n", config.size, config.ccache_size)
+    format!("[Unit]\nDescription=Kyth distrobox cache — tmpfs for ccache/cargo\nAfter=local-fs.target\n[Service]\nType=oneshot\nRemainAfterExit=yes\nExecStart=/bin/sh -c 'mkdir -p /run/kyth-distrobox-cache && mount -t tmpfs -o size={},mode=0755 tmpfs /run/kyth-distrobox-cache && mkdir -p /run/kyth-distrobox-cache/ccache /run/kyth-distrobox-cache/cargo && chown 1000:1000 /run/kyth-distrobox-cache/ccache /run/kyth-distrobox-cache/cargo && (ccache --max-size={} 2>/dev/null || true)'\nExecStop=/bin/sh -c 'umount /run/kyth-distrobox-cache 2>/dev/null || true'\n[Install]\nWantedBy=multi-user.target\n", config.size, config.ccache_size)
 }
 
 pub fn generate(
@@ -121,6 +121,20 @@ pub fn generate(
 mod tests {
     use super::*;
     use tempfile::tempdir;
+
+    #[test]
+    fn generated_cache_directories_are_owned_by_the_regular_user() {
+        let unit = render_service(&DistroboxCacheConfig {
+            enabled: true,
+            ..DistroboxCacheConfig::default()
+        });
+        assert!(
+            unit.contains(
+                "chown 1000:1000 /run/kyth-distrobox-cache/ccache /run/kyth-distrobox-cache/cargo"
+            ),
+            "mounted tmpfs children must be writable by the desktop user"
+        );
+    }
 
     #[test]
     fn clamps_cache_sizes_and_round_trips() {
