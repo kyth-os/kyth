@@ -329,6 +329,35 @@ class BuildAssemblyContracts(unittest.TestCase):
             result = subprocess.run(["bash", str(orchestrator)], cwd=root, text=True, capture_output=True)
             self.assertEqual(0, result.returncode, result.stderr)
 
+    def test_sysconfig_hash_changes_when_shared_fragment_helper_changes(self):
+        # A sourced helper is an input to every fragment that uses it; omitting it
+        # lets BuildKit reuse a stale sysconfig-static layer after helper edits.
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "build_files/scripts"
+            (scripts / "sysconfig/lib").mkdir(parents=True)
+            (scripts / "lib").mkdir(parents=True)
+            (scripts / "sysconfig-static.sh").write_text("# static\n", encoding="utf-8")
+            (scripts / "sysconfig/01-fragment.sh").write_text(
+                'source "../lib/config-helpers.sh"\n', encoding="utf-8"
+            )
+            (scripts / "lib/config-helpers.sh").write_text("# helper v1\n", encoding="utf-8")
+            (root / "build_files/data").mkdir()
+            (root / "src/kyth_shared").mkdir(parents=True)
+            (root / "build_files/kyth_shared").mkdir(parents=True)
+            hasher = scripts / "hash-sysconfig.sh"
+            hasher.write_text(
+                (BUILD_FILES / "scripts/hash-sysconfig.sh").read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+
+            def content_hash():
+                return subprocess.check_output(["bash", str(hasher)], cwd=root, text=True).strip()
+
+            before = content_hash()
+            (scripts / "lib/config-helpers.sh").write_text("# helper v2\n", encoding="utf-8")
+            self.assertNotEqual(before, content_hash())
+
     def test_installer_hash_and_live_iso_use_one_canonical_input_set(self):
         hasher = (BUILD_FILES / "scripts/installer-build-hash.sh").read_text(encoding="utf-8")
         iso = (BUILD_FILES / "build-live-iso.sh").read_text(encoding="utf-8")
