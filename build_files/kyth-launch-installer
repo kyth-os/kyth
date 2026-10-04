@@ -38,7 +38,11 @@ if [ -z "${session_user}" ] || [ "${session_user}" = root ] || ! /usr/bin/id -u 
 fi
 
 session_uid="$(/usr/bin/id -u "${session_user}")"
+session_gid="$(/usr/bin/id -g "${session_user}")"
 session_home="$(/usr/bin/getent passwd "${session_user}" | /usr/bin/cut -d: -f6)"
+CLIENT_TOKEN_DIR="${LAUNCH_DIR}/client-${session_uid}"
+CLIENT_TOKEN_FILE="${CLIENT_TOKEN_DIR}/tokens.json"
+CLIENT_TOKEN_TMP="${CLIENT_TOKEN_FILE}.$$"
 if [ -z "${session_home}" ] || [ "${session_uid}" -eq 0 ]; then
 	exit 1
 fi
@@ -60,10 +64,16 @@ token_tmp="${TOKEN_FILE}.$$"
 printf '%s' "${session_token}" > "${token_tmp}"
 /usr/bin/chmod 0600 "${token_tmp}"
 /usr/bin/mv -fT -- "${token_tmp}" "${TOKEN_FILE}"
+/usr/bin/install -d -m 0700 -o "${session_user}" -g "${session_gid}" "${CLIENT_TOKEN_DIR}"
+/usr/bin/printf '{"bootstrap_token":"","session_token":"%s"}\n' "${session_token}" > "${CLIENT_TOKEN_TMP}"
+/usr/bin/chown "${session_user}:${session_gid}" "${CLIENT_TOKEN_TMP}"
+/usr/bin/chmod 0600 "${CLIENT_TOKEN_TMP}"
+/usr/bin/mv -fT -- "${CLIENT_TOKEN_TMP}" "${CLIENT_TOKEN_FILE}"
 
 cleanup() {
 	/usr/bin/systemctl stop kyth-installerd.service >/dev/null 2>&1 || true
-	/usr/bin/rm -f -- "${TOKEN_FILE}" "${token_tmp}"
+	/usr/bin/rm -f -- "${TOKEN_FILE}" "${token_tmp}" "${CLIENT_TOKEN_FILE}" "${CLIENT_TOKEN_TMP}"
+	/usr/bin/rmdir -- "${CLIENT_TOKEN_DIR}" 2>/dev/null || true
 	unset session_token
 }
 trap cleanup EXIT HUP INT TERM
@@ -95,5 +105,4 @@ trap cleanup EXIT HUP INT TERM
 	KYTH_TARGET_IMAGE="${KYTH_TARGET_IMAGE}" \
 	KYTH_SOURCE_DIGEST="${KYTH_SOURCE_DIGEST}" \
 	KYTH_INSTALLER_SOCKET="${SOCKET_PATH}" \
-	KYTH_INSTALLER_SESSION_TOKEN="${session_token}" \
-	/usr/bin/kyth-installer-shell --socket-path "${SOCKET_PATH}" >> "${LAUNCH_LOG}" 2>&1
+	/usr/bin/kyth-installer-shell --socket-path "${SOCKET_PATH}" --tokens-file "${CLIENT_TOKEN_FILE}" >> "${LAUNCH_LOG}" 2>&1

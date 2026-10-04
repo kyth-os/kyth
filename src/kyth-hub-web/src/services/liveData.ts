@@ -1329,7 +1329,7 @@ export async function applyPipewireQuantum(preset: string, dryRun = false): Prom
   if (!inTauriShell()) return null;
   // No catch: a failed write inside the Hub shell must surface as a failure,
   // not as null ("outside the Hub shell").
-  return await invoke<{ ok: boolean; detail: string }>("apply_pipewire_quantum", { preset, dryRun });
+  return await invoke<{ ok: boolean; detail: string }>("apply_pipewire_quantum", { preset, dry_run: dryRun });
 }
 
 // Deployment history — bootc timeline (Repair)
@@ -1582,18 +1582,18 @@ export async function invokeBootcSwitchBranch(branch: string): Promise<string> {
 export async function invokeGuardianExecute(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
   if (!confirmUserAction(`Run Guardian fix ${recipeId}? It may change system configuration.`)) return "Cancelled.";
-  return await invokeBounded<string>("guardian_execute_recipe", { recipeId }, 90_000);
+  return await invokeBounded<string>("guardian_execute_recipe", { recipe_id: recipeId }, 90_000);
 }
 export async function dismissGuardianRecommendation(recipeId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("not in Tauri");
-  return await invoke<string>("guardian_dismiss", { recipeId });
+  return await invoke<string>("guardian_dismiss", { recipe_id: recipeId });
 }
 
 // Plasma HDR/VRR presets — apply_plasma_preset is the mutating half of the
 // pair fetchPlasmaPresets lists (same shape as the PipeWire pair above).
 export async function applyPlasmaPreset(preset: string, dryRun = false): Promise<{ ok: boolean; detail: string } | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<{ ok: boolean; detail: string }>("apply_plasma_preset", { preset, dryRun }); } catch { return null; }
+  try { return await invoke<{ ok: boolean; detail: string }>("apply_plasma_preset", { preset, dry_run: dryRun }); } catch { return null; }
 }
 
 // Driver/desktop introspection (Hardware, Desktop & displays).
@@ -1644,7 +1644,7 @@ export async function importAppImage(path: string): Promise<string> {
 export async function uninstallFlatpak(id: string): Promise<string> {
   if (!inTauriShell()) throw new Error("App installs are available from the installed Kyth Hub.");
   if (!confirmUserAction(`Uninstall ${id}? This removes the application from this system.`)) return "Cancelled.";
-  const launch = await invoke<InstallActionLaunch>("uninstall_flatpak", { appId: id });
+  const launch = await invoke<InstallActionLaunch>("uninstall_flatpak", { app_id: id });
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Uninstall did not start.");
   const job = launch.job;
   trackJob("install", job);
@@ -1692,7 +1692,7 @@ export async function updateFlatpaks(): Promise<string> {
 }
 export async function installFlatpak(appId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("App installs are available from the installed Kyth Hub.");
-  const launch = await invoke<InstallActionLaunch>("install_flatpak", { appId });
+  const launch = await invoke<InstallActionLaunch>("install_flatpak", { app_id: appId });
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Install did not start.");
   return launch.job;
 }
@@ -1791,18 +1791,18 @@ export async function enterKaliTerminal(): Promise<string> {
 
 export async function installSecHostTool(flatpakId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Security tools are available from the installed Kyth Hub.");
-  const job = securityJob(await invoke<SecurityActionLaunch>("sec_host_tool_install", { flatpakId }));
+  const job = securityJob(await invoke<SecurityActionLaunch>("sec_host_tool_install", { flatpak_id: flatpakId }));
   return await pollSecurityJob(job, 240); // up to 12 minutes
 }
 export async function uninstallSecHostTool(flatpakId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Security tools are available from the installed Kyth Hub.");
   if (!confirmUserAction("Remove this tool?")) return "Cancelled.";
-  const job = securityJob(await invoke<SecurityActionLaunch>("sec_host_tool_uninstall", { flatpakId }));
+  const job = securityJob(await invoke<SecurityActionLaunch>("sec_host_tool_uninstall", { flatpak_id: flatpakId }));
   return await pollSecurityJob(job, 60);
 }
 export async function launchSecHostTool(flatpakId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Security tools are available from the installed Kyth Hub.");
-  return await invoke<string>("sec_host_tool_launch", { flatpakId });
+  return await invoke<string>("sec_host_tool_launch", { flatpak_id: flatpakId });
 }
 
 // ---------------------------------------------------------------------
@@ -1840,18 +1840,18 @@ function gamingJob(launch: GamingActionLaunch): string { if (launch.state !== "r
 
 export async function installGamingTool(flatpakId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
-  const job = gamingJob(await invoke<GamingActionLaunch>("gaming_tool_install", { flatpakId }));
+  const job = gamingJob(await invoke<GamingActionLaunch>("gaming_tool_install", { flatpak_id: flatpakId }));
   return await pollGamingJob(job, 240); // up to 12 minutes
 }
 export async function uninstallGamingTool(flatpakId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
   if (!confirmUserAction("Remove this tool?")) return "Cancelled.";
-  const job = gamingJob(await invoke<GamingActionLaunch>("gaming_tool_uninstall", { flatpakId }));
+  const job = gamingJob(await invoke<GamingActionLaunch>("gaming_tool_uninstall", { flatpak_id: flatpakId }));
   return await pollGamingJob(job, 60);
 }
 export async function launchGamingTool(flatpakId: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Gaming tools are available from the installed Kyth Hub.");
-  return await invoke<string>("gaming_tool_launch", { flatpakId });
+  return await invoke<string>("gaming_tool_launch", { flatpak_id: flatpakId });
 }
 
 export async function fixDiscordScreenshare(): Promise<string> {
@@ -1907,7 +1907,7 @@ function devToolsJob(launch: DevToolsActionLaunch): string {
  * catalog selection can legitimately take a while on a fresh box. */
 export async function installSelectedDevTools(selectedIds: string[]): Promise<string> {
   if (!inTauriShell()) throw new Error("Dev Tools setup is available from the installed Kyth Hub.");
-  const job = devToolsJob(await invoke<DevToolsActionLaunch>("dev_tools_install_selection", { selectedIds }));
+  const job = devToolsJob(await invoke<DevToolsActionLaunch>("dev_tools_install_selection", { selected_ids: selectedIds }));
   trackJob("dev-tools", job);
   try {
     const state = await pollJobUntilSettled("dev-tools", job, {
@@ -2101,15 +2101,15 @@ export async function openExeHandlerFlathub(searchTerm: string): Promise<void> {
 }
 export async function isExeHandlerFlatpakInstalled(appId: string): Promise<boolean> {
   if (!inTauriShell()) return false;
-  return await invoke<boolean>("exe_handler_flatpak_installed", { appId });
+  return await invoke<boolean>("exe_handler_flatpak_installed", { app_id: appId });
 }
 export async function launchExeHandlerFlatpak(appId: string): Promise<void> {
   if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");
-  await invoke("exe_handler_launch_flatpak", { appId });
+  await invoke("exe_handler_launch_flatpak", { app_id: appId });
 }
 export async function startExeHandlerFlatpakInstall(appId: string): Promise<ExeHandlerJob> {
   if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");
-  return await invoke<ExeHandlerJob>("install_flatpak", { appId });
+  return await invoke<ExeHandlerJob>("install_flatpak", { app_id: appId });
 }
 export async function startExeHandlerBottles(path: string, allowUnsupported: boolean): Promise<ExeHandlerJob> {
   if (!inTauriShell()) throw new Error("Installer help is available from the installed Kyth Hub.");

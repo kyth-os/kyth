@@ -145,11 +145,14 @@ impl PartitionJournal {
     }
 
     pub(crate) fn remove_op(&mut self, index: usize) -> bool {
-        if index >= self.ops.len() {
-            return false;
-        }
-        self.ops.remove(index);
-        true
+        self.ops
+            .iter()
+            .position(|operation| operation.index == index)
+            .map(|position| {
+                self.ops.remove(position);
+                true
+            })
+            .unwrap_or(false)
     }
 
     pub(crate) fn clear(&mut self) {
@@ -172,11 +175,17 @@ impl PartitionJournal {
         Ok(())
     }
 
-    pub(crate) fn rollback_metadata(&mut self) {
+    pub(crate) fn rollback_metadata(&mut self) -> Result<(), String> {
+        if self.committed {
+            return Err(
+                "Partition changes have already been committed and cannot be rolled back."
+                    .to_string(),
+            );
+        }
         self.clear();
-        self.committed = false;
         self.root_partition = None;
         self.irreversible_completed = false;
+        Ok(())
     }
 }
 
@@ -1881,6 +1890,47 @@ mod tests {
         assert_eq!(journal.pending()[0].index, 1);
         assert_eq!(journal.add_op("format", json!({"fs_type": "btrfs"})), 2);
         assert!(!journal.remove_op(99));
+    }
+
+    #[test]
+    fn removes_by_stable_operation_id_after_a_gap() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("create", json!({}));
+        journal.add_op("format", json!({}));
+        journal.add_op("delete", json!({}));
+        assert!(journal.remove_op(0));
+        assert!(journal.remove_op(2));
+        assert_eq!(
+            journal
+                .pending()
+                .iter()
+                .map(|op| op.index)
+                .collect::<Vec<_>>(),
+            [1]
+        );
+    }
+
+    #[test]
+    fn committed_metadata_cannot_be_rolled_back() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("create", json!({}));
+        journal
+            .mark_committed(Some("/dev/sda2"))
+            .expect("valid root");
+        let result = journal.rollback_metadata();
+        assert!(result.is_err());
+        assert!(journal.committed);
+        assert_eq!(journal.ops.len(), 1);
+        assert_eq!(journal.root_partition.as_deref(), Some("/dev/sda2"));
+    }
+
+    #[test]
+    fn uncommitted_metadata_rollback_clears_state() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("create", json!({}));
+        journal.rollback_metadata().expect("uncommitted rollback");
+        assert!(journal.ops.is_empty());
+        assert!(!journal.committed);
     }
 
     #[test]

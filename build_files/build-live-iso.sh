@@ -27,10 +27,7 @@ done
 
 ROOTFUL_PODMAN="${REPO_ROOT}/build_files/scripts/rootful-podman.sh"
 mkdir -p "${OUTPUT_DIR}"
-INSTALLER_BUILD_HASH="${INSTALLER_BUILD_HASH:-$(sha256sum \
-	installer/build.sh \
-	build_files/kyth_shared/kyth_shared/vm_acceptance.py \
-	build_files/kyth-vm-acceptance.service | sha256sum | awk '{print $1}')}"
+INSTALLER_BUILD_HASH="${INSTALLER_BUILD_HASH:-$("${SCRIPT_DIR}/scripts/installer-build-hash.sh")}"
 
 if [[ "${IS_LOCAL_IMAGE}" == true ]] &&
 	! "${ROOTFUL_PODMAN}" image exists "${BASE_IMAGE}" &&

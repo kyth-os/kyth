@@ -3,6 +3,7 @@
 //! helpers: is_live_session, strip_ansi, with_idle_inhibit, disk write bytes,
 //! format_elapsed/eta/progress.
 
+use std::collections::HashSet;
 use std::fs;
 use std::io::{self, Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -568,18 +569,43 @@ fn which(cmd: &str) -> bool {
     false
 }
 
+pub fn diskstats_write_sectors(text: &str, whole_devices: &[&str]) -> u64 {
+    let allowed: HashSet<&str> = whole_devices.iter().copied().collect();
+    text.lines()
+        .filter_map(|line| {
+            let parts: Vec<&str> = line.split_whitespace().collect();
+            if parts.len() < 10 || !allowed.contains(parts[2]) {
+                return None;
+            }
+            parts[9].parse::<u64>().ok()
+        })
+        .sum()
+}
+
+fn whole_physical_block_devices() -> HashSet<String> {
+    let mut devices = HashSet::new();
+    let Ok(entries) = fs::read_dir("/sys/dev/block") else {
+        return devices;
+    };
+    for entry in entries.flatten() {
+        let Ok(path) = entry.path().canonicalize() else {
+            continue;
+        };
+        if path.join("partition").exists() || path.to_string_lossy().contains("/virtual/block/") {
+            continue;
+        }
+        if let Some(name) = path.file_name().and_then(|name| name.to_str()) {
+            devices.insert(name.to_string());
+        }
+    }
+    devices
+}
+
 pub fn get_disk_write_bytes() -> u64 {
     if let Ok(text) = fs::read_to_string("/proc/diskstats") {
-        let mut total: u64 = 0;
-        for line in text.lines() {
-            let parts: Vec<&str> = line.split_whitespace().collect();
-            if parts.len() >= 10 {
-                if let Ok(v) = parts[9].parse::<u64>() {
-                    total += v;
-                }
-            }
-        }
-        return total * 512;
+        let devices = whole_physical_block_devices();
+        let refs: Vec<&str> = devices.iter().map(String::as_str).collect();
+        return diskstats_write_sectors(&text, &refs) * 512;
     }
     0
 }
@@ -722,6 +748,12 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(25));
         }
+    }
+
+    #[test]
+    fn diskstats_counts_only_whole_devices_named_by_sysfs_filter() {
+        let text = "8 0 sda 0 0 0 0 0 0 100 0 0 0 0\n8 1 sda1 0 0 0 0 0 0 200 0 0 0 0\n7 0 loop0 0 0 0 0 0 0 300 0 0 0 0";
+        assert_eq!(diskstats_write_sectors(text, &["sda"]), 100);
     }
 
     #[test]

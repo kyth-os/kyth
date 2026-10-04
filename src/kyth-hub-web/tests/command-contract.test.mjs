@@ -96,6 +96,28 @@ test("Dashboard wrappers are present and used by the page", () => {
   }
 });
 
+test("Hub action payloads use the canonical snake_case IPC field names", () => {
+  const expected = [
+    ['"uninstall_flatpak", { app_id: id }', "uninstall_flatpak"],
+    ['"install_flatpak", { app_id: appId }', "install_flatpak"],
+    ['"exe_handler_flatpak_installed", { app_id: appId }', "exe_handler_flatpak_installed"],
+    ['"exe_handler_launch_flatpak", { app_id: appId }', "exe_handler_launch_flatpak"],
+    ['"sec_host_tool_install", { flatpak_id: flatpakId }', "sec_host_tool_install"],
+    ['"sec_host_tool_uninstall", { flatpak_id: flatpakId }', "sec_host_tool_uninstall"],
+    ['"sec_host_tool_launch", { flatpak_id: flatpakId }', "sec_host_tool_launch"],
+    ['"gaming_tool_install", { flatpak_id: flatpakId }', "gaming_tool_install"],
+    ['"gaming_tool_uninstall", { flatpak_id: flatpakId }', "gaming_tool_uninstall"],
+    ['"gaming_tool_launch", { flatpak_id: flatpakId }', "gaming_tool_launch"],
+    ['"apply_pipewire_quantum", { preset, dry_run: dryRun }', "apply_pipewire_quantum"],
+    ['"apply_plasma_preset", { preset, dry_run: dryRun }', "apply_plasma_preset"],
+    ['"guardian_execute_recipe", { recipe_id: recipeId }', "guardian_execute_recipe"],
+    ['"guardian_dismiss", { recipe_id: recipeId }', "guardian_dismiss"],
+    ['"dev_tools_install_selection", { selected_ids: selectedIds }', "dev_tools_install_selection"],
+  ];
+  for (const [snippet, command] of expected) assert.ok(service.includes(snippet), `${command} must use ${snippet}`);
+  assert.match(service, /"install_flatpak", \{ app_id: appId \}/, "startExeHandlerFlatpakInstall must use app_id");
+});
+
 test("native bridge calls have a default deadline and polling uses a shorter probe deadline", () => {
   assert.match(service, /import \{ invoke as tauriInvoke \} from "@tauri-apps\/api\/core"/);
   assert.equal((service.match(/\btauriInvoke</g) ?? []).length, 1, "raw Tauri invoke should only exist inside the bounded bridge wrapper");

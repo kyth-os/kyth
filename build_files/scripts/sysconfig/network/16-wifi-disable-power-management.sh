@@ -91,11 +91,15 @@ if ((gaming_live)); then
     exit 0
 fi
 
-# On AC power the latency win is free; on battery keep the radio throttled.
-on_ac=1
+# Treat a battery-only machine as battery power.  Do not default to AC when
+# /sys/class/power_supply contains only BAT* entries (common on laptops).
+on_ac=0
 for psu in /sys/class/power_supply/AC* /sys/class/power_supply/ADP*; do
     [[ -f "${psu}/online" ]] || continue
-    [[ "$(cat "${psu}/online" 2>/dev/null)" == "1" ]] || on_ac=0
+    if [[ "$(cat "${psu}/online" 2>/dev/null)" == "1" ]]; then
+        on_ac=1
+        break
+    fi
 done
 if [[ "${on_ac}" -eq 1 ]]; then
     iw dev "${iface}" set power_save off >/dev/null 2>&1 || true

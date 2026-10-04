@@ -327,6 +327,39 @@ class SetupRestoreBackupTests(unittest.TestCase):
             )
 
 
+    def test_restore_refuses_symlinked_destination_without_touching_outside(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            outside = root / "outside"
+            outside.mkdir()
+            home.mkdir()
+            (home / ".config").symlink_to(outside, target_is_directory=True)
+            archive = self._archive_with(root, {".config/kdeglobals": "attacker"})
+            with mock.patch.object(Path, "home", return_value=home):
+                with self.assertRaisesRegex(ValueError, "symlink"):
+                    setup_transfer.restore_setup(str(archive))
+            self.assertFalse((outside / "kdeglobals").exists())
+
+    def test_export_dereferences_symlinked_settings_directory(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            home = root / "home"
+            target = root / "real-config"
+            target.mkdir(parents=True)
+            (target / "kdeglobals").write_text("linked-settings", encoding="utf-8")
+            home.mkdir()
+            (home / ".config").symlink_to(target, target_is_directory=True)
+            with mock.patch.object(Path, "home", return_value=home):
+                archive = setup_transfer.export_setup(str(root / "backup"))
+            with tarfile.open(archive, "r:gz") as tar:
+                member = tar.getmember("kyth-setup/files/.config/kdeglobals")
+                self.assertFalse(member.issym())
+                extracted = tar.extractfile(member)
+                assert extracted is not None
+                self.assertEqual(extracted.read(), b"linked-settings")
+
+
 class GamingSnapshotWarningTests(unittest.TestCase):
     def test_no_tool_result_is_a_warning_not_silent_ok(self):
         with mock.patch.object(

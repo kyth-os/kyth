@@ -1639,20 +1639,20 @@
     "active_by_authority": {
       "rust-dispatcher": 49,
       "rust-service": 28,
-      "shell-orchestration": 111
+      "shell-orchestration": 113
     },
     "active_by_scope": {
       "installer": 1,
-      "system-service": 45,
+      "system-service": 47,
       "user-session": 142
     },
-    "active_entries": 188,
+    "active_entries": 190,
     "active_python_entries": 0,
     "entries": 767,
     "p0_open_entries": 0,
     "status_by_active_entry": {
       "done-native": 187,
-      "queued": 1
+      "queued": 3
     },
     "superseded_entries": 124
   },

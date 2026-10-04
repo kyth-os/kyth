@@ -22,6 +22,12 @@ class WifiRadioBootStateTests(unittest.TestCase):
         self.assertNotIn("nmcli radio wifi off", dispatcher)
         self.assertNotIn("wifi-off-for-wired", dispatcher)
 
+    def test_battery_only_power_supply_defaults_to_powersave(self):
+        body = NETWORK_SETUP.read_text(encoding="utf-8")
+        self.assertIn("on_ac=0", body)
+        self.assertIn("/sys/class/power_supply/AC*", body)
+        self.assertIn("set power_save on", body)
+
     def test_wired_nics_keep_their_hardware_mac(self) -> None:
         """A hashed wired MAC changes with the ifname, which a USB dock rewrites."""
         body = NETWORK_SETUP.read_text(encoding="utf-8")

@@ -262,6 +262,22 @@ _INSTALL_LINE = re.compile(r"(?<![A-Za-z0-9_.-])(install|cp|COPY|mv|ln)(?![A-Za-
 _NAME_TOKEN = re.compile(r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_@.+-]+)(?![A-Za-z0-9_.-])")
 
 
+def _logical_lines(text: str) -> list[str]:
+    """Join shell backslash continuations before classifying install commands."""
+    lines: list[str] = []
+    pending = ""
+    for raw in text.splitlines():
+        line = raw.rstrip()
+        if line.endswith("\\"):
+            pending += line[:-1] + " "
+        else:
+            lines.append(pending + line)
+            pending = ""
+    if pending:
+        lines.append(pending)
+    return lines
+
+
 def installed_script_evidence() -> dict[str, dict[str, bool]]:
     """Map installed shell-script basename to install evidence.
 
@@ -287,7 +303,7 @@ def installed_script_evidence() -> dict[str, dict[str, bool]]:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for line in text.splitlines():
+        for line in _logical_lines(text):
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
@@ -331,14 +347,14 @@ def installed_launcher_sources() -> dict[str, str]:
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        for line in text.splitlines():
+        for line in _logical_lines(text):
             stripped = line.strip()
             if not stripped or stripped.startswith("#"):
                 continue
             for match in _INSTALL_DEST.finditer(line):
                 source, dest = match.group(1), match.group(2)
                 candidate = ROOT / "build_files" / source
-                if candidate.is_file():
+                if candidate.is_file() and not candidate.is_relative_to(ROOT / "build_files/scripts"):
                     found[Path(dest).name] = f"build_files/{source}"
     return found
 

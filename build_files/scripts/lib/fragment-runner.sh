@@ -39,17 +39,26 @@ run_fragments() {
 		for attempt in 1 2 3; do
 			if [[ "${mode}" == "source" ]]; then
 				previous_dir="${PWD}"
-				cd "${frag_dir}" || return 1
-				# shellcheck disable=SC1090
-				source "./${frag_name}"
-				status=$?
+				if cd "${frag_dir}"; then
+					# shellcheck disable=SC1090
+					if source "./${frag_name}"; then
+						status=0
+					else
+						status=$?
+					fi
+				else
+					status=$?
+				fi
 				cd "${previous_dir}" || return 1
 			else
-				(
+				if (
 					cd "${frag_dir}" || exit 1
 					bash "./${frag_name}"
-				)
-				status=$?
+				); then
+					status=0
+				else
+					status=$?
+				fi
 			fi
 			if ((status == 0)); then
 				break

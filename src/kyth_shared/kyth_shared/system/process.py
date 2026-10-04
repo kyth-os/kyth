@@ -84,17 +84,43 @@ def probe_cached(key: str, ttl: float, fetch: Callable[[], T]) -> T:
     return _probe_cached(key, ttl, fetch)
 
 
-def get_disk_write_bytes() -> int:
-    """Sum write bytes across all block devices from /proc/diskstats."""
+def diskstats_write_sectors(text: str, whole_devices: set[str]) -> int:
+    """Return write sectors for whole physical block devices only.
+
+    Callers derive ``whole_devices`` from sysfs, excluding partition entries and
+    devices below ``/sys/devices/virtual/block``; this avoids counting both a
+    disk and its partitions or virtual device duplicates.
+    """
+    total = 0
+    for line in text.splitlines():
+        parts = line.split()
+        if len(parts) >= 10 and parts[2] in whole_devices:
+            try:
+                total += int(parts[9])
+            except ValueError:
+                continue
+    return total
+
+
+def _whole_physical_block_devices() -> set[str]:
+    devices: set[str] = set()
     try:
-        total = 0
+        for entry in __import__("pathlib").Path("/sys/dev/block").iterdir():
+            device = entry.resolve()
+            if (device / "partition").exists() or "/virtual/block/" in str(device):
+                continue
+            devices.add(device.name)
+    except OSError:
+        return set()
+    return devices
+
+
+def get_disk_write_bytes() -> int:
+    """Sum writes once for whole physical block devices from /proc/diskstats."""
+    try:
         with open("/proc/diskstats") as f:
-            for line in f:
-                parts = line.split()
-                if len(parts) >= 10:
-                    total += int(parts[9])
-        return total * 512
-    except (OSError, ValueError, IndexError, UnicodeError):
+            return diskstats_write_sectors(f.read(), _whole_physical_block_devices()) * 512
+    except (OSError, UnicodeError):
         return 0
 
 

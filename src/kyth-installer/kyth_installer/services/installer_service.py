@@ -281,7 +281,18 @@ class InstallerService:
         try:
             state = validation.validate_install_request(body, self.context, strict_locale=strict_locale)
         except validation.InstallRequestError as exc:
-            return {"started": False, "message": str(exc)}
+            # Validation happens before the worker owns the transaction, but
+            # it is still an attempted install and must survive a reboot for
+            # Rescue/support diagnostics.
+            message = str(exc)
+            try:
+                from ..config import FAILURE_SUMMARY_FILE, TRANSACTION_FILE
+                from ..recovery import write_failure_summary, write_transaction_state
+                write_transaction_state(TRANSACTION_FILE, context=self.context, status="failed", message=message)
+                write_failure_summary(FAILURE_SUMMARY_FILE, context=self.context, message=message)
+            except (OSError, RuntimeError, ValueError):
+                pass
+            return {"started": False, "message": message}
         try:
             if not execution.start_installation(self.context, state, install._run_install):
                 return {"started": False, "message": "An installation is already running."}

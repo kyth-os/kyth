@@ -10294,27 +10294,27 @@
         {
           "name": "log",
           "owner": "fixture::build_files/scripts/kyth-live-owe-wifi-setup.sh",
-          "ownership": "build-only"
+          "ownership": "shell"
         }
       ],
-      "installed_implementation": "not-installed",
-      "migration_priority": 3,
+      "installed_implementation": "shell",
+      "migration_priority": 2,
       "name": "kyth-live-owe-wifi-setup.sh",
       "owner": "fixture::build_files/scripts/kyth-live-owe-wifi-setup.sh",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/kyth-live-owe-wifi-setup.sh",
-      "priority": 0,
-      "reason": "build/test shell script, not installed runtime authority",
+      "priority": 1,
+      "reason": "installed shell script owns runtime behavior; no native owner yet",
       "resolved_target": "build_files/scripts/kyth-live-owe-wifi-setup.sh",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "build-time",
+      "risk_tier": "privileged-writer",
       "rollback": "restore previous installed kyth-live-owe-wifi-setup.sh entry point",
-      "runtime_active": false,
-      "runtime_authority": "build-only",
-      "runtime_scope": "build",
-      "status": "not-applicable",
+      "runtime_active": true,
+      "runtime_authority": "shell-orchestration",
+      "runtime_scope": "system-service",
+      "status": "queued",
       "surface": "shell-script"
     },
     {
@@ -11529,27 +11529,27 @@
         {
           "name": "__main__",
           "owner": "fixture::build_files/scripts/plymouth-branding-guard.sh",
-          "ownership": "build-only"
+          "ownership": "shell"
         }
       ],
-      "installed_implementation": "not-installed",
-      "migration_priority": 3,
+      "installed_implementation": "shell",
+      "migration_priority": 2,
       "name": "plymouth-branding-guard.sh",
       "owner": "fixture::build_files/scripts/plymouth-branding-guard.sh",
       "parity_tests": [
         "tests/"
       ],
       "path": "build_files/scripts/plymouth-branding-guard.sh",
-      "priority": 0,
-      "reason": "build/test shell script, not installed runtime authority",
+      "priority": 1,
+      "reason": "installed shell script owns runtime behavior; no native owner yet",
       "resolved_target": "build_files/scripts/plymouth-branding-guard.sh",
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
-      "risk_tier": "build-time",
+      "risk_tier": "privileged-writer",
       "rollback": "restore previous installed plymouth-branding-guard.sh entry point",
-      "runtime_active": false,
-      "runtime_authority": "build-only",
-      "runtime_scope": "build",
-      "status": "not-applicable",
+      "runtime_active": true,
+      "runtime_authority": "shell-orchestration",
+      "runtime_scope": "system-service",
+      "status": "queued",
       "surface": "shell-script"
     },
     {

@@ -120,10 +120,9 @@ def _copy_into_payload(home: Path, payload: Path, rel: str) -> bool:
         return False
     target = payload / "files" / rel
     target.parent.mkdir(parents=True, exist_ok=True)
-    # Dereference on export (mirror the Rust side): preserving $HOME
-    # symlinks into the archive would let a hostile/shared archive re-plant
-    # arbitrary links in $HOME at restore time.
-    if source.is_dir() and not source.is_symlink():
+    # Dereference directory links by copying their contents, never the link
+    # itself. This keeps exported archives self-contained and link-free.
+    if source.is_dir():
         shutil.copytree(source, target, symlinks=False)
     else:
         shutil.copy2(source, target, follow_symlinks=True)
@@ -356,8 +355,19 @@ def _backup_existing(home: Path, paths: list[str]) -> Path | None:
     return backup_dir
 
 
+def _ensure_restore_target_safe(home: Path, rel: str) -> None:
+    """Reject existing symlink components before any restore copy."""
+    current = home
+    for component in Path(rel).parts:
+        current /= component
+        if current.is_symlink():
+            raise ValueError(f"Unsafe restore destination: {rel} traverses a symlink")
+
+
 def _restore_files(payload: Path, home: Path, paths: list[str]) -> int:
     restored = 0
+    for rel in paths:
+        _ensure_restore_target_safe(home, rel)
     backup_dir = _backup_existing(home, paths)
     if backup_dir is not None:
         print(

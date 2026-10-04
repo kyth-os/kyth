@@ -285,6 +285,57 @@ class BuildAssemblyContracts(unittest.TestCase):
             )
             self.assertEqual(0, result.returncode, result.stderr)
 
+    def test_fragment_runner_retries_with_set_e_and_restores_cwd(self):
+        runner = BUILD_FILES / "scripts/lib/fragment-runner.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            fragments = scripts / "packages"
+            fragments.mkdir(parents=True)
+            (fragments / "01-flaky.sh").write_text(
+                "attempt_file=../attempts\n"
+                "n=$(cat \"${attempt_file}\" 2>/dev/null || printf 0)\n"
+                "n=$((n + 1)); printf '%s' \"${n}\" >\"${attempt_file}\"\n"
+                "if [[ \"${n}\" -lt 2 ]]; then false; fi\n",
+                encoding="utf-8",
+            )
+            (root / "attempts").write_text("0", encoding="utf-8")
+            orchestrator = scripts / "run.sh"
+            orchestrator.write_text(
+                f"#!/bin/bash\nset -e\nsource {runner}\nstart=$PWD\nrun_fragments packages source\n[[ $PWD == $start ]]\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(["bash", str(orchestrator)], cwd=root, text=True, capture_output=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_fragment_runner_retries_in_bash_mode_under_set_e(self):
+        runner = BUILD_FILES / "scripts/lib/fragment-runner.sh"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            fragments = scripts / "packages"
+            fragments.mkdir(parents=True)
+            (fragments / "01-flaky.sh").write_text(
+                "n=$(cat ../attempts 2>/dev/null || printf 0); n=$((n + 1)); printf '%s' \"${n}\" > ../attempts;\n"
+                "if [[ \"${n}\" -lt 2 ]]; then false; fi\n",
+                encoding="utf-8",
+            )
+            (root / "attempts").write_text("0", encoding="utf-8")
+            orchestrator = scripts / "run.sh"
+            orchestrator.write_text(
+                f"#!/bin/bash\nset -e\nsource {runner}\nrun_fragments packages bash\n",
+                encoding="utf-8",
+            )
+            result = subprocess.run(["bash", str(orchestrator)], cwd=root, text=True, capture_output=True)
+            self.assertEqual(0, result.returncode, result.stderr)
+
+    def test_installer_hash_and_live_iso_use_one_canonical_input_set(self):
+        hasher = (BUILD_FILES / "scripts/installer-build-hash.sh").read_text(encoding="utf-8")
+        iso = (BUILD_FILES / "build-live-iso.sh").read_text(encoding="utf-8")
+        self.assertIn("build_files/scripts", hasher)
+        self.assertIn("installer-build-hash.sh", iso)
+        self.assertNotIn("build_files/kyth_shared/kyth_shared/vm_acceptance.py \\", iso)
+
     def test_standalone_container_scripts_anchor_helper_sources(self):
         scripts = BUILD_FILES / "scripts"
         standalone = (

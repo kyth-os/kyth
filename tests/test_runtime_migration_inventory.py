@@ -59,6 +59,17 @@ class InventoryTest(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("valid", result.stdout)
 
+    def test_multiline_install_commands_are_classified_as_runtime_helpers(self):
+        checker = load_checker()
+        logical = checker._logical_lines(
+            "install -Dm755 \\\n"
+            "  /ctx/kyth-helper \\\n"
+            "  /usr/libexec/kyth-helper\n"
+        )[0]
+        match = checker._INSTALL_DEST.search(logical)
+        self.assertIsNotNone(match)
+        self.assertEqual(match.group(2), "/usr/libexec/kyth-helper")
+
     def test_installer_source_is_retired_fixture(self):
         # Post-cutover contract: the Python installer backend is source-only
         # parity material, not an installed runtime authority.
@@ -77,7 +88,7 @@ class InventoryTest(unittest.TestCase):
         # installer authority is active.
         self.assertEqual(report["summary"]["p0_open_entries"], 0)
         self.assertEqual(report["p0_open"], [])
-        self.assertEqual(report["summary"]["active_entries"], 188)
+        self.assertEqual(report["summary"]["active_entries"], 190)
         self.assertEqual(report["summary"]["active_python_entries"], 0)
         self.assertEqual(report["summary"]["superseded_entries"], 124)
         self.assertFalse(

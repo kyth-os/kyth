@@ -74,6 +74,13 @@ test("offline warning matches the selected image source requirement", () => {
   assert.match(app, /setError\(event\.message\); setStep\("rescue"\); void probe\(\)/);
 });
 
+test("installer auth, navigation, and progress stream fail safely", () => {
+  assert.match(api, /Authorization: "Bearer " \+ value\.bootstrap_token/);
+  assert.match(api, /EventSource reconnects automatically/);
+  assert.match(api, /readyState === EventSource\.CLOSED/);
+  assert.match(app, /name === "install" \|\| step === "install"/);
+  assert.match(app, /name !== "install"/);
+});
 test("React account and hostname rules match the shared installer contract", async () => {
   // validation_rules.json is the single source: the daemon rejects anything
   // looser, and a name accepted here but refused by useradd fails the install
