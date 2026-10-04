@@ -51,10 +51,13 @@ COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
 # retired Python service tree is not copied into the builder or final image.
 COPY src/kyth-hub-web /build/kyth-hub-web
 # glib is a path dependency on the vendored third_party/gtk-glib-0.18.5
-# backport (see src/kyth-hub-web/src-tauri/Cargo.toml) — it must sit at the
-# same relative position as in the repo so the ../../../third_party path
-# resolves inside the builder, exactly like kyth-shared-rs above.
-COPY third_party/gtk-glib-0.18.5 /build/third_party/gtk-glib-0.18.5
+# backport (see src/kyth-hub-web/src-tauri/Cargo.toml). The builder layout is
+# one level shallower than the repo (/build/kyth-hub-web instead of
+# /build/src/kyth-hub-web), so the ../../../third_party path escapes /build
+# and resolves to /third_party — copy it there to match, exactly like
+# build_files/exe-handler-apps.json above, rather than editing the crate
+# (whose path must stay correct for real-repo checkouts).
+COPY third_party/gtk-glib-0.18.5 /third_party/gtk-glib-0.18.5
 WORKDIR /build/kyth-hub-web
 RUN --mount=type=cache,id=kyth-hub-web-npm,target=/root/.npm \
     npm ci && npm run build

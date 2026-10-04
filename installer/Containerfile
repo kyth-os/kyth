@@ -36,11 +36,11 @@ COPY src/kyth-shared-rs /build/kyth-shared-rs
 COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
 COPY src/kyth-installer-web /build/kyth-installer-web
 # glib is a path dependency on the vendored third_party/gtk-glib-0.18.5
-# backport (see src/kyth-installer-web/src-tauri/Cargo.toml) — it must sit
-# at the same relative position as in the repo so the ../../../third_party
-# path resolves inside the builder. (Mirrors the hub-web-builder stage in
-# the top-level Dockerfile.)
-COPY third_party/gtk-glib-0.18.5 /build/third_party/gtk-glib-0.18.5
+# backport (see src/kyth-installer-web/src-tauri/Cargo.toml). The builder
+# layout is one level shallower than the repo, so the ../../../third_party
+# path escapes /build and resolves to /third_party — copy it there to match.
+# (Mirrors the hub-web-builder stage in the top-level Dockerfile.)
+COPY third_party/gtk-glib-0.18.5 /third_party/gtk-glib-0.18.5
 # Bust the builder cache whenever installer inputs change: without this,
 # Docker/Podman reuses stale npm/cargo layers because the COPY cache keys
 # only cover the copied trees, not their content at this layer. (The ARG
