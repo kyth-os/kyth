@@ -47,7 +47,7 @@ class BootStabilityUnitTests(unittest.TestCase):
             subs = os.path.join(tmp, "file_contexts.subs_dist")
             with open(subs, "w", encoding="utf-8") as handle:
                 handle.write(original)
-            os.chmod(subs, 0o644)
+            os.chmod(subs, 0o600)
             env = {**os.environ, "KYTH_SELINUX_SUBS_DIST": subs}
             for _ in range(2):  # second pass must be a no-op
                 result = subprocess.run(
@@ -65,7 +65,7 @@ class BootStabilityUnitTests(unittest.TestCase):
             # Every other alias, including look-alike prefixes, is preserved.
             expected = [l for l in original.splitlines() if l.split()[:1] != ["/var/home"]]
             self.assertEqual(lines, expected)
-            self.assertEqual(oct(os.stat(subs).st_mode & 0o777), "0o644")
+            self.assertEqual(oct(os.stat(subs).st_mode & 0o777), "0o600")
             missing = subprocess.run(
                 ["bash", str(VAR_HOME_ALIAS_FRAGMENT)],
                 env={**env, "KYTH_SELINUX_SUBS_DIST": os.path.join(tmp, "absent")},
@@ -491,7 +491,7 @@ class BootStabilityUnitTests(unittest.TestCase):
                 stub = os.path.join(tmp, "nmcli")
                 with open(stub, "w", encoding="utf-8") as handle:
                     handle.write(f"#!/bin/sh\nprintf '{nmcli_output}'\n")
-                os.chmod(stub, 0o755)
+                os.chmod(stub, 0o700)
                 result = subprocess.run(
                     ["bash", "-c", f"set -euo pipefail\n{line}\n{default}\nprintf '%s' \"$wifi_connected\""],
                     env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},
