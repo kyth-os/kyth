@@ -208,7 +208,7 @@ fn validated_sec_tool(
         .ok_or_else(|| "unknown security tool".to_string())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityActionLaunch, String> {
     let tool = validated_sec_tool(&flatpak_id)?;
     let name = tool.name.to_string();
@@ -246,7 +246,7 @@ pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityAction
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActionLaunch, String> {
     let tool = validated_sec_tool(&flatpak_id)?;
     let name = tool.name.to_string();
@@ -283,7 +283,7 @@ pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActi
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn sec_host_tool_launch(flatpak_id: String) -> Result<String, String> {
     let tool = validated_sec_tool(&flatpak_id)?;
     // A detached `flatpak run` of a missing app fails where nobody reads

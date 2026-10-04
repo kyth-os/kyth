@@ -24,7 +24,7 @@ import type { JobDomain } from "../services/liveData";
  * `invoke` that returns a human-readable string (or throws one). The
  * backend commands are the gate, not this: each validates its own input,
  * runs in the background, and keeps progress in the Hub. */
-export function useSectionAction(trackedDomain?: JobDomain) {
+export function useSectionAction(trackedDomain?: JobDomain | readonly JobDomain[]) {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // Component state is lost on reload, but a tracked backend job keeps
@@ -43,17 +43,21 @@ export function useSectionAction(trackedDomain?: JobDomain) {
   // ids means a genuinely new job — one that isn't the one already
   // accounted for — still gets surfaced.
   const [dismissedJob, setDismissedJob] = useState<string | null>(null);
-  const trackedJob = trackedDomain !== undefined ? getInFlightJob(trackedDomain) : undefined;
+  const trackedDomains =
+    trackedDomain === undefined ? [] : Array.isArray(trackedDomain) ? trackedDomain : [trackedDomain];
+  const trackedEntry = trackedDomains
+    .map((domain) => ({ domain, job: getInFlightJob(domain) }))
+    .find((entry) => entry.job !== undefined);
+  const trackedJobKey = trackedEntry ? `${trackedEntry.domain}:${trackedEntry.job}` : null;
   const resumedNote =
     busy === null &&
-    trackedDomain !== undefined &&
-    getInFlightJob(trackedDomain) !== undefined &&
-    trackedJob !== dismissedJob
+    trackedJobKey !== null &&
+    trackedJobKey !== dismissedJob
       ? "A previous action is still running; its progress resumes here."
       : null;
 
   async function run(id: string, pendingLabel: string, action: () => Promise<string>) {
-    setDismissedJob(trackedJob ?? null);
+    setDismissedJob(trackedJobKey);
     setBusy(id);
     setStatus(pendingLabel);
     try {
