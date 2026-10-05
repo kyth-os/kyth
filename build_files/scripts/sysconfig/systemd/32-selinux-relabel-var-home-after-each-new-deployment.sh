@@ -55,6 +55,7 @@ Before=shutdown.target
 
 [Service]
 Type=oneshot
+ExecStartPre=/usr/libexec/kyth-selinux-var-home-alias
 ExecStart=/usr/libexec/kyth-selinux-relabel-home
 RemainAfterExit=yes
 TimeoutStartSec=60
@@ -101,6 +102,7 @@ WantedBy=multi-user.target
 RELABELFULLEOF
 
 install -d -m 0755 /usr/libexec
+install -m 0755 ../kyth-selinux-var-home-alias /usr/libexec/kyth-selinux-var-home-alias
 # Both relabel helpers are native binaries (COPY layer); the retained shell
 # sources stay in the tree only as rollback fixtures.
 

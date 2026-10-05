@@ -75,6 +75,43 @@ class BootStabilityUnitTests(unittest.TestCase):
             )
             self.assertEqual(missing.returncode, 0, "absent policy file must not fail the build")
 
+    def test_persisted_var_home_alias_is_removed_before_login_relabel(self) -> None:
+        """The prior image's /etc overlay survives upgrades; remove its alias at boot."""
+        import os
+        import tempfile
+
+        helper = ROOT / "build_files/scripts/sysconfig/kyth-selinux-var-home-alias"
+        self.assertTrue(helper.is_file(), "install a runtime /var/home alias repair helper")
+        unit = SELINUX_UNIT.read_text(encoding="utf-8")
+        fast_unit = unit.split("RELABELEOF", 1)[1].split("RELABELEOF", 1)[0]
+        self.assertIn("ExecStartPre=/usr/libexec/kyth-selinux-var-home-alias", fast_unit)
+        self.assertLess(
+            fast_unit.index("ExecStartPre=/usr/libexec/kyth-selinux-var-home-alias"),
+            fast_unit.index("ExecStart=/usr/libexec/kyth-selinux-relabel-home"),
+        )
+        helper_source = (SELINUX_UNIT.parent / "../kyth-selinux-var-home-alias").resolve()
+        self.assertTrue(helper_source.is_file(), "the image fragment must stage the runtime helper")
+        self.assertIn(
+            "install -m 0755 ../kyth-selinux-var-home-alias /usr/libexec/kyth-selinux-var-home-alias",
+            unit,
+        )
+
+        original = "/var/home /home\n/var/home-backup /keep\n/var/roothome /root\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            subs = pathlib.Path(tmp) / "file_contexts.subs_dist"
+            subs.write_text(original, encoding="utf-8")
+            env = {**os.environ, "KYTH_SELINUX_SUBS_DIST": str(subs)}
+            for _ in range(2):
+                result = subprocess.run(
+                    ["bash", str(helper)], env=env, capture_output=True, text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                subs.read_text(encoding="utf-8"),
+                "/var/home-backup /keep\n/var/roothome /root\n",
+            )
+
     def test_selinux_home_relabel_is_capped_and_still_before_greeter(self) -> None:
         """The login-critical relabel must stay bounded and gate the greeter;
         the exhaustive full-tree pass must run separately, in the background,

@@ -1,0 +1,51 @@
+#!/bin/bash
+set -euo pipefail
+
+# /etc is persistent across bootc/OSTree deployments. The old SELinux-policy
+# alias may therefore survive in file_contexts.subs_dist even when the image
+# build removed it. This must run before restorecon and before the greeter.
+if [[ -n "${KYTH_SELINUX_SUBS_DIST:-}" ]]; then
+    subs_file="$KYTH_SELINUX_SUBS_DIST"
+else
+    selinux_type="targeted"
+    if [[ -r /etc/selinux/config ]]; then
+        while IFS='=' read -r key value; do
+            key="${key//[[:space:]]/}"
+            if [[ "$key" == SELINUXTYPE ]]; then
+                value="${value%%#*}"
+                value="${value//\"/}"
+                value="${value//\'/}"
+                value="${value//[[:space:]]/}"
+                if [[ ! "$value" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+                    printf '%s\n' 'kyth-selinux-var-home-alias: invalid SELINUXTYPE' >&2
+                    exit 1
+                fi
+                selinux_type="$value"
+                break
+            fi
+        done < /etc/selinux/config
+    fi
+    subs_file="/etc/selinux/${selinux_type}/contexts/files/file_contexts.subs_dist"
+fi
+
+if [[ ! -f "$subs_file" ]]; then
+    printf 'kyth-selinux-var-home-alias: %s not present; nothing to do\n' "$subs_file"
+    exit 0
+fi
+
+if ! grep -qE '^/var/home[[:space:]]' "$subs_file"; then
+    exit 0
+fi
+
+tmp="$(mktemp "${subs_file}.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+grep -vE '^/var/home[[:space:]]' "$subs_file" >"$tmp" || true
+chmod --reference="$subs_file" "$tmp"
+chown --reference="$subs_file" "$tmp"
+mv -f "$tmp" "$subs_file"
+trap - EXIT
+
+if grep -qE '^/var/home[[:space:]]' "$subs_file"; then
+    printf '%s\n' 'kyth-selinux-var-home-alias: failed to remove /var/home alias' >&2
+    exit 1
+fi

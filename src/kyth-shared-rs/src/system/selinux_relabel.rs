@@ -159,10 +159,19 @@ pub fn restorecon_forced(paths: &[String]) -> bool {
 }
 
 /// Login-critical home paths for one account, mirroring the script's fixed
-/// subdir list. Only existing paths are returned.
+/// subdir list. Includes KWallet's salt file because pam_kwallet5 reads it
+/// before the user session exists. Only existing paths are returned.
 pub fn login_paths(home: &Path) -> Vec<String> {
     let mut paths = vec![home.to_string_lossy().into_owned()];
-    for sub in [".cache", ".config", ".local", ".local/share", ".ssh"] {
+    for sub in [
+        ".cache",
+        ".config",
+        ".local",
+        ".local/share",
+        ".local/share/kwalletd",
+        ".local/share/kwalletd/kdewallet.salt",
+        ".ssh",
+    ] {
         let candidate = home.join(sub);
         if candidate.exists() {
             paths.push(candidate.to_string_lossy().into_owned());
@@ -293,6 +302,19 @@ mod tests {
         assert!(paths.iter().any(|path| path == &home.to_string_lossy()));
         assert!(paths.iter().any(|path| path.ends_with(".config")));
         assert!(!paths.iter().any(|path| path.ends_with("Documents")));
+    }
+
+    #[test]
+    fn login_paths_include_kwallet_pam_salt_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("alice");
+        let salt = home.join(".local/share/kwalletd/kdewallet.salt");
+        std::fs::create_dir_all(salt.parent().unwrap()).unwrap();
+        std::fs::write(&salt, "salt").unwrap();
+
+        let paths = login_paths(&home);
+        assert!(paths.contains(&home.join(".local/share/kwalletd").display().to_string()));
+        assert!(paths.contains(&salt.display().to_string()));
     }
 
     #[test]

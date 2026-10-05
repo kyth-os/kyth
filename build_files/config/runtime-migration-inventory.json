@@ -13349,6 +13349,36 @@
     },
     {
       "current_implementation": "shell",
+      "cutover": "replace installed kyth-selinux-var-home-alias entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/sysconfig/kyth-selinux-var-home-alias",
+          "ownership": "shell"
+        }
+      ],
+      "installed_implementation": "shell",
+      "migration_priority": 2,
+      "name": "kyth-selinux-var-home-alias",
+      "owner": "fixture::build_files/scripts/sysconfig/kyth-selinux-var-home-alias",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/sysconfig/kyth-selinux-var-home-alias",
+      "priority": 1,
+      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "resolved_target": "build_files/scripts/sysconfig/kyth-selinux-var-home-alias",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "privileged-writer",
+      "rollback": "restore previous installed kyth-selinux-var-home-alias entry point",
+      "runtime_active": true,
+      "runtime_authority": "shell-orchestration",
+      "runtime_scope": "system-service",
+      "status": "queued",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
       "cutover": "replace installed 16-wifi-disable-power-management.sh entry point after parity gates",
       "function_inventory": [
         {
