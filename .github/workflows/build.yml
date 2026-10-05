@@ -12,9 +12,11 @@ on:
   push:
     branches: [testing]
   workflow_run: # zizmor: ignore[dangerous-triggers]
+    # Testing has its own push-triggered build, already gated on Validation;
+    # matching testing here launches a duplicate container build.
     workflows: ["Validation"]
     types: [completed]
-    branches: [main, testing]
+    branches: [main]
 
 permissions:
   contents: read
