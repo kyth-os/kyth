@@ -94,6 +94,20 @@ class ReleaseChainingContracts(unittest.TestCase):
         # workflow_run build can never cancel the real F45 one.
         self.assertIn("github.event_name == 'push' && 'push-'", build)
 
+    def test_testing_validation_does_not_trigger_a_duplicate_container_build(self):
+        """The testing push build is already gated on its Validation run.
+
+        Letting that Validation success also match workflow_run starts a second
+        matrix build for the same testing SHA. Keep the default-branch latest
+        build on main, and let testing's push-triggered workflow own :testing.
+        """
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        on_block = build.split("\njobs:", 1)[0]
+        self.assertRegex(
+            on_block,
+            r"(?ms)^  workflow_run:.*?^    branches: \[main\]$",
+        )
+
     def test_every_testing_push_builds_with_testings_own_workflow(self):
         """workflow_run runs main's copy of build.yml, so testing pushes built F44.
 
