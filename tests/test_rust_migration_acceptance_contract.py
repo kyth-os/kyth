@@ -64,13 +64,33 @@ class RustMigrationAcceptanceContractTest(unittest.TestCase):
         self.assertNotIn("podman build", self.artifact_workflow)
         self.assertNotIn("Build ISO with Titanoboa", self.artifact_workflow)
 
+    def test_nightly_downloads_testing_iso_from_canonical_r2_url(self):
+        nightly_download = self.artifact_workflow.split(
+            "      - name: Download promoted testing ISO", 1
+        )[1].split("      - name: Verify promoted testing ISO", 1)[0]
+        self.assertIn('r2_download_url("kyth-live-testing.iso")', nightly_download)
+        self.assertIn("curl --fail --location", nightly_download)
+        self.assertIn("kyth-live-testing.iso-CHECKSUM", nightly_download)
+        self.assertNotIn("gh release download", nightly_download)
+
+    def test_nightly_checksum_is_checked_from_the_iso_directory(self):
+        verification = self.artifact_workflow.split(
+            "      - name: Verify promoted testing ISO", 1
+        )[1].split("      # A nonzero acceptance exit", 1)[0]
+        self.assertIn('cd "$(dirname "${iso}")"', verification)
+        self.assertIn(
+            'sha256sum --check --strict "$(basename "${iso}")-CHECKSUM"',
+            verification,
+        )
+
     def test_artifact_workflow_is_callable_and_runs_nightly(self):
         self.assertIn("workflow_call:", self.artifact_workflow)
         self.assertIn("schedule:", self.artifact_workflow)
         self.assertIn("cron:", self.artifact_workflow)
         # Nightly runs the promoted testing image, not a dispatch artifact.
         self.assertIn("ghcr.io/kyth-os/kyth:testing", self.artifact_workflow)
-        self.assertIn("iso-testing", self.artifact_workflow)
+        self.assertIn("r2_download_url", self.artifact_workflow)
+        self.assertIn("kyth-live-testing.iso", self.artifact_workflow)
         # The nightly run must fail on a nonzero acceptance exit: it gates
         # nothing, so silence would hide regressions.
         self.assertNotIn("continue-on-error", self.artifact_workflow)
