@@ -111,6 +111,28 @@ class ShippedCommandContracts(unittest.TestCase):
         self.assertIn("hub", keywords)
         self.assertNotIn("pulse", keywords)
 
+    def test_hub_runtime_window_icons_use_the_launcher_branding(self):
+        import hashlib
+        import json
+
+        tauri_dir = ROOT / "src/kyth-hub-web/src-tauri"
+        config = json.loads((tauri_dir / "tauri.conf.json").read_text(encoding="utf-8"))
+        expected_icons = {
+            "icons/32x32.png": "da17e2678a1be6e0c73ef2b2df83374d5361a94a2d8ac17668265edf19b1292d",
+            "icons/128x128.png": "f928da798928fc24282f6ee9f7e03d6551706093da05963e7c699c1f5c574cc9",
+            "icons/128x128@2x.png": "3799230a74b60a309ab7a75a7099a09214c915a8c1b352836bd3a3fdd47a182e",
+            "icons/icon.png": "ab0db7b8974e9d4f0b4dc2f867ed877ff5e4d805dc149870787161e630b6ff02",
+        }
+        self.assertEqual(set(config["bundle"]["icon"]), set(expected_icons))
+        for relative_path, expected_digest in expected_icons.items():
+            with self.subTest(icon=relative_path):
+                actual = hashlib.sha256((tauri_dir / relative_path).read_bytes()).hexdigest()
+                self.assertEqual(
+                    actual,
+                    expected_digest,
+                    "Hub's runtime window icon must match the Kyth launcher art",
+                )
+
     def test_hub_wayland_app_id_resolves_to_hidden_desktop_entry(self):
         import json
 
