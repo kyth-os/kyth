@@ -435,7 +435,8 @@ pub(crate) fn source_status_for(source_value: &str, target: &str) -> Value {
         return serde_json::json!({
             "available": true,
             "kind": "local",
-            "verified": !digest.is_empty(),
+            // SECURITY: Do not claim "verified" based on env presence alone.
+            "verified": false,
             "requires_network": false,
             "digest": digest,
             "target_ref": target,
@@ -446,7 +447,10 @@ pub(crate) fn source_status_for(source_value: &str, target: &str) -> Value {
     serde_json::json!({
         "available": true,
         "kind": "network",
-        "verified": !digest.is_empty(),
+        // SECURITY: Do not claim "verified" based on env presence alone.
+        // A real verification (registry digest fetch + signature check) is
+        // required before claiming verified:true.
+        "verified": false,
         "requires_network": true,
         "digest": digest,
         "target_ref": target,

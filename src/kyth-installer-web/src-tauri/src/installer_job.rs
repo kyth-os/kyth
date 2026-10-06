@@ -424,7 +424,20 @@ fn run_worker<E: PhaseExecutor>(shared: Arc<Shared<E>>, job_id: u64) {
         }
         shared.changed.notify_all();
 
-        let result = shared.executor.execute_phase(phase, &token);
+        // Catch panics from the executor: a panicking phase must not kill the
+        // worker thread and wedge the supervisor (worker_active stuck true,
+        // no terminal event). Route panics through finish_error instead.
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            shared.executor.execute_phase(phase, &token)
+        }))
+        .unwrap_or_else(|panic_payload| {
+            let msg = panic_payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| panic_payload.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_else(|| "executor panicked".to_string());
+            Err(format!("executor panicked during {phase:?}: {msg}"))
+        });
         if token.is_cancelled() {
             shared.executor.record_cancelled(Some(phase));
             finish_cancelled(&shared, job_id, Some(phase));

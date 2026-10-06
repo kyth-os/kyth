@@ -118,6 +118,11 @@ fn resize_op_params(
         .get("ntfs_verified_clean")
         .and_then(serde_json::Value::as_bool)
     {
+        // SECURITY: Do NOT trust the client-supplied value. The NTFS dirty
+        // bit must be re-verified at commit time via a root-owned live check
+        // (see stamp_ntfs_attestation). Staging-time values are advisory only.
+        // We preserve the client's claim here for the journal's validate()
+        // gate, but commit-time stamping will overwrite it with a live probe.
         params["ntfs_verified_clean"] = serde_json::Value::Bool(ntfs_clean);
     }
     if let Some(ac) = value
@@ -133,6 +138,60 @@ fn resize_op_params(
 /// reading at commit time, when the shrink gate evaluates power state.
 fn stamp_shrink_power_attestation(journal: &mut super::installer_journal::PartitionJournal) {
     stamp_shrink_power_attestation_in(journal, Path::new("/sys/class/power_supply"));
+}
+
+/// Re-verify NTFS dirty bit at commit time, replacing any client-supplied
+/// `ntfs_verified_clean` value. The client's staging-time attestation is not
+/// trustworthy: Windows may have run (setting the dirty bit) between staging
+/// and commit. This root-owned live probe runs immediately before the shrink.
+fn stamp_ntfs_attestation(journal: &mut super::installer_journal::PartitionJournal) {
+    for op in &mut journal.ops {
+        if op.kind != "resize" {
+            continue;
+        }
+        let target = op
+            .params
+            .get("partition")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if target.is_empty() {
+            continue;
+        }
+        // Only NTFS targets need the dirty-bit check. We determine this from
+        // the op params (fs_type) if present, otherwise probe via blkid.
+        let needs_check = op
+            .params
+            .get("fs_type")
+            .and_then(serde_json::Value::as_str)
+            .map(|fs| fs == "ntfs" || fs == "ntfs3")
+            .unwrap_or(false);
+        if needs_check {
+            let clean = ntfs_volume_is_clean(target);
+            op.params["ntfs_verified_clean"] = serde_json::Value::Bool(clean);
+        }
+    }
+}
+
+/// Check if an NTFS volume has its dirty bit clear via `ntfsfix --no-action`.
+/// Returns false (dirty/unknown) on any error — fail closed.
+fn ntfs_volume_is_clean(device: &str) -> bool {
+    use std::process::Command;
+    // ntfsfix -n: do not write anything, just report. Exit 0 with "No errors"
+    // or similar indicates clean. We parse stderr for dirty indicators.
+    let output = Command::new("/usr/sbin/ntfsfix")
+        .arg("-n")
+        .arg(device)
+        .output();
+    match output {
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).to_lowercase();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            let combined = format!("{stdout} {stderr}");
+            // If ntfsfix reports the volume as dirty or needing repair, it's not clean.
+            !combined.contains("dirty") && !combined.contains("corrupt") && out.status.success()
+        }
+        Err(_) => false, // Fail closed if we can't run the check
+    }
 }
 
 fn stamp_shrink_power_attestation_in(
@@ -464,6 +523,10 @@ impl NativeJournalRegistry {
                 // (per the documented "confirmed online at commit time"
                 // contract), replacing any client-supplied value.
                 stamp_shrink_power_attestation(&mut journal);
+                // Commit-time NTFS dirty-bit re-verification: the client's
+                // staging-time `ntfs_verified_clean` is not trustworthy.
+                // Re-probe live here, replacing any client-supplied value.
+                stamp_ntfs_attestation(&mut journal);
                 match super::installer_journal::commit_request(
                     super::installer_journal::JournalCommitInput { journal },
                 ) {

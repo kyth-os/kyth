@@ -100,8 +100,8 @@ pub fn validate(input: &CreateUserInput) -> Result<(PathBuf, PathBuf), String> {
                 .into(),
         );
     }
-    if input.password_hash.is_empty() || input.password_hash.contains(['\n', '\r', '\0']) {
-        return Err("password_hash must be a single non-empty line".into());
+    if input.password_hash.is_empty() || input.password_hash.contains(['\n', '\r', '\0', ':']) {
+        return Err("password_hash must be a single non-empty line without ':'".into());
     }
     Ok((deploy, target))
 }

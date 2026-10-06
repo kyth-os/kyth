@@ -1306,10 +1306,10 @@ fn execute_operation(
                 .map(|part| part.start_bytes)
                 .ok_or_else(|| format!("partition geometry for {target} is unavailable"))?;
             // A successful filesystem shrink cannot be undone by restoring
-            // the old partition table. Mark this before starting the shrink
-            // so a later resizepart failure also skips a harmful restore.
-            *irreversible = true;
+            // the old partition table. Mark irreversible only after the shrink
+            // succeeds, so a failed shrink (zero mutation) still allows rollback.
             shrink_filesystem(&target, &fs, new_size)?;
+            *irreversible = true;
             run_disk_operation(installer_disk::DiskOperationInput::ResizePartition {
                 disk: journal.disk.clone(),
                 part_num: number,
@@ -1330,15 +1330,19 @@ fn execute_operation(
                     && value_string(&item.params, "partition") == target
             });
             if !created_here {
-                // Formatting an existing filesystem is irreversible even if
-                // the utility exits non-zero after partially writing it.
-                *irreversible = true;
+                // Formatting an existing filesystem is irreversible only after
+                // the format actually runs. Set the flag after success so a
+                // failed format (zero mutation, e.g. unsupported fs_type)
+                // still allows partition-table rollback.
             }
             run_disk_operation(installer_disk::DiskOperationInput::FormatFilesystem {
                 device: target.clone(),
                 fs: value_string(params, "fs_type"),
                 label: value_string(params, "label"),
             })?;
+            if !created_here {
+                *irreversible = true;
+            }
             Ok(target)
         }
         "set_mountpoint" => {

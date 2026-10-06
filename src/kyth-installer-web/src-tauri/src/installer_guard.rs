@@ -21,9 +21,18 @@ pub(crate) fn acquire_disk_lock(disk: &str) -> Result<File, String> {
         .custom_flags(libc::O_CLOEXEC)
         .open(&disk)
         .map_err(|error| format!("could not lock {disk} for exclusive use: {error}"))?;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0
-        && std::env::var("KYTH_INSTALL_ALLOW_NO_DISK_LOCK").as_deref() != Ok("1")
-    {
+    let lock_failed = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0;
+    let bypass_allowed = std::env::var("KYTH_INSTALL_ALLOW_NO_DISK_LOCK").as_deref() == Ok("1");
+    if lock_failed && bypass_allowed {
+        // SECURITY: Loud warning when the disk-lock bypass engages. This is a
+        // dev escape hatch; if it ever leaks into production, destructive disk
+        // ops run without exclusive access.
+        eprintln!(
+            "WARNING: KYTH_INSTALL_ALLOW_NO_DISK_LOCK=1 bypassed exclusive disk lock for {disk}. \
+             Destructive operations will proceed without protection against concurrent access."
+        );
+    }
+    if lock_failed && !bypass_allowed {
         return Err(format!(
             "another process is using {disk}; close other installers and retry"
         ));

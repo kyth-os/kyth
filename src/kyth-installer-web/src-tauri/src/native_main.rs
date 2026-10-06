@@ -266,15 +266,12 @@ fn connection_args() -> ConnectionArgs {
     let args = std::env::args().collect::<Vec<_>>();
     ConnectionArgs {
         socket_path: arg_value(&args, "--socket-path"),
-        session_token: arg_value(&args, "--session-token")
-            .filter(|value| !value.is_empty())
-            .or_else(|| std::env::var("KYTH_INSTALLER_SESSION_TOKEN").ok())
-            .filter(|value| !value.is_empty())
-            .or_else(|| {
-                arg_value(&args, "--tokens-file").and_then(|path| {
-                    let (_, session) = load_tokens_file(&path);
-                    (!session.is_empty()).then_some(session)
-                })
+        // SECURITY: Token only from --tokens-file (0600). Argv/env tokens
+        // would be visible via /proc/<pid>/cmdline and /proc/<pid>/environ.
+        session_token: arg_value(&args, "--tokens-file")
+            .and_then(|path| {
+                let (_, session) = load_tokens_file(&path);
+                (!session.is_empty()).then_some(session)
             })
             .unwrap_or_default(),
     }

@@ -434,14 +434,13 @@ fn main() {
         .unwrap_or_default();
     let tokens = InstallerConnection {
         base_url: BACKEND_URL.to_string(),
-        bootstrap_token: arg_value(&argv, "--bootstrap-token")
-            .filter(|value| !value.is_empty())
-            .unwrap_or(file_tokens.0),
-        session_token: arg_value(&argv, "--session-token")
-            .filter(|value| !value.is_empty())
-            .or_else(|| std::env::var("KYTH_INSTALLER_SESSION_TOKEN").ok())
-            .filter(|value| !value.is_empty())
-            .unwrap_or(file_tokens.1),
+        // SECURITY: Tokens are only loaded from --tokens-file (0600).
+        // Passing tokens via argv (--bootstrap-token/--session-token) or env
+        // (KYTH_INSTALLER_SESSION_TOKEN) is not supported: they would be
+        // visible to other local users via /proc/<pid>/cmdline and
+        // /proc/<pid>/environ.
+        bootstrap_token: file_tokens.0,
+        session_token: file_tokens.1,
         socket_path: arg_value(&argv, "--socket-path"),
         transport: if argv.iter().any(|arg| arg == "--socket-path") {
             "unix".to_string()
