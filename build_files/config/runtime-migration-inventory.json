@@ -12372,7 +12372,7 @@
       "cutover": "replace installed kyth-kwallet-pam-ensure entry point after parity gates",
       "function_inventory": [
         {
-          "name": "__main__",
+          "name": "END",
           "owner": "fixture::build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
           "ownership": "shell"
         }

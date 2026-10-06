@@ -112,6 +112,75 @@ class BootStabilityUnitTests(unittest.TestCase):
                 "/var/home-backup /keep\n/var/roothome /root\n",
             )
 
+    def test_kwallet_pam_bridge_does_not_duplicate_dash_prefixed_rules(self) -> None:
+        """PAM's leading '-' suppresses missing-module logging; it does not disable the rule."""
+        import os
+        import tempfile
+
+        helper = ROOT / "build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure"
+        source = helper.read_text(encoding="utf-8")
+        live_paths = "for PAM_FILE in /etc/pam.d/plasmalogin /usr/lib/pam.d/plasmalogin; do"
+        self.assertIn(live_paths, source)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            pam_file = root / "plasmalogin"
+            pam_file.write_text(
+                "#%PAM-1.0\n-auth optional pam_kwallet5.so\n"
+                "-auth optional pam_oo7.so\n"
+                "-session optional pam_kwallet5.so auto_start\n"
+                "auth     optional     pam_kwallet5.so\n"
+                "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel\n"
+                "session  optional     pam_kwallet5.so auto_start\n",
+                encoding="utf-8",
+            )
+            isolated_helper = root / "ensure-pam"
+            isolated_helper.write_text(
+                source.replace(live_paths, f"for PAM_FILE in {pam_file}; do"),
+                encoding="utf-8",
+            )
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            rpm_stub = bin_dir / "rpm"
+            rpm_stub.write_text(
+                "#!/bin/sh\nprintf '%s\\n' /usr/lib64/security/pam_kwallet5.so\n",
+                encoding="utf-8",
+            )
+            rpm_stub.chmod(0o755)
+            env = {**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin"}
+
+            for _ in range(2):
+                result = subprocess.run(
+                    ["bash", str(isolated_helper)], env=env, capture_output=True,
+                    text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+            lines = pam_file.read_text(encoding="utf-8").splitlines()
+            active_auth = [
+                line for line in lines
+                if re.match(r"^\s*-?auth\s+.*pam_kwallet5\.so(?:\s|$)", line)
+            ]
+            active_session = [
+                (index, line) for index, line in enumerate(lines)
+                if re.match(r"^\s*-?session\s+.*pam_kwallet5\.so.*auto_start", line)
+            ]
+            self.assertEqual(active_auth, ["-auth optional pam_kwallet5.so"])
+            self.assertEqual(len(active_session), 1)
+            index, _ = active_session[0]
+            self.assertEqual(lines[index - 1], "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel")
+            self.assertEqual(sum("kyth-kwallet-relabel" in line for line in lines), 1)
+            self.assertEqual(
+                sum("pam_oo7.so" in line and not line.lstrip().startswith("#") for line in lines),
+                0,
+            )
+
+        build_fragment = (
+            ROOT / "build_files/scripts/sysconfig/desktop/26-kwallet-pam-bridge-wire-pam-kwallet5-so-into-the-s.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("^[[:space:]]*-?(auth|session)", build_fragment)
+        self.assertIn("$0 ~ /^[[:space:]]*-?session[[:space:]]/", build_fragment)
+
     def test_selinux_home_relabel_is_capped_and_still_before_greeter(self) -> None:
         """The login-critical relabel must stay bounded and gate the greeter;
         the exhaustive full-tree pass must run separately, in the background,
