@@ -22,7 +22,7 @@ ARG BASE_IMAGE=localhost/kyth-base:stable
 # *dev* context that ignores frontendDist and points the webview at devUrl,
 # and the plain `cargo build --release` below has no way to opt in the way
 # `tauri build` does. See that Cargo.toml's [features] comment.
-FROM registry.fedoraproject.org/fedora:45@sha256:de146563f829c68464c9ed1b2c621d08f04ab2debf7a4aa7402f925960695390 AS hub-web-builder
+FROM registry.fedoraproject.org/fedora:45@sha256:cc55518dc3593184519ae4184a814a26d6405b42713762d57353659fd7105445 AS hub-web-builder
 RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
         cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \
         webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel gtk3-devel dbus-devel && \
