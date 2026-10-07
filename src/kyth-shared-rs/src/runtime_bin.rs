@@ -82,23 +82,43 @@ fn refresh_marker_path(operation: &str, home: Option<&std::ffi::OsStr>) -> PathB
 /// True when any user has a *live* running-game hint (`hint-<uid>`) in `dir`.
 /// The hint file holds the launcher PID (`kyth-game-launch` execs the game, so
 /// the PID stays valid for the whole session and dies with it); a hint whose
-/// PID is gone is stale and ignored. Unparseable content counts as active —
-/// fail toward gaming mode — and `/run` is tmpfs, so legacy constant-content
-/// hints cannot survive a reboot anyway.
+/// PID is gone is stale and ignored. Unparseable or unreadable content counts
+/// as inactive (fail closed): the old "fail toward gaming mode" let any user
+/// force gaming tunables system-wide with `echo 1 > hint-<uid>`. The hint PID
+/// must also belong to the hint file's owner: parse the `Uid:` line from
+/// `/proc/<pid>/status` and require it to match the expected UID derived
+/// from the `hint-<uid>` filename.
 fn gaming_hint_active(dir: &Path) -> bool {
     fs::read_dir(dir).is_ok_and(|entries| {
         entries.flatten().any(|entry| {
-            if !entry.file_name().to_string_lossy().starts_with("hint-") {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some(uid_str) = name.strip_prefix("hint-") else {
                 return false;
-            }
+            };
+            let Ok(expected_uid): Result<u32, _> = uid_str.parse() else {
+                return false;
+            };
             let pid: u32 = match fs::read_to_string(entry.path()) {
                 Ok(contents) => match contents.trim().parse() {
                     Ok(pid) => pid,
-                    Err(_) => return true,
+                    Err(_) => return false,
                 },
-                Err(_) => return true,
+                Err(_) => return false,
             };
-            Path::new(&format!("/proc/{pid}")).exists()
+            // Bind the PID to the hint owner's UID: read /proc/<pid>/status
+            // and require the real UID to match the hint filename's UID.
+            // PID 1 (or any other user's process) can no longer spoof a hint.
+            let status = match fs::read_to_string(format!("/proc/{pid}/status")) {
+                Ok(s) => s,
+                Err(_) => return false,
+            };
+            let uid_matches = status.lines().any(|line| {
+                line.strip_prefix("Uid:")
+                    .and_then(|rest| rest.split_whitespace().next())
+                    .and_then(|uid| uid.parse::<u32>().ok())
+                    .is_some_and(|uid| uid == expected_uid)
+            });
+            uid_matches && Path::new(&format!("/proc/{pid}")).exists()
         })
     })
 }

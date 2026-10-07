@@ -35,9 +35,9 @@ build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0
         echo "Verifying base image signature with cosign..."
         cosign verify \
             --certificate-oidc-issuer=https://token.actions.githubusercontent.com \
-            --certificate-identity-regexp='^https://github\.com/ublue-os/main/' \
+            --certificate-identity-regexp='^https://github\.com/fedora[^/]*/' \
             {{ base_image }} \
-            || echo "WARNING: cosign verification failed — proceeding without signature check."
+            || { echo "ERROR: base image signature verification failed" >&2; exit 1; }
     else
         echo "WARNING: cosign not found — skipping signature verification."
     fi

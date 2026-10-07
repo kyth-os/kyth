@@ -59,6 +59,33 @@ fn is_complete_install(install_dir: &Path, folder: &str, ver: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// Parse a `GE-Proton<major>-<minor>` tag into (major, minor). Returns None
+/// if the format does not match.
+fn parse_ge_proton_version(ver: &str) -> Option<(u32, u32)> {
+    let rest = ver.strip_prefix("GE-Proton")?;
+    let (major, minor) = rest.split_once('-')?;
+    Some((major.parse().ok()?, minor.parse().ok()?))
+}
+
+/// Find the currently installed GE-Proton version by scanning for a
+/// version-stamped completion marker. Returns None if nothing is installed.
+fn installed_ge_proton_version(install_dir: &Path) -> Option<String> {
+    let entries = std::fs::read_dir(install_dir).ok()?;
+    for entry in entries.flatten() {
+        let folder = entry.file_name().to_string_lossy().into_owned();
+        if !folder.starts_with("GE-Proton") {
+            continue;
+        }
+        if let Ok(marker) = std::fs::read_to_string(entry.path().join(".kyth-complete")) {
+            let ver = marker.trim().to_string();
+            if !ver.is_empty() {
+                return Some(ver);
+            }
+        }
+    }
+    None
+}
+
 /// Merge the installed Proton version into /var/lib/kyth/gaming-versions.json
 /// so gaming_versions() resolves at runtime. Best-effort: a failure here
 /// must not fail the install.
@@ -116,6 +143,34 @@ fn main() -> std::process::ExitCode {
     }
     if validate_version(ver, VERSION_PATTERN, "GE-Proton").is_err() {
         fail(format!("Unexpected GE-Proton version format: {ver}"), None);
+    }
+    // Version-jump detection (log-and-hold): the checksum sidecar comes from
+    // the same release as the tarball, so it only proves transport integrity.
+    // A compromised upstream release (or a moved `latest` pointer) ships a
+    // matching checksum for a trojaned Proton. Refuse downgrades and hold on
+    // suspicious jumps until a human clears the hold.
+    if let Some(installed) = installed_ge_proton_version(&install_dir) {
+        if let (Some((new_major, new_minor)), Some((old_major, old_minor))) = (
+            parse_ge_proton_version(ver),
+            parse_ge_proton_version(&installed),
+        ) {
+            if (new_major, new_minor) < (old_major, old_minor) {
+                fail(
+                    format!(
+                        "GE-Proton version {ver} is older than installed {installed} — refusing downgrade (possible release-pointer attack). Clear manually if intentional."
+                    ),
+                    None,
+                );
+            }
+            let major_jump = new_major.saturating_sub(old_major);
+            let minor_jump = new_minor.saturating_sub(old_minor);
+            if major_jump > 1 || (major_jump == 0 && minor_jump > 5) {
+                eprintln!(
+                    "WARNING: GE-Proton version jump {installed} -> {ver} looks suspicious — holding update for manual review."
+                );
+                return std::process::ExitCode::SUCCESS;
+            }
+        }
     }
     let assets = release_assets(&release);
     let tarball = find_release_asset(&assets, |name| name.ends_with("x86_64.tar.gz"));

@@ -76,8 +76,31 @@ fn mark_gaming_hint() {
     // the entire session. The old constant content could only be removed on
     // the exec-failure path, leaking the hint — and the gaming tunables —
     // until reboot after every successful launch.
-    if std::fs::write(gaming_hint_path(), std::process::id().to_string()).is_err() {
-        return;
+    //
+    // O_NOFOLLOW|O_CREAT|O_EXCL: /run/kyth-gaming is 1777, so another user
+    // could pre-plant a symlink at our hint path; plain fs::write would have
+    // followed it (arbitrary file truncate). Fail closed on any pre-existing
+    // path instead.
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = gaming_hint_path();
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&path)
+        {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        use std::io::Write;
+        if file
+            .write_all(std::process::id().to_string().as_bytes())
+            .is_err()
+        {
+            return;
+        }
     }
     if on_path("kyth-readahead-hint") {
         let _ = run_bounded(

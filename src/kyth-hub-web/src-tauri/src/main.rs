@@ -1877,7 +1877,30 @@ fn exe_handler_untrust(sha256: String) -> Result<(), String> {
 #[tauri::command]
 fn exe_handler_launch_umu(path: String) -> Result<(), String> {
     let path = regular_handler_path(&path)?;
-    kyth_shared::system::windows_installer::launch_in_umu(&path)
+    // Gate on the trust store: only exes explicitly trusted for the umu
+    // runner may launch directly. Anything else must go through the dialog.
+    let file = open_nofollow_umu(&path).ok_or("could not open file")?;
+    let digest =
+        kyth_shared::system::exe_trust::full_sha256_file(&file).ok_or("could not hash file")?;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or("no home")?;
+    match kyth_shared::system::exe_trust::trusted_runner(&home, &digest).as_deref() {
+        Some(kyth_shared::system::exe_trust::RUNNER_UMU) => {
+            kyth_shared::system::windows_installer::launch_in_umu(&path)
+        }
+        _ => Err("not trusted for direct launch; use the dialog".into()),
+    }
+}
+
+/// Open a file with O_NOFOLLOW for the umu launch path: a symlink swapped in
+/// after `regular_handler_path`'s checks fails the open instead of redirecting it.
+fn open_nofollow_umu(path: &Path) -> Option<std::fs::File> {
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .ok()
 }
 
 /// First-boot app status for the Play checklist: whether the background

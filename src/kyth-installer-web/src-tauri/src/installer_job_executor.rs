@@ -1460,12 +1460,40 @@ impl NativePhaseExecutor {
         &self,
         phase: Phase,
         cancellation: &CancellationToken,
-        target: &str,
+        _target: &str,
     ) -> Result<(), NativePhaseError> {
         let _disk_lock = crate::installer_guard::acquire_disk_lock(&self.storage_plan.disk)
             .map_err(|message| NativePhaseError::Execution { phase, message })?;
         crate::installer_guard::validate_target_disk(&self.storage_plan.disk)
             .map_err(|message| NativePhaseError::Execution { phase, message })?;
+        // Re-validate the target partition against a fresh snapshot AFTER the
+        // lock is held: the `target` device name came from a pre-lock snapshot,
+        // and a non-cooperating process in the live session could have changed
+        // what that device name refers to in the gap. Format the re-probed name.
+        let target = {
+            let requested = self
+                .storage_plan
+                .target_partition
+                .as_deref()
+                .ok_or_else(|| NativePhaseError::Execution {
+                    phase,
+                    message: "filesystem install has no target partition".to_string(),
+                })?;
+            let role = if self.storage_plan.mode == "manual" {
+                "root partition"
+            } else {
+                "target partition"
+            };
+            let snapshot = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+            crate::installer_storage::validate_replace_target(
+                &snapshot,
+                &self.storage_plan.disk,
+                requested,
+                role,
+            )
+            .map_err(|message| NativePhaseError::Execution { phase, message })?
+            .name
+        };
         self.execute_disk_helper(
             phase,
             cancellation,

@@ -167,6 +167,12 @@ fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
     let executable = argv
         .first()
         .ok_or_else(|| format!("{description} plan was empty"))?;
+    // Pin well-known binaries to absolute paths: never resolve a root command
+    // through an inherited PATH.
+    let executable = match executable.as_str() {
+        "bootc" => "/usr/bin/bootc".to_string(),
+        other => other.to_string(),
+    };
     let mut command = Command::new(executable);
     command.args(&argv[1..]).stdin(Stdio::inherit());
     unsafe {
@@ -372,6 +378,10 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     let executable = argv
         .first()
         .ok_or_else(|| format!("{operation} plan was empty"))?;
+    let executable = match executable.as_str() {
+        "bootc" => "/usr/bin/bootc".to_string(),
+        other => other.to_string(),
+    };
     // All executable paths come from the fixed Rust operation plan.
     let mut command = Command::new(executable);
     command.args(&argv[1..]);

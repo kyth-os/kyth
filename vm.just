@@ -41,11 +41,8 @@ _run-vm $target_image $tag $type:
 
     run_args=()
     run_args+=(--rm --privileged)
-    if [[ "$type" == live-iso ]]; then
-        run_args+=(--pull missing)
-    else
-        run_args+=(--pull=newer)
-    fi
+    # Pinned digest; --pull missing avoids silently adopting a poisoned tag.
+    run_args+=(--pull missing)
     run_args+=(--publish "127.0.0.1:${port}:8006")
     run_args+=(--env "CPU_CORES=4")
     run_args+=(--env "RAM_SIZE=8G")
@@ -56,7 +53,7 @@ _run-vm $target_image $tag $type:
     run_args+=(--env "GPU=Y")
     run_args+=(--device=/dev/kvm)
     run_args+=(--volume "${PWD}/${image_file}":"/boot.${boot_target}")
-    run_args+=(docker.io/qemux/qemu)
+    run_args+=(docker.io/qemux/qemu@sha256:e7f6fda52503a546fd649670ba46e4bc23dc6dcef275bc3fac48877fbbc430df)
 
     (sleep 30 && xdg-open http://localhost:"$port") &
     docker run "${run_args[@]}"

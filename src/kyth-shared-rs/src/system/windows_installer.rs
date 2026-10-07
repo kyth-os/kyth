@@ -391,17 +391,17 @@ pub fn flatpak_install_commands() -> [Vec<String>; 2] {
 /// natively double-clicked game: detached stdio, no pipe to drain, and the
 /// caller does not wait.
 pub fn umu_available() -> bool {
+    // Pinned absolute path only: a PATH lookup could resolve to a
+    // user-writable early PATH dir (e.g. ~/.local/bin), letting malware plant
+    // a fake umu-run that executes with the trusted game exe as its argument.
     Path::new("/usr/bin/umu-run").is_file()
-        || std::env::var_os("PATH")
-            .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("umu-run").is_file()))
-            .unwrap_or(false)
 }
 
 pub fn launch_in_umu(exe: &Path) -> Result<(), String> {
     if !umu_available() {
         return Err("umu-run is not installed".to_string());
     }
-    Command::new("umu-run")
+    Command::new("/usr/bin/umu-run")
         .arg(exe)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
