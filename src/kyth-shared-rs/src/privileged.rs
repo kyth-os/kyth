@@ -458,6 +458,15 @@ fn peer_allowed(stream: &UnixStream) -> Result<(u32, u32, u32), String> {
     if !supplementary {
         return Err("caller is not root or a wheel member".to_string());
     }
+    // The pid above came from SO_PEERCRED, but the peer may have exited and
+    // its pid recycled between the getsockopt and the /proc read, in which
+    // case the group check evaluated the wrong process. Re-read the peer
+    // credentials and require the pid to be unchanged: an attacker would now
+    // have to win the race twice with the same recycled pid.
+    let (pid_after, _, _) = peer_credentials(stream).map_err(|error| error.to_string())?;
+    if pid_after != pid {
+        return Err("peer changed during authorization; retry the request".to_string());
+    }
     Ok((pid, uid, gid))
 }
 

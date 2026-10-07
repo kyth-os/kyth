@@ -1295,6 +1295,15 @@ fn execute_operation(
         "resize" => {
             let number = part_num(&target, &before)?;
             let new_size = value_u64(params, "new_size_bytes", 0);
+            // Independent of the validate pass: a missing or zero resize
+            // target is a data-destruction primitive. The execute path must
+            // not trust that validation ran (e.g. journals handed directly
+            // to the exec binary). Reject here, unconditionally.
+            if new_size == 0 {
+                return Err(format!(
+                    "refusing resize of {target}: new_size_bytes is missing or zero"
+                ));
+            }
             // Earlier journal operations may have reformatted this partition.
             // Probe the live filesystem immediately before resizing instead
             // of using the pre-commit snapshot's stale filesystem type.

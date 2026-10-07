@@ -159,16 +159,42 @@ fn stamp_ntfs_attestation(journal: &mut super::installer_journal::PartitionJourn
         }
         // Only NTFS targets need the dirty-bit check. We determine this from
         // the op params (fs_type) if present, otherwise probe via blkid.
-        let needs_check = op
-            .params
-            .get("fs_type")
-            .and_then(serde_json::Value::as_str)
-            .map(|fs| fs == "ntfs" || fs == "ntfs3")
-            .unwrap_or(false);
+        // Fail closed: if fs_type is absent and blkid cannot positively
+        // identify a non-NTFS filesystem, run the check.
+        let fs_type = op.params.get("fs_type").and_then(serde_json::Value::as_str);
+        let needs_check = match fs_type {
+            Some(fs) => fs == "ntfs" || fs == "ntfs3",
+            None => probe_fs_type_is_ntfs(target),
+        };
         if needs_check {
             let clean = ntfs_volume_is_clean(target);
             op.params["ntfs_verified_clean"] = serde_json::Value::Bool(clean);
         }
+    }
+}
+
+/// Probe the live filesystem type of a device via blkid.
+/// Returns true if the device is NTFS or its type cannot be determined
+/// (fail closed). Returns false only when blkid positively identifies a
+/// non-NTFS filesystem.
+fn probe_fs_type_is_ntfs(device: &str) -> bool {
+    use std::process::Command;
+    let output = Command::new("/usr/sbin/blkid")
+        .arg("-o")
+        .arg("value")
+        .arg("-s")
+        .arg("TYPE")
+        .arg(device)
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            let fs = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+            // Empty output (no filesystem detected) is not proof of non-NTFS;
+            // stay conservative and run the check.
+            fs.is_empty() || fs == "ntfs" || fs == "ntfs3"
+        }
+        // blkid missing or failed: fail closed, assume NTFS and check it.
+        _ => true,
     }
 }
 

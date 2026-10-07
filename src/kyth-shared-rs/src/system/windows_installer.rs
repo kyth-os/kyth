@@ -215,7 +215,12 @@ pub fn inspect_installer(
     path: impl AsRef<Path>,
 ) -> Result<InstallerRequest, InstallerInspectionError> {
     let path = path.as_ref();
-    if path.is_symlink() || !path.is_file() {
+    // `/proc/self/fd/N` names an already-open descriptor (kyth-exe-handler's
+    // TOCTOU fix opens with O_NOFOLLOW and hashes the descriptor): the
+    // symlink is ours, not attacker input, so the symlink rejection below
+    // does not apply to it.
+    let is_proc_fd = path.starts_with("/proc/self/fd");
+    if (!is_proc_fd && path.is_symlink()) || !path.is_file() {
         return Err(invalid(
             "Choose a regular, non-symbolic-link installer file.",
         ));

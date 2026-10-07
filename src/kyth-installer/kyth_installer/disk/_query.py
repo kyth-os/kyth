@@ -60,7 +60,21 @@ def list_disks():
             file=sys.stderr,
         )
         return []
-    protected = _disk._protected_install_disks(tree=tree, running_disk=running_disk)
+    protected: set[str]
+    try:
+        protected = _disk._protected_install_disks(tree=tree, running_disk=running_disk)
+    except _disk.LiveUsbProbeFailed as exc:
+        # Fail closed: the live boot media is mounted but its disk could not
+        # be resolved, so the protected set may be missing the USB the
+        # installer booted from. Offer nothing rather than an unprotected
+        # list; callers surface "Invalid disk."
+        _logger.warning("disk scan refused: %s", exc)
+        print(
+            "disk scan failed: could not identify the live boot media. "
+            "No storage changes were made.",
+            file=sys.stderr,
+        )
+        return []
     current_disk = _disk._parent_disk(running_disk, tree=tree)
     disks = []
     try:

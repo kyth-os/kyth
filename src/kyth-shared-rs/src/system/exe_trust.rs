@@ -25,21 +25,30 @@ fn config_home() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("/"))
 }
 
-/// Full SHA-256 of a file, streamed so multi-GB installers never load
-/// fully into memory.
-pub fn full_sha256(path: &Path) -> Option<String> {
+/// Full SHA-256 of an already-open file, streamed so multi-GB installers
+/// never load fully into memory. Hashing the open descriptor (rather than
+/// re-opening by path) is what lets callers prove the hashed bytes are the
+/// bytes they subsequently execute: the descriptor cannot be redirected by
+/// a path swap between hash and exec.
+pub fn full_sha256_file(file: &std::fs::File) -> Option<String> {
     use std::io::Read;
-    let mut file = std::fs::File::open(path).ok()?;
+    let mut reader = file;
     let mut hasher = Sha256::new();
     let mut buf = [0u8; 65536];
     loop {
-        match file.read(&mut buf) {
+        match reader.read(&mut buf) {
             Ok(0) => break,
             Ok(n) => hasher.update(&buf[..n]),
             Err(_) => return None,
         }
     }
     Some(format!("{:x}", hasher.finalize()))
+}
+
+/// Full SHA-256 of a file by path, streamed so multi-GB installers never load
+/// fully into memory.
+pub fn full_sha256(path: &Path) -> Option<String> {
+    full_sha256_file(&std::fs::File::open(path).ok()?)
 }
 
 fn load_trust(home: &Path) -> BTreeMap<String, Value> {

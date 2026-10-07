@@ -22,7 +22,15 @@ pub(crate) fn acquire_disk_lock(disk: &str) -> Result<File, String> {
         .open(&disk)
         .map_err(|error| format!("could not lock {disk} for exclusive use: {error}"))?;
     let lock_failed = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0;
+    // Dev-only escape hatch: in debug builds, KYTH_INSTALL_ALLOW_NO_DISK_LOCK=1
+    // skips the exclusive disk lock. Release builds ignore the env var
+    // entirely — a failed flock is always an error there, so a leaked
+    // developer shell or ambient environment can never silently disable
+    // exclusive disk access during destructive operations.
+    #[cfg(debug_assertions)]
     let bypass_allowed = std::env::var("KYTH_INSTALL_ALLOW_NO_DISK_LOCK").as_deref() == Ok("1");
+    #[cfg(not(debug_assertions))]
+    let bypass_allowed = false;
     if lock_failed && bypass_allowed {
         // SECURITY: Loud warning when the disk-lock bypass engages. This is a
         // dev escape hatch; if it ever leaks into production, destructive disk

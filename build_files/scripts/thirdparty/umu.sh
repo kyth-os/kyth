@@ -15,8 +15,7 @@ install_umu() {
 		) || true
 		if [[ -z "${UMU_URL}" ]]; then
 			UMU_URL=$(
-				grep -oP 'https://[^"]+/releases/download/[^"]+\.tar(\.(gz|zst))?' "${release_json}" |
-					grep -iv 'source\|src' |
+				grep -oP 'https://[^"]+/releases/download/[^"]*umu-launcher-[^"]*x86_64[^"]*\.tar(\.(gz|zst))?' "${release_json}" |
 					head -n1
 			) || true
 		fi
