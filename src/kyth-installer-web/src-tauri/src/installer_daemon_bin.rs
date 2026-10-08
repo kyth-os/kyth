@@ -6,6 +6,7 @@ mod installer_bootc;
 mod installer_configuration;
 mod installer_daemon;
 mod installer_disk;
+mod installer_durable_journal;
 mod installer_executor;
 mod installer_guard;
 mod installer_job;

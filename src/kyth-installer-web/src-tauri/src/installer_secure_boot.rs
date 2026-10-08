@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use zeroize::Zeroizing;
 
 const MOKUTIL: &str = "/usr/bin/mokutil";
 const CERTIFICATE: &str = "/usr/share/kyth/secureboot/kyth-secureboot.der";
@@ -283,8 +284,13 @@ pub(crate) fn stage_with_cancellation(
     if plan.action != "import-certificate" {
         return Ok(plan);
     }
-    validate_stage_password(&input.password)?;
-    match stage_certificate(&input.password, cancel_requested)? {
+    // The password lives in a Zeroizing wrapper from here on: the heap
+    // allocation is overwritten when it drops, so the secret does not
+    // linger in freed memory after staging (or after a validation
+    // failure). The executor-side copy is wrapped by the other worker.
+    let password = Zeroizing::new(input.password);
+    validate_stage_password(&password)?;
+    match stage_certificate(&password, cancel_requested)? {
         "staged" => Ok(SecureBootPlan {
             state: "staged".to_string(),
             action: "import-certificate".to_string(),

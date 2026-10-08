@@ -25,6 +25,16 @@ pub struct InstallerPlanInput {
     pub free_region_start: i64,
     #[serde(default)]
     pub free_region_end: i64,
+    /// Disk identity captured at selection time (lsblk MODEL/SERIAL/SIZE).
+    /// Populated by the executor, never trusted from the client; consumed by
+    /// `verify_disk_identity` to confirm the selected disk is the disk being
+    /// installed to.
+    #[serde(default)]
+    pub target_disk_serial: Option<String>,
+    #[serde(default)]
+    pub target_disk_model: Option<String>,
+    #[serde(default)]
+    pub target_disk_size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -36,6 +46,15 @@ pub struct InstallerPlan {
     pub resize_bytes: u64,
     pub free_region_start: Option<u64>,
     pub free_region_end: Option<u64>,
+    /// NTFS partition size in bytes recorded before a guided shrink, so a
+    /// retried install can detect an already-completed shrink instead of
+    /// shrinking twice. Set by the executor at request time (before any
+    /// destructive step), not by plan validation.
+    pub pre_shrink_bytes: Option<u64>,
+    /// Disk identity captured at selection time; see `InstallerPlanInput`.
+    pub target_disk_serial: Option<String>,
+    pub target_disk_model: Option<String>,
+    pub target_disk_size_bytes: Option<u64>,
 }
 
 pub(crate) fn normalize_device_path(raw: &str) -> Option<String> {
@@ -150,6 +169,12 @@ pub fn build_plan(input: InstallerPlanInput) -> Result<InstallerPlan, String> {
         resize_bytes,
         free_region_start,
         free_region_end,
+        // Recorded by the executor before any destructive step; plan
+        // validation itself never probes live disks.
+        pre_shrink_bytes: None,
+        target_disk_serial: input.target_disk_serial,
+        target_disk_model: input.target_disk_model,
+        target_disk_size_bytes: input.target_disk_size_bytes,
     })
 }
 
@@ -167,6 +192,9 @@ mod tests {
             resize_gib: 0,
             free_region_start: 0,
             free_region_end: 0,
+            target_disk_serial: None,
+            target_disk_model: None,
+            target_disk_size_bytes: None,
         }
     }
 

@@ -84,6 +84,11 @@ pub(crate) enum JobEventKind {
     Done {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         mok_state: Option<String>,
+        /// True when the user must explicitly confirm the pending MOK
+        /// enrollment before rebooting (MOK staged or already pending).
+        /// Frontends gate the reboot button on this.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        requires_reboot_confirmation: Option<bool>,
     },
     Error {
         message: String,
@@ -466,13 +471,25 @@ fn run_worker<E: PhaseExecutor>(shared: Arc<Shared<E>>, job_id: u64) {
         return;
     }
     let mok_state = shared.executor.success_mok_state();
+    // Wire the Secure Boot plan's `requires_reboot_confirmation` through to
+    // the done event: "staged" and "pending" are exactly the MOK states
+    // whose plan requires explicit reboot confirmation, so the frontends
+    // can gate reboot on enrollment acknowledgement.
+    let requires_reboot_confirmation =
+        matches!(mok_state.as_deref(), Some("staged") | Some("pending"));
     state.runtime.lifecycle = Lifecycle::Done;
     state.runtime.phase = Phase::Complete;
     state.runtime.cancel_requested = false;
     state.cancellation = None;
     state.worker_active = false;
     state.worker_id = None;
-    state.terminal_event_id = Some(append_event(&mut state, JobEventKind::Done { mok_state }));
+    state.terminal_event_id = Some(append_event(
+        &mut state,
+        JobEventKind::Done {
+            mok_state,
+            requires_reboot_confirmation: requires_reboot_confirmation.then_some(true),
+        },
+    ));
     shared.changed.notify_all();
 }
 
@@ -660,7 +677,10 @@ mod tests {
             .unwrap();
         assert_eq!(
             replay.events.last().unwrap().kind,
-            JobEventKind::Done { mok_state: None }
+            JobEventKind::Done {
+                mok_state: None,
+                requires_reboot_confirmation: None,
+            }
         );
     }
 
@@ -676,12 +696,14 @@ mod tests {
         assert_eq!(
             event.kind,
             JobEventKind::Done {
-                mok_state: Some("staged".to_string())
+                mok_state: Some("staged".to_string()),
+                requires_reboot_confirmation: Some(true),
             }
         );
         let encoded = serde_json::to_value(event).unwrap();
         assert_eq!(encoded["type"], "done");
         assert_eq!(encoded["mok_state"], "staged");
+        assert_eq!(encoded["requires_reboot_confirmation"], true);
     }
 
     #[test]

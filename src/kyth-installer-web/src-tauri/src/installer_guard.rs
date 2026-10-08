@@ -124,7 +124,28 @@ fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
 
 /// Re-probe all disk ancestry and live mounts immediately before mutation.
 pub(crate) fn validate_target_disk(disk: &str) -> Result<(), String> {
+    validate_target_disk_inner(disk, None)
+}
+
+/// Re-probe disk ancestry, live mounts, and the selection-time disk
+/// identity immediately before mutation. The executor calls this variant
+/// once the storage plan carries the expected disk identity, so a swapped
+/// or re-enumerated disk fails closed instead of being written to.
+pub(crate) fn validate_target_disk_with_identity(
+    disk: &str,
+    expected: &installer_storage::DiskIdentity,
+) -> Result<(), String> {
+    validate_target_disk_inner(disk, Some(expected))
+}
+
+fn validate_target_disk_inner(
+    disk: &str,
+    expected: Option<&installer_storage::DiskIdentity>,
+) -> Result<(), String> {
     let disk = normalized(disk)?;
+    if let Some(expected) = expected {
+        installer_storage::verify_disk_identity(&disk, expected)?;
+    }
     let disk_snapshot = command_output(
         "/usr/bin/lsblk",
         &[

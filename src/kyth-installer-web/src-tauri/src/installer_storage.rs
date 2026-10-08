@@ -38,6 +38,8 @@ struct LsblkDevice {
     rota: Option<bool>,
     tran: Option<String>,
     pttype: Option<String>,
+    serial: Option<String>,
+    partuuid: Option<String>,
     #[serde(default)]
     children: Vec<LsblkDevice>,
 }
@@ -86,10 +88,109 @@ pub(crate) struct PartitionProbe {
     pub start_bytes: u64,
     pub fstype: String,
     pub label: String,
+    pub partuuid: String,
     pub efi: bool,
     pub current: bool,
     pub in_use: bool,
     pub read_only: bool,
+}
+
+/// Stable identity of a disk, captured at selection time and re-verified
+/// immediately before destructive operations. If the disk was swapped,
+/// re-enumerated under a different path, or replaced between selection and
+/// commit, the commit fails closed instead of writing to the wrong device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct DiskIdentity {
+    pub serial: Option<String>,
+    pub model: Option<String>,
+    pub size_bytes: Option<u64>,
+}
+
+/// Re-probe `lsblk` SERIAL/MODEL/SIZE for the disk and fail closed on any
+/// mismatch against the selection-time identity. Identity fields that were
+/// unknown at selection time (`None`) are not checked; a field that was
+/// known but is now unreadable also fails closed.
+pub fn verify_disk_identity(disk: &str, expected: &DiskIdentity) -> Result<(), String> {
+    let disk = normalize_device_path(disk)
+        .ok_or_else(|| "disk identity query has an invalid disk".to_string())?;
+    let output = std::process::Command::new("/usr/bin/lsblk")
+        .args([
+            "--json",
+            "--bytes",
+            "--paths",
+            "--output",
+            "NAME,SIZE,TYPE,MODEL,SERIAL",
+            &disk,
+        ])
+        .output()
+        .map_err(|error| format!("could not probe disk identity: {error}"))?;
+    if !output.status.success() {
+        return Err("disk identity probe failed".to_string());
+    }
+    let snapshot = String::from_utf8(output.stdout)
+        .map_err(|_| "disk identity probe was not UTF-8".to_string())?;
+    verify_disk_identity_in_snapshot(&snapshot, &disk, expected)
+}
+
+/// Compare a selection-time [`DiskIdentity`] against one lsblk snapshot.
+/// Split out so the comparison policy is unit-testable without devices.
+pub(crate) fn verify_disk_identity_in_snapshot(
+    input: &str,
+    disk: &str,
+    expected: &DiskIdentity,
+) -> Result<(), String> {
+    let disk = normalize_device_path(disk)
+        .ok_or_else(|| "disk identity query has an invalid disk".to_string())?;
+    let snapshot = parse_snapshot(input)?;
+    let device = snapshot
+        .blockdevices
+        .iter()
+        .find(|entry| {
+            entry
+                .name
+                .as_deref()
+                .and_then(normalize_device_path)
+                .as_deref()
+                == Some(disk.as_str())
+                && entry.device_type.as_deref() == Some("disk")
+        })
+        .ok_or_else(|| "target disk was not present in disk identity probe".to_string())?;
+    if let Some(expected_serial) = expected.serial.as_deref() {
+        let actual = device.serial.as_deref().unwrap_or("").trim();
+        if actual.is_empty() || !actual.eq_ignore_ascii_case(expected_serial.trim()) {
+            return Err(
+                "target disk serial number does not match the selected disk; refusing to proceed"
+                    .to_string(),
+            );
+        }
+    }
+    if let Some(expected_model) = expected.model.as_deref() {
+        let actual = device.model.as_deref().unwrap_or("").trim();
+        if actual.is_empty() || actual != expected_model.trim() {
+            return Err(
+                "target disk model does not match the selected disk; refusing to proceed"
+                    .to_string(),
+            );
+        }
+    }
+    if let Some(expected_size) = expected.size_bytes {
+        if device.size.unwrap_or(0) != expected_size {
+            return Err(
+                "target disk size does not match the selected disk; refusing to proceed"
+                    .to_string(),
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Sector sizes the storage layer understands: powers of two from 512-byte
+/// classic sectors through 4096-byte 4Kn sectors.
+fn valid_sector_size(sector_size: u64) -> Result<(), String> {
+    if !sector_size.is_power_of_two() || !(512..=4096).contains(&sector_size) {
+        return Err("storage query returned an unsupported sector size".to_string());
+    }
+    Ok(())
 }
 
 /// Filesystems that always signal somebody else's data. The alongside and
@@ -142,8 +243,9 @@ pub(crate) fn validate_replace_target(
     disk: &str,
     partition: &str,
     role: &str,
+    sector_size: u64,
 ) -> Result<PartitionProbe, String> {
-    let probe = partition_probe_from_snapshot(input, disk, partition)?;
+    let probe = partition_probe_from_snapshot(input, disk, partition, sector_size)?;
     if probe.efi {
         return Err(format!(
             "The EFI system partition cannot be used as the KythOS {role}."
@@ -166,12 +268,73 @@ pub(crate) fn validate_replace_target(
     Ok(probe)
 }
 
+/// Re-validate a partition immediately before it is formatted.
+///
+/// Narrower than [`validate_replace_target`]: the manual partition editor
+/// formats small ESPs (before the `esp` flag is set) and repartitions
+/// existing filesystems on explicit user request, so there is no minimum
+/// size and no foreign-filesystem gate here — those belong to the guided
+/// alongside/manual commit path. What is never safe — formatting a device
+/// that is not a partition of the selected disk, the ESP, or a
+/// mounted/stacked/read-only partition — fails closed for every caller,
+/// including future ones that skip validation.
+pub(crate) fn validate_format_target(
+    input: &str,
+    disk: &str,
+    partition: &str,
+    sector_size: u64,
+) -> Result<PartitionProbe, String> {
+    let probe = partition_probe_from_snapshot(input, disk, partition, sector_size)?;
+    if probe.efi {
+        return Err("The EFI system partition cannot be formatted.".to_string());
+    }
+    if probe.current || probe.in_use || probe.read_only {
+        return Err(
+            "The selected partition is mounted, read-only, or has active mappings; refusing to format it."
+                .to_string(),
+        );
+    }
+    Ok(probe)
+}
+
 /// The ESP selected from a fresh snapshot, including a safe live-session
 /// mountpoint when one is already available for bind mounting.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct EfiPartition {
     pub name: String,
     pub mounted_at: Option<String>,
+}
+
+/// First mountpoint that is safe to trust for ESP resolution: absolute, with
+/// no parent-directory escapes or empty components.
+fn first_safe_mountpoint(mountpoints: &[String]) -> Option<String> {
+    mountpoints
+        .iter()
+        .find(|mount| mount.starts_with('/') && !mount.contains("..") && !mount.contains("//"))
+        .cloned()
+}
+
+/// One ESP resolution shared by the typed ESP query and the storage
+/// preflight, so the two can never disagree about which partition is the
+/// ESP. Exactly one ESP resolves to itself; several resolve to the one
+/// mounted at `/boot/efi`; anything else fails closed instead of letting the
+/// first-ESP-wins scan and the ambiguity-aware query pick different
+/// partitions.
+fn resolve_esp(candidates: Vec<EfiPartition>) -> Result<Option<EfiPartition>, String> {
+    match candidates.as_slice() {
+        [] => Ok(None),
+        [efi] => Ok(Some(efi.clone())),
+        _ => {
+            let mounted = candidates
+                .iter()
+                .filter(|efi| efi.mounted_at.as_deref() == Some("/boot/efi"))
+                .collect::<Vec<_>>();
+            match mounted.as_slice() {
+                [efi] => Ok(Some((*efi).clone())),
+                _ => Err("target disk has multiple EFI system partitions; refusing to select one arbitrarily".to_string()),
+            }
+        }
+    }
 }
 
 fn normalize_device_path(raw: &str) -> Option<String> {
@@ -323,14 +486,12 @@ pub(crate) fn free_regions(
     disk: &str,
     sector_size: u64,
 ) -> Result<Vec<FreeRegionRecord>, String> {
-    if !sector_size.is_power_of_two() || !(512..=4096).contains(&sector_size) {
-        return Err("storage query returned an unsupported sector size".to_string());
-    }
+    valid_sector_size(sector_size)?;
     let (disk_size, is_gpt) = disk_metadata(disk_snapshot, disk)?;
     if disk_size <= GPT_RESERVE_BYTES.saturating_mul(2) {
         return Ok(Vec::new());
     }
-    let partitions = parse_partitions(disk_snapshot)?;
+    let partitions = parse_partitions(disk_snapshot, sector_size)?;
     let has_bios_boot = partitions
         .iter()
         .any(|part| part.parttype.eq_ignore_ascii_case(BIOS_BOOT_GUID));
@@ -376,6 +537,12 @@ pub(crate) fn free_regions(
     Ok(regions)
 }
 
+/// Free regions are aligned to 1 MiB (or the sector size, whichever is
+/// larger). Sector-granular alignment leaves partition starts that the
+/// bootloader and partitioning tools do not expect; 1 MiB keeps every region
+/// on a boundary parted, GRUB, and SSD erase blocks all agree on.
+const REGION_ALIGN_BYTES: u64 = 1024 * 1024;
+
 fn append_region(
     regions: &mut Vec<FreeRegionRecord>,
     start: u64,
@@ -383,8 +550,9 @@ fn append_region(
     sector_size: u64,
     required: u64,
 ) {
-    let aligned_start = start.div_ceil(sector_size) * sector_size;
-    let aligned_end = (end / sector_size) * sector_size;
+    let align = sector_size.max(REGION_ALIGN_BYTES);
+    let aligned_start = start.div_ceil(align) * align;
+    let aligned_end = (end / align) * align;
     if aligned_end > aligned_start && aligned_end - aligned_start >= required {
         regions.push(FreeRegionRecord {
             start_bytes: aligned_start,
@@ -437,11 +605,18 @@ pub(crate) fn parse_disks(
 
 /// Parse partition records, including descendant mounts, from an lsblk tree.
 ///
-pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, String> {
+/// `sector_size` is the device's logical sector size: lsblk `START` counts
+/// sectors, so `start_bytes` must scale by it. Callers obtain it from
+/// `blockdev --getss`, the same source `free_regions` validates.
+pub(crate) fn parse_partitions(
+    input: &str,
+    sector_size: u64,
+) -> Result<Vec<PartitionRecord>, String> {
+    valid_sector_size(sector_size)?;
     let snapshot = parse_snapshot(input)?;
     let mut partitions = Vec::new();
 
-    fn walk(devices: &[LsblkDevice], partitions: &mut Vec<PartitionRecord>) {
+    fn walk(devices: &[LsblkDevice], partitions: &mut Vec<PartitionRecord>, sector_size: u64) {
         for device in devices {
             if device.device_type.as_deref() == Some("part") {
                 if let Some(name) = device.name.as_deref().and_then(normalize_device_path) {
@@ -482,7 +657,7 @@ pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, Stri
                     partitions.push(PartitionRecord {
                         name,
                         size_bytes,
-                        start_bytes: device.start.unwrap_or(0).saturating_mul(512),
+                        start_bytes: device.start.unwrap_or(0).saturating_mul(sector_size),
                         fstype,
                         label,
                         parttype,
@@ -496,11 +671,11 @@ pub(crate) fn parse_partitions(input: &str) -> Result<Vec<PartitionRecord>, Stri
                     });
                 }
             }
-            walk(&device.children, partitions);
+            walk(&device.children, partitions, sector_size);
         }
     }
 
-    walk(&snapshot.blockdevices, &mut partitions);
+    walk(&snapshot.blockdevices, &mut partitions, sector_size);
     Ok(partitions)
 }
 
@@ -552,10 +727,11 @@ pub(crate) fn root_partition_from_snapshot(input: &str, disk: &str) -> Result<St
 pub(crate) fn efi_partition_from_snapshot(
     input: &str,
     disk: &str,
+    sector_size: u64,
 ) -> Result<Option<EfiPartition>, String> {
     let disk = normalize_device_path(disk)
         .ok_or_else(|| "EFI partition query has an invalid disk".to_string())?;
-    let candidates = parse_partitions(input)?
+    let candidates = parse_partitions(input, sector_size)?
         .into_iter()
         .filter(|part| {
             part.efi
@@ -569,26 +745,11 @@ pub(crate) fn efi_partition_from_snapshot(
                 })
         })
         .map(|part| EfiPartition {
-            name: part.name,
-            mounted_at: part.mountpoints.into_iter().find(|mount| {
-                mount.starts_with('/') && !mount.contains("..") && !mount.contains("//")
-            }),
+            name: part.name.clone(),
+            mounted_at: first_safe_mountpoint(&part.mountpoints),
         })
         .collect::<Vec<_>>();
-    match candidates.as_slice() {
-        [] => Ok(None),
-        [efi] => Ok(Some(efi.clone())),
-        _ => {
-            let mounted = candidates
-                .iter()
-                .filter(|efi| efi.mounted_at.as_deref() == Some("/boot/efi"))
-                .collect::<Vec<_>>();
-            match mounted.as_slice() {
-                [efi] => Ok(Some((*efi).clone())),
-                _ => Err("target disk has multiple EFI system partitions; refusing to select one arbitrarily".to_string()),
-            }
-        }
-    }
+    resolve_esp(candidates)
 }
 
 /// Revalidate one partition as a member of the selected disk.
@@ -601,7 +762,9 @@ pub(crate) fn partition_probe_from_snapshot(
     input: &str,
     disk: &str,
     partition: &str,
+    sector_size: u64,
 ) -> Result<PartitionProbe, String> {
+    valid_sector_size(sector_size)?;
     let disk = normalize_device_path(disk)
         .ok_or_else(|| "partition query has an invalid disk".to_string())?;
     let partition = normalize_device_path(partition)
@@ -617,7 +780,11 @@ pub(crate) fn partition_probe_from_snapshot(
         })
         .ok_or_else(|| "target disk was not present in partition probe".to_string())?;
 
-    fn find_partition(device: &LsblkDevice, wanted: &str) -> Option<PartitionProbe> {
+    fn find_partition(
+        device: &LsblkDevice,
+        wanted: &str,
+        sector_size: u64,
+    ) -> Option<PartitionProbe> {
         if device.device_type.as_deref() == Some("part")
             && normalize_device_path(device.name.as_deref().unwrap_or_default()).as_deref()
                 == Some(wanted)
@@ -639,9 +806,10 @@ pub(crate) fn partition_probe_from_snapshot(
                 name,
                 number,
                 size_bytes: device.size.unwrap_or(0),
-                start_bytes: device.start.unwrap_or(0).saturating_mul(512),
+                start_bytes: device.start.unwrap_or(0).saturating_mul(sector_size),
                 fstype,
                 label: device.label.clone().unwrap_or_default(),
+                partuuid: device.partuuid.clone().unwrap_or_default(),
                 efi,
                 current: !mounts.is_empty(),
                 in_use: !device.children.is_empty(),
@@ -651,11 +819,52 @@ pub(crate) fn partition_probe_from_snapshot(
         device
             .children
             .iter()
-            .find_map(|child| find_partition(child, wanted))
+            .find_map(|child| find_partition(child, wanted, sector_size))
     }
 
-    find_partition(root, &partition)
+    find_partition(root, &partition, sector_size)
         .ok_or_else(|| "selected partition was not present on the target disk".to_string())
+}
+
+/// Resolve the PARTUUID of a partition number on a disk from a fresh lsblk
+/// snapshot.
+///
+/// Destructive partition operations take a bare partition number from the
+/// caller; the number is only meaningful if it still refers to the partition
+/// the user selected. Callers pass the selection-time PARTUUID alongside the
+/// number and compare it against this fresh probe before acting, so a
+/// renumbered or replaced partition fails closed instead of being deleted,
+/// resized, or reflagged.
+pub(crate) fn partuuid_for_partition_number(
+    input: &str,
+    disk: &str,
+    part_num: u32,
+) -> Result<String, String> {
+    let disk = normalize_device_path(disk)
+        .ok_or_else(|| "partition identity query has an invalid disk".to_string())?;
+    if part_num == 0 {
+        return Err("partition number must be positive".to_string());
+    }
+    let snapshot = parse_snapshot(input)?;
+    fn walk(devices: &[LsblkDevice], disk: &str, part_num: u32, found: &mut Option<String>) {
+        for device in devices {
+            if device.device_type.as_deref() == Some("part") && device.partn == Some(part_num) {
+                if let Some(name) = device.name.as_deref().and_then(normalize_device_path) {
+                    if on_selected_disk(&name, disk) {
+                        *found = device
+                            .partuuid
+                            .clone()
+                            .map(|id| id.trim().to_string())
+                            .filter(|id| !id.is_empty());
+                    }
+                }
+            }
+            walk(&device.children, disk, part_num, found);
+        }
+    }
+    let mut found = None;
+    walk(&snapshot.blockdevices, &disk, part_num, &mut found);
+    found.ok_or_else(|| "partition identity was not present in the fresh probe".to_string())
 }
 
 /// Confirm that a selected free-space interval is still one of the safe
@@ -685,16 +894,17 @@ pub(crate) fn new_partition_from_snapshots(
     after: &str,
     start_bytes: u64,
     size_bytes: u64,
+    sector_size: u64,
 ) -> Result<String, String> {
     if start_bytes == 0 || size_bytes == 0 {
         return Err("new partition geometry must be positive".to_string());
     }
-    let prior = parse_partitions(before)?
+    let prior = parse_partitions(before, sector_size)?
         .into_iter()
         .map(|partition| partition.name)
         .collect::<std::collections::HashSet<_>>();
     const GEOMETRY_TOLERANCE: u64 = 1024 * 1024;
-    let candidates = parse_partitions(after)?
+    let candidates = parse_partitions(after, sector_size)?
         .into_iter()
         .filter(|partition| !prior.contains(&partition.name))
         .filter(|partition| {
@@ -710,8 +920,8 @@ pub(crate) fn new_partition_from_snapshots(
     }
 }
 
-pub(crate) fn has_bios_boot_partition(input: &str) -> Result<bool, String> {
-    Ok(parse_partitions(input)?
+pub(crate) fn has_bios_boot_partition(input: &str, sector_size: u64) -> Result<bool, String> {
+    Ok(parse_partitions(input, sector_size)?
         .into_iter()
         .any(|partition| partition.parttype.eq_ignore_ascii_case(BIOS_BOOT_GUID)))
 }
@@ -727,6 +937,7 @@ pub(crate) fn validate_alongside_bios_boot(
     input: &str,
     disk: &str,
     uefi_boot: bool,
+    sector_size: u64,
 ) -> Result<(), String> {
     if uefi_boot {
         return Ok(());
@@ -737,10 +948,12 @@ pub(crate) fn validate_alongside_bios_boot(
     }
     let disk = normalize_device_path(disk)
         .ok_or_else(|| "BIOS boot query has an invalid disk".to_string())?;
-    let has_bios_boot = parse_partitions(input)?.iter().any(|partition| {
-        on_selected_disk(&partition.name, &disk)
-            && partition.parttype.eq_ignore_ascii_case(BIOS_BOOT_GUID)
-    });
+    let has_bios_boot = parse_partitions(input, sector_size)?
+        .iter()
+        .any(|partition| {
+            on_selected_disk(&partition.name, &disk)
+                && partition.parttype.eq_ignore_ascii_case(BIOS_BOOT_GUID)
+        });
     if has_bios_boot {
         return Ok(());
     }
@@ -783,6 +996,7 @@ fn on_selected_disk(name: &str, disk: &str) -> bool {
 pub(crate) fn storage_preflight_from_snapshot(
     input: &str,
     disk: &str,
+    sector_size: u64,
 ) -> Result<StoragePreflight, String> {
     let disk = normalize_device_path(disk)
         .ok_or_else(|| "storage preflight has an invalid disk".to_string())?;
@@ -794,14 +1008,17 @@ pub(crate) fn storage_preflight_from_snapshot(
         bitlocker_locked: false,
         checked_partitions: 0,
     };
-    for part in parse_partitions(input)? {
+    let mut esp_candidates = Vec::new();
+    for part in parse_partitions(input, sector_size)? {
         if !on_selected_disk(&part.name, &disk) {
             continue;
         }
         preflight.checked_partitions += 1;
-        if part.efi && !preflight.esp_present {
-            preflight.esp_present = true;
-            preflight.esp_name = part.name.clone();
+        if part.efi {
+            esp_candidates.push(EfiPartition {
+                name: part.name.clone(),
+                mounted_at: first_safe_mountpoint(&part.mountpoints),
+            });
         }
         // `parttype`/`fstype` are already lowercased by parse_partitions.
         if matches!(part.fstype.as_str(), "ntfs" | "ntfs3")
@@ -818,6 +1035,13 @@ pub(crate) fn storage_preflight_from_snapshot(
         {
             preflight.bitlocker_locked = true;
         }
+    }
+    // The same resolution efi_partition_from_snapshot uses: one shared
+    // decision, so the preflight can never name a different ESP than the
+    // installer later mounts.
+    if let Some(esp) = resolve_esp(esp_candidates)? {
+        preflight.esp_present = true;
+        preflight.esp_name = esp.name;
     }
     Ok(preflight)
 }
@@ -862,7 +1086,7 @@ mod tests {
 
     #[test]
     fn parses_partition_candidates_and_descendant_mounts() {
-        let partitions = parse_partitions(SNAPSHOT).expect("snapshot should parse");
+        let partitions = parse_partitions(SNAPSHOT, 512).expect("snapshot should parse");
         assert_eq!(partitions.len(), 2);
         assert!(partitions[0].efi);
         assert!(!partitions[0].alongside_candidate);
@@ -881,7 +1105,7 @@ mod tests {
             {"name":"/dev/sda1","type":"part","size":137438953472,"fstype":"ntfs","parttype":"ebd0a0a2-b9e5-4433-87c0-68b6b72699c7","mountpoints":[]},
             {"name":"/dev/sda2","type":"part","size":137438953472,"fstype":"ext4","mountpoints":[]}
         ]}]}"#;
-        let partitions = parse_partitions(snapshot).expect("snapshot should parse");
+        let partitions = parse_partitions(snapshot, 512).expect("snapshot should parse");
         assert_eq!(partitions.len(), 2);
         assert!(!partitions[0].alongside_candidate);
         assert!(partitions[0].ntfs_resize_candidate);
@@ -891,17 +1115,17 @@ mod tests {
 
     #[test]
     fn selects_efi_partition_and_reuses_only_safe_existing_mounts() {
-        let efi = efi_partition_from_snapshot(SNAPSHOT, "/dev/sda")
+        let efi = efi_partition_from_snapshot(SNAPSHOT, "/dev/sda", 512)
             .expect("EFI query should parse")
             .expect("fixture has an ESP");
         assert_eq!(efi.name, "/dev/sda1");
         assert_eq!(efi.mounted_at.as_deref(), Some("/boot/efi"));
-        assert!(efi_partition_from_snapshot(SNAPSHOT, "/dev/sdb")
+        assert!(efi_partition_from_snapshot(SNAPSHOT, "/dev/sdb", 512)
             .unwrap()
             .is_none());
 
         let unsafe_mount = SNAPSHOT.replace("/boot/efi", "/run/../etc");
-        let efi = efi_partition_from_snapshot(&unsafe_mount, "/dev/sda")
+        let efi = efi_partition_from_snapshot(&unsafe_mount, "/dev/sda", 512)
             .unwrap()
             .expect("ESP remains discoverable");
         assert!(efi.mounted_at.is_none());
@@ -909,7 +1133,7 @@ mod tests {
 
     #[test]
     fn rejects_malformed_snapshot() {
-        let error = parse_partitions("not-json").expect_err("malformed JSON must fail closed");
+        let error = parse_partitions("not-json", 512).expect_err("malformed JSON must fail closed");
         assert!(error.contains("invalid lsblk snapshot"));
     }
 
@@ -1061,7 +1285,7 @@ mod tests {
             {"name":"/dev/sda1","type":"part","fstype":"vfat","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b","mountpoints":[]},
             {"name":"/dev/sda2","type":"part","fstype":"vfat","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b","mountpoints":[]}
         ]}]}"#;
-        let error = efi_partition_from_snapshot(snapshot, "/dev/sda")
+        let error = efi_partition_from_snapshot(snapshot, "/dev/sda", 512)
             .expect_err("multiple ESPs must not select arbitrarily");
         assert!(error.contains("multiple EFI"), "{error}");
     }
@@ -1073,7 +1297,7 @@ mod tests {
         let snapshot = format!(
             r#"{{"blockdevices":[{{"name":"/dev/sda","size":{disk_size},"type":"disk","pttype":"gpt","children":[{{"name":"/dev/sda1","partn":1,"size":{partition_size},"type":"part","fstype":"ntfs","start":2048,"mountpoints":[null],"ro":false}}]}}]}}"#
         );
-        let partition = partition_probe_from_snapshot(&snapshot, "/dev/sda", "sda1")
+        let partition = partition_probe_from_snapshot(&snapshot, "/dev/sda", "sda1", 512)
             .expect("selected partition should be found");
         assert_eq!(partition.name, "/dev/sda1");
         assert_eq!(partition.number, 1);
@@ -1084,7 +1308,7 @@ mod tests {
         assert!(!partition.efi);
         assert!(!partition.read_only);
 
-        assert!(partition_probe_from_snapshot(&snapshot, "/dev/sdb", "/dev/sda1").is_err());
+        assert!(partition_probe_from_snapshot(&snapshot, "/dev/sdb", "/dev/sda1", 512).is_err());
     }
 
     #[test]
@@ -1120,10 +1344,10 @@ mod tests {
             {"name":"/dev/sda1","type":"part","size":34359738368,"start":4096}
         ]}] }"#;
         assert_eq!(
-            new_partition_from_snapshots(before, after, 4096 * 512, 34359738368).unwrap(),
+            new_partition_from_snapshots(before, after, 4096 * 512, 34359738368, 512).unwrap(),
             "/dev/sda1"
         );
-        assert!(new_partition_from_snapshots(before, after, 8192 * 512, 34359738368).is_err());
+        assert!(new_partition_from_snapshots(before, after, 8192 * 512, 34359738368, 512).is_err());
     }
 
     #[test]
@@ -1132,7 +1356,7 @@ mod tests {
             r#"{{"blockdevices":[{{"name":"/dev/sda","type":"disk","children":[{{"name":"/dev/sda1","type":"part","parttype":"{}"}}]}}]}}"#,
             BIOS_BOOT_GUID
         );
-        assert!(has_bios_boot_partition(&snapshot).unwrap());
+        assert!(has_bios_boot_partition(&snapshot, 512).unwrap());
     }
 
     fn preflight_snapshot(children: &str) -> String {
@@ -1150,7 +1374,7 @@ mod tests {
                 {"name":"/dev/sda4","type":"part","fstype":"btrfs","label":"KythOS"}"#,
         );
         let preflight =
-            storage_preflight_from_snapshot(&snapshot, "/dev/sda").expect("snapshot parses");
+            storage_preflight_from_snapshot(&snapshot, "/dev/sda", 512).expect("snapshot parses");
         assert_eq!(preflight.checked_partitions, 4);
         assert!(preflight.esp_present);
         assert_eq!(preflight.esp_name, "/dev/sda1");
@@ -1158,7 +1382,7 @@ mod tests {
         assert!(preflight.bitlocker_locked);
         // Another disk's partitions never leak into this disk's preflight.
         let other =
-            storage_preflight_from_snapshot(&snapshot, "/dev/sdb").expect("snapshot parses");
+            storage_preflight_from_snapshot(&snapshot, "/dev/sdb", 512).expect("snapshot parses");
         assert_eq!(other.checked_partitions, 0);
         assert!(!other.esp_present);
         assert!(!other.windows_present);
@@ -1170,7 +1394,8 @@ mod tests {
         let snapshot = preflight_snapshot(
             r#"{"name":"/dev/sda1","type":"part","fstype":"ntfs","label":"Data","children":[{"name":"/dev/mapper/locked","type":"crypt"}]}"#,
         );
-        let preflight = storage_preflight_from_snapshot(&snapshot, "sda").expect("snapshot parses");
+        let preflight =
+            storage_preflight_from_snapshot(&snapshot, "sda", 512).expect("snapshot parses");
         assert!(preflight.windows_present);
         assert!(preflight.bitlocker_locked);
         assert!(!preflight.esp_present);
@@ -1211,8 +1436,8 @@ mod tests {
         };
         assert!(validate_storage_preflight(&clean, "alongside").is_ok());
         assert!(
-            storage_preflight_from_snapshot("not-json", "/dev/sda").is_err()
-                && storage_preflight_from_snapshot("{}", "../../etc").is_err()
+            storage_preflight_from_snapshot("not-json", "/dev/sda", 512).is_err()
+                && storage_preflight_from_snapshot("{}", "../../etc", 512).is_err()
         );
     }
 
@@ -1251,6 +1476,7 @@ mod tests {
                 "/dev/sda",
                 partition,
                 "target partition",
+                512,
             )
             .expect_err(partition);
             assert!(error.contains(needle), "{partition}: {error}");
@@ -1259,15 +1485,21 @@ mod tests {
 
     #[test]
     fn replace_target_refuses_esp_small_and_cross_disk_partitions() {
-        let esp =
-            validate_replace_target(REPLACE_SNAPSHOT, "/dev/sda", "/dev/sda1", "root partition")
-                .unwrap_err();
+        let esp = validate_replace_target(
+            REPLACE_SNAPSHOT,
+            "/dev/sda",
+            "/dev/sda1",
+            "root partition",
+            512,
+        )
+        .unwrap_err();
         assert!(esp.contains("EFI system partition"), "{esp}");
         let small = validate_replace_target(
             REPLACE_SNAPSHOT,
             "/dev/sda",
             "/dev/sda7",
             "target partition",
+            512,
         )
         .unwrap_err();
         assert!(small.contains("too small"), "{small}");
@@ -1278,6 +1510,7 @@ mod tests {
             "/dev/sda",
             "/dev/sdb1",
             "target partition",
+            512,
         )
         .unwrap_err();
         assert!(
@@ -1294,6 +1527,7 @@ mod tests {
                 "/dev/sda",
                 partition,
                 "target partition",
+                512,
             )
             .unwrap_or_else(|error| panic!("{partition}: {error}"));
             assert_eq!(probe.name, partition);
@@ -1318,31 +1552,179 @@ mod tests {
 
         // Legacy BIOS + GPT + no BIOS boot partition: GRUB cannot boot Btrfs.
         let missing = bios_snapshot("gpt", esp, "");
-        let error = validate_alongside_bios_boot(&missing, "/dev/sda", false).unwrap_err();
+        let error = validate_alongside_bios_boot(&missing, "/dev/sda", false, 512).unwrap_err();
         assert!(error.contains("BIOS boot partition"), "{error}");
         // A BIOS boot partition on a different disk does not help this one.
         let elsewhere = bios_snapshot("gpt", esp, &other_disk_bios);
-        assert!(validate_alongside_bios_boot(&elsewhere, "/dev/sda", false).is_err());
+        assert!(validate_alongside_bios_boot(&elsewhere, "/dev/sda", false, 512).is_err());
 
         // UEFI boots, MBR disks, and disks that already have one are fine.
-        assert!(validate_alongside_bios_boot(&missing, "/dev/sda", true).is_ok());
+        assert!(validate_alongside_bios_boot(&missing, "/dev/sda", true, 512).is_ok());
         let mbr = bios_snapshot("dos", esp, "");
-        assert!(validate_alongside_bios_boot(&mbr, "/dev/sda", false).is_ok());
+        assert!(validate_alongside_bios_boot(&mbr, "/dev/sda", false, 512).is_ok());
         let present = bios_snapshot("gpt", &format!("{esp},{bios}"), "");
-        assert!(validate_alongside_bios_boot(&present, "/dev/sda", false).is_ok());
+        assert!(validate_alongside_bios_boot(&present, "/dev/sda", false, 512).is_ok());
 
         // An unknown disk fails closed rather than skipping the check.
-        assert!(validate_alongside_bios_boot(&missing, "/dev/sdz", false).is_err());
+        assert!(validate_alongside_bios_boot(&missing, "/dev/sdz", false, 512).is_err());
     }
 
     #[test]
     fn alongside_candidates_match_the_commit_content_gate() {
-        let partitions = parse_partitions(REPLACE_SNAPSHOT).expect("snapshot should parse");
+        let partitions = parse_partitions(REPLACE_SNAPSHOT, 512).expect("snapshot should parse");
         let offered: Vec<&str> = partitions
             .iter()
             .filter(|part| part.alongside_candidate)
             .map(|part| part.name.as_str())
             .collect();
         assert_eq!(offered, ["/dev/sda5", "/dev/sda6", "/dev/sdb1"]);
+    }
+
+    /// 4Kn disks report `START` in 4096-byte sectors. Scaling by a hardcoded
+    /// 512 under-reports the byte offset 8x, which once let `free_regions`
+    /// carve "free" space out of a live partition. Both geometry entry points
+    /// must scale by the real sector size.
+    #[test]
+    fn four_k_native_sectors_scale_start_bytes() {
+        let snapshot = r#"{"blockdevices":[{"name":"/dev/sda","type":"disk","size":17592186044416,"children":[
+            {"name":"/dev/sda1","type":"part","partn":1,"size":17592186044416,"start":2048,"fstype":"","mountpoints":[]}
+        ]}]}"#;
+        let partitions = parse_partitions(snapshot, 4096).expect("4Kn snapshot should parse");
+        assert_eq!(partitions.len(), 1);
+        // 2048 sectors * 4096 bytes: the 512-byte assumption would say 1 MiB.
+        assert_eq!(partitions[0].start_bytes, 2048 * 4096);
+
+        let probe = partition_probe_from_snapshot(snapshot, "/dev/sda", "/dev/sda1", 4096)
+            .expect("4Kn probe should parse");
+        assert_eq!(probe.start_bytes, 2048 * 4096);
+
+        // The same snapshot under a 512 assumption computes a different,
+        // wrong offset: the sector size is load-bearing, not cosmetic.
+        let wrong = parse_partitions(snapshot, 512).expect("snapshot should parse");
+        assert_eq!(wrong[0].start_bytes, 2048 * 512);
+        assert_ne!(partitions[0].start_bytes, wrong[0].start_bytes);
+    }
+
+    #[test]
+    fn rejects_unsupported_sector_sizes() {
+        let snapshot = r#"{"blockdevices":[]}"#;
+        for bad in [0, 511, 513, 1000, 8192] {
+            assert!(
+                parse_partitions(snapshot, bad).is_err(),
+                "sector size {bad} must fail closed"
+            );
+            assert!(
+                partition_probe_from_snapshot(snapshot, "/dev/sda", "/dev/sda1", bad).is_err(),
+                "sector size {bad} must fail closed"
+            );
+        }
+        for good in [512, 1024, 2048, 4096] {
+            assert!(
+                parse_partitions(snapshot, good).is_ok(),
+                "sector size {good} must parse"
+            );
+        }
+    }
+
+    fn identity_snapshot() -> String {
+        r#"{"blockdevices":[{"name":"/dev/sda","type":"disk","size":1099511627776,"model":"Example SSD","serial":"S3Y9NX0R123456"}]}"#
+            .to_string()
+    }
+
+    #[test]
+    fn disk_identity_verification_fails_closed_on_mismatch() {
+        let snapshot = identity_snapshot();
+        let expected = DiskIdentity {
+            serial: Some("S3Y9NX0R123456".to_string()),
+            model: Some("Example SSD".to_string()),
+            size_bytes: Some(1099511627776),
+        };
+        assert!(verify_disk_identity_in_snapshot(&snapshot, "/dev/sda", &expected).is_ok());
+
+        // Unknown fields are not checked.
+        let partial = DiskIdentity {
+            serial: None,
+            model: None,
+            size_bytes: None,
+        };
+        assert!(verify_disk_identity_in_snapshot(&snapshot, "/dev/sda", &partial).is_ok());
+
+        for mutated in [
+            DiskIdentity {
+                serial: Some("DIFFERENT".to_string()),
+                ..expected.clone()
+            },
+            DiskIdentity {
+                model: Some("Other Disk".to_string()),
+                ..expected.clone()
+            },
+            DiskIdentity {
+                size_bytes: Some(1),
+                ..expected.clone()
+            },
+        ] {
+            let error = verify_disk_identity_in_snapshot(&snapshot, "/dev/sda", &mutated)
+                .expect_err("identity mismatch must fail closed");
+            assert!(error.contains("refusing to proceed"), "{error}");
+        }
+
+        // Serial comparison is case-insensitive (kernel vs. label casing),
+        // but an unreadable serial never verifies a known one.
+        let lower = DiskIdentity {
+            serial: Some("s3y9nx0r123456".to_string()),
+            ..expected.clone()
+        };
+        assert!(verify_disk_identity_in_snapshot(&snapshot, "/dev/sda", &lower).is_ok());
+        let no_serial_snapshot = r#"{"blockdevices":[{"name":"/dev/sda","type":"disk","size":1099511627776,"model":"Example SSD"}]}"#;
+        assert!(
+            verify_disk_identity_in_snapshot(&no_serial_snapshot, "/dev/sda", &expected).is_err()
+        );
+        assert!(verify_disk_identity_in_snapshot(&snapshot, "/dev/sdz", &expected).is_err());
+        assert!(verify_disk_identity_in_snapshot(&snapshot, "../../etc", &expected).is_err());
+    }
+
+    #[test]
+    fn partition_number_identity_resolves_partuuid() {
+        let snapshot = r#"{"blockdevices":[{"name":"/dev/sda","type":"disk","children":[
+            {"name":"/dev/sda1","type":"part","partn":1,"partuuid":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b"},
+            {"name":"/dev/sda2","type":"part","partn":2}
+        ]}]}"#;
+        assert_eq!(
+            partuuid_for_partition_number(snapshot, "/dev/sda", 1).unwrap(),
+            "c12a7328-f81f-11d2-ba4b-00a0c93ec93b"
+        );
+        // A partition without a PARTUUID has no stable identity to assert.
+        assert!(partuuid_for_partition_number(snapshot, "/dev/sda", 2).is_err());
+        assert!(partuuid_for_partition_number(snapshot, "/dev/sda", 9).is_err());
+        assert!(partuuid_for_partition_number(snapshot, "/dev/sda", 0).is_err());
+        assert!(partuuid_for_partition_number(snapshot, "/dev/sdb", 1).is_err());
+    }
+
+    /// The preflight and the typed ESP query share one resolution function:
+    /// with two ESPs where one is mounted at /boot/efi, both must name the
+    /// mounted one; with two unmounted ESPs, both must fail closed.
+    #[test]
+    fn preflight_and_esp_query_agree_on_esp_resolution() {
+        let two_esp = |mounts: &str| {
+            format!(
+                r#"{{"blockdevices":[{{"name":"/dev/sda","type":"disk","children":[
+                    {{"name":"/dev/sda1","type":"part","fstype":"vfat","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b","mountpoints":[]}},
+                    {{"name":"/dev/sda2","type":"part","fstype":"vfat","parttype":"c12a7328-f81f-11d2-ba4b-00a0c93ec93b","mountpoints":[{mounts}]}}
+                ]}}]}}"#
+            )
+        };
+        let mounted = two_esp(r#""/boot/efi""#);
+        let preflight =
+            storage_preflight_from_snapshot(&mounted, "/dev/sda", 512).expect("snapshot parses");
+        assert!(preflight.esp_present);
+        assert_eq!(preflight.esp_name, "/dev/sda2");
+        let efi = efi_partition_from_snapshot(&mounted, "/dev/sda", 512)
+            .expect("snapshot parses")
+            .expect("ESP resolves");
+        assert_eq!(efi.name, preflight.esp_name);
+
+        let ambiguous = two_esp("");
+        assert!(storage_preflight_from_snapshot(&ambiguous, "/dev/sda", 512).is_err());
+        assert!(efi_partition_from_snapshot(&ambiguous, "/dev/sda", 512).is_err());
     }
 }

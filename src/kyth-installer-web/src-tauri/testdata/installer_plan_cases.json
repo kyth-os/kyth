@@ -9,7 +9,11 @@
       "resize_partition": null,
       "resize_bytes": 0,
       "free_region_start": null,
-      "free_region_end": null
+      "free_region_end": null,
+      "pre_shrink_bytes": null,
+      "target_disk_serial": null,
+      "target_disk_model": null,
+      "target_disk_size_bytes": null
     }
   },
   {
@@ -22,7 +26,11 @@
       "resize_partition": null,
       "resize_bytes": 0,
       "free_region_start": null,
-      "free_region_end": null
+      "free_region_end": null,
+      "pre_shrink_bytes": null,
+      "target_disk_serial": null,
+      "target_disk_model": null,
+      "target_disk_size_bytes": null
     }
   },
   {
@@ -35,7 +43,11 @@
       "resize_partition": "/dev/sda2",
       "resize_bytes": 42949672960,
       "free_region_start": null,
-      "free_region_end": null
+      "free_region_end": null,
+      "pre_shrink_bytes": null,
+      "target_disk_serial": null,
+      "target_disk_model": null,
+      "target_disk_size_bytes": null
     }
   },
   {
@@ -48,7 +60,11 @@
       "resize_partition": null,
       "resize_bytes": 0,
       "free_region_start": 1048576,
-      "free_region_end": 35433480192
+      "free_region_end": 35433480192,
+      "pre_shrink_bytes": null,
+      "target_disk_serial": null,
+      "target_disk_model": null,
+      "target_disk_size_bytes": null
     }
   },
   {
@@ -61,7 +77,11 @@
       "resize_partition": null,
       "resize_bytes": 0,
       "free_region_start": null,
-      "free_region_end": null
+      "free_region_end": null,
+      "pre_shrink_bytes": null,
+      "target_disk_serial": null,
+      "target_disk_model": null,
+      "target_disk_size_bytes": null
     }
   },
   {

@@ -51,6 +51,19 @@ struct InstallerConnection {
     socket_path: Option<String>,
 }
 
+/// The connection description handed to the webview. This deliberately
+/// carries NO tokens: the session and bootstrap tokens stay in Rust state
+/// only (the `installer_request` proxy attaches the session token from
+/// Rust state on every call). Returning tokens to JavaScript would let any
+/// XSS in the webview bypass the Tauri route allowlist and speak to the
+/// privileged daemon directly.
+#[derive(Clone, Serialize)]
+struct InstallerConnectionInfo {
+    base_url: String,
+    transport: String,
+    socket_path: Option<String>,
+}
+
 #[derive(Serialize)]
 struct InstallerResponse {
     status: u16,
@@ -123,13 +136,20 @@ fn load_tokens_file(path: &str) -> (String, String) {
 #[tauri::command]
 fn installer_connection(
     state: tauri::State<InstallerTokens>,
-) -> Result<InstallerConnection, String> {
-    state
+) -> Result<InstallerConnectionInfo, String> {
+    let value = state
         .0
         .lock()
         .map_err(|_| "installer connection state unavailable".to_string())?
         .clone()
-        .ok_or_else(|| "installer shell was not given backend tokens".to_string())
+        .ok_or_else(|| "installer shell was not given backend tokens".to_string())?;
+    // Tokens never cross into JavaScript: the proxy below attaches them
+    // from Rust state. See `InstallerConnectionInfo`.
+    Ok(InstallerConnectionInfo {
+        base_url: value.base_url,
+        transport: value.transport,
+        socket_path: value.socket_path,
+    })
 }
 
 #[tauri::command]

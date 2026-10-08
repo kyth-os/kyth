@@ -186,6 +186,17 @@ fn valid_base64_signature(value: &str) -> bool {
 
 /// Verify the cosign signature bundle embedded at ISO build time.
 ///
+/// HONESTY NOTICE — READ BEFORE CALLING THIS "VERIFICATION":
+/// This check is CONSISTENCY-ONLY, not cryptographic. It confirms that the
+/// metadata, the bundle file, and the digests all agree with each other
+/// (sha256 comparisons and shape checks against values that shipped inside
+/// the same ISO). No public key is consulted anywhere in this path, so a
+/// forged ISO whose embedded metadata consistently lies will pass. The real
+/// cryptographic anchor is the BUILD-TIME cosign gate that signed the
+/// release before the ISO was assembled; this install-time check only
+/// detects accidental corruption or mismatched build artifacts, never a
+/// maliciously crafted image.
+///
 /// `metadata.signature` is `"verified"` for registry builds — the bundle
 /// file's sha256 must equal `metadata.signature_digest` and the bundle's
 /// subject digest must equal the release digest — or `"local"` for unsigned
@@ -391,6 +402,11 @@ fn embedded_digest_with_paths(
         );
     }
     verify_embedded_signature(&metadata, digest, release_digest, bundle_path)?;
+    // NOTE: the call above is a consistency check only — it compares
+    // digests that all shipped inside this ISO and consults no public key.
+    // It cannot detect a maliciously crafted image; the cryptographic
+    // anchor is the build-time cosign gate. See the honesty notice on
+    // `verify_embedded_signature`.
     let metadata_target = metadata
         .get("target_image")
         .and_then(Value::as_str)

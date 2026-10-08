@@ -5,6 +5,8 @@
 //! and one fixed argv shape.
 
 use serde::Deserialize;
+use std::path::Path;
+use std::process::Command;
 
 use crate::installer_plan::normalize_device_path;
 
@@ -47,6 +49,7 @@ pub(crate) enum DiskOperationInput {
     DeletePartition {
         disk: String,
         part_num: u32,
+        expected_partuuid: String,
     },
     ResizePartition {
         disk: String,
@@ -55,6 +58,7 @@ pub(crate) enum DiskOperationInput {
         new_size: u64,
         #[serde(default = "default_sector_size")]
         sector_size: u64,
+        expected_partuuid: String,
     },
     FilesystemCheck {
         device: String,
@@ -86,6 +90,7 @@ pub(crate) enum DiskOperationInput {
         flag: String,
         #[serde(default = "default_true")]
         enabled: bool,
+        expected_partuuid: String,
     },
     FormatFilesystem {
         device: String,
@@ -137,6 +142,95 @@ pub(crate) fn sync_backup(path: &str) -> Result<(), String> {
     directory
         .sync_all()
         .map_err(|error| format!("could not sync partition backup directory: {error}"))
+}
+
+/// Partition-table backup argv for a known table type. GPT uses sgdisk's
+/// native backup format; MBR ("dos") uses sfdisk's dump, which sgdisk cannot
+/// read or write. sfdisk emits the dump on stdout, so the MBR plan shells
+/// the redirection into the backup file; both interpolated paths pass
+/// strict validators that exclude every shell metacharacter, and the
+/// positional parameters stay double-quoted.
+fn table_backup_plan(
+    disk: String,
+    backup_path: String,
+    table_type: &str,
+    sfdisk: Option<&str>,
+) -> Result<DiskPlan, String> {
+    match table_type {
+        "gpt" => Ok(DiskPlan {
+            argv: vec![
+                "/usr/sbin/sgdisk".to_string(),
+                "--backup".to_string(),
+                safe_absolute_path(&backup_path, "backup path")?,
+                required_device(&disk, "disk")?,
+            ],
+            timeout_seconds: 30,
+            needs_confirmation: false,
+        }),
+        "dos" => {
+            let sfdisk = sfdisk.ok_or_else(|| {
+                "sfdisk is required for MBR partition table backup but is not installed."
+                    .to_string()
+            })?;
+            Ok(DiskPlan {
+                argv: vec![
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!("exec {sfdisk} --dump \"$1\" > \"$2\""),
+                    "kyth-sfdisk-dump".to_string(),
+                    required_device(&disk, "disk")?,
+                    safe_absolute_path(&backup_path, "backup path")?,
+                ],
+                timeout_seconds: 30,
+                needs_confirmation: false,
+            })
+        }
+        _ => Err(format!("unsupported partition table type: {table_type}")),
+    }
+}
+
+/// Partition-table restore argv for a known table type. Mirrors
+/// [`table_backup_plan`]: sgdisk's `--load-backup` for GPT, and for MBR a
+/// dump script piped back into sfdisk, which reads the table description
+/// from stdin. `--force` keeps the non-interactive restore from prompting,
+/// matching the sgdisk path.
+fn table_restore_plan(
+    disk: String,
+    backup_path: String,
+    table_type: &str,
+    sfdisk: Option<&str>,
+) -> Result<DiskPlan, String> {
+    match table_type {
+        "gpt" => Ok(DiskPlan {
+            argv: vec![
+                "/usr/sbin/sgdisk".to_string(),
+                "--load-backup".to_string(),
+                safe_absolute_path(&backup_path, "backup path")?,
+                required_device(&disk, "disk")?,
+            ],
+            timeout_seconds: 60,
+            needs_confirmation: false,
+        }),
+        "dos" => {
+            let sfdisk = sfdisk.ok_or_else(|| {
+                "sfdisk is required for MBR partition table restore but is not installed."
+                    .to_string()
+            })?;
+            Ok(DiskPlan {
+                argv: vec![
+                    "/bin/sh".to_string(),
+                    "-c".to_string(),
+                    format!("exec {sfdisk} --force \"$1\" < \"$2\""),
+                    "kyth-sfdisk-load".to_string(),
+                    required_device(&disk, "disk")?,
+                    safe_absolute_path(&backup_path, "backup path")?,
+                ],
+                timeout_seconds: 60,
+                needs_confirmation: false,
+            })
+        }
+        _ => Err(format!("unsupported partition table type: {table_type}")),
+    }
 }
 
 fn default_sector_size() -> u64 {
@@ -214,15 +308,131 @@ fn normalized_name(raw: &str) -> String {
     raw.trim().to_ascii_lowercase()
 }
 
+/// Run a fixed read-only lsblk probe. `disk` scopes the probe to one disk;
+/// `None` probes the whole system (needed to resolve a partition's parent
+/// disk, since a device-scoped probe omits the parent itself).
+fn lsblk_snapshot(disk: Option<&str>, columns: &str) -> Result<String, String> {
+    let mut args = vec!["--json", "--bytes", "--paths", "--output", columns];
+    if let Some(disk) = disk {
+        args.push(disk);
+    }
+    let output = Command::new("/usr/bin/lsblk")
+        .args(args)
+        .output()
+        .map_err(|error| format!("could not probe disk state: {error}"))?;
+    if !output.status.success() {
+        return Err("disk state probe failed.".to_string());
+    }
+    String::from_utf8(output.stdout).map_err(|_| "disk state probe was not UTF-8.".to_string())
+}
+
+/// Logical sector size from `blockdev --getss`, validated the same way the
+/// storage layer validates it.
+fn logical_sector_size(disk: &str) -> Result<u64, String> {
+    let output = Command::new("/usr/bin/blockdev")
+        .args(["--getss", disk])
+        .output()
+        .map_err(|error| format!("could not probe sector size: {error}"))?;
+    if !output.status.success() {
+        return Err("sector size probe failed.".to_string());
+    }
+    let size = String::from_utf8(output.stdout)
+        .map_err(|_| "sector size probe was not UTF-8.".to_string())?
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| "sector size probe returned an invalid value.".to_string())?;
+    if !size.is_power_of_two() || !(512..=4096).contains(&size) {
+        return Err("storage probe returned an unsupported sector size.".to_string());
+    }
+    Ok(size)
+}
+
+fn safe_partuuid(raw: &str) -> Result<String, String> {
+    let value = raw.trim();
+    if value.is_empty()
+        || value.len() > 128
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
+    {
+        return Err("expected partition UUID is invalid.".to_string());
+    }
+    Ok(value.to_string())
+}
+
+/// Assert the caller's selection-time PARTUUID still matches the partition
+/// number in a fresh probe. A bare partition number is a TOCTOU hazard: the
+/// kernel may have renumbered partitions since the user selected one.
+/// Callers must invoke `build_plan` for these operations while holding the
+/// disk lock; the probe-then-act window is only safe under that lock.
+fn assert_partition_identity(
+    disk: &str,
+    part_num: u32,
+    expected_partuuid: &str,
+) -> Result<(), String> {
+    let expected = safe_partuuid(expected_partuuid)?;
+    let disk = required_device(disk, "disk")?;
+    let snapshot = lsblk_snapshot(Some(&disk), "NAME,PARTN,PARTUUID,TYPE")?;
+    let actual =
+        crate::installer_storage::partuuid_for_partition_number(&snapshot, &disk, part_num)?;
+    if !actual.eq_ignore_ascii_case(&expected) {
+        return Err(
+            "partition identity changed since selection; refusing to operate on a different partition."
+                .to_string(),
+        );
+    }
+    Ok(())
+}
+
+/// Read the disk's partition-table type from a fresh lsblk probe: "gpt" or
+/// "dos". Anything else (no table, exotic table) fails closed rather than
+/// backing up with the wrong tool.
+fn probe_partition_table_type(disk: &str) -> Result<String, String> {
+    let disk = required_device(disk, "disk")?;
+    let output = Command::new("/usr/bin/lsblk")
+        .args(["--nodeps", "--noheadings", "--output", "PTTYPE", &disk])
+        .output()
+        .map_err(|error| format!("could not probe partition table type: {error}"))?;
+    if !output.status.success() {
+        return Err("partition table type probe failed.".to_string());
+    }
+    let table_type = String::from_utf8(output.stdout)
+        .map_err(|_| "partition table type probe was not UTF-8.".to_string())?
+        .trim()
+        .to_ascii_lowercase();
+    match table_type.as_str() {
+        "gpt" | "dos" => Ok(table_type),
+        _ => Err("disk has no recognized partition table; refusing to back it up.".to_string()),
+    }
+}
+
+/// Locate sfdisk for MBR table backup/restore. sgdisk only understands GPT;
+/// without sfdisk an MBR table cannot be backed up, so the caller fails
+/// closed instead of writing an sgdisk backup of a DOS table.
+fn sfdisk_binary() -> Result<&'static str, String> {
+    ["/usr/sbin/sfdisk", "/usr/bin/sfdisk"]
+        .into_iter()
+        .find(|path| Path::new(path).exists())
+        .ok_or_else(|| {
+            "sfdisk is required for MBR partition table backup but is not installed.".to_string()
+        })
+}
+
+/// Partitions are aligned to 1 MiB (or the sector size, whichever is
+/// larger), matching the free-region alignment in `installer_storage`.
+/// Sector-granular starts confuse parted/GRUB and waste SSD erase blocks.
+const PARTITION_ALIGN_BYTES: u64 = 1024 * 1024;
+
 fn partition_end(start: u64, size: u64, sector_size: u64) -> Result<u64, String> {
     if sector_size == 0 || !sector_size.is_power_of_two() || !(512..=4096).contains(&sector_size) {
         return Err("partition sector size is unsupported.".to_string());
     }
-    if start == 0 || size < sector_size {
+    let align = sector_size.max(PARTITION_ALIGN_BYTES);
+    if start == 0 || size < align {
         return Err("partition start or size is invalid.".to_string());
     }
-    if start % sector_size != 0 || size % sector_size != 0 {
-        return Err("partition geometry is not aligned to the device sector size.".to_string());
+    if start % align != 0 || size % align != 0 {
+        return Err("partition geometry is not aligned to 1 MiB.".to_string());
     }
     start
         .checked_add(size - sector_size)
@@ -263,7 +473,30 @@ fn interactive_parted_device(
     })
 }
 
+/// Guarded mkfs entry point: re-validates the target against a fresh probe
+/// immediately before building the mkfs argv, so an ESP, a mounted or
+/// stacked partition, or a device that is not a partition of a known disk
+/// can never be formatted even if a future caller skips validation.
+///
+/// The minimum-size and foreign-filesystem gates stay on the guided
+/// alongside/manual commit path (`validate_replace_target`): the manual
+/// partition editor formats small ESPs (before the `esp` flag is set) and
+/// existing filesystems on explicit user request, and a blanket gate here
+/// would break those legitimate flows.
 fn build_mkfs(device: String, fs: String, label: String) -> Result<DiskPlan, String> {
+    let device = required_device(&device, "filesystem device")?;
+    let snapshot = lsblk_snapshot(
+        None,
+        "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,PARTN,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO,PKNAME",
+    )?;
+    let disk = crate::installer_storage::parent_disk_in_snapshot(&snapshot, &device)?
+        .ok_or_else(|| "mkfs target is not on a known disk.".to_string())?;
+    let sector_size = logical_sector_size(&disk)?;
+    crate::installer_storage::validate_format_target(&snapshot, &disk, &device, sector_size)?;
+    build_mkfs_plan(device, fs, label)
+}
+
+fn build_mkfs_plan(device: String, fs: String, label: String) -> Result<DiskPlan, String> {
     let device = required_device(&device, "filesystem device")?;
     let fs = normalized_name(&fs);
     let label = safe_label(label)?;
@@ -367,28 +600,84 @@ fn build_filesystem_resize(
     }
 }
 
+/// Pure argv builders for the identity-asserted partition operations. The
+/// `build_plan` arms assert the caller's selection-time PARTUUID against a
+/// fresh probe first, then delegate here, keeping the argv shapes
+/// unit-testable without devices.
+fn build_delete_partition(disk: String, part_num: u32) -> Result<DiskPlan, String> {
+    if part_num == 0 {
+        return Err("partition number must be positive.".to_string());
+    }
+    parted_device(disk, vec!["rm".to_string(), part_num.to_string()], 60)
+}
+
+fn build_resize_partition(
+    disk: String,
+    part_num: u32,
+    start: u64,
+    new_size: u64,
+    sector_size: u64,
+) -> Result<DiskPlan, String> {
+    if part_num == 0 {
+        return Err("partition number must be positive.".to_string());
+    }
+    let end = partition_end(start, new_size, sector_size)?;
+    interactive_parted_device(
+        disk,
+        vec![
+            "unit".to_string(),
+            "B".to_string(),
+            "resizepart".to_string(),
+            part_num.to_string(),
+            format!("{end}B"),
+        ],
+        120,
+    )
+}
+
+fn build_set_partition_flag(
+    disk: String,
+    part_num: u32,
+    flag: String,
+    enabled: bool,
+) -> Result<DiskPlan, String> {
+    if part_num == 0 {
+        return Err("partition number must be positive.".to_string());
+    }
+    let flag = normalized_name(&flag);
+    if !matches!(flag.as_str(), "bios_grub" | "esp") {
+        return Err(format!("unsupported partition flag: {flag}"));
+    }
+    parted_device(
+        disk,
+        vec![
+            "set".to_string(),
+            part_num.to_string(),
+            flag,
+            if enabled { "on" } else { "off" }.to_string(),
+        ],
+        60,
+    )
+}
+
 pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> {
     match input {
-        DiskOperationInput::BackupTable { disk, backup_path } => Ok(DiskPlan {
-            argv: vec![
-                "/usr/sbin/sgdisk".to_string(),
-                "--backup".to_string(),
-                safe_absolute_path(&backup_path, "backup path")?,
-                required_device(&disk, "disk")?,
-            ],
-            timeout_seconds: 30,
-            needs_confirmation: false,
-        }),
-        DiskOperationInput::RestoreTable { disk, backup_path } => Ok(DiskPlan {
-            argv: vec![
-                "/usr/sbin/sgdisk".to_string(),
-                "--load-backup".to_string(),
-                safe_absolute_path(&backup_path, "backup path")?,
-                required_device(&disk, "disk")?,
-            ],
-            timeout_seconds: 60,
-            needs_confirmation: false,
-        }),
+        DiskOperationInput::BackupTable { disk, backup_path } => {
+            let table_type = probe_partition_table_type(&disk)?;
+            let sfdisk = match table_type.as_str() {
+                "dos" => Some(sfdisk_binary()?),
+                _ => None,
+            };
+            table_backup_plan(disk, backup_path, &table_type, sfdisk)
+        }
+        DiskOperationInput::RestoreTable { disk, backup_path } => {
+            let table_type = probe_partition_table_type(&disk)?;
+            let sfdisk = match table_type.as_str() {
+                "dos" => Some(sfdisk_binary()?),
+                _ => None,
+            };
+            table_restore_plan(disk, backup_path, &table_type, sfdisk)
+        }
         DiskOperationInput::CreateLabel { disk, table_type } => {
             let table_type = normalized_name(&table_type);
             if !matches!(table_type.as_str(), "gpt" | "msdos") {
@@ -452,11 +741,13 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
                 120,
             )
         }
-        DiskOperationInput::DeletePartition { disk, part_num } => {
-            if part_num == 0 {
-                return Err("partition number must be positive.".to_string());
-            }
-            parted_device(disk, vec!["rm".to_string(), part_num.to_string()], 60)
+        DiskOperationInput::DeletePartition {
+            disk,
+            part_num,
+            expected_partuuid,
+        } => {
+            assert_partition_identity(&disk, part_num, &expected_partuuid)?;
+            build_delete_partition(disk, part_num)
         }
         DiskOperationInput::ResizePartition {
             disk,
@@ -464,22 +755,10 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             start,
             new_size,
             sector_size,
+            expected_partuuid,
         } => {
-            if part_num == 0 {
-                return Err("partition number must be positive.".to_string());
-            }
-            let end = partition_end(start, new_size, sector_size)?;
-            interactive_parted_device(
-                disk,
-                vec![
-                    "unit".to_string(),
-                    "B".to_string(),
-                    "resizepart".to_string(),
-                    part_num.to_string(),
-                    format!("{end}B"),
-                ],
-                120,
-            )
+            assert_partition_identity(&disk, part_num, &expected_partuuid)?;
+            build_resize_partition(disk, part_num, start, new_size, sector_size)
         }
         DiskOperationInput::FilesystemCheck { device } => {
             let device = required_device(&device, "filesystem device")?;
@@ -551,24 +830,10 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             part_num,
             flag,
             enabled,
+            expected_partuuid,
         } => {
-            if part_num == 0 {
-                return Err("partition number must be positive.".to_string());
-            }
-            let flag = normalized_name(&flag);
-            if !matches!(flag.as_str(), "bios_grub" | "esp") {
-                return Err(format!("unsupported partition flag: {flag}"));
-            }
-            parted_device(
-                disk,
-                vec![
-                    "set".to_string(),
-                    part_num.to_string(),
-                    flag,
-                    if enabled { "on" } else { "off" }.to_string(),
-                ],
-                60,
-            )
+            assert_partition_identity(&disk, part_num, &expected_partuuid)?;
+            build_set_partition_flag(disk, part_num, flag, enabled)
         }
         DiskOperationInput::FormatFilesystem { device, fs, label } => build_mkfs(device, fs, label),
         DiskOperationInput::BtrfsSubvolumeCreate { mountpoint, name } => {
@@ -649,15 +914,26 @@ mod tests {
 
     #[test]
     fn projects_filesystem_commands_with_type_specific_labels() {
-        let plan = build_plan(DiskOperationInput::FormatFilesystem {
+        // The pure argv builder still projects the exact mkfs command.
+        let plan = build_mkfs_plan(device(), "fat32".into(), "EFI".into())
+            .expect("filesystem plan should validate");
+        assert_eq!(
+            plan.argv,
+            ["/usr/sbin/mkfs.fat", "-F32", "-n", "EFI", "/dev/sda"]
+        );
+
+        // The guarded entry point re-probes before building argv: /dev/sda
+        // is a whole disk, never a validated replace target, so planning a
+        // format for it fails closed instead of projecting mkfs argv.
+        let error = build_plan(DiskOperationInput::FormatFilesystem {
             device: device(),
             fs: "fat32".into(),
             label: "EFI".into(),
         })
-        .expect("filesystem plan should validate");
-        assert_eq!(
-            plan.argv,
-            ["/usr/sbin/mkfs.fat", "-F32", "-n", "EFI", "/dev/sda"]
+        .expect_err("unvalidated format target must fail closed");
+        assert!(
+            error.contains("known disk") || error.contains("not present"),
+            "{error}"
         );
     }
 
@@ -696,23 +972,14 @@ mod tests {
             ]
         );
 
-        let delete = build_plan(DiskOperationInput::DeletePartition {
-            disk: device(),
-            part_num: 2,
-        })
-        .expect("delete plan should validate");
+        let delete = build_delete_partition(device(), 2).expect("delete plan should validate");
         assert_eq!(
             delete.argv,
             ["/usr/sbin/parted", "-s", "/dev/sda", "rm", "2"]
         );
 
-        let flag = build_plan(DiskOperationInput::SetPartitionFlag {
-            disk: device(),
-            part_num: 1,
-            flag: "esp".into(),
-            enabled: false,
-        })
-        .expect("flag plan should validate");
+        let flag = build_set_partition_flag(device(), 1, "esp".into(), false)
+            .expect("flag plan should validate");
         assert_eq!(
             flag.argv,
             [
@@ -729,11 +996,9 @@ mod tests {
 
     #[test]
     fn projects_backup_and_restore_operations() {
-        let backup = build_plan(DiskOperationInput::BackupTable {
-            disk: device(),
-            backup_path: "/tmp/table.backup".into(),
-        })
-        .expect("backup plan should validate");
+        // GPT tables keep the sgdisk backup format.
+        let backup = table_backup_plan(device(), "/tmp/table.backup".into(), "gpt", None)
+            .expect("backup plan should validate");
         assert_eq!(
             backup.argv,
             [
@@ -744,11 +1009,8 @@ mod tests {
             ]
         );
 
-        let restore = build_plan(DiskOperationInput::RestoreTable {
-            disk: device(),
-            backup_path: "/tmp/table.backup".into(),
-        })
-        .expect("restore plan should validate");
+        let restore = table_restore_plan(device(), "/tmp/table.backup".into(), "gpt", None)
+            .expect("restore plan should validate");
         assert_eq!(
             restore.argv,
             [
@@ -758,6 +1020,56 @@ mod tests {
                 "/dev/sda",
             ]
         );
+
+        // MBR ("dos") tables use sfdisk: sgdisk cannot read or write them.
+        // sfdisk dumps to stdout, so the plan shells the redirection; the
+        // interpolated paths pass strict validators with no shell
+        // metacharacters.
+        let dos_backup = table_backup_plan(
+            device(),
+            "/tmp/table.backup".into(),
+            "dos",
+            Some("/usr/sbin/sfdisk"),
+        )
+        .expect("MBR backup plan should validate");
+        assert_eq!(
+            dos_backup.argv,
+            [
+                "/bin/sh",
+                "-c",
+                "exec /usr/sbin/sfdisk --dump \"$1\" > \"$2\"",
+                "kyth-sfdisk-dump",
+                "/dev/sda",
+                "/tmp/table.backup",
+            ]
+        );
+
+        let dos_restore = table_restore_plan(
+            device(),
+            "/tmp/table.backup".into(),
+            "dos",
+            Some("/usr/sbin/sfdisk"),
+        )
+        .expect("MBR restore plan should validate");
+        assert_eq!(
+            dos_restore.argv,
+            [
+                "/bin/sh",
+                "-c",
+                "exec /usr/sbin/sfdisk --force \"$1\" < \"$2\"",
+                "kyth-sfdisk-load",
+                "/dev/sda",
+                "/tmp/table.backup",
+            ]
+        );
+
+        // MBR without sfdisk fails closed instead of running sgdisk against
+        // a DOS table.
+        let missing = table_backup_plan(device(), "/tmp/table.backup".into(), "dos", None)
+            .expect_err("MBR backup without sfdisk must fail closed");
+        assert!(missing.contains("sfdisk"), "{missing}");
+        assert!(table_restore_plan(device(), "/tmp/table.backup".into(), "dos", None).is_err());
+        assert!(table_backup_plan(device(), "/tmp/table.backup".into(), "bsd", None).is_err());
     }
 
     #[test]
@@ -778,14 +1090,8 @@ mod tests {
 
     #[test]
     fn projects_interactive_resize_with_fixed_confirmation() {
-        let plan = build_plan(DiskOperationInput::ResizePartition {
-            disk: device(),
-            part_num: 3,
-            start: 128 * 1024 * 1024,
-            new_size: 64 * 1024 * 1024,
-            sector_size: 512,
-        })
-        .expect("resize plan should validate");
+        let plan = build_resize_partition(device(), 3, 128 * 1024 * 1024, 64 * 1024 * 1024, 512)
+            .expect("resize plan should validate");
         assert_eq!(
             plan.argv,
             [
@@ -944,6 +1250,7 @@ mod tests {
                 part_num: 1,
                 flag: "boot".into(),
                 enabled: true,
+                expected_partuuid: "9a3b4c5d-6e7f-8a9b-0c1d-2e3f4a5b6c7d".into(),
             },
             DiskOperationInput::FormatFilesystem {
                 device: device(),
@@ -1008,12 +1315,59 @@ mod tests {
     }
 
     #[test]
+    fn partition_identity_is_asserted_before_acting() {
+        // An empty or malformed expected PARTUUID fails closed before any
+        // probe runs: there is no identity to assert.
+        for input in [
+            DiskOperationInput::DeletePartition {
+                disk: device(),
+                part_num: 2,
+                expected_partuuid: String::new(),
+            },
+            DiskOperationInput::SetPartitionFlag {
+                disk: device(),
+                part_num: 1,
+                flag: "esp".into(),
+                enabled: true,
+                expected_partuuid: "not-a-uuid!!".into(),
+            },
+            DiskOperationInput::ResizePartition {
+                disk: device(),
+                part_num: 3,
+                start: 128 * 1024 * 1024,
+                new_size: 64 * 1024 * 1024,
+                sector_size: 512,
+                expected_partuuid: String::new(),
+            },
+        ] {
+            let error = build_plan(input).expect_err("missing identity must fail closed");
+            assert!(error.contains("partition UUID"), "{error}");
+        }
+        // A well-formed PARTUUID that the fresh probe cannot confirm fails
+        // closed too, whether the disk is absent or the number now points
+        // at a different partition.
+        assert!(build_plan(DiskOperationInput::DeletePartition {
+            disk: device(),
+            part_num: 2,
+            expected_partuuid: "9a3b4c5d-6e7f-8a9b-0c1d-2e3f4a5b6c7d".into(),
+        })
+        .is_err());
+
+        // The pure builders keep their own input validation.
+        assert!(build_delete_partition(device(), 0).is_err());
+        assert!(build_resize_partition(device(), 0, 1024 * 1024, 1024 * 1024, 512).is_err());
+        assert!(build_set_partition_flag(device(), 1, "boot".into(), true).is_err());
+    }
+
+    #[test]
     fn rejects_geometry_overflow_and_bad_sector_sizes() {
         for (start, size, sector_size) in [
             (u64::MAX, 512, 512),
             (1024, 511, 512),
             (1024, 1024, 1000),
             (1025, 1024, 512),
+            // Sector-aligned but not 1 MiB aligned.
+            (2048, 1024 * 1024, 512),
         ] {
             let input = DiskOperationInput::CreateUnformattedPartition {
                 disk: device(),

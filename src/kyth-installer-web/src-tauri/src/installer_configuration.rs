@@ -301,36 +301,86 @@ impl ConfigurationPlan {
 
 pub(crate) fn apply_plan(plan: ConfigurationPlan) -> Result<(), String> {
     for write in &plan.writes {
-        let mut file = OpenOptions::new();
-        file.write(true)
-            .create(true)
-            .truncate(true)
-            .mode(write.mode)
-            .custom_flags(libc::O_NOFOLLOW);
-        let mut file = file
-            .open(&write.path)
-            .map_err(|error| format!("could not open configuration file: {error}"))?;
-        file.write_all(write.content.as_bytes())
-            .map_err(|error| format!("could not write configuration file: {error}"))?;
-        file.flush()
-            .map_err(|error| format!("could not flush configuration file: {error}"))?;
-        file.sync_all()
-            .map_err(|error| format!("could not sync configuration file: {error}"))?;
-        fs::set_permissions(&write.path, fs::Permissions::from_mode(write.mode))
-            .map_err(|error| format!("could not secure configuration file: {error}"))?;
+        write_replacing(Path::new(&write.path), write.content.as_bytes(), write.mode)?;
     }
 
+    // Atomic localtime swap: symlink to a temp name, then rename over the
+    // target. A power loss leaves the old or the new link, never a missing
+    // /etc/localtime (remove-then-symlink could).
     let localtime = Path::new(&plan.target_root).join("etc/localtime");
     if let Ok(metadata) = fs::symlink_metadata(&localtime) {
         if metadata.is_dir() {
             return Err("installed localtime path is a directory".to_string());
         }
-        fs::remove_file(&localtime)
-            .map_err(|error| format!("could not replace installed localtime: {error}"))?;
     }
-    std::os::unix::fs::symlink(&plan.localtime_target, &localtime)
+    let temporary = localtime.with_extension("kyth-localtime.tmp");
+    let _ = fs::remove_file(&temporary);
+    std::os::unix::fs::symlink(&plan.localtime_target, &temporary)
+        .map_err(|error| format!("could not stage installed timezone: {error}"))?;
+    fs::rename(&temporary, &localtime)
         .map_err(|error| format!("could not set installed timezone: {error}"))?;
+    if let Some(parent) = localtime.parent() {
+        OpenOptions::new()
+            .read(true)
+            .open(parent)
+            .map_err(|error| format!("could not open installed etc directory: {error}"))?
+            .sync_all()
+            .map_err(|error| format!("could not sync installed etc directory: {error}"))?;
+    }
     Ok(())
+}
+
+/// Replace `path` atomically: write a same-directory temp file with the
+/// planned mode, fsync it, rename it over the target, then fsync the
+/// directory. A power loss leaves the old or the new file, never the
+/// zero-length file that truncate-then-write could leave.
+///
+/// (Mirrors `write_replacing` in installer_accounts.rs, which is private
+/// to that module; the config writer carries its mode in the plan rather
+/// than stat-ing an existing file.)
+fn write_replacing(path: &Path, contents: &[u8], mode: u32) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| "configuration file has no parent directory".to_string())?;
+    let parent_metadata = fs::symlink_metadata(parent)
+        .map_err(|error| format!("could not inspect configuration directory: {error}"))?;
+    if parent_metadata.file_type().is_symlink() || !parent_metadata.is_dir() {
+        return Err("configuration parent must be a real directory".to_string());
+    }
+    if let Ok(metadata) = fs::symlink_metadata(path) {
+        if metadata.is_dir() {
+            return Err("configuration path is a directory".to_string());
+        }
+    }
+    let temporary = path.with_extension("kyth-tmp");
+    let _ = fs::remove_file(&temporary);
+    let result = (|| {
+        let mut file = OpenOptions::new();
+        file.write(true)
+            .create_new(true)
+            .mode(mode)
+            .custom_flags(libc::O_NOFOLLOW);
+        let mut file = file
+            .open(&temporary)
+            .map_err(|error| format!("could not create temporary configuration: {error}"))?;
+        file.write_all(contents)
+            .map_err(|error| format!("could not write temporary configuration: {error}"))?;
+        file.sync_all()
+            .map_err(|error| format!("could not sync temporary configuration: {error}"))?;
+        fs::set_permissions(&temporary, fs::Permissions::from_mode(mode))
+            .map_err(|error| format!("could not secure temporary configuration: {error}"))?;
+        fs::rename(&temporary, path)
+            .map_err(|error| format!("could not replace configuration file: {error}"))?;
+        OpenOptions::new()
+            .read(true)
+            .open(parent)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| format!("could not sync configuration directory: {error}"))
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn safe_fstab_path(raw: &str) -> Result<String, String> {
@@ -341,7 +391,7 @@ fn safe_fstab_path(raw: &str) -> Result<String, String> {
     Ok(path)
 }
 
-fn validate_fstab_line(line: &str) -> Result<(), String> {
+pub(crate) fn validate_fstab_line(line: &str) -> Result<(), String> {
     if line.is_empty() || line.len() > MAX_FSTAB_LINE_BYTES || !line.ends_with('\n') {
         return Err("fstab entry must be one bounded line".to_string());
     }
@@ -376,6 +426,27 @@ fn validate_fstab_line(line: &str) -> Result<(), String> {
 pub(crate) fn append_fstab(input: FstabAppendInput) -> Result<(), String> {
     let path = safe_fstab_path(&input.path)?;
     validate_fstab_line(&input.line)?;
+    let new_uuid = input
+        .line
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    // Dedupe on retry: a failed phase that already appended this UUID must
+    // not leave two entries for the same filesystem.
+    if let Ok(metadata) = fs::symlink_metadata(&path) {
+        if metadata.file_type().is_symlink() {
+            return Err("fstab path must not be a symlink".to_string());
+        }
+    }
+    if let Ok(existing) = fs::read_to_string(&path) {
+        if existing
+            .lines()
+            .any(|line| line.split_whitespace().next() == Some(new_uuid.as_str()))
+        {
+            return Ok(());
+        }
+    }
     let mut file = OpenOptions::new();
     file.create(true)
         .read(true)
@@ -624,6 +695,23 @@ mod tests {
             std::fs::read(&path).unwrap(),
             b"UUID=ABCD /old ext4 defaults 0 2\nUUID=BEEF /new ext4 defaults 0 2\n"
         );
+    }
+
+    #[test]
+    fn append_skips_duplicate_uuid_on_retry() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let etc = directory.path().join("etc");
+        std::fs::create_dir(&etc).expect("etc directory");
+        let path = etc.join("fstab");
+        let line = "UUID=ABCD-1234 /var/home btrfs subvol=@home 0 0\n";
+        for _ in 0..2 {
+            append_fstab(FstabAppendInput {
+                path: path.to_string_lossy().into_owned(),
+                line: line.into(),
+            })
+            .expect("fstab entry should append");
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), line);
     }
 
     #[test]

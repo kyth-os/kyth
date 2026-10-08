@@ -7,8 +7,6 @@ declare global { interface Window { __KYTH_SESSION_TOKEN__?: string; } }
 
 interface InstallerConnection {
   base_url: string;
-  bootstrap_token: string;
-  session_token: string;
   transport: "http" | "unix";
   socket_path?: string;
 }
@@ -23,8 +21,12 @@ let connectionPromise: Promise<void> | null = null;
 
 /**
  * Bootstrap the embedded UI against the root-owned Rust installer daemon once.
- * The HTTP bootstrap fetch below only runs on the dev-loopback transport; the
- * packaged Unix-socket transport authenticates via the session token instead.
+ *
+ * The `installer_connection` command deliberately returns no tokens: both
+ * tokens stay in Rust state only, and the `installer_request` proxy attaches
+ * the session token from Rust state on every call, so a compromised webview
+ * can never read them. The liveness probe below goes through the same proxy
+ * (an allowlisted route) rather than touching the backend directly.
  */
 /**
  * fetch with a cleared-on-settle timeout (ES2020-safe: no
@@ -50,22 +52,13 @@ async function ensureConnection(): Promise<void> {
   if (!inTauriShell() || connection) return;
   if (!connectionPromise) {
     connectionPromise = invoke<InstallerConnection>("installer_connection").then(async (value) => {
-      if (value.transport === "http") {
-        // Bearer header, never the query string: a token in the URL lands
-        // in daemon access logs, proxy logs, history, and crash reports.
-        const response = await fetchBounded(
-          `${value.base_url}/`,
-          {
-            headers: {
-              Accept: "application/json",
-              Authorization: "Bearer " + value.bootstrap_token,
-            },
-          },
-          30_000,
-          "Installer backend bootstrap",
-        );
-        if (!response.ok) throw new Error(`Installer backend bootstrap failed (${response.status})`);
-      }
+      // Liveness probe through the Rust proxy (session token attached from
+      // Rust state); the webview never sees either token.
+      await invoke<InstallerNativeResponse>("installer_request", {
+        method: "GET",
+        path: "/api/config",
+        body: null,
+      });
       connection = value;
     });
     // A failed bootstrap must not brick the UI until reload: drop the
@@ -91,11 +84,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers);
   headers.set("Accept", "application/json");
   if (init?.body) headers.set("Content-Type", "application/json");
-  const token = connection?.session_token ?? window.__KYTH_SESSION_TOKEN__;
-  if (token) headers.set("X-Kyth-Session-Token", token);
   let status: number;
   let text: string;
-  if (connection?.transport === "unix") {
+  if (inTauriShell()) {
+    // Every backend call from the shell goes through the Rust proxy, which
+    // attaches the session token from Rust state. JavaScript never holds a
+    // token, so an XSS in the webview cannot bypass the route allowlist.
     const native = await invoke<InstallerNativeResponse>("installer_request", {
       method: init?.method ?? "GET",
       path,
@@ -104,10 +98,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     status = native.status;
     text = native.body;
   } else {
+    // Dev-browser fallback only: the token comes from a manually injected
+    // window global, never from the Tauri connection state.
+    const token = window.__KYTH_SESSION_TOKEN__;
+    if (token) headers.set("X-Kyth-Session-Token", token);
     const response = await fetchBounded(apiUrl(path), {
       ...init,
       headers,
-      credentials: inTauriShell() ? "omit" : "same-origin",
+      credentials: "same-origin",
     }, path === "/api/disk/commit" ? 4 * 60 * 60 * 1000 + 60_000 : 60_000, `Installer request ${path}`);
     status = response.status;
     text = await response.text();
@@ -154,7 +152,7 @@ export const installerApi = {
   },
   start: (body: InstallRequest) => post<{ started: boolean }>("/api/start", body),
   cancel: () => post<{ ok: boolean; message?: string }>("/api/cancel", {}),
-  reboot: () => post<{ ok: boolean }>("/api/reboot", {}),
+  reboot: () => post<{ ok: boolean }>("/api/reboot", { confirm: true }),
   rescueLogsToUsb: (usb_mount?: string) => post<{ ok: boolean; dest?: string; copied?: string[]; message?: string }>("/api/rescue/logs-to-usb", { usb_mount }),
   newTable: (disk: string, table_type: "gpt" | "msdos") => post("/api/disk/new-table", { disk, table_type }),
   createPartition: (body: Record<string, unknown>) => post("/api/disk/create", body),

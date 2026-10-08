@@ -278,6 +278,26 @@ fn connection_args() -> ConnectionArgs {
 }
 
 fn get_json(config: &ConnectionArgs, path: &str) -> Result<(u16, serde_json::Value), String> {
+    // Same allowlist discipline as `post_json`: the Slint shell must not
+    // become a generic GET bridge to the privileged daemon.
+    const ALLOWED: &[&str] = &[
+        "/api/config",
+        "/api/disks",
+        "/api/partitions",
+        "/api/free-space",
+        "/api/timezones",
+        "/api/locales",
+        "/api/keymaps",
+        "/api/disk/pending",
+        "/api/disk/filesystems",
+        "/api/report",
+        "/api/rescue/probe",
+        "/api/log",
+    ];
+    let route = path.split('?').next().unwrap_or(path);
+    if !ALLOWED.contains(&route) {
+        return Err("Installer route is not allowlisted".to_string());
+    }
     let Some(socket_path) = config.socket_path.as_deref() else {
         return Err("Waiting for the installer service socket".to_string());
     };
@@ -1622,7 +1642,7 @@ fn main() -> Result<(), slint::PlatformError> {
             reboot_weak.clone(),
             reboot_config.clone(),
             "/api/reboot",
-            json!({}),
+            json!({"confirm": true}),
         );
     });
     let rescue_weak = window.as_weak();

@@ -75,7 +75,11 @@ test("offline warning matches the selected image source requirement", () => {
 });
 
 test("installer auth, navigation, and progress stream fail safely", () => {
-  assert.match(api, /Authorization: "Bearer " \+ value\.bootstrap_token/);
+  // M2: session tokens never reach JS — all Tauri-shell requests go through
+  // the Rust `installer_request` proxy, which attaches the token from Rust state.
+  assert.match(api, /invoke.*\"installer_request\"/);
+  assert.doesNotMatch(api, /bootstrap_token/);
+  assert.doesNotMatch(api, /session_token/);
   assert.match(api, /EventSource reconnects automatically/);
   assert.match(api, /readyState === EventSource\.CLOSED/);
   assert.match(app, /name === "install" \|\| step === "install"/);

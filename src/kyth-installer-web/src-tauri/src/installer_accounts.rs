@@ -118,6 +118,62 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
     }
 }
 
+/// Properties `apply` sets via `useradd`. When the user already exists in the
+/// installed system, these must match; anything else fails closed instead of
+/// silently adopting or modifying a foreign account.
+const EXPECTED_SHELL: &str = "/bin/bash";
+const EXPECTED_GROUPS: &[&str] = &["wheel", "video", "audio", "render"];
+
+/// True when `username` already has an entry in the installed system's
+/// passwd database. This checks the *target* root (`--root` semantics), not
+/// the live session: `id <name>` would answer for the wrong system.
+fn target_user_exists(passwd_path: &Path, username: &str) -> Result<bool, String> {
+    let content = fs::read_to_string(passwd_path)
+        .map_err(|e| format!("could not read installed passwd: {e}"))?;
+    Ok(content.lines().any(|line| {
+        line.split_once(':')
+            .is_some_and(|(name, _)| name == username)
+    }))
+}
+
+/// Verify an already-existing target user matches the properties `apply`
+/// would set (login shell and supplementary groups). A foreign account with
+/// the same name must never be silently adopted.
+fn verify_matching_properties(etc: &Path, username: &str) -> Result<(), String> {
+    let passwd = fs::read_to_string(etc.join("passwd"))
+        .map_err(|e| format!("could not read installed passwd: {e}"))?;
+    let entry = passwd
+        .lines()
+        .find_map(|line| {
+            let fields: Vec<_> = line.split(':').collect();
+            (fields.first() == Some(&username)).then_some(fields)
+        })
+        .ok_or_else(|| format!("user {username:?} disappeared from installed passwd"))?;
+    let shell = entry.get(6).copied().unwrap_or_default();
+    if shell != EXPECTED_SHELL {
+        return Err(format!(
+            "user {username:?} already exists in the installed system with a different login shell ({shell:?}); refusing to modify it"
+        ));
+    }
+    let group_content = fs::read_to_string(etc.join("group"))
+        .map_err(|e| format!("could not read installed group database: {e}"))?;
+    for group in EXPECTED_GROUPS {
+        let member = group_content.lines().any(|line| {
+            let mut fields = line.split(':');
+            fields.next() == Some(*group)
+                && fields.nth(2).is_some_and(|members| {
+                    members.split(',').any(|member| member.trim() == username)
+                })
+        });
+        if !member {
+            return Err(format!(
+                "user {username:?} already exists in the installed system without the expected {group:?} group membership; refusing to modify it"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn replace_shadow_hash(path: &Path, username: &str, hash: &str) -> Result<(), String> {
     let content =
         fs::read_to_string(path).map_err(|e| format!("could not read installed shadow: {e}"))?;
@@ -145,7 +201,7 @@ fn replace_shadow_hash(path: &Path, username: &str, hash: &str) -> Result<(), St
     }
     if !found {
         return Err(format!(
-            "user {username:?} not found in shadow after useradd"
+            "user {username:?} not found in the installed shadow database"
         ));
     }
     write_replacing(path, output.as_bytes())
@@ -200,19 +256,28 @@ pub fn apply(input: CreateUserInput) -> Result<(), String> {
     let home = target
         .join("ostree/deploy/default/var/home")
         .join(&input.username);
-    run(
-        "/usr/sbin/useradd",
-        &[
-            "--root",
-            deploy.to_str().ok_or("deploy_root is not valid UTF-8")?,
-            "-M",
-            "-G",
-            "wheel,video,audio,render",
-            "-s",
-            "/bin/bash",
-            &input.username,
-        ],
-    )?;
+    // M16: idempotent create-user. A retry after a crash (or a re-run)
+    // must not fail on "user already exists": when the account is already
+    // there with matching properties, skip `useradd` and treat it as
+    // success. The shadow hash and home-directory steps below are
+    // idempotent, so they still run and converge the account.
+    if target_user_exists(&etc.join("passwd"), &input.username)? {
+        verify_matching_properties(&etc, &input.username)?;
+    } else {
+        run(
+            "/usr/sbin/useradd",
+            &[
+                "--root",
+                deploy.to_str().ok_or("deploy_root is not valid UTF-8")?,
+                "-M",
+                "-G",
+                "wheel,video,audio,render",
+                "-s",
+                "/bin/bash",
+                &input.username,
+            ],
+        )?;
+    }
     replace_shadow_hash(&shadow, &input.username, &input.password_hash)?;
     fs::create_dir_all(&home).map_err(|e| format!("could not create user home: {e}"))?;
     let passwd = fs::read_to_string(etc.join("passwd"))
@@ -347,5 +412,56 @@ mod tests {
             fs::read_to_string(path).unwrap(),
             "root:!:x\nkyth_user:$6$new:x\n"
         );
+    }
+
+    fn etc_with_user(dir: &Path, shell: &str, groups: &[(&str, &str)]) {
+        let etc = dir.join("etc");
+        fs::create_dir_all(&etc).unwrap();
+        fs::write(
+            etc.join("passwd"),
+            format!(
+                "root:x:0:0::/root:/bin/bash\nkyth_user:x:1000:1000::/var/home/kyth_user:{shell}\n"
+            ),
+        )
+        .unwrap();
+        let mut group = String::from("root:x:0:\n");
+        for (name, members) in groups {
+            group.push_str(&format!("{name}:x:100:{members}\n"));
+        }
+        fs::write(etc.join("group"), group).unwrap();
+        fs::write(etc.join("shadow"), "root:!:x\nkyth_user:!:x\n").unwrap();
+    }
+
+    #[test]
+    fn existing_user_with_matching_properties_is_accepted() {
+        let dir = tempfile::tempdir().unwrap();
+        etc_with_user(
+            dir.path(),
+            "/bin/bash",
+            &[
+                ("wheel", "kyth_user"),
+                ("video", "kyth_user"),
+                ("audio", "kyth_user"),
+                ("render", "kyth_user"),
+            ],
+        );
+        assert!(target_user_exists(&dir.path().join("etc/passwd"), "kyth_user").unwrap());
+        assert!(!target_user_exists(&dir.path().join("etc/passwd"), "nobody").unwrap());
+        verify_matching_properties(&dir.path().join("etc"), "kyth_user")
+            .expect("matching properties should be accepted");
+    }
+
+    #[test]
+    fn existing_user_with_foreign_properties_fails_closed() {
+        // Wrong shell.
+        let dir = tempfile::tempdir().unwrap();
+        etc_with_user(dir.path(), "/bin/zsh", &[("wheel", "kyth_user")]);
+        assert!(verify_matching_properties(&dir.path().join("etc"), "kyth_user").is_err());
+        // Missing group membership.
+        let dir = tempfile::tempdir().unwrap();
+        etc_with_user(dir.path(), "/bin/bash", &[("wheel", "kyth_user")]);
+        let error = verify_matching_properties(&dir.path().join("etc"), "kyth_user")
+            .expect_err("missing group must fail closed");
+        assert!(error.contains("video"), "{error}");
     }
 }

@@ -33,13 +33,13 @@ const MAX_LOG_RESPONSE_BYTES: u64 = 1024 * 1024;
 fn transaction_path() -> PathBuf {
     std::env::var_os("KYTH_INSTALLER_TRANSACTION")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/run/kyth-installer/transaction.json"))
+        .unwrap_or_else(|| PathBuf::from("/run/kyth-installer/txn/transaction.json"))
 }
 
 fn failure_summary_path() -> PathBuf {
     std::env::var_os("KYTH_INSTALLER_FAILURE_SUMMARY")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/run/kyth-installer/failure.json"))
+        .unwrap_or_else(|| PathBuf::from("/run/kyth-installer/txn/failure.json"))
 }
 
 fn installer_log_path() -> PathBuf {
@@ -813,6 +813,12 @@ fn listener(options: &Options) -> Result<UnixListener, String> {
     Ok(socket)
 }
 
+/// Kernel-attested peer UID for a connected Unix socket (SO_PEERCRED).
+///
+/// This proves the peer's UID, nothing more: it cannot distinguish the
+/// installer shell from any other process running as the same live-session
+/// UID, and it says nothing about which binary the peer is. See the trust
+/// boundary note on `handle`.
 fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
     let mut credentials = libc::ucred {
         pid: 0,
@@ -1437,8 +1443,12 @@ fn read_only_storage_route(
                 "/usr/bin/lsblk",
                 &args.iter().map(String::as_str).collect::<Vec<_>>(),
             )?;
+            let sector = command_output("/usr/bin/blockdev", &["--getss", &disk])?
+                .trim()
+                .parse::<u64>()
+                .map_err(|_| "blockdev returned an invalid sector size".to_string())?;
             let mut value =
-                serde_json::to_value(installer_storage::parse_partitions(&snapshot)?)
+                serde_json::to_value(installer_storage::parse_partitions(&snapshot, sector)?)
                     .map_err(|error| format!("could not serialize partition inventory: {error}"))?;
             add_display_sizes(&mut value);
             Ok(Some(value))
@@ -1779,6 +1789,24 @@ fn native_stream(
     }
 }
 
+/// TRUST BOUNDARY — READ BEFORE WEAKENING ANYTHING HERE.
+///
+/// The daemon socket is 0660 root:<live-session-group> and every request
+/// must present the per-launch session token, but the effective trust
+/// boundary is the LIVE-SESSION UID, not the token:
+///
+/// * The per-shell token file is mode 0600 owned by the session user, so
+///   ANY process running as that UID can read it (same-uid file access)
+///   and drive the privileged API directly, bypassing the UI entirely.
+/// * The optional `--peer-uid` SO_PEERCRED check (see `peer_uid`) only
+///   rejects peers with a DIFFERENT uid; it cannot distinguish between
+///   two processes that share the session UID.
+///
+/// In other words: the session token authenticates "this connection comes
+/// from the live session", not "this connection comes from the installer
+/// shell". The live image must therefore treat every process running as
+/// the live-session user as fully privileged over the installer API, and
+/// must not grant that UID to untrusted code during installation.
 fn handle(
     mut client: UnixStream,
     token: &str,
@@ -2022,6 +2050,25 @@ fn handle(
         return Ok(());
     }
     if method == "POST" && route == "/api/reboot" {
+        // Rebooting the machine is not something a stray or replayed
+        // request should trigger: the caller must explicitly confirm in
+        // the JSON body. Both frontends send `{"confirm": true}` from
+        // their reboot buttons.
+        let confirmed = request_body(&request)
+            .ok()
+            .and_then(|body| body.get("confirm").and_then(serde_json::Value::as_bool))
+            .unwrap_or(false);
+        if !confirmed {
+            json_response(
+                &mut client,
+                "400 Bad Request",
+                &serde_json::json!({
+                    "ok": false,
+                    "error": "Reboot requires an explicit confirmation ({\"confirm\": true})."
+                }),
+            );
+            return Ok(());
+        }
         let _storage_guard = storage_gate
             .lock()
             .map_err(|_| "installer storage operation gate is unavailable".to_string())?;

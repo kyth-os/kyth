@@ -59,6 +59,11 @@ KYTH_SOURCE_DIGEST="${KYTH_SOURCE_DIGEST:-}"
 
 umask 077
 /usr/bin/install -d -m 0750 -o root -g liveuser "${LAUNCH_DIR}"
+# TRUST BOUNDARY: the session token below is 0600 owned by the session user,
+# which means ANY process running as the live-session UID can read it and
+# speak to the privileged installer daemon directly. The live-session UID —
+# not this token — is the trust boundary: never grant it to untrusted code
+# while the installer is running.
 session_token="$(/usr/bin/openssl rand -hex 32)"
 token_tmp="${TOKEN_FILE}.$$"
 printf '%s' "${session_token}" > "${token_tmp}"

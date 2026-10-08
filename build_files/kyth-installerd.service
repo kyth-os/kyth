@@ -8,6 +8,11 @@ After=local-fs.target
 
 [Service]
 Type=simple
+# TRUST BOUNDARY: the daemon socket is 0660 root:liveuser and the session
+# token file is 0600 owned by the session UID, so the effective trust
+# boundary is the LIVE-SESSION UID itself — any process running as that UID
+# can read the token and drive this privileged API directly. The live image
+# must not grant the session UID to untrusted code during installation.
 ExecStart=/usr/bin/kyth-installerd --socket-path /run/kyth-installer/api.sock --session-token-file /run/kyth-installer/session-token --socket-group liveuser
 EnvironmentFile=-/etc/kyth-installer.env
 User=root
