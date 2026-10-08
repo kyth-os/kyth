@@ -2406,8 +2406,10 @@ mod tests {
         fs::write(dir.path().join("unrelated"), "1").unwrap();
         assert!(!gaming_hint_active(dir.path()));
         // Live hint: the test process's own PID is necessarily alive.
+        // Use the actual UID so the UID-binding check passes.
         let live_pid = std::process::id().to_string();
-        fs::write(dir.path().join("hint-1000"), &live_pid).unwrap();
+        let uid = unsafe { libc::getuid() };
+        fs::write(dir.path().join(format!("hint-{uid}")), &live_pid).unwrap();
         assert!(gaming_hint_active(dir.path()));
     }
 
@@ -2420,10 +2422,10 @@ mod tests {
     }
 
     #[test]
-    fn gaming_hint_unparseable_content_fails_safe_to_active() {
+    fn gaming_hint_unparseable_content_fails_closed() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("hint-1000"), "not-a-pid").unwrap();
-        assert!(gaming_hint_active(dir.path()));
+        assert!(!gaming_hint_active(dir.path()));
     }
 
     #[test]

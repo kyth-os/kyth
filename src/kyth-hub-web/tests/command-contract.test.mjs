@@ -751,7 +751,8 @@ test("bug-hunt round 6: fail closed everywhere", async () => {
   assert.match(planCommit, /marker could not be/, "NTFS marker failure must abort");
   assert.match(planCommit, /Could not read the live NTFS/, "NTFS probe failure must abort");
   const apiTs = await readFile(resolve(root, "../kyth-installer-web/src/api.ts"), "utf8");
-  assert.match(apiTs, /Authorization/, "bootstrap must use a header, not the URL");
+  assert.match(apiTs, /withCredentials/, "bootstrap must use HttpOnly cookie, not URL token");
+  assert.doesNotMatch(apiTs, /session_token/, "session token must not appear in JS");
   assert.doesNotMatch(apiTs, /bootstrap_token=\$/, "token must not be interpolated into the URL");
   assert.match(apiTs, /connectionPromise = null/, "failed bootstrap must be retryable");
   assert.match(rust, /atomic_write_text\(&path/, "exe config must write atomically");

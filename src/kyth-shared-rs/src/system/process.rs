@@ -81,10 +81,10 @@ fn collect_output(
 ) -> io::Result<Output> {
     let stdout = stdout_reader
         .join()
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "output reader panicked"))??;
+        .map_err(|_| io::Error::other("output reader panicked"))??;
     let stderr = stderr_reader
         .join()
-        .map_err(|_| io::Error::new(io::ErrorKind::Other, "output reader panicked"))??;
+        .map_err(|_| io::Error::other("output reader panicked"))??;
     Ok(Output {
         status,
         stdout,
