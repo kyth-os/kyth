@@ -78,6 +78,7 @@ mod tests {
                 DiskOperationInput::DeletePartition {
                     disk: "/dev/sda".into(),
                     part_num: 2,
+                    expected_partuuid: "test-partuuid".into(),
                 },
                 "/usr/sbin/parted",
                 false,
@@ -89,6 +90,7 @@ mod tests {
                     start: 1_048_576,
                     new_size: 4 * 1024 * 1024,
                     sector_size: 512,
+                    expected_partuuid: "test-partuuid".into(),
                 },
                 "/usr/sbin/parted",
                 true,
@@ -108,6 +110,7 @@ mod tests {
                     device: "/dev/sda2".into(),
                     fs: "ext4".into(),
                     label: "KythRoot".into(),
+                    expected_disk: "/dev/sda".into(),
                 },
                 "/usr/sbin/mkfs.ext4",
                 false,
@@ -149,6 +152,7 @@ mod tests {
                 &after,
                 new_start_sectors * 512,
                 new_size_bytes,
+                512,
             )
             .expect("geometry identifies one new partition"),
             "/dev/sda3"
@@ -157,7 +161,8 @@ mod tests {
             LSBLK,
             LSBLK,
             new_start_sectors * 512,
-            new_size_bytes
+            new_size_bytes,
+            512
         )
         .is_err());
     }

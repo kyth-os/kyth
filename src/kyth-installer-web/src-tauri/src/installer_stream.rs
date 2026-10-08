@@ -16,6 +16,12 @@ use std::time::{Duration, Instant};
 
 const RECENT_OUTPUT_LINES: usize = 30;
 const FAILURE_OUTPUT_LINES: usize = 10;
+/// Longest single log line the streaming model will retain. A hostile or
+/// malfunctioning child spewing a multi-GB unterminated line must not OOM
+/// the daemon: longer lines are emitted in capped chunks marked
+/// `[truncated]`, so the pending line buffer stays bounded.
+const MAX_STREAM_LINE_BYTES: usize = 64 * 1024;
+const TRUNCATED_LINE_SUFFIX: &str = "[truncated]";
 const STREAM_READ_CHUNK: usize = 64 * 1024;
 const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_INSTALLER_LOG_BYTES: u64 = 1024 * 1024;
@@ -81,6 +87,28 @@ pub(crate) fn kill_process_group(child: &mut Child) {
     let _ = child.kill();
 }
 
+/// Ask the kernel to deliver SIGTERM to this process when its parent dies.
+///
+/// Installed via `pre_exec` in every helper the daemon or exec binary spawns
+/// for disk work: if the spawner dies mid-mkfs/ntfsresize/bootc, the helper
+/// must not keep writing. The getppid double-check closes the fork race
+/// where the parent dies between fork and the prctl call. The codebase is
+/// Linux-only, so no cfg guard is needed (consistent with the other
+/// `pre_exec` uses).
+pub(crate) fn parent_death_signal() -> io::Result<()> {
+    let parent_pid = unsafe { libc::getppid() };
+    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) } != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    if unsafe { libc::getppid() } != parent_pid {
+        return Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "installer parent exited during child setup",
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub(crate) enum StreamEvent {
     Log(String),
@@ -131,6 +159,64 @@ pub(crate) fn run_command_timeout(
     result
 }
 
+/// Bounded `run_command_timeout` variant that also captures stdout.
+///
+/// For read-only probes (blkid, mokutil, ...) whose output the caller needs:
+/// same cancel/timeout/kill-process-group discipline, but stdout is returned
+/// on success instead of just the exit status.
+pub(crate) fn run_output_timeout(
+    command: &mut Command,
+    cancel_requested: impl Fn() -> bool,
+    timeout: Duration,
+    operation: &str,
+) -> Result<String, String> {
+    let mut child = command
+        .process_group(0)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("could not spawn {operation}: {error}"))?;
+    let started = Instant::now();
+    loop {
+        if cancel_requested() {
+            kill_process_group(&mut child);
+            let _ = child.wait();
+            return Err(format!("{operation} cancelled"));
+        }
+        match child.try_wait() {
+            Ok(Some(_)) => {
+                let output = child
+                    .wait_with_output()
+                    .map_err(|error| format!("could not collect {operation} output: {error}"))?;
+                if !output.status.success() {
+                    return Err(format!(
+                        "{operation} failed with exit code {}",
+                        output.status.code().unwrap_or(1)
+                    ));
+                }
+                return String::from_utf8(output.stdout)
+                    .map_err(|_| format!("{operation} returned non-UTF-8 output"));
+            }
+            Ok(None) if started.elapsed() < timeout => {
+                std::thread::sleep(Duration::from_millis(50))
+            }
+            Ok(None) => {
+                kill_process_group(&mut child);
+                let _ = child.wait();
+                return Err(format!(
+                    "{operation} timed out after {} seconds",
+                    timeout.as_secs()
+                ));
+            }
+            Err(error) => {
+                kill_process_group(&mut child);
+                let _ = child.wait();
+                return Err(format!("could not wait for {operation}: {error}"));
+            }
+        }
+    }
+}
+
 /// Run a fixed helper operation while supplying a bounded JSON request on
 /// stdin. The helper is spawned and reaped through the same cancellation and
 /// output path as streaming commands.
@@ -139,6 +225,12 @@ pub(crate) fn run_command_with_input(
     input: &[u8],
     cancel_requested: impl Fn() -> bool,
 ) -> Result<ExitStatus, String> {
+    // M8: the exec binary must die with the daemon. Its own children already
+    // install PR_SET_PDEATHSIG; without it here, daemon death orphans a
+    // mid-mkfs/ntfsresize/bootc helper.
+    unsafe {
+        command.pre_exec(parent_death_signal);
+    }
     let mut child = command
         .process_group(0)
         .stdin(Stdio::piped())
@@ -315,12 +407,28 @@ impl StreamingCommandModel {
     fn take_lines(&mut self, final_chunk: bool) -> Vec<StreamEvent> {
         let mut events = Vec::new();
         loop {
-            let Some(index) = self.pending.find(['\n', '\r']) else {
-                break;
-            };
-            let line = self.pending[..index].to_string();
-            self.pending.drain(..=index);
-            self.emit_line(line, &mut events);
+            if let Some(index) = self.pending.find(['\n', '\r']) {
+                let line = self.pending[..index].to_string();
+                self.pending.drain(..=index);
+                self.emit_line(line, &mut events);
+                continue;
+            }
+            // No terminator yet: without a bound, a single unterminated line
+            // grows `pending` without limit. Emit the over-long prefix now as
+            // a capped, marked chunk and keep the bounded remainder; the next
+            // feed repeats until the terminator arrives or the output ends.
+            if self.pending.len() > MAX_STREAM_LINE_BYTES {
+                let mut end = MAX_STREAM_LINE_BYTES;
+                while !self.pending.is_char_boundary(end) {
+                    end -= 1;
+                }
+                let mut line = self.pending[..end].to_string();
+                self.pending.drain(..end);
+                line.push_str(TRUNCATED_LINE_SUFFIX);
+                self.emit_line(line, &mut events);
+                continue;
+            }
+            break;
         }
         if final_chunk && !self.pending.is_empty() {
             let line = std::mem::take(&mut self.pending);
@@ -592,6 +700,33 @@ mod tests {
         model.request_cancel();
         assert!(model.cancellation_requested());
         assert!(model.finish_status(0).is_err());
+    }
+
+    #[test]
+    fn unterminated_giant_line_is_capped_and_marked() {
+        let mut model = StreamingCommandModel::new(0, 0);
+        // 200 KiB with no line terminator: the pending buffer must stay
+        // bounded instead of accumulating the whole line.
+        let events = event_lines(model.feed(&vec![b'A'; 200 * 1024], 1));
+        // Consecutive identical chunks dedupe to a single event, but it must
+        // be capped at 64 KiB and marked.
+        assert_eq!(events.len(), 1);
+        assert!(events[0].ends_with(TRUNCATED_LINE_SUFFIX));
+        assert_eq!(
+            events[0].len(),
+            MAX_STREAM_LINE_BYTES + TRUNCATED_LINE_SUFFIX.len()
+        );
+        assert!(
+            model.pending.len() <= MAX_STREAM_LINE_BYTES,
+            "pending line buffer grew past the cap: {}",
+            model.pending.len()
+        );
+        // Terminating the line flushes the bounded remainder as one final,
+        // unmarked line.
+        let events = event_lines(model.feed(b"\n", 2));
+        assert_eq!(events.len(), 1);
+        assert!(!events[0].ends_with(TRUNCATED_LINE_SUFFIX));
+        assert!(model.pending.is_empty());
     }
 
     #[test]

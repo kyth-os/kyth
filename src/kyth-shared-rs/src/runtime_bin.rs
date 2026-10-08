@@ -10,6 +10,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{self, Write};
+use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::thread;
@@ -87,7 +88,10 @@ fn refresh_marker_path(operation: &str, home: Option<&std::ffi::OsStr>) -> PathB
 /// force gaming tunables system-wide with `echo 1 > hint-<uid>`. The hint PID
 /// must also belong to the hint file's owner: parse the `Uid:` line from
 /// `/proc/<pid>/status` and require it to match the expected UID derived
-/// from the `hint-<uid>` filename.
+/// from the `hint-<uid>` filename. Finally, the hint file itself must be
+/// owned by that UID (lstat, so symlinks cannot smuggle a victim-owned
+/// target): in the 1777 directory any user could otherwise plant `hint-0`
+/// containing "1" and pass the PID-UID binding via PID 1.
 fn gaming_hint_active(dir: &Path) -> bool {
     fs::read_dir(dir).is_ok_and(|entries| {
         entries.flatten().any(|entry| {
@@ -105,6 +109,18 @@ fn gaming_hint_active(dir: &Path) -> bool {
                 },
                 Err(_) => return false,
             };
+            // The hint file itself must be owned by the hint's UID. The hint
+            // directory is mode 1777, so without this any user could plant
+            // `hint-0` containing "1": PID 1 is uid 0, the PID-UID binding
+            // alone would pass, and the planter would force the gaming power
+            // profile. `symlink_metadata` (lstat) so a planted symlink to a
+            // victim-owned file cannot pass either.
+            let owned_by_hint_uid = fs::symlink_metadata(entry.path())
+                .map(|metadata| metadata.uid() == expected_uid)
+                .unwrap_or(false);
+            if !owned_by_hint_uid {
+                return false;
+            }
             // Bind the PID to the hint owner's UID: read /proc/<pid>/status
             // and require the real UID to match the hint filename's UID.
             // PID 1 (or any other user's process) can no longer spoof a hint.
@@ -2425,6 +2441,21 @@ mod tests {
     fn gaming_hint_unparseable_content_fails_closed() {
         let dir = tempfile::tempdir().unwrap();
         fs::write(dir.path().join("hint-1000"), "not-a-pid").unwrap();
+        assert!(!gaming_hint_active(dir.path()));
+    }
+
+    #[test]
+    fn gaming_hint_planted_file_with_wrong_owner_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        // The classic plant: `hint-0` containing "1". PID 1 is uid 0, so the
+        // PID-UID binding alone accepts it; the file-owner check must reject
+        // it because the planter does not own uid 0's hint file. Skipped for
+        // uid 0, which legitimately owns `hint-0`.
+        let uid = unsafe { libc::getuid() };
+        if uid == 0 {
+            return;
+        }
+        fs::write(dir.path().join("hint-0"), "1").unwrap();
         assert!(!gaming_hint_active(dir.path()));
     }
 

@@ -24,7 +24,9 @@ fn valid_username(username: &str) -> bool {
             .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || matches!(b, b'_' | b'-'))
 }
 
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+/// No Debug impl on purpose: the password hash must never be formattable
+/// into a log line, event, or diagnostic message.
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
 pub struct CreateUserInput {
     pub deploy_root: String,
     pub target_root: String,

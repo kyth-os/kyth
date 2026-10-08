@@ -62,6 +62,15 @@ impl JournalState {
 
 /// Append-only handle to the on-disk journal. Every mutation is written
 /// atomically (temp file + rename) and fsync'd, including the directory.
+///
+/// FAT32 (the ESP) offers no atomic-rename guarantee: a crash or power loss
+/// mid-rename can leave a torn or vanished journal behind. Every write is
+/// therefore verified by reading the file back and checking it parses with
+/// the expected record count; a mismatch retries once, then fails closed
+/// rather than continuing with untrustworthy crash-recovery state. A journal
+/// that cannot be loaded — corrupt or vanished — is never silently reset to
+/// empty: without trustworthy records a retry cannot know what already
+/// happened.
 pub struct DurableJournal {
     path: PathBuf,
 }
@@ -165,15 +174,13 @@ impl DurableJournal {
     /// Record an operation transition, fsync'd before returning. `Started`
     /// appends a new record; `Completed` closes the most recent open record
     /// with that name (or records a standalone completed entry when none is
-    /// open).
+    /// open). Fails closed when the journal cannot be loaded: a journal that
+    /// vanished after open() is never silently reset to empty, which would
+    /// lose the crash-recovery history a retry depends on.
     pub fn record(&self, op: &str, state: OpState) -> Result<(), String> {
         let name = validated_op_name(op)?;
         let now = unix_now()?;
-        let mut journal = match Self::load(&self.path) {
-            Ok(journal) => journal,
-            Err(_) if fs::symlink_metadata(&self.path).is_err() => JournalState::default(),
-            Err(error) => return Err(error),
-        };
+        let mut journal = Self::load(&self.path)?;
         match state {
             OpState::Started => journal.ops.push(JournalOp {
                 name,
@@ -200,9 +207,39 @@ impl DurableJournal {
         self.write_state(&journal)
     }
 
-    /// Atomically copy this journal's records to `dest` (fsync'd) and return
-    /// a handle to the copy. Used to relocate the journal onto the ESP
-    /// before a destructive step without losing earlier records.
+    /// Append-only union merge of two journal states. For each operation
+    /// name, a `Completed` record wins over `Started`/absent; a destination
+    /// record is never downgraded or dropped. Staging records keep their
+    /// original order; a destination record survives unless the staging
+    /// journal already completed that operation.
+    fn merge_journal_states(staging: JournalState, existing: JournalState) -> JournalState {
+        let mut merged = staging.ops;
+        for op in existing.ops {
+            if merged
+                .iter()
+                .any(|staged| staged.name == op.name && staged.completed.is_some())
+            {
+                continue;
+            }
+            merged.push(op);
+        }
+        JournalState { ops: merged }
+    }
+
+    /// Atomically move this journal's records to `dest` (fsync'd) and
+    /// return a handle to the copy. Used to relocate the journal onto the
+    /// ESP before a destructive step without losing earlier records.
+    ///
+    /// Merge semantics: when a journal already exists at `dest`, its records
+    /// are union-merged with this journal's before writing — `Completed`
+    /// wins over `Started`/absent, and records are never downgraded or
+    /// dropped. A retry that opens a fresh staging journal must not delete
+    /// completions a previous run recorded (e.g. `ntfs_shrink`), or the
+    /// operation would run a second time.
+    ///
+    /// A corrupt or unparseable destination journal fails toward the fresh
+    /// staging records: they are kept and written, and a warning is
+    /// logged — never silently discarded.
     pub fn relocate(&self, dest: &Path) -> Result<Self, String> {
         if dest == self.path.as_path() {
             return Ok(Self {
@@ -219,11 +256,31 @@ impl DurableJournal {
                 parent.display()
             )
         })?;
-        let state = Self::load(&self.path)?;
+        let staging = Self::load(&self.path)?;
+        let merged = match fs::symlink_metadata(dest) {
+            Ok(_) => match Self::load(dest) {
+                Ok(existing) => Self::merge_journal_states(staging, existing),
+                Err(error) => {
+                    eprintln!(
+                        "install journal destination {} is corrupt ({}); keeping fresh staging records",
+                        dest.display(),
+                        error
+                    );
+                    staging
+                }
+            },
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => staging,
+            Err(error) => {
+                return Err(format!(
+                    "could not inspect journal destination {}: {error}",
+                    dest.display()
+                ))
+            }
+        };
         let relocated = Self {
             path: dest.to_path_buf(),
         };
-        relocated.write_state(&state)?;
+        relocated.write_state(&merged)?;
         Ok(relocated)
     }
 
@@ -277,7 +334,25 @@ impl DurableJournal {
         });
         let bytes = serde_json::to_vec(&document)
             .map_err(|error| format!("could not encode install journal: {error}"))?;
-        write_atomically(&self.path, &bytes)
+        let expected_records = state.ops.len();
+        write_atomically(&self.path, &bytes)?;
+        if Self::load(&self.path).is_ok_and(|reloaded| reloaded.ops.len() == expected_records) {
+            return Ok(());
+        }
+        // Read-back mismatch: a torn rename on FAT32 can leave a partial or
+        // vanished file. Retry once, then fail closed rather than continue
+        // with untrustworthy crash-recovery state.
+        write_atomically(&self.path, &bytes)?;
+        let reloaded = Self::load(&self.path)
+            .map_err(|error| format!("install journal failed verification after write: {error}"))?;
+        if reloaded.ops.len() == expected_records {
+            Ok(())
+        } else {
+            Err(format!(
+                "install journal record count mismatch after write: expected {expected_records}, found {}",
+                reloaded.ops.len()
+            ))
+        }
     }
 }
 
@@ -441,6 +516,23 @@ mod tests {
     }
 
     #[test]
+    fn record_fails_closed_when_journal_vanishes_after_open() {
+        let dir = tempdir();
+        let journal = DurableJournal::open(None, dir.path()).expect("journal should open");
+        journal
+            .record("image_write", OpState::Started)
+            .expect("record should persist");
+        // A torn FAT32 rename (or an unmounted ESP) can make the journal
+        // vanish between writes: recording must fail closed, never silently
+        // reset to empty and lose the crash-recovery history.
+        fs::remove_file(journal.path()).expect("journal file should delete");
+        assert!(
+            journal.record("image_write", OpState::Completed).is_err(),
+            "a vanished journal must not silently reset to empty"
+        );
+    }
+
+    #[test]
     fn rejects_unsafe_operation_names_and_paths() {
         let dir = tempdir();
         let journal = DurableJournal::open(None, dir.path()).expect("journal should open");
@@ -451,5 +543,62 @@ mod tests {
             );
         }
         assert!(DurableJournal::open(None, Path::new("relative/path")).is_err());
+    }
+
+    #[test]
+    fn relocate_merges_instead_of_deleting_completed_records() {
+        let dir = tempdir();
+        let staging_dir = dir.path().join("staging");
+        let esp = dir.path().join("esp");
+        // Run 1: the ESP journal records ntfs_shrink as completed.
+        let first =
+            DurableJournal::open(Some(esp.as_path()), dir.path()).expect("ESP journal should open");
+        first
+            .record("ntfs_shrink", OpState::Completed)
+            .expect("record should persist");
+        // Run 2: a fresh staging journal knows nothing about the shrink.
+        let staging =
+            DurableJournal::open(None, staging_dir.as_path()).expect("staging journal should open");
+        staging
+            .record("partition_table", OpState::Started)
+            .expect("record should persist");
+        // Relocating the fresh staging journal must NOT delete the
+        // completion record — that is what a retry does via
+        // ensure_esp_journal before destructive steps.
+        let dest = esp.join(JOURNAL_FILE_NAME);
+        let relocated = staging.relocate(&dest).expect("relocate should merge");
+        let state = DurableJournal::load(relocated.path()).expect("journal should load");
+        assert!(
+            state.completed("ntfs_shrink"),
+            "relocate must preserve the run-1 completion: {state:?}"
+        );
+        assert!(state.started("partition_table"));
+        assert!(
+            !state.completed("partition_table"),
+            "staging records keep their own state: {state:?}"
+        );
+    }
+
+    #[test]
+    fn relocate_keeps_staging_records_when_destination_is_corrupt() {
+        let dir = tempdir();
+        let staging_dir = dir.path().join("staging");
+        let esp = dir.path().join("esp");
+        fs::create_dir_all(&esp).expect("esp fixture should exist");
+        let dest = esp.join(JOURNAL_FILE_NAME);
+        fs::write(&dest, "{not json").expect("corrupt destination fixture should write");
+        let staging =
+            DurableJournal::open(None, staging_dir.as_path()).expect("staging journal should open");
+        staging
+            .record("ntfs_shrink", OpState::Started)
+            .expect("record should persist");
+        // A corrupt destination fails toward the fresh staging state: the
+        // staging records are kept and written, not discarded.
+        let relocated = staging
+            .relocate(&dest)
+            .expect("relocate should keep staging records on corrupt destination");
+        let state = DurableJournal::load(relocated.path()).expect("journal should load");
+        assert!(state.started("ntfs_shrink"));
+        assert_eq!(state.ops.len(), 1);
     }
 }

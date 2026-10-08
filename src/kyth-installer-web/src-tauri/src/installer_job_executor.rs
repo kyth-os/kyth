@@ -1102,11 +1102,15 @@ impl NativePhaseExecutor {
         Ok(())
     }
 
-    fn check_storage_preflight(&self, phase: Phase) -> Result<(), NativePhaseError> {
+    fn check_storage_preflight(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
         // H3: a tpm2 install without a TPM would encrypt a disk that can
         // never be unlocked. Probe TPM presence BEFORE any destructive
         // phase and fail closed when there is none.
-        self.check_tpm_preflight(phase)?;
+        self.check_tpm_preflight(phase, cancellation)?;
         // Live ESP-preservation / Windows / BitLocker preflight immediately
         // before mutation or bootc: locked BitLocker fails closed in every
         // mode, and non-wipe modes require an existing ESP to preserve.
@@ -1122,30 +1126,50 @@ impl NativePhaseExecutor {
             .map_err(|message| NativePhaseError::Execution { phase, message })
     }
 
-    /// H3: when TPM2 encryption was requested, refuse the install when no
-    /// TPM is present. A TPM is present when `/dev/tpm0` exists or
-    /// `tpm2_pcrread` exits 0; anything else fails closed with an actionable
-    /// message before partitioning or bootc runs.
-    fn check_tpm_preflight(&self, phase: Phase) -> Result<(), NativePhaseError> {
+    /// H3/M6: when TPM2 encryption was requested, require a FUNCTIONAL TPM
+    /// before any destructive phase. `/dev/tpm0` existing is not enough: a
+    /// present-but-dead node (broken VM passthrough, uninitialized firmware
+    /// TPM) passes a path check and then fails at enrollment after bootc
+    /// has already wiped the disk. The node must exist AND `tpm2_pcrread`
+    /// must exit 0; anything else fails closed here.
+    fn check_tpm_preflight(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
         if self.bootc_request.encryption.trim().to_ascii_lowercase() != "tpm2" {
             return Ok(());
         }
-        let tpm_present = Path::new("/dev/tpm0").exists() || {
-            ["/usr/bin/tpm2_pcrread", "/usr/sbin/tpm2_pcrread"]
-                .iter()
-                .any(|program| {
-                    Command::new(program)
-                        .stdout(std::process::Stdio::null())
-                        .stderr(std::process::Stdio::null())
-                        .status()
-                        .map(|status| status.success())
-                        .unwrap_or(false)
-                })
-        };
-        if !tpm_present {
+        // Fast path: no device node, no TPM — skip the userspace probe.
+        if !Path::new("/dev/tpm0").exists() {
             return Err(NativePhaseError::Execution {
                 phase,
-                message: "TPM2 encryption was requested but no TPM was detected: /dev/tpm0 is missing and tpm2_pcrread failed. Refusing to install: without a TPM the encrypted disk could never be unlocked."
+                message: "TPM2 encryption was requested but no TPM was detected: /dev/tpm0 is missing. Refusing to install: without a TPM the encrypted disk could never be unlocked."
+                    .to_string(),
+            });
+        }
+        // Functional probe: the node exists, so the TPM stack must actually
+        // answer. A dead node fails closed here, before partitioning or
+        // bootc runs.
+        // M11: tpm2_pcrread on a wedged TPM would hang the worker forever
+        // with the exclusive disk lock held and the cancel token never
+        // consulted. Bound it with the shared cancel-checked helper.
+        let pcrread_ok = ["/usr/bin/tpm2_pcrread", "/usr/sbin/tpm2_pcrread"]
+            .iter()
+            .any(|program| {
+                let mut command = Command::new(program);
+                super::installer_stream::run_command_timeout(
+                    &mut command,
+                    || cancellation.is_cancelled(),
+                    std::time::Duration::from_secs(30),
+                )
+                .map(|status| status.success())
+                .unwrap_or(false)
+            });
+        if !pcrread_ok {
+            return Err(NativePhaseError::Execution {
+                phase,
+                message: "TPM2 encryption was requested and /dev/tpm0 exists, but tpm2_pcrread failed: the TPM is not functional (broken passthrough or uninitialized firmware TPM). Refusing to install: without a working TPM the encrypted disk could never be unlocked."
                     .to_string(),
             });
         }
@@ -1163,7 +1187,7 @@ impl NativePhaseExecutor {
         // or available memory is too low to write it safely.
         self.check_image_resources(phase)?;
         self.verify_install_source(phase)?;
-        self.check_storage_preflight(phase)?;
+        self.check_storage_preflight(phase, cancellation)?;
         if self.storage_plan.mode == "wipe" {
             self.validate_target_disk(phase)?;
         }
@@ -1187,6 +1211,12 @@ impl NativePhaseExecutor {
             self.record_journal(phase, "image_write", OpState::Completed)?;
             if self.storage_plan.mode == "wipe" {
                 self.mount_wipe_root(phase, cancellation)?;
+                // M5: wipe is the most destructive mode, and until now the
+                // durable journal lived on tmpfs. bootc just created the
+                // ESP; move the journal onto it so a crash or reboot during
+                // the configure phase leaves a recoverable record instead
+                // of a blind retry.
+                self.ensure_esp_journal(phase, cancellation)?;
             }
             Ok(())
         } else {
@@ -1328,7 +1358,7 @@ impl NativePhaseExecutor {
                 "--bytes",
                 "--paths",
                 "--output",
-                "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,PARTN,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO,PKNAME,PTTYPE",
+                "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,PARTN,PARTUUID,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO,PKNAME,PTTYPE",
                 disk,
             ])
             .output()
@@ -1473,6 +1503,19 @@ impl NativePhaseExecutor {
     /// of the install cannot lose the completion record. Mounts the target
     /// ESP at a scratch mountpoint when the live session has not already
     /// mounted it.
+    ///
+    /// M5 durable-journal coverage by install mode (the executor's
+    /// crash-recovery journal; the manual partition editor's
+    /// `PartitionJournal` is a separate, in-daemon structure):
+    /// - resize_ntfs (guided NTFS shrink): relocated here, before the
+    ///   destructive resize.
+    /// - wipe: relocated in the image phase after `mount_wipe_root`, once
+    ///   bootc has created the ESP; there is no ESP to use before that.
+    /// - alongside / manual / free_space: relocated at the end of
+    ///   `prepare_btrfs_target`, after the pre-existing ESP is mounted.
+    /// There is no supported path where the journal silently stays on
+    /// tmpfs: non-wipe modes fail preflight without an ESP, and wipe mode
+    /// fails here if bootc did not create one.
     fn ensure_esp_journal(
         &self,
         phase: Phase,
@@ -1818,12 +1861,21 @@ impl NativePhaseExecutor {
         }) {
             Ok(value) => Ok(value),
             Err((operation_error, None)) => Err(operation_error),
-            Err((operation_error, Some(restore_error))) => Err(NativePhaseError::Execution {
-                phase,
-                message: format!(
-                    "{operation_error}; partition-table restore also failed: {restore_error}"
-                ),
-            }),
+            Err((operation_error, Some(restore_error))) => {
+                // M12: the partition-table backup is the one recovery
+                // artifact, and this is the path that needs it. Never delete
+                // it here: persist the tempdir in place and report the path
+                // so Rescue mode can find it. It lives on tmpfs (/tmp), so
+                // it survives process death but not reboot.
+                let backup_dir = directory.keep();
+                Err(NativePhaseError::Execution {
+                    phase,
+                    message: format!(
+                        "{operation_error}; partition-table restore also failed: {restore_error}; partition-table backup preserved at {}",
+                        backup_dir.display()
+                    ),
+                })
+            }
         }
     }
 
@@ -1892,7 +1944,8 @@ impl NativePhaseExecutor {
                     "disk": &self.storage_plan.disk,
                     "part_num": bios_probe.number,
                     "flag": "bios_grub",
-                    "enabled": true
+                    "enabled": true,
+                    "expected_partuuid": bios_probe.partuuid
                 }),
             )?;
             before = after;
@@ -2069,7 +2122,8 @@ impl NativePhaseExecutor {
                 "part_num": fresh_probe.number,
                 "start": fresh_probe.start_bytes,
                 "new_size": new_size,
-                "sector_size": sector_size
+                "sector_size": sector_size,
+                "expected_partuuid": fresh_probe.partuuid
             }),
         )?;
         let after = self.disk_snapshot(phase, &self.storage_plan.disk)?;
@@ -2251,7 +2305,10 @@ impl NativePhaseExecutor {
                 "operation": "format_filesystem",
                 "device": target,
                 "fs": "btrfs",
-                "label": "KythOS"
+                "label": "KythOS",
+                // M14: build_mkfs fails closed unless the target's parent
+                // disk is this install plan's selected disk.
+                "expected_disk": self.storage_plan.disk
             }),
         )?;
         self.record_journal(phase, "format", OpState::Completed)?;
@@ -2331,6 +2388,13 @@ impl NativePhaseExecutor {
         self.register_mount(FILESYSTEM_STAGING_MOUNTPOINT)?;
 
         self.mount_efi(phase, cancellation)?;
+        // M5: the pre-existing ESP is mounted now (alongside / manual /
+        // free-space paths); move the durable journal onto it so a crash
+        // or reboot during the image or configure phases leaves a
+        // recoverable record instead of a tmpfs journal that vanishes.
+        // Idempotent with the resize_ntfs call site, which relocated the
+        // journal earlier, before the destructive shrink.
+        self.ensure_esp_journal(phase, cancellation)?;
         Ok(())
     }
 
@@ -2377,7 +2441,7 @@ impl NativePhaseExecutor {
     ) -> Result<(), NativePhaseError> {
         if self.storage_plan.mode != "wipe" {
             self.validate_target_disk(phase)?;
-            self.check_storage_preflight(phase)?;
+            self.check_storage_preflight(phase, cancellation)?;
         }
         // H4: open the durable crash-recovery journal before the first
         // destructive mutation of the Storage phase (for wipe mode the

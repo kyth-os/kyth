@@ -150,8 +150,10 @@ export const installerApi = {
   validatePlan: async (body: InstallRequest): Promise<void> => {
     if (inTauriShell()) await invoke("installer_validate_plan", { request: body });
   },
-  start: (body: InstallRequest) => post<{ started: boolean }>("/api/start", body),
-  cancel: () => post<{ ok: boolean; message?: string }>("/api/cancel", {}),
+  start: (body: InstallRequest) => post<{ started: boolean; job_id?: number; first_event_id?: number }>("/api/start", body),
+  // M7: cancel names the job it cancels; the daemon 409s a stale id so a
+  // replayed cancel cannot kill a newer install.
+  cancel: (job_id: number) => post<{ ok: boolean; message?: string }>("/api/cancel", { job_id }),
   reboot: () => post<{ ok: boolean }>("/api/reboot", { confirm: true }),
   rescueLogsToUsb: (usb_mount?: string) => post<{ ok: boolean; dest?: string; copied?: string[]; message?: string }>("/api/rescue/logs-to-usb", { usb_mount }),
   newTable: (disk: string, table_type: "gpt" | "msdos") => post("/api/disk/new-table", { disk, table_type }),

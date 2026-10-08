@@ -14,7 +14,9 @@ use crate::installer_secure_boot::{self, SecureBootInput, SecureBootPlan};
 
 pub(crate) const EXECUTOR_PROTOCOL_VERSION: u32 = 1;
 
-#[derive(Clone, Debug, Deserialize)]
+/// No Debug impl on purpose: `account` carries the password hash, which
+/// must never be formattable into a log line, event, or diagnostic message.
+#[derive(Clone, Deserialize)]
 pub(crate) struct InstallerExecutionInput {
     pub bootc: BootcInstallInput,
     pub configuration: ConfigurationInput,

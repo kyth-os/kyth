@@ -31,6 +31,17 @@ pub(crate) struct PartitionJournal {
     pub committed: bool,
     pub root_partition: Option<String>,
     pub irreversible_completed: bool,
+    /// Disk identity (lsblk MODEL/SERIAL/SIZE) captured at staging time
+    /// (M4). The commit path re-verifies it and fails closed on mismatch,
+    /// so a disk re-enumerated between staging and commit cannot receive
+    /// another disk's `new_table`. `#[serde(default)]` keeps journals
+    /// serialized before these fields existed readable.
+    #[serde(default)]
+    pub disk_model: Option<String>,
+    #[serde(default)]
+    pub disk_serial: Option<String>,
+    #[serde(default)]
+    pub disk_size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -116,12 +127,19 @@ impl PartitionJournal {
     pub(crate) fn new(disk: &str) -> Result<Self, String> {
         let disk = normalize_device_path(disk)
             .ok_or_else(|| "Invalid disk path for journal.".to_string())?;
+        // M4: capture the disk identity at staging time. Best-effort here
+        // so unit tests and unprivileged staging keep working; the commit
+        // path fails closed when no identity was captured.
+        let identity = crate::installer_storage::read_disk_identity(&disk).ok();
         Ok(Self {
             disk,
             ops: Vec::new(),
             committed: false,
             root_partition: None,
             irreversible_completed: false,
+            disk_model: identity.as_ref().and_then(|id| id.model.clone()),
+            disk_serial: identity.as_ref().and_then(|id| id.serial.clone()),
+            disk_size_bytes: identity.as_ref().and_then(|id| id.size_bytes),
         })
     }
 
@@ -910,6 +928,13 @@ fn run_disk_operation(operation: installer_disk::DiskOperationInput) -> Result<(
     let mut command = Command::new(&plan.argv[0]);
     command.args(&plan.argv[1..]);
     command.process_group(0);
+    // M9: own process group, but the parent-death signal is about parent
+    // death, not the group: if the daemon dies mid-commit, this partition
+    // tool must die with it instead of writing on after the flock is
+    // released and racing a restarted daemon's retry.
+    unsafe {
+        command.pre_exec(crate::installer_stream::parent_death_signal);
+    }
     if plan.needs_confirmation {
         command.stdin(Stdio::piped());
     }
@@ -1236,6 +1261,10 @@ fn execute_operation(
     operation: &mut PartitionOperation,
     journal: &PartitionJournal,
     irreversible: &mut bool,
+    // M13: the disk's real logical sector size, probed once at commit time.
+    // partition_end/alignment math needs the real size; 512 is only valid
+    // for lsblk START scaling per HIGH 1.
+    sector_size: u64,
 ) -> Result<String, String> {
     let params = &mut operation.params;
     let target = value_string(params, "partition");
@@ -1261,7 +1290,7 @@ fn execute_operation(
                         start: 1024 * 1024,
                         size: BIOS_BOOT_BYTES,
                         label: "biosboot".to_string(),
-                        sector_size: 512,
+                        sector_size,
                     },
                 )?;
                 let bios =
@@ -1287,7 +1316,7 @@ fn execute_operation(
                 size,
                 fs: value_string(params, "fs_type"),
                 label: value_string(params, "label"),
-                sector_size: 512,
+                sector_size,
             })?;
             let created = find_new_partition(&journal.disk, &before, start, size)?;
             params["partition"] = Value::String(created.clone());
@@ -1298,6 +1327,9 @@ fn execute_operation(
                     device: created.clone(),
                     fs,
                     label: value_string(params, "label"),
+                    // M14: the mkfs target must resolve to this journal's
+                    // selected disk; build_mkfs fails closed on mismatch.
+                    expected_disk: journal.disk.clone(),
                 })?;
             }
             if is_efi_mountpoint(&value_string(params, "mountpoint")) {
@@ -1361,7 +1393,7 @@ fn execute_operation(
                 expected_partuuid,
                 start,
                 new_size,
-                sector_size: 512,
+                sector_size,
             })?;
             Ok(target)
         }
@@ -1387,6 +1419,9 @@ fn execute_operation(
                 device: target.clone(),
                 fs: value_string(params, "fs_type"),
                 label: value_string(params, "label"),
+                // M14: the mkfs target must resolve to this journal's
+                // selected disk; build_mkfs fails closed on mismatch.
+                expected_disk: journal.disk.clone(),
             })?;
             Ok(target)
         }
@@ -1498,7 +1533,25 @@ fn write_rollback_marker(backup_dir: &Path, disk: &str, stage: &str, detail: &st
 }
 
 pub(crate) fn commit_request(input: JournalCommitInput) -> Result<Value, String> {
-    commit_request_with_target_guard(input, crate::installer_guard::validate_target_disk)
+    // M4: the manual journal commit must prove the disk is the one the
+    // plan was staged against. Rebuild the staging-time identity and run
+    // the identity-checking guard; a journal with no captured identity
+    // (or a swapped/re-enumerated disk) fails closed before the first
+    // privileged disk probe or write.
+    let identity = crate::installer_storage::DiskIdentity {
+        serial: input.journal.disk_serial.clone(),
+        model: input.journal.disk_model.clone(),
+        size_bytes: input.journal.disk_size_bytes,
+    };
+    if identity.serial.is_none() && identity.model.is_none() && identity.size_bytes.is_none() {
+        return Err(
+            "partition journal has no staging-time disk identity; restage the partition plan before committing"
+                .to_string(),
+        );
+    }
+    commit_request_with_target_guard(input, |disk| {
+        crate::installer_guard::validate_target_disk_with_identity(disk, &identity)
+    })
 }
 
 fn commit_request_with_target_guard(
@@ -1510,6 +1563,11 @@ fn commit_request_with_target_guard(
     // check here, immediately before the first privileged disk probe or write.
     validate_target(&input.journal.disk)?;
     let _lock = crate::installer_guard::acquire_disk_lock(&input.journal.disk)?;
+    // M13: probe the disk's real logical sector size once, under the lock,
+    // and thread it into every journal operation. logical_sector_size fails
+    // closed unless the value is a sane power of two (512/1024/2048/4096);
+    // partition_end/alignment math in the disk plans needs the real size.
+    let sector_size = crate::installer_disk::logical_sector_size(&input.journal.disk)?;
     let current_parts = runtime_partition_records(&input.journal.disk)?;
     let (table_type, disk_size_bytes) = runtime_disk_metadata(&input.journal.disk)?;
     let errors = validate(&input.journal, &current_parts, &table_type, disk_size_bytes);
@@ -1535,10 +1593,14 @@ fn commit_request_with_target_guard(
     })?;
 
     let mut irreversible = false;
-    // L6: per-operation durability (which op started/completed, against
-    // which target) is provided by the durable journal module's per-op
-    // markers, not by this loop. The `step` events emitted below are the
-    // in-memory/UX view of that same durable sequence.
+    // NOTE: the manual commit path has no durable per-op markers. The `step`
+    // events emitted below are in-memory only: a crash mid-commit leaves no
+    // started/completed record of which op was in flight, only the fsync'd
+    // rollback markers (for reversible ops) and the partition-table backup
+    // taken above. The durable journal module owns per-op markers for the
+    // guided installer phases, but this path never opens one — wiring it in
+    // would need ESP discovery and mount before the first op, which does not
+    // exist in the partition-editor flow.
     for index in 0..input.journal.ops.len() {
         let kind = input.journal.ops[index].kind.clone();
         let target = value_string(&input.journal.ops[index].params, "partition");
@@ -1550,6 +1612,7 @@ fn commit_request_with_target_guard(
             &mut input.journal.ops[index],
             &journal_snapshot,
             &mut irreversible,
+            sector_size,
         ) {
             Ok(completed_target) => {
                 emit_event(
@@ -1582,10 +1645,18 @@ fn commit_request_with_target_guard(
                             &format!("{started_detail}; partition-table rollback also failed: {restore_error}"),
                         );
                         input.journal.irreversible_completed = true;
+                        // M12: the partition-table backup is the one recovery
+                        // artifact, and this is the path that needs it. Never
+                        // delete it here: persist the tempdir in place and
+                        // report the path so Rescue mode can find it. It lives
+                        // on tmpfs (/tmp), so it survives process death but
+                        // not reboot.
+                        let backup_dir = directory.keep();
                         return Ok(serde_json::json!({
                             "ok": false,
                             "irreversible": true,
                             "recovery_required": true,
+                            "backup_dir": backup_dir.to_string_lossy(),
                             "message": format!("{error}; partition-table rollback also failed: {restore_error}"),
                             "journal": input.journal,
                         }));
@@ -2008,6 +2079,22 @@ mod tests {
     }
 
     #[test]
+    fn partition_commit_fails_closed_without_staging_time_disk_identity() {
+        // M4: a journal with no captured identity (staging probe failed,
+        // or a hand-built payload) must fail closed, never fall back to
+        // the non-identity disk check.
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.disk_model = None;
+        journal.disk_serial = None;
+        journal.disk_size_bytes = None;
+        let error = commit_request(JournalCommitInput { journal }).unwrap_err();
+        assert!(
+            error.contains("no staging-time disk identity"),
+            "identity-less commit must fail closed, got: {error}"
+        );
+    }
+
+    #[test]
     fn partition_commit_rejects_protected_target_before_disk_access() {
         let journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
         let mut journal = journal;
@@ -2141,6 +2228,9 @@ mod tests {
                 committed: false,
                 root_partition: None,
                 irreversible_completed: false,
+                disk_model: None,
+                disk_serial: None,
+                disk_size_bytes: None,
             },
             current_parts: Vec::new(),
             table_type: "gpt".to_string(),

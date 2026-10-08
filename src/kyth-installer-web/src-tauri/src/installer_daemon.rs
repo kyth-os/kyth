@@ -178,14 +178,7 @@ fn stamp_ntfs_attestation(journal: &mut super::installer_journal::PartitionJourn
 /// (fail closed). Returns false only when blkid positively identifies a
 /// non-NTFS filesystem.
 fn probe_fs_type_is_ntfs(device: &str) -> bool {
-    use std::process::Command;
-    let output = Command::new("/usr/sbin/blkid")
-        .arg("-o")
-        .arg("value")
-        .arg("-s")
-        .arg("TYPE")
-        .arg(device)
-        .output();
+    let output = run_probe("/usr/sbin/blkid", &["-o", "value", "-s", "TYPE", device]);
     match output {
         Ok(out) if out.status.success() => {
             let fs = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
@@ -201,13 +194,9 @@ fn probe_fs_type_is_ntfs(device: &str) -> bool {
 /// Check if an NTFS volume has its dirty bit clear via `ntfsfix --no-action`.
 /// Returns false (dirty/unknown) on any error — fail closed.
 fn ntfs_volume_is_clean(device: &str) -> bool {
-    use std::process::Command;
     // ntfsfix -n: do not write anything, just report. Exit 0 with "No errors"
     // or similar indicates clean. We parse stderr for dirty indicators.
-    let output = Command::new("/usr/sbin/ntfsfix")
-        .arg("-n")
-        .arg(device)
-        .output();
+    let output = run_probe("/usr/sbin/ntfsfix", &["-n", device]);
     match output {
         Ok(out) => {
             let stderr = String::from_utf8_lossy(&out.stderr).to_lowercase();
@@ -340,6 +329,20 @@ impl NativeJournalRegistry {
                     Ok(journal) => journal,
                     Err(error) => return (400, serde_json::json!({"ok": false, "message": error})),
                 };
+                // M4: the commit path requires a staging-time disk identity
+                // and fails closed without one. Refuse the staging now with
+                // an actionable message instead of letting the commit fail
+                // later; a missing identity here means the lsblk probe
+                // itself failed (size is always reported when it works).
+                if journal.disk_model.is_none()
+                    && journal.disk_serial.is_none()
+                    && journal.disk_size_bytes.is_none()
+                {
+                    return (
+                        400,
+                        serde_json::json!({"ok": false, "message": "Could not capture the target disk identity (lsblk MODEL/SERIAL/SIZE); refusing to stage partition changes."}),
+                    );
+                }
                 journal.add_op("new_table", serde_json::json!({"table_type": table_type}));
                 let pending = journal.ops.len();
                 *active = Some(journal);
@@ -628,15 +631,28 @@ impl NativeJobRegistry {
         Ok(receipt)
     }
 
-    fn cancel(&self) -> Result<(), String> {
+    fn cancel(&self, job_id: u64) -> Result<(), String> {
         let active = self
             .active
             .lock()
             .map_err(|_| "native installer job state is unavailable".to_string())?;
-        active
+        let supervisor = active
             .as_ref()
-            .ok_or_else(|| "No installation is running to cancel.".to_string())?
-            .cancel()
+            .ok_or_else(|| "No installation is running to cancel.".to_string())?;
+        // M7: bind the cancel to the job it names. A replayed or stale
+        // cancel for a finished job must not SIGKILL a newer install that
+        // started under a different job id. The mutex is held across the
+        // check and the cancel, so no new job can slip in between.
+        let active_job_id = supervisor.snapshot()?.job_id;
+        if active_job_id != Some(job_id) {
+            return Err(format!(
+                "Cancel refused: job_id {job_id} does not match the active installation (job_id {}).",
+                active_job_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            ));
+        }
+        supervisor.cancel()
     }
 
     fn snapshot(&self) -> Result<Option<JobSnapshot>, String> {
@@ -1086,10 +1102,7 @@ fn add_display_sizes(value: &mut serde_json::Value) {
 }
 
 fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(program)
-        .args(args)
-        .output()
-        .map_err(|error| format!("could not run {program}: {error}"))?;
+    let output = run_probe(program, args)?;
     if !output.status.success() {
         return Err(format!(
             "{program} failed with exit code {}: {}",
@@ -1098,6 +1111,21 @@ fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
         ));
     }
     String::from_utf8(output.stdout).map_err(|_| format!("{program} returned non-UTF-8 output"))
+}
+
+/// Bounded runner for read-only probes (lsblk, blockdev, findmnt, blkid,
+/// ntfsfix). A wedged device must never hang a daemon worker forever: 32
+/// hung probes (MAX_ACTIVE_CLIENTS) would 503 everything including
+/// /api/cancel. 30s is generous for slow devices but always bounded; on
+/// timeout the child is killed and an error is returned, never a hang.
+fn run_probe(program: &str, args: &[&str]) -> Result<Output, String> {
+    let child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("could not run {program}: {error}"))?;
+    wait_for_child(child, program, Duration::from_secs(30))
 }
 
 fn wait_for_child(mut child: Child, operation: &str, timeout: Duration) -> Result<Output, String> {
@@ -1130,10 +1158,10 @@ fn wait_for_child(mut child: Child, operation: &str, timeout: Duration) -> Resul
 fn disk_exists(disk: &str) -> Result<(), String> {
     let disk = super::installer_plan::normalize_device_path(disk)
         .ok_or_else(|| "Invalid or unsafe disk.".to_string())?;
-    let output = Command::new("/usr/bin/lsblk")
-        .args(["--noheadings", "--output", "TYPE", &disk])
-        .output()
-        .map_err(|error| format!("could not inspect {disk}: {error}"))?;
+    let output = run_probe(
+        "/usr/bin/lsblk",
+        &["--noheadings", "--output", "TYPE", disk.as_str()],
+    )?;
     if !output.status.success()
         || !String::from_utf8_lossy(&output.stdout)
             .lines()
@@ -1327,10 +1355,7 @@ fn findmnt_sources(path: &str, recursive: bool) -> Result<Vec<String>, String> {
         args.push("-R");
     }
     args.extend(["-n", "-o", "SOURCE", path]);
-    let output = Command::new("/usr/bin/findmnt")
-        .args(args)
-        .output()
-        .map_err(|error| format!("could not run findmnt: {error}"))?;
+    let output = run_probe("/usr/bin/findmnt", &args)?;
     // findmnt uses exit code 1 for a path with no matching mount. That is a
     // normal result for optional live-media paths, unlike a probe failure.
     if !output.status.success() && output.status.code() != Some(1) {
@@ -2137,6 +2162,23 @@ fn handle(
         return Ok(());
     }
     if method == "POST" && route == "/api/cancel" {
+        // M7: a cancel names the job it cancels. Without the binding, a
+        // replayed or stale cancel for a finished job would kill whatever
+        // install is active — possibly a newer job mid-mkfs/parted/bootc.
+        let requested_job_id = request_body(&request)
+            .ok()
+            .and_then(|body| body.get("job_id").and_then(serde_json::Value::as_u64));
+        let Some(requested_job_id) = requested_job_id else {
+            json_response(
+                &mut client,
+                "400 Bad Request",
+                &serde_json::json!({
+                    "ok": false,
+                    "message": "Cancel requires the active job id in the request body ({\"job_id\": N})."
+                }),
+            );
+            return Ok(());
+        };
         if native_registry.snapshot()?.is_none() {
             json_response(
                 &mut client,
@@ -2148,7 +2190,7 @@ fn handle(
             );
             return Ok(());
         }
-        match native_registry.cancel() {
+        match native_registry.cancel(requested_job_id) {
             Ok(()) => json_response(
                 &mut client,
                 "200 OK",
@@ -2537,8 +2579,26 @@ mod tests {
         assert!(registry.snapshot().unwrap().is_none());
         assert!(registry.replay(0).unwrap().is_none());
         assert_eq!(
-            registry.cancel().unwrap_err(),
+            registry.cancel(1).unwrap_err(),
             "No installation is running to cancel."
+        );
+    }
+
+    #[test]
+    fn native_job_registry_cancel_rejects_mismatched_job_id() {
+        // M7: a cancel naming the wrong job must not touch the active
+        // supervisor. The pre-start supervisor has no job id yet, so any
+        // named id exercises the mismatch branch without spawning a worker.
+        let request = start_request(
+            r#"{"disk":"sda","install_mode":"wipe","username":"alice","password":"secret","confirm_backup":true,"confirm_erase":true,"acknowledged-irreversible":true}"#,
+        );
+        let executor = native_executor_from_start(&request).expect("native plan should validate");
+        let registry = super::NativeJobRegistry::default();
+        *registry.active.lock().unwrap() = Some(super::NativeSupervisor::new(executor));
+        let error = registry.cancel(42).unwrap_err();
+        assert!(
+            error.contains("does not match"),
+            "mismatched cancel must be refused, got: {error}"
         );
     }
 

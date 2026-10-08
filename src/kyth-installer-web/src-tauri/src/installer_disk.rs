@@ -96,6 +96,9 @@ pub(crate) enum DiskOperationInput {
         device: String,
         fs: String,
         label: String,
+        /// The install plan's selected disk (e.g. `/dev/sda`). build_mkfs
+        /// fails closed unless the target partition's parent disk matches.
+        expected_disk: String,
     },
     BtrfsSubvolumeCreate {
         mountpoint: String,
@@ -327,8 +330,8 @@ fn lsblk_snapshot(disk: Option<&str>, columns: &str) -> Result<String, String> {
 }
 
 /// Logical sector size from `blockdev --getss`, validated the same way the
-/// storage layer validates it.
-fn logical_sector_size(disk: &str) -> Result<u64, String> {
+/// storage layer validates it: power of two, 512..=4096, fail closed.
+pub(crate) fn logical_sector_size(disk: &str) -> Result<u64, String> {
     let output = Command::new("/usr/bin/blockdev")
         .args(["--getss", disk])
         .output()
@@ -483,14 +486,30 @@ fn interactive_parted_device(
 /// partition editor formats small ESPs (before the `esp` flag is set) and
 /// existing filesystems on explicit user request, and a blanket gate here
 /// would break those legitimate flows.
-fn build_mkfs(device: String, fs: String, label: String) -> Result<DiskPlan, String> {
+fn build_mkfs(
+    device: String,
+    fs: String,
+    label: String,
+    expected_disk: String,
+) -> Result<DiskPlan, String> {
     let device = required_device(&device, "filesystem device")?;
+    let expected_disk = required_device(&expected_disk, "expected disk")?;
     let snapshot = lsblk_snapshot(
         None,
         "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,PARTN,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO,PKNAME",
     )?;
     let disk = crate::installer_storage::parent_disk_in_snapshot(&snapshot, &device)?
         .ok_or_else(|| "mkfs target is not on a known disk.".to_string())?;
+    // M14: the target partition's parent disk must be the install plan's
+    // selected disk. Re-validating "not ESP, not mounted, is a partition of
+    // a known disk" is not enough: a stale device path could otherwise
+    // format a partition on the wrong disk.
+    if disk != expected_disk {
+        return Err(
+            "mkfs target is not on the install plan's selected disk; refusing to format."
+                .to_string(),
+        );
+    }
     let sector_size = logical_sector_size(&disk)?;
     crate::installer_storage::validate_format_target(&snapshot, &disk, &device, sector_size)?;
     build_mkfs_plan(device, fs, label)
@@ -835,7 +854,12 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             assert_partition_identity(&disk, part_num, &expected_partuuid)?;
             build_set_partition_flag(disk, part_num, flag, enabled)
         }
-        DiskOperationInput::FormatFilesystem { device, fs, label } => build_mkfs(device, fs, label),
+        DiskOperationInput::FormatFilesystem {
+            device,
+            fs,
+            label,
+            expected_disk,
+        } => build_mkfs(device, fs, label, expected_disk),
         DiskOperationInput::BtrfsSubvolumeCreate { mountpoint, name } => {
             let mountpoint = safe_mountpoint(&mountpoint)?;
             let name = safe_btrfs_subvolume_name(&name)?;
@@ -929,6 +953,7 @@ mod tests {
             device: device(),
             fs: "fat32".into(),
             label: "EFI".into(),
+            expected_disk: device(),
         })
         .expect_err("unvalidated format target must fail closed");
         assert!(
@@ -1256,6 +1281,7 @@ mod tests {
                 device: device(),
                 fs: "zfs".into(),
                 label: String::new(),
+                expected_disk: device(),
             },
         ];
         for input in cases {

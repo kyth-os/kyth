@@ -76,16 +76,20 @@ pub(crate) fn bitlocker_probe_argv(device: &str) -> Result<Vec<String>, String> 
 
 pub(crate) fn lookup_uuid(input: UuidInput) -> Result<String, String> {
     let argv = uuid_argv(&input)?;
-    let output = Command::new(&argv[0])
-        .args(&argv[1..])
-        .output()
-        .map_err(|error| format!("could not probe filesystem UUID: {error}"))?;
-    if !output.status.success() {
-        return Err("filesystem UUID probe failed".into());
-    }
-    let uuid = String::from_utf8(output.stdout)
-        .map_err(|_| "filesystem UUID was not UTF-8".to_string())?;
-    let uuid = uuid.trim();
+    // M11: blkid on a wedged device must not hang the worker forever with
+    // the exclusive disk lock held (the manual-mounts phase holds it). Bound
+    // the probe with the shared cancel-checked helper; the exec-binary
+    // callers run under the outer spawn's own cancel/timeout, so no token
+    // is threaded here.
+    let mut command = Command::new(&argv[0]);
+    command.args(&argv[1..]);
+    let output = crate::installer_stream::run_output_timeout(
+        &mut command,
+        || false,
+        std::time::Duration::from_secs(30),
+        "filesystem UUID probe",
+    )?;
+    let uuid = output.trim();
     if uuid.is_empty()
         || uuid.len() > 128
         || !uuid.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-')

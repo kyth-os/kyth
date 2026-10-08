@@ -184,6 +184,57 @@ pub(crate) fn verify_disk_identity_in_snapshot(
     Ok(())
 }
 
+/// Capture the selection-time [`DiskIdentity`] of `disk` from a fresh
+/// lsblk probe. Staging paths (e.g. the manual partition journal) call
+/// this when the plan is created so the commit path can re-verify the
+/// disk did not change under us (M4). Empty MODEL/SERIAL strings are
+/// normalized to `None` so a disk that genuinely reports no serial does
+/// not fail closed against itself at commit time.
+pub fn read_disk_identity(disk: &str) -> Result<DiskIdentity, String> {
+    let disk = normalize_device_path(disk)
+        .ok_or_else(|| "disk identity query has an invalid disk".to_string())?;
+    let output = std::process::Command::new("/usr/bin/lsblk")
+        .args([
+            "--json",
+            "--bytes",
+            "--paths",
+            "--output",
+            "NAME,SIZE,TYPE,MODEL,SERIAL",
+            &disk,
+        ])
+        .output()
+        .map_err(|error| format!("could not probe disk identity: {error}"))?;
+    if !output.status.success() {
+        return Err("disk identity probe failed".to_string());
+    }
+    let snapshot = String::from_utf8(output.stdout)
+        .map_err(|_| "disk identity probe was not UTF-8".to_string())?;
+    let parsed = parse_snapshot(&snapshot)?;
+    let device = parsed
+        .blockdevices
+        .iter()
+        .find(|entry| {
+            entry
+                .name
+                .as_deref()
+                .and_then(normalize_device_path)
+                .as_deref()
+                == Some(disk.as_str())
+                && entry.device_type.as_deref() == Some("disk")
+        })
+        .ok_or_else(|| "target disk was not present in disk identity probe".to_string())?;
+    let nonempty = |value: Option<&String>| {
+        value
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    Ok(DiskIdentity {
+        serial: nonempty(device.serial.as_ref()),
+        model: nonempty(device.model.as_ref()),
+        size_bytes: device.size,
+    })
+}
+
 /// Sector sizes the storage layer understands: powers of two from 512-byte
 /// classic sectors through 4096-byte 4Kn sectors.
 fn valid_sector_size(sector_size: u64) -> Result<(), String> {
@@ -605,9 +656,13 @@ pub(crate) fn parse_disks(
 
 /// Parse partition records, including descendant mounts, from an lsblk tree.
 ///
-/// `sector_size` is the device's logical sector size: lsblk `START` counts
-/// sectors, so `start_bytes` must scale by it. Callers obtain it from
-/// `blockdev --getss`, the same source `free_regions` validates.
+/// `sector_size` is the device's logical sector size, used by `free_regions`
+/// for alignment and validation. It does NOT scale lsblk `START`: the
+/// kernel's /sys/block/<part>/start ABI — and the START column util-linux
+/// fills raw from it — is always expressed in 512-byte sectors, even on 4Kn
+/// disks. Scaling START by the logical sector size 8x-overstates offsets
+/// on 4Kn hardware. Callers obtain the sector size from `blockdev --getss`,
+/// the same source `free_regions` validates.
 pub(crate) fn parse_partitions(
     input: &str,
     sector_size: u64,
@@ -616,7 +671,7 @@ pub(crate) fn parse_partitions(
     let snapshot = parse_snapshot(input)?;
     let mut partitions = Vec::new();
 
-    fn walk(devices: &[LsblkDevice], partitions: &mut Vec<PartitionRecord>, sector_size: u64) {
+    fn walk(devices: &[LsblkDevice], partitions: &mut Vec<PartitionRecord>) {
         for device in devices {
             if device.device_type.as_deref() == Some("part") {
                 if let Some(name) = device.name.as_deref().and_then(normalize_device_path) {
@@ -657,7 +712,11 @@ pub(crate) fn parse_partitions(
                     partitions.push(PartitionRecord {
                         name,
                         size_bytes,
-                        start_bytes: device.start.unwrap_or(0).saturating_mul(sector_size),
+                        // START is always 512-byte sectors per the kernel
+                        // /sys/block/<part>/start ABI and the util-linux
+                        // START column contract — never scale by the logical
+                        // sector size.
+                        start_bytes: device.start.unwrap_or(0).saturating_mul(512),
                         fstype,
                         label,
                         parttype,
@@ -671,11 +730,11 @@ pub(crate) fn parse_partitions(
                     });
                 }
             }
-            walk(&device.children, partitions, sector_size);
+            walk(&device.children, partitions);
         }
     }
 
-    walk(&snapshot.blockdevices, &mut partitions, sector_size);
+    walk(&snapshot.blockdevices, &mut partitions);
     Ok(partitions)
 }
 
@@ -780,11 +839,7 @@ pub(crate) fn partition_probe_from_snapshot(
         })
         .ok_or_else(|| "target disk was not present in partition probe".to_string())?;
 
-    fn find_partition(
-        device: &LsblkDevice,
-        wanted: &str,
-        sector_size: u64,
-    ) -> Option<PartitionProbe> {
+    fn find_partition(device: &LsblkDevice, wanted: &str) -> Option<PartitionProbe> {
         if device.device_type.as_deref() == Some("part")
             && normalize_device_path(device.name.as_deref().unwrap_or_default()).as_deref()
                 == Some(wanted)
@@ -806,7 +861,10 @@ pub(crate) fn partition_probe_from_snapshot(
                 name,
                 number,
                 size_bytes: device.size.unwrap_or(0),
-                start_bytes: device.start.unwrap_or(0).saturating_mul(sector_size),
+                // START is always 512-byte sectors per the kernel
+                // /sys/block/<part>/start ABI and the util-linux START
+                // column contract — never scale by the logical sector size.
+                start_bytes: device.start.unwrap_or(0).saturating_mul(512),
                 fstype,
                 label: device.label.clone().unwrap_or_default(),
                 partuuid: device.partuuid.clone().unwrap_or_default(),
@@ -819,10 +877,10 @@ pub(crate) fn partition_probe_from_snapshot(
         device
             .children
             .iter()
-            .find_map(|child| find_partition(child, wanted, sector_size))
+            .find_map(|child| find_partition(child, wanted))
     }
 
-    find_partition(root, &partition, sector_size)
+    find_partition(root, &partition)
         .ok_or_else(|| "selected partition was not present on the target disk".to_string())
 }
 
@@ -1580,29 +1638,33 @@ mod tests {
         assert_eq!(offered, ["/dev/sda5", "/dev/sda6", "/dev/sdb1"]);
     }
 
-    /// 4Kn disks report `START` in 4096-byte sectors. Scaling by a hardcoded
-    /// 512 under-reports the byte offset 8x, which once let `free_regions`
-    /// carve "free" space out of a live partition. Both geometry entry points
-    /// must scale by the real sector size.
+    /// lsblk `START` — and the kernel /sys/block/<part>/start ABI it mirrors
+    /// — is ALWAYS 512-byte sectors, even on 4Kn disks. util-linux fills
+    /// START raw from the kernel's `start_sect`, so scaling it by the
+    /// logical sector size 8x-overstates the offset on 4Kn hardware and
+    /// once let `free_regions` carve "free" space out of a live partition.
+    /// Both geometry entry points must multiply START by 512
+    /// unconditionally; the logical sector size only drives alignment and
+    /// validation.
     #[test]
-    fn four_k_native_sectors_scale_start_bytes() {
+    fn start_bytes_uses_512_sector_contract_on_all_disks() {
         let snapshot = r#"{"blockdevices":[{"name":"/dev/sda","type":"disk","size":17592186044416,"children":[
             {"name":"/dev/sda1","type":"part","partn":1,"size":17592186044416,"start":2048,"fstype":"","mountpoints":[]}
         ]}]}"#;
-        let partitions = parse_partitions(snapshot, 4096).expect("4Kn snapshot should parse");
-        assert_eq!(partitions.len(), 1);
-        // 2048 sectors * 4096 bytes: the 512-byte assumption would say 1 MiB.
-        assert_eq!(partitions[0].start_bytes, 2048 * 4096);
+        for sector_size in [512, 4096] {
+            let partitions =
+                parse_partitions(snapshot, sector_size).expect("snapshot should parse");
+            assert_eq!(partitions.len(), 1);
+            // 2048 sectors * 512 bytes == 1 MiB on 512-byte and 4Kn disks
+            // alike. Scaling by the logical sector size would say 8 MiB on
+            // 4Kn — 8x overstated.
+            assert_eq!(partitions[0].start_bytes, 2048 * 512);
 
-        let probe = partition_probe_from_snapshot(snapshot, "/dev/sda", "/dev/sda1", 4096)
-            .expect("4Kn probe should parse");
-        assert_eq!(probe.start_bytes, 2048 * 4096);
-
-        // The same snapshot under a 512 assumption computes a different,
-        // wrong offset: the sector size is load-bearing, not cosmetic.
-        let wrong = parse_partitions(snapshot, 512).expect("snapshot should parse");
-        assert_eq!(wrong[0].start_bytes, 2048 * 512);
-        assert_ne!(partitions[0].start_bytes, wrong[0].start_bytes);
+            let probe =
+                partition_probe_from_snapshot(snapshot, "/dev/sda", "/dev/sda1", sector_size)
+                    .expect("probe should parse");
+            assert_eq!(probe.start_bytes, 2048 * 512);
+        }
     }
 
     #[test]
