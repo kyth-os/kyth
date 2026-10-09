@@ -25,10 +25,10 @@ KythOS is not a promise that every Windows program, anti-cheat system, driver, o
 ## Start with Kyth Hub
 
 <div align="center">
-<img src="docs/system-hub-home.png" alt="Current Kyth Hub Home screen with device-specific live details obscured" width="100%">
+<img src="docs/system-hub-apps.png" alt="Kyth Hub Apps screen with the App Store, app search, and popular apps" width="100%">
 </div>
 
-<sub>Device-specific values and activity details are blurred in this screenshot for privacy.</sub>
+<sub>Current Apps layout from a local preview; per-device install and update status is not live.</sub>
 
 Kyth Hub is the guided control center for KythOS. Instead of sending you through settings panels, terminal commands, and web searches, it gives you one clear next step and keeps the useful controls close by.
 
