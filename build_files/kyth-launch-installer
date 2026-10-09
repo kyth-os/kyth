@@ -59,11 +59,18 @@ KYTH_SOURCE_DIGEST="${KYTH_SOURCE_DIGEST:-}"
 
 umask 077
 /usr/bin/install -d -m 0750 -o root -g liveuser "${LAUNCH_DIR}"
-# TRUST BOUNDARY: the session token below is 0600 owned by the session user,
-# which means ANY process running as the live-session UID can read it and
-# speak to the privileged installer daemon directly. The live-session UID —
-# not this token — is the trust boundary: never grant it to untrusted code
-# while the installer is running.
+# Serialize installer sessions: rotating the token for a second shell would
+# invalidate the first shell's authentication and restarting the daemon could
+# interrupt its install. The lock is held through the child shell lifetime.
+exec 9>/run/lock/kyth-installer.lock
+if ! /usr/bin/flock -n 9; then
+	msg="The KythOS installer is already running. Return to the open installer window."
+	command -v kdialog >/dev/null 2>&1 && kdialog --error "${msg}" || true
+	command -v zenity >/dev/null 2>&1 && zenity --error --text "${msg}" || true
+	exit 1
+fi
+# The session token below is 0600 owned by the session user; the live-session
+# UID remains the trust boundary while the installer is running.
 session_token="$(/usr/bin/openssl rand -hex 32)"
 token_tmp="${TOKEN_FILE}.$$"
 printf '%s' "${session_token}" > "${token_tmp}"
@@ -89,7 +96,10 @@ trap cleanup EXIT HUP INT TERM
 	echo "native launcher uid=$(id -u) session_user=${session_user}"
 } >> "${LAUNCH_LOG}" 2>&1
 
-/usr/bin/systemctl start kyth-installerd.service >> "${LAUNCH_LOG}" 2>&1
+# Always reload the daemon after writing this launch's token. `systemctl start`
+# is a no-op for an already-active daemon, which would keep an old token and
+# answer the new shell's first request with 403 Forbidden.
+/usr/bin/systemctl restart kyth-installerd.service >> "${LAUNCH_LOG}" 2>&1
 /usr/bin/systemctl is-active --quiet kyth-installerd.service
 
 /usr/sbin/runuser -u "${session_user}" -- /usr/bin/env \
