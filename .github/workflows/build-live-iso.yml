@@ -316,7 +316,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}/installer/iso.yaml:/kyth/iso.yaml:ro" \
             --mount type=image,source=localhost/payload:latest,dst=/rootfs \
             -v "${OUT}:/output" \
-            quay.io/fedora/fedora:45@sha256:de146563f829c68464c9ed1b2c621d08f04ab2debf7a4aa7402f925960695390 /src/build_iso.sh
+            registry.fedoraproject.org/fedora:45@sha256:cc55518dc3593184519ae4184a814a26d6405b42713762d57353659fd7105445 /src/build_iso.sh
           sudo chown "$(id -u):$(id -g)" "${OUT}/"*.iso
           mv "${OUT}/"*.iso "${RUNNER_TEMP}/kyth-live-${SOURCE_TAG}.iso"
           test -s "${RUNNER_TEMP}/kyth-live-${SOURCE_TAG}.iso"
