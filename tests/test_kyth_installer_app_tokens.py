@@ -168,5 +168,26 @@ class ChildGuiCommandTests(unittest.TestCase):
                     )
 
 
+class DaemonRestartTests(unittest.TestCase):
+    """The installer daemon must be RESTARTED (not started) so it re-reads
+    the fresh session token. `systemctl start` is a no-op on an already-active
+    service, leaving the daemon with a stale token -> 403 on every API call."""
+
+    def test_restart_uses_systemctl_restart(self):
+        with mock.patch.object(app, "run_command") as mock_run:
+            app._restart_installer_daemon()
+            mock_run.assert_called_once_with(
+                ["systemctl", "restart", "kyth-installerd.service"],
+                check=True,
+                timeout=30,
+            )
+
+    def test_restart_does_not_use_start(self):
+        with mock.patch.object(app, "run_command") as mock_run:
+            app._restart_installer_daemon()
+            args = mock_run.call_args[0][0]
+            self.assertNotIn("start", args[:2])
+
+
 if __name__ == "__main__":
     unittest.main()

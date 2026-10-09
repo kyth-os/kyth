@@ -374,6 +374,17 @@ def run_headless() -> None:
             sys.exit(1)
 
 
+def _restart_installer_daemon() -> None:
+    """Restart the privileged installer daemon so it picks up the fresh token.
+
+    The service is enabled at boot and may already be running with a stale
+    token from a previous launch. A plain `systemctl start` is a no-op on an
+    active service, leaving the daemon validating against the old token while
+    the new GUI child presents the fresh one -> 403 on every API call.
+    """
+    run_command(["systemctl", "restart", "kyth-installerd.service"], check=True, timeout=30)
+
+
 def main() -> None:
     if "--headless" in sys.argv:
         run_headless()
@@ -388,7 +399,7 @@ def main() -> None:
         token_file = SESSION_TOKEN_FILE
         try:
             _write_session_token(token_file, SESSION_TOKEN)
-            run_command(["systemctl", "start", "kyth-installerd.service"], check=True, timeout=30)
+            _restart_installer_daemon()
             socket_service_started = True
             deadline = time.monotonic() + 5
             while not SOCKET_PATH.exists() and time.monotonic() < deadline:

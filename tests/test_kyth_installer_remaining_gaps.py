@@ -366,7 +366,7 @@ class InstallerAppCoverageTests(unittest.TestCase):
 
         write_token.assert_called_once_with(token_path, app.SESSION_TOKEN)
         self.assertEqual([call[0][0] for call in run_calls], [
-            ["systemctl", "start", "kyth-installerd.service"],
+            ["systemctl", "restart", "kyth-installerd.service"],
             ["systemctl", "stop", "kyth-installerd.service"],
         ])
         self.assertIn("--socket-path", spawn.call_args.args[0])
