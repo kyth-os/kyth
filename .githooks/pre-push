@@ -13,15 +13,14 @@ repo_root="$(git rev-parse --show-toplevel)"
 # enforcing the perf policy on a stable runner.
 export KYTH_PERF_GATE_ADVISORY=1
 
-# Local push gate: validate.sh (lint, actionlint, zizmor, shell analysis,
-# syntax/secrets/systemd, and optionally the plain test suite) plus
-# run-quality.sh with coverage. The latter is intentionally mandatory even in
-# fast mode: it runs the coverage-instrumented suite and check-critical-coverage
-# so coverage-floor regressions are caught before push instead of in CI.
+# Local push gate: run repository-wide static validation plus the fast quality
+# checks. Full tests and coverage floors run in GitHub Actions on every push;
+# avoid running the 3-minute instrumented suite twice (locally, then in CI).
+# The heavy local path remains opt-in below.
 if [[ "${KYTH_ALLOW_HEAVY_PRE_PUSH:-0}" == "1" ]]; then
 	echo "[pre-push] Running FULL local validation (heavy, opt-in via KYTH_ALLOW_HEAVY_PRE_PUSH=1)..." 
 else
-	echo "[pre-push] Running fast validation plus mandatory coverage-floor gate."
+	echo "[pre-push] Running fast validation; full test and coverage gates run in CI."
 	echo "[pre-push] To also run the uninstrumented full validation and Hub smoke: KYTH_ALLOW_HEAVY_PRE_PUSH=1 git push"
 fi
 # Deprioritized (not paused) relative to the interactive session: this box is
@@ -55,10 +54,45 @@ else
 	"${scope[@]}" "${repo_root}/build_files/scripts/validate.sh" --fast
 fi
 
-# Do not pass --fast here. Coverage floors are a required local pre-push gate,
-# including on live desktops where validate.sh deliberately remains fast.
-echo "[pre-push] Running Python coverage and coverage-floor gate..."
-"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh"
+# The default path does lint/static checks only; full-suite testing and
+# coverage floors are CI gates. If a test module itself changed, run just that
+# module locally as a fast, directly relevant check.
+if [[ "${KYTH_ALLOW_HEAVY_PRE_PUSH:-0}" == "1" ]]; then
+	echo "[pre-push] Running full Python quality suite and coverage floors..."
+	"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh"
+else
+	echo "[pre-push] Running fast Python lint checks..."
+	"${scope[@]}" "${repo_root}/build_files/scripts/run-quality.sh" --fast
+
+	declare -A changed_test_files=()
+	while IFS=$'	' read -r local_ref local_sha remote_ref remote_sha; do
+		[[ "${local_ref:-}" == refs/heads/* && "${remote_ref:-}" == refs/heads/* ]] || continue
+		[[ -n "${local_sha:-}" && ! "${local_sha}" =~ ^0+$ ]] || continue
+		# A new remote branch has no remote tip to diff against; let CI run the
+		# full suite rather than treating every repository test as changed.
+		[[ -n "${remote_sha:-}" && ! "${remote_sha}" =~ ^0+$ ]] || continue
+		base_tree="${remote_sha}"
+		while IFS= read -r path; do
+			[[ "${path}" =~ ^tests/(.*/)?test_[^/]+\.py$ && -f "${path}" ]] || continue
+			changed_test_files["${path}"]=1
+		done < <(git diff --name-only "${base_tree}" "${local_sha}" -- tests)
+	done
+
+	if ((${#changed_test_files[@]} > 0)); then
+		quality_python="python3"
+		[[ -x "${repo_root}/.venv-quality/bin/python" ]] && quality_python="${repo_root}/.venv-quality/bin/python"
+		tool_bin="${KYTH_CI_TOOL_CACHE:-${repo_root}/.cache/kyth-ci-tools}/bin"
+		for test_file in "${!changed_test_files[@]}"; do
+			echo "[pre-push] Running changed test module: ${test_file}"
+			PATH="${tool_bin}:${PATH}" \
+			PYTHONPATH="${repo_root}/src/kyth_shared:${repo_root}/src/kyth-installer:${repo_root}/build_files/kyth_shared:${repo_root}/build_files/kyth-installer" \
+				"${scope[@]}" "${quality_python}" -m unittest discover \
+				-s "${repo_root}/$(dirname "${test_file}")" -p "$(basename "${test_file}")" -b
+		done
+	else
+		echo "[pre-push] No changed Python test modules; full suite is gated by CI."
+	fi
+fi
 
 # P1-3: also catch System Hub regressions the CI gui-smoke job checks. Run
 # the same canonical module CI runs (tests/test_kyth_welcome_hub_smoke.py)
