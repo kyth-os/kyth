@@ -809,6 +809,43 @@ impl NativePhaseExecutor {
         }
     }
 
+    /// Install Flatpaks selected on the software step.
+    /// Runs `flatpak install --system` for each validated app ID.
+    /// Best-effort: individual failures are logged but don't fail the install.
+    fn install_selected_flatpaks(
+        &self,
+        phase: Phase,
+        cancellation: &CancellationToken,
+    ) -> Result<(), NativePhaseError> {
+        use std::process::Command;
+
+        for app_id in &self.storage_plan.flatpaks {
+            if cancellation.is_cancelled() {
+                return Err(NativePhaseError::Execution {
+                    phase,
+                    message: "Flatpak install cancelled".to_string(),
+                });
+            }
+            // App IDs were validated against the server-side allowlist at
+            // plan time; pass as a single argv element (no shell).
+            let mut command = Command::new("flatpak");
+            command.args(["install", "--system", "-y", "--noninteractive", app_id]);
+            match command.output() {
+                Ok(output) if output.status.success() => {
+                    eprintln!("kyth-installer: installed Flatpak {app_id}");
+                }
+                Ok(output) => {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("kyth-installer: failed to install Flatpak {app_id}: {stderr}");
+                }
+                Err(error) => {
+                    eprintln!("kyth-installer: failed to run flatpak for {app_id}: {error}");
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn execute_configuration(
         &self,
         phase: Phase,
@@ -965,6 +1002,14 @@ impl NativePhaseExecutor {
             return Err(error);
         }
         // H4: configure_complete marker after the configure steps succeed.
+        // Software step: install selected Flatpaks. Best-effort — a failed
+        // Flatpak install must not fail the whole installation, but it is
+        // logged for the transaction report.
+        if !self.storage_plan.flatpaks.is_empty() {
+            if let Err(error) = self.install_selected_flatpaks(phase, cancellation) {
+                eprintln!("kyth-installer: Flatpak install failed (non-fatal): {error}");
+            }
+        }
         self.record_journal(phase, "configure", OpState::Completed)?;
         Ok(())
     }

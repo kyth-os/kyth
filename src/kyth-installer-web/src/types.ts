@@ -19,6 +19,8 @@ export interface InstallRequest {
   confirm_backup: boolean; confirm_erase: boolean; confirm_current: boolean;
   encryption: string; tpm_recovery_ack: boolean; acknowledged_irreversible: boolean;
   mounts?: ManualMount[];
+  /** Flatpak app IDs selected on the software step. Installed during configure. */
+  flatpaks: string[];
 }
 
 export type InstallerEvent =
