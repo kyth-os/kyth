@@ -283,7 +283,7 @@ fn main() -> std::process::ExitCode {
 
 #[cfg(test)]
 mod tests {
-    use super::version_line_matches;
+    use super::{is_downgrade, parse_rclone_version, version_line_matches};
 
     /// The installed binary must report the target version: first line of
     /// `rclone --version` contains the version string.
