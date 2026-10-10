@@ -69,8 +69,17 @@ fn parse_ge_proton_version(ver: &str) -> Option<(u32, u32)> {
 
 /// Find the currently installed GE-Proton version by scanning for a
 /// version-stamped completion marker. Returns None if nothing is installed.
+/// Find the currently installed GE-Proton version by scanning for
+/// version-stamped completion markers. Returns the MAXIMUM version found,
+/// or None if nothing is installed.
+///
+/// Must be the maximum (M5): `prune_installations(..., 2)` retains two
+/// versions, and `read_dir` order is arbitrary. Comparing a downgrade
+/// check against an older retained install would let a moved `latest`
+/// pointer slip a downgrade past the refusal.
 fn installed_ge_proton_version(install_dir: &Path) -> Option<String> {
     let entries = std::fs::read_dir(install_dir).ok()?;
+    let mut best: Option<((u32, u32), String)> = None;
     for entry in entries.flatten() {
         let folder = entry.file_name().to_string_lossy().into_owned();
         if !folder.starts_with("GE-Proton") {
@@ -78,12 +87,24 @@ fn installed_ge_proton_version(install_dir: &Path) -> Option<String> {
         }
         if let Ok(marker) = std::fs::read_to_string(entry.path().join(".kyth-complete")) {
             let ver = marker.trim().to_string();
-            if !ver.is_empty() {
-                return Some(ver);
+            if ver.is_empty() {
+                continue;
+            }
+            let parsed = parse_ge_proton_version(&ver);
+            let is_better = match (&best, parsed) {
+                // Prefer parseable versions ordered numerically; an
+                // unparseable marker never outranks a parseable one.
+                (Some((best_ver, _)), Some(ver)) => ver > *best_ver,
+                (None, Some(_)) => true,
+                (None, None) => true,
+                (Some(_), None) => false,
+            };
+            if is_better {
+                best = Some((parsed.unwrap_or((0, 0)), ver));
             }
         }
     }
-    None
+    best.map(|(_, ver)| ver)
 }
 
 /// Merge the installed Proton version into /var/lib/kyth/gaming-versions.json
@@ -168,7 +189,11 @@ fn main() -> std::process::ExitCode {
                 eprintln!(
                     "WARNING: GE-Proton version jump {installed} -> {ver} looks suspicious — holding update for manual review."
                 );
-                return std::process::ExitCode::SUCCESS;
+                // Non-zero exit (M4): a held update is not a success. The
+                // timer's only signal is the exit code, so a hold must be
+                // visible to monitoring rather than looking like a healthy
+                // no-op.
+                return std::process::ExitCode::FAILURE;
             }
         }
     }
@@ -304,5 +329,28 @@ mod tests {
         )
         .unwrap();
         assert!(is_complete_install(dir.path(), folder, "cachyos-1-slr"));
+    }
+
+    #[test]
+    fn installed_version_returns_maximum_not_first_found() {
+        // Regression test for M5: with two retained versions, the
+        // downgrade check must compare against the NEWEST, not whichever
+        // read_dir happens to yield first.
+        let dir = tempfile::tempdir().unwrap();
+        for ver in ["GE-Proton10-5", "GE-Proton10-12"] {
+            let folder = dir.path().join(ver);
+            std::fs::create_dir_all(&folder).unwrap();
+            std::fs::write(folder.join(".kyth-complete"), format!("{ver}\n")).unwrap();
+        }
+        assert_eq!(
+            installed_ge_proton_version(dir.path()),
+            Some("GE-Proton10-12".to_string())
+        );
+    }
+
+    #[test]
+    fn installed_version_returns_none_when_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(installed_ge_proton_version(dir.path()), None);
     }
 }

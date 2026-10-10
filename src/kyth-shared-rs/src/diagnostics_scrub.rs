@@ -6,6 +6,87 @@
 
 use regex::Regex;
 use std::net::IpAddr;
+use std::sync::OnceLock;
+
+/// Compiled scrub patterns, initialized once. The dynamic hostname/username
+/// patterns stay per-call (env-dependent); everything else is static.
+struct ScrubPatterns {
+    private_key: Regex,
+    auth_value: Regex,
+    sensitive_header: Regex,
+    secret_value: Regex,
+    secret_flag: Regex,
+    secret_query: Regex,
+    url_credentials: Regex,
+    github_token: Regex,
+    aws_key: Regex,
+    slack_token: Regex,
+    age_key: Regex,
+    mac: Regex,
+    ipv4: Regex,
+    ipv6_candidate: Regex,
+    email: Regex,
+    uuid: Regex,
+    home_path: Regex,
+}
+
+fn patterns() -> &'static ScrubPatterns {
+    static PATTERNS: OnceLock<ScrubPatterns> = OnceLock::new();
+    PATTERNS.get_or_init(|| ScrubPatterns {
+        private_key: Regex::new(
+            r"(?s)-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----",
+        )
+        .expect("private-key regex is valid"),
+        auth_value: Regex::new(
+            r"(?i)(\b(?:authorization|proxy-authorization)\s*[:=]\s*)(?:bearer|basic|token)\s+\S+",
+        )
+        .expect("auth regex is valid"),
+        sensitive_header: Regex::new(
+            r"(?im)(\b(?:authorization|proxy-authorization|cookie|set-cookie|x-auth-token)\s*[:=]\s*)[^\r\n]+",
+        )
+        .expect("header regex is valid"),
+        secret_value: Regex::new(
+            r#"(?i)(["']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|bearer|password|passwd|passphrase|client[_-]?secret|api[_-]?key|private[_-]?key|auth[_-]?cookie|session[_-]?cookie|cookie|secret)["']?\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\s,;&]+)"#,
+        )
+        .expect("secret-value regex is valid"),
+        secret_flag: Regex::new(
+            r"(?i)(--(?:cookie|password|passwd|token|client-secret|api-key)(?:=|\s+))\S+",
+        )
+        .expect("secret-flag regex is valid"),
+        secret_query: Regex::new(
+            r"(?i)([?&](?:access_token|refresh_token|id_token|token|password|passwd|secret|cookie|api_key|client_secret)=)[^&#\s]+",
+        )
+        .expect("secret-query regex is valid"),
+        url_credentials: Regex::new(r"(?i)(\b[a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@")
+            .expect("URL regex is valid"),
+        // Bare high-entropy tokens with no key= prefix (H1): common in command
+        // output, URLs, and error dumps. Format-based, not name-based.
+        github_token: Regex::new(
+            r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9_]{36,}\b|\bgithub_pat_[A-Za-z0-9_]{80,}\b",
+        )
+        .expect("github-token regex is valid"),
+        aws_key: Regex::new(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b")
+            .expect("aws-key regex is valid"),
+        slack_token: Regex::new(r"\bxox[baprs]-[A-Za-z0-9-]{20,}\b")
+            .expect("slack-token regex is valid"),
+        age_key: Regex::new(r"\bAGE-SECRET-KEY-1[0-9A-Z]{58}\b")
+            .expect("age-key regex is valid"),
+        mac: Regex::new(r"[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}")
+            .expect("MAC regex is valid"),
+        ipv4: Regex::new(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
+            .expect("IPv4 regex is valid"),
+        ipv6_candidate: Regex::new(r"(?:[0-9A-Fa-f]*:){2,}[0-9A-Fa-f]*")
+            .expect("IPv6 regex is valid"),
+        email: Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
+            .expect("email regex is valid"),
+        uuid: Regex::new(
+            r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
+        )
+        .expect("UUID regex is valid"),
+        home_path: Regex::new(r"/(var/home|home)/[^/\s:]+")
+            .expect("home-path regex is valid"),
+    })
+}
 
 fn replace_with<F>(regex: &Regex, text: String, replacement: F) -> String
 where
@@ -44,40 +125,18 @@ fn hostnames_to_redact() -> Vec<String> {
 }
 
 pub fn scrub_logs(text: &str) -> String {
-    let private_key = Regex::new(
-        r"(?s)-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----",
-    )
-    .expect("private-key regex is valid");
-    let auth_value = Regex::new(
-        r"(?i)(\b(?:authorization|proxy-authorization)\s*[:=]\s*)(?:bearer|basic|token)\s+\S+",
-    )
-    .expect("auth regex is valid");
-    let sensitive_header = Regex::new(
-        r"(?im)(\b(?:authorization|proxy-authorization|cookie|set-cookie)\s*[:=]\s*)[^\r\n]+",
-    )
-    .expect("header regex is valid");
-    let secret_value = Regex::new(
-        r#"(?i)(["']?(?:access[_-]?token|refresh[_-]?token|id[_-]?token|bearer|password|passwd|passphrase|client[_-]?secret|api[_-]?key|private[_-]?key|auth[_-]?cookie|session[_-]?cookie|cookie|secret)["']?\s*[:=]\s*)("[^"\r\n]*"|'[^'\r\n]*'|[^\s,;&]+)"#,
-    )
-    .expect("secret-value regex is valid");
-    let secret_flag =
-        Regex::new(r"(?i)(--(?:cookie|password|passwd|token|client-secret|api-key)(?:=|\s+))\S+")
-            .expect("secret-flag regex is valid");
-    let secret_query = Regex::new(
-        r"(?i)([?&](?:access_token|refresh_token|id_token|token|password|passwd|secret|cookie|api_key|client_secret)=)[^&#\s]+",
-    )
-    .expect("secret-query regex is valid");
-    let url_credentials =
-        Regex::new(r"(?i)(\b[a-z][a-z0-9+.-]*://)[^/@\s:]+:[^/@\s]+@").expect("URL regex is valid");
+    let p = patterns();
 
-    let mut text = private_key
+    let mut text = p
+        .private_key
         .replace_all(text, "[private key redacted]")
         .into_owned();
-    text = auth_value.replace_all(&text, "$1[redacted]").into_owned();
-    text = sensitive_header
+    text = p.auth_value.replace_all(&text, "$1[redacted]").into_owned();
+    text = p
+        .sensitive_header
         .replace_all(&text, "$1[redacted]")
         .into_owned();
-    text = replace_with(&secret_value, text, |captures| {
+    text = replace_with(&p.secret_value, text, |captures| {
         let value = captures.get(2).map_or("", |match_| match_.as_str());
         let replacement = if value.starts_with('"') {
             "\"[redacted]\""
@@ -88,10 +147,34 @@ pub fn scrub_logs(text: &str) -> String {
         };
         format!("{}{}", &captures[1], replacement)
     });
-    text = secret_flag.replace_all(&text, "$1[redacted]").into_owned();
-    text = secret_query.replace_all(&text, "$1[redacted]").into_owned();
-    text = url_credentials
+    text = p
+        .secret_flag
+        .replace_all(&text, "$1[redacted]")
+        .into_owned();
+    text = p
+        .secret_query
+        .replace_all(&text, "$1[redacted]")
+        .into_owned();
+    text = p
+        .url_credentials
         .replace_all(&text, "$1[credentials-redacted]@")
+        .into_owned();
+    // Bare format-based tokens (H1): redact even with no key= prefix.
+    text = p
+        .github_token
+        .replace_all(&text, "[github token redacted]")
+        .into_owned();
+    text = p
+        .aws_key
+        .replace_all(&text, "[aws key redacted]")
+        .into_owned();
+    text = p
+        .slack_token
+        .replace_all(&text, "[slack token redacted]")
+        .into_owned();
+    text = p
+        .age_key
+        .replace_all(&text, "[age key redacted]")
         .into_owned();
 
     for (pattern, replacement) in [
@@ -107,21 +190,13 @@ pub fn scrub_logs(text: &str) -> String {
             .into_owned();
     }
 
-    text = Regex::new(r"[0-9a-fA-F]{2}(:[0-9a-fA-F]{2}){5}")
-        .expect("MAC regex is valid")
-        .replace_all(&text, "xx:xx:xx:xx:xx:xx")
-        .into_owned();
-    text = Regex::new(r"\b\d{1,3}(?:\.\d{1,3}){3}\b")
-        .expect("IPv4 regex is valid")
-        .replace_all(&text, "xxx.xxx.xxx.xxx")
-        .into_owned();
+    text = p.mac.replace_all(&text, "xx:xx:xx:xx:xx:xx").into_owned();
+    text = p.ipv4.replace_all(&text, "xxx.xxx.xxx.xxx").into_owned();
 
     // Rust's regex crate deliberately has no look-around. The broad match
     // still mirrors the Python candidate for normal IPv6 literals, and the
     // parser prevents ordinary colon-separated text from being redacted.
-    let ipv6_candidate =
-        Regex::new(r"(?:[0-9A-Fa-f]*:){2,}[0-9A-Fa-f]*").expect("IPv6 regex is valid");
-    text = replace_with(&ipv6_candidate, text, |captures| {
+    text = replace_with(&p.ipv6_candidate, text, |captures| {
         let candidate = captures.get(0).map_or("", |match_| match_.as_str());
         if candidate
             .parse::<IpAddr>()
@@ -132,20 +207,15 @@ pub fn scrub_logs(text: &str) -> String {
             candidate.to_string()
         }
     });
-    text = Regex::new(r"[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}")
-        .expect("email regex is valid")
+    text = p
+        .email
         .replace_all(&text, "redacted@example.com")
         .into_owned();
-    text = Regex::new(
-        r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b",
-    )
-    .expect("UUID regex is valid")
-    .replace_all(&text, "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
-    .into_owned();
-    text = Regex::new(r"/(var/home|home)/[^/\s:]+")
-        .expect("home-path regex is valid")
-        .replace_all(&text, "/$1/redacted")
+    text = p
+        .uuid
+        .replace_all(&text, "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx")
         .into_owned();
+    text = p.home_path.replace_all(&text, "/$1/redacted").into_owned();
 
     // The Python implementation uses the current hostname and USER as final
     // fallbacks. Python resolves the hostname via gethostname(2), which
@@ -238,6 +308,27 @@ mod tests {
     fn preserves_non_sensitive_text() {
         let scrubbed = scrub_logs("plain status: ok\nvalue=42");
         assert_eq!(scrubbed, "plain status: ok\nvalue=42");
+    }
+
+    #[test]
+    fn redacts_bare_format_based_tokens() {
+        // H1: bare high-entropy tokens with no key= prefix must be redacted.
+        // Test tokens are built via concat! to avoid tripping secret scanners
+        // on literal credential-shaped strings.
+        let ghp = concat!("ghp_", "abcdefghijklmnopqrstuvwxyz0123456789ABCD");
+        let akia = concat!("AKIA", "IOSFODNN7EXAMPLE");
+        let xoxb = concat!("xoxb-", "123456789012-1234567890123-AbCdEfGhIjKlMnOpQrStUv");
+        let age = concat!(
+            "AGE-SECRET-KEY-1",
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789ABCDEFGHIJKLMNOPQRSTUV"
+        );
+        let report = format!(
+            "error: {ghp}\nkey: {akia}\ntoken {xoxb}\n{age}\nX-Auth-Token: header-secret-value\n",
+        );
+        let scrubbed = scrub_logs(&report);
+        for secret in [ghp, akia, xoxb, age, "header-secret-value"] {
+            assert!(!scrubbed.contains(secret), "secret leaked: {secret}");
+        }
     }
 
     /// Byte-parity with the Python scrubber over the shared corpus in

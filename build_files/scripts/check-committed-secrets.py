@@ -33,9 +33,12 @@ def main() -> int:
         # Don't flag the detector implementations' own pattern literals.
         # Both copies intentionally contain the high-confidence signatures
         # they enforce; neither is a credential-bearing application file.
+        # diagnostics_scrub.rs contains both the scrub patterns and realistic
+        # test fixtures for the H1 bare-token redaction tests.
         if name in {
             "build_files/scripts/check-committed-secrets.py",
             "src/kyth-shared-rs/src/secret_scan.rs",
+            "src/kyth-shared-rs/src/diagnostics_scrub.rs",
         }:
             continue
         try:

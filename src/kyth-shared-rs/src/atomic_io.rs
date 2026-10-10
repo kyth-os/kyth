@@ -111,6 +111,35 @@ pub fn read_json_or_default<T: DeserializeOwned>(path: impl AsRef<Path>, default
         .unwrap_or(default)
 }
 
+/// Run `f` while holding an exclusive advisory lock on a `<path>.lock`
+/// sidecar file.
+///
+/// Serializes read-modify-write cycles on `path` against other threads and
+/// processes that use this helper for the same path. The atomic-write
+/// helpers above make each *write* crash-safe, but two concurrent
+/// read-modify-write sequences still interleave (both read, both modify,
+/// last writer silently wins). The lock file is a 0o600 sidecar next to
+/// `path`; the kernel releases the lock when the file is closed.
+pub fn with_file_lock<T>(path: impl AsRef<Path>, f: impl FnOnce() -> T) -> std::io::Result<T> {
+    let path = path.as_ref();
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("kyth");
+    let lock_path = parent.join(format!(".{file_name}.lock"));
+    let lock_file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .mode(0o600)
+        .open(&lock_path)?;
+    rustix::fs::flock(&lock_file, rustix::fs::FlockOperation::LockExclusive)?;
+    let result = f();
+    let _ = rustix::fs::flock(&lock_file, rustix::fs::FlockOperation::Unlock);
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

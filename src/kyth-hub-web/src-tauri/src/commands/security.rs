@@ -213,12 +213,36 @@ pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityAction
     let tool = validated_sec_tool(&flatpak_id)?;
     let name = tool.name.to_string();
     let launch_detail = format!("Installing {name}…");
+    // No shell: the flatpak id is catalog-validated, but argv form removes
+    // even the theoretical injection surface that `bash -c` with an
+    // interpolated id had. The remote-add runs synchronously first (fast,
+    // idempotent with --if-not-exists); the install itself stays a tracked
+    // job so the UI can follow and cancel it.
+    let remote_add = kyth_shared::system::process::run_bounded(
+        &[
+            "flatpak".to_string(),
+            "remote-add".to_string(),
+            "--user".to_string(),
+            "--if-not-exists".to_string(),
+            "flathub".to_string(),
+            "https://dl.flathub.org/repo/flathub.flatpakrepo".to_string(),
+        ],
+        std::time::Duration::from_secs(60),
+    )
+    .map_err(|error| format!("Could not ensure the Flathub remote: {error}"))?;
+    if !remote_add.status.success() {
+        return Err(format!(
+            "Could not ensure the Flathub remote: {}",
+            String::from_utf8_lossy(&remote_add.stderr).trim()
+        ));
+    }
     let argv = vec![
-        "bash".to_string(),
-        "-c".to_string(),
-        format!(
-            "flatpak remote-add --user --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo && flatpak install --user -y flathub {flatpak_id}"
-        ),
+        "flatpak".to_string(),
+        "install".to_string(),
+        "--user".to_string(),
+        "-y".to_string(),
+        "flathub".to_string(),
+        flatpak_id,
     ];
     let job = start_job("sec-install", &format!("Installing {name}…"))?;
     spawn_argv_job(

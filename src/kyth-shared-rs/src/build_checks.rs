@@ -338,9 +338,16 @@ pub fn source_hash(root: impl AsRef<Path>) -> std::io::Result<String> {
 fn collect_files(root: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
     for entry in std::fs::read_dir(root)? {
         let path = entry?.path();
-        if path.is_dir() {
+        // H2: use symlink_metadata so symlinks are never followed. A symlink
+        // loop would otherwise recurse unboundedly (stack overflow), and a
+        // symlink to outside the tree would silently pollute the digest.
+        let meta = std::fs::symlink_metadata(&path)?;
+        if meta.file_type().is_symlink() {
+            continue;
+        }
+        if meta.is_dir() {
             collect_files(&path, files)?;
-        } else if path.is_file() {
+        } else if meta.is_file() {
             files.push(path);
         }
     }
@@ -462,5 +469,35 @@ mod tests {
         let first = source_hash(directory.path()).unwrap();
         std::fs::write(directory.path().join("a"), "two").unwrap();
         assert_ne!(first, source_hash(directory.path()).unwrap());
+    }
+
+    #[test]
+    fn source_hash_ignores_symlinks() {
+        // H2: symlink loops must not cause unbounded recursion, and symlinks
+        // to outside the tree must not pollute the digest.
+        let directory = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        std::fs::write(directory.path().join("real"), "content").unwrap();
+        std::fs::write(outside.path().join("evil"), "pollution").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::symlink;
+            // Loop: link -> .
+            symlink(".", directory.path().join("loop")).unwrap();
+            // Outside-tree target.
+            symlink(
+                outside.path().join("evil"),
+                directory.path().join("outside_link"),
+            )
+            .unwrap();
+        }
+        // Must complete without stack overflow and produce a stable digest.
+        let first = source_hash(directory.path()).unwrap();
+        let second = source_hash(directory.path()).unwrap();
+        assert_eq!(first, second);
+        // Digest must match the tree without symlinks.
+        let clean = tempdir().unwrap();
+        std::fs::write(clean.path().join("real"), "content").unwrap();
+        assert_eq!(first, source_hash(clean.path()).unwrap());
     }
 }

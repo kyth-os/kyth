@@ -499,10 +499,17 @@ fn smb_save_configured_share(share: SmbConfiguredShare) -> Result<SmbActionResul
     if !valid_smb_configured_share(&share) {
         return Err("invalid SMB share configuration".to_string());
     }
-    let mut shares = load_smb_configured_shares();
-    shares.retain(|existing| existing.name != share.name);
-    shares.push(share);
-    save_smb_configured_shares(&shares)?;
+    // Serialize the load-modify-save against concurrent invocations: without
+    // the lock, two rapid saves interleave (both read, both modify, last
+    // writer silently wins) and one share definition is lost.
+    let path = smb_config_path()?;
+    kyth_shared::atomic_io::with_file_lock(&path, || {
+        let mut shares = load_smb_configured_shares();
+        shares.retain(|existing| existing.name != share.name);
+        shares.push(share);
+        save_smb_configured_shares(&shares)
+    })
+    .map_err(|error| format!("could not lock SMB configuration: {error}"))??;
     Ok(SmbActionResult {
         state: "complete".into(),
         detail: "Network share configuration saved.".into(),
@@ -519,9 +526,16 @@ fn smb_remove_configured_share(name: String) -> Result<SmbActionResult, String> 
     {
         return Err("invalid SMB share name".to_string());
     }
-    let mut shares = load_smb_configured_shares();
-    shares.retain(|existing| existing.name != name);
-    save_smb_configured_shares(&shares)?;
+    // Same read-modify-write lock as smb_save_configured_share: the load,
+    // retain, and save must all happen under the lock, or a concurrent save
+    // racing this removal would resurrect the deleted share.
+    let path = smb_config_path()?;
+    kyth_shared::atomic_io::with_file_lock(&path, || {
+        let mut shares = load_smb_configured_shares();
+        shares.retain(|existing| existing.name != name);
+        save_smb_configured_shares(&shares)
+    })
+    .map_err(|error| format!("could not lock SMB configuration: {error}"))??;
     Ok(SmbActionResult {
         state: "complete".into(),
         detail: "Network share configuration removed.".into(),
@@ -1965,40 +1979,45 @@ fn exe_handler_set_auto_bottles(enabled: bool) -> Result<(), String> {
     // Parse-modify-write, preserving every other key/section: a bare
     // fs::write of the two known lines would discard anything else a user
     // or a future version stores here. Atomic temp + fsync + rename so a
-    // crash mid-write never leaves a truncated file.
-    let desired = format!("auto_bottles={}", if enabled { "true" } else { "false" });
-    let mut lines: Vec<String> = match fs::read_to_string(&path) {
-        Ok(text) => text.lines().map(str::to_string).collect(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => return Err(format!("Could not save preference: {error}")),
-    };
-    let mut in_section = false;
-    let mut section_seen = false;
-    let mut key_written = false;
-    for line in &mut lines {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            in_section = trimmed == "[exe-handler]";
-            section_seen = section_seen || in_section;
-        } else if in_section
-            && trimmed
-                .split_once('=')
-                .is_some_and(|(key, _)| key.trim() == "auto_bottles")
-        {
-            *line = desired.clone();
-            key_written = true;
+    // crash mid-write never leaves a truncated file. The whole
+    // read-modify-write runs under an exclusive file lock so two rapid
+    // toggles cannot interleave (both read, both modify, last writer wins).
+    kyth_shared::atomic_io::with_file_lock(&path, || {
+        let desired = format!("auto_bottles={}", if enabled { "true" } else { "false" });
+        let mut lines: Vec<String> = match fs::read_to_string(&path) {
+            Ok(text) => text.lines().map(str::to_string).collect(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(format!("Could not save preference: {error}")),
+        };
+        let mut in_section = false;
+        let mut section_seen = false;
+        let mut key_written = false;
+        for line in &mut lines {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                in_section = trimmed == "[exe-handler]";
+                section_seen = section_seen || in_section;
+            } else if in_section
+                && trimmed
+                    .split_once('=')
+                    .is_some_and(|(key, _)| key.trim() == "auto_bottles")
+            {
+                *line = desired.clone();
+                key_written = true;
+            }
         }
-    }
-    if !key_written {
-        if !section_seen {
-            lines.push("[exe-handler]".to_string());
+        if !key_written {
+            if !section_seen {
+                lines.push("[exe-handler]".to_string());
+            }
+            lines.push(desired);
         }
-        lines.push(desired);
-    }
-    let mut rendered = lines.join("\n");
-    rendered.push('\n');
-    kyth_shared::atomic_io::atomic_write_text(&path, &rendered, Some(0o600))
-        .map_err(|error| format!("Could not save preference: {error}"))
+        let mut rendered = lines.join("\n");
+        rendered.push('\n');
+        kyth_shared::atomic_io::atomic_write_text(&path, &rendered, Some(0o600))
+            .map_err(|error| format!("Could not save preference: {error}"))
+    })
+    .map_err(|error| format!("Could not lock preference file: {error}"))?
 }
 
 #[tauri::command]

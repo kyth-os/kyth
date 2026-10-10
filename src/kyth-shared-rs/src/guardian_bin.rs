@@ -711,6 +711,34 @@ fn check(persist: bool, allow_automatic: bool, investigate: bool) -> Value {
     json!({"schema_version": 1, "enabled": enabled, "automatic_safe_fixes": automatic, "user_initiated": false, "persisted": persist, "symptoms": symptoms, "decisions": decisions, "pending": kyth_shared::guardian::pending_recommendations(&kyth_shared::guardian::load_state()), "model": model_status()})
 }
 
+/// Prompt for confirmation before running a `risk: "confirm"` recipe from
+/// the `fix` CLI (M15). Returns false (declined) when stdin is not
+/// interactive — a scripted invocation must pass `--yes` explicitly rather
+/// than hanging on a prompt nobody will answer.
+fn confirm_recipe(recipe: &kyth_shared::guardian::Recipe) -> bool {
+    use std::io::{BufRead, Write};
+    // is_terminal is stable since Rust 1.70.
+    if !std::io::stdin().is_terminal() {
+        eprintln!(
+            "kyth-guardian: recipe '{}' needs confirmation (risk: confirm); re-run interactively or pass --yes",
+            recipe.id
+        );
+        return false;
+    }
+    eprint!(
+        "kyth-guardian: run '{}' ({} )? [y/N] ",
+        recipe.title, recipe.id
+    );
+    let _ = std::io::stderr().flush();
+    let mut line = String::new();
+    let confirmed = std::io::stdin().lock().read_line(&mut line).is_ok()
+        && matches!(line.trim().to_ascii_lowercase().as_str(), "y" | "yes");
+    if !confirmed {
+        eprintln!("kyth-guardian: skipped '{}'", recipe.id);
+    }
+    confirmed
+}
+
 fn now() -> f64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -732,15 +760,28 @@ fn main() -> std::process::ExitCode {
         "check" => check(true, true, false),
         "investigate" => check(true, true, true),
         "fix" => {
-            let ids = args.iter().skip(command_index + 1);
+            // Confirm-risk recipes need explicit user confirmation (M15):
+            // the automatic check() path only runs safe+automatic recipes,
+            // so the CLI must not let a scripted `fix` bypass the designed
+            // confirmation UX for disruptive repairs.
+            let yes_all = args.iter().any(|arg| arg == "--yes");
+            let ids: Vec<&String> = args
+                .iter()
+                .skip(command_index + 1)
+                .filter(|arg| *arg != "--yes")
+                .collect();
             let mut decisions = Vec::new();
             for id in ids {
-                if !kyth_shared::guardian::recipes()
+                let recipe = kyth_shared::guardian::recipes()
                     .iter()
-                    .any(|recipe| recipe.id == id)
-                {
+                    .find(|recipe| recipe.id == id.as_str());
+                let Some(recipe) = recipe else {
                     eprintln!("kyth-guardian: unknown recipe: {id}");
                     return std::process::ExitCode::from(1);
+                };
+                if recipe.risk == "confirm" && !yes_all && !confirm_recipe(recipe) {
+                    decisions.push(json!({"recipe_id": id, "action": "skipped", "detail": "confirmation declined", "verified": false}));
+                    continue;
                 }
                 let result = kyth_shared::guardian::execute_recipe(id);
                 decisions.push(json!({"recipe_id": id, "action": "executed", "detail": result.clone().unwrap_or_else(|error| error), "verified": result.is_ok()}));
@@ -748,7 +789,7 @@ fn main() -> std::process::ExitCode {
             json!({"schema_version": 1, "user_initiated": true, "decisions": decisions})
         }
         _ => {
-            eprintln!("usage: kyth-guardian [--json] status|check|inspect|investigate|fix [recipe-id ...]");
+            eprintln!("usage: kyth-guardian [--json] status|check|inspect|investigate|fix [--yes] [recipe-id ...]");
             return std::process::ExitCode::from(2);
         }
     };

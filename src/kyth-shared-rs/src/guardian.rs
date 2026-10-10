@@ -690,6 +690,13 @@ pub fn execute_recipe(recipe_id: &str) -> Result<String, String> {
         Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
     };
     let state = load_state();
+    // Authorization gate (M7): only a recipe Guardian is currently
+    // recommending may be executed. Without this, any caller that can
+    // reach this function (a Tauri command, a CLI arg) can be talked into
+    // running an arbitrary recipe id by whatever hands it the string.
+    if !is_pending_recipe(&state, recipe_id) {
+        return Err("recipe is not currently recommended by Guardian".to_string());
+    }
     if cooldown_active(&state, recipe) {
         return Err("repair cooldown is active".to_string());
     }

@@ -137,7 +137,12 @@ impl JobStore {
         let mut round = 1u32;
         while inner.entries.contains_key(&unique) {
             round += 1;
-            unique = format!("{id}#{round}");
+            // Use `-{round}` (not `#{round}`): the Hub persists in-flight job
+            // IDs and validates them against `JOB_ID_PATTERN`
+            // (/^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$/) in liveData.ts. A `#`
+            // suffix fails that pattern, so a collided job's Cancel dies
+            // across a Hub reload.
+            unique = format!("{id}-{round}");
         }
         inner.order.push_back(unique.clone());
         inner.entries.insert(
@@ -323,8 +328,33 @@ mod tests {
         store.finish(&first, STATE_COMPLETE, "done".to_string());
         let (second, _) = store.start("reused", "second".to_string());
         assert_eq!(first, "reused");
-        assert_eq!(second, "reused#2");
+        assert_eq!(second, "reused-2");
         assert_eq!(store.order_len(), 2);
+    }
+
+    #[test]
+    fn dedup_suffix_matches_hub_job_id_pattern() {
+        // The Hub persists in-flight job IDs and validates them against
+        // `/^[A-Za-z0-9][A-Za-z0-9_-]*-\d+$/` (liveData.ts). A deduped ID
+        // must still match or Cancel breaks across a Hub reload.
+        let store = JobStore::default();
+        let (first, _) = store.start("sec-install-123", "first".to_string());
+        let (second, _) = store.start("sec-install-123", "second".to_string());
+        let (third, _) = store.start("sec-install-123", "third".to_string());
+        for id in [&first, &second, &third] {
+            assert!(
+                id.bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_'),
+                "deduped id must not contain pattern-breaking chars: {id}"
+            );
+            let tail = id.rsplit('-').next().unwrap_or("");
+            assert!(
+                !tail.is_empty() && tail.bytes().all(|b| b.is_ascii_digit()),
+                "deduped id must end with -<digits>: {id}"
+            );
+        }
+        assert_eq!(second, "sec-install-123-2");
+        assert_eq!(third, "sec-install-123-3");
     }
 
     #[test]

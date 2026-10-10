@@ -294,6 +294,11 @@ pub fn add_share(request: &ShareRequest) -> Result<String, String> {
             "refusing to overwrite {unit}: not a KythOS-managed share unit"
         ));
     }
+    // If we're replacing an existing unit (M12), the mount must be
+    // restarted after daemon-reload: `systemctl start` on an
+    // already-active mount is a no-op, so new server/path/credentials
+    // would silently not take effect until reboot.
+    let replacing_existing = unit_path.is_file() && !unit_path.is_symlink();
     ensure_no_symlink_in_path(Path::new(&request.mount_point))?;
     fs::create_dir_all(&request.mount_point).map_err(|error| error.to_string())?;
 
@@ -328,7 +333,11 @@ pub fn add_share(request: &ShareRequest) -> Result<String, String> {
         // an arbitrary path. No slow operations may go between this check
         // and the mount.
         ensure_no_symlink_in_path(Path::new(&request.mount_point))?;
-        run_systemctl(&["start", &unit], 45)?;
+        if replacing_existing {
+            run_systemctl(&["restart", &unit], 45)?;
+        } else {
+            run_systemctl(&["start", &unit], 45)?;
+        }
     }
     Ok(format!("Configured SMB share {}.", request.name))
 }

@@ -11,6 +11,7 @@
 
 use std::path::Path;
 
+use kyth_shared::atomic_io::atomic_write_text;
 use kyth_shared::system::service_preferences::{load_scx, scx_config_path};
 
 const SCX_LOADER_CONF: &str = "/etc/scx/scx_loader.conf";
@@ -34,7 +35,14 @@ fn main() -> std::process::ExitCode {
         if let Some(parent) = dest.parent() {
             let _ = std::fs::create_dir_all(parent);
         }
-        let _ = std::fs::write(dest, format!("SCX_SCHEDULER={scx}\n# per-game explicit\n"));
+        // Atomic write (M11): kyth-ai-perfd rewrites this same file on
+        // every policy change. A torn non-atomic write here could leave
+        // the loader parsing half a file.
+        let _ = atomic_write_text(
+            dest,
+            &format!("SCX_SCHEDULER={scx}\n# per-game explicit\n"),
+            None,
+        );
     }
     println!(
         "kyth-apply-scx-preset: {} games \u{2192} {scx}",

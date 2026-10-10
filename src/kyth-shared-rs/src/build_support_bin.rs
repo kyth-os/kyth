@@ -54,7 +54,7 @@ fn render_repo(args: &[String]) -> Result<(), String> {
         .iter()
         .find(|spec| spec.name == name)
         .ok_or_else(|| format!("repository {name:?} is not defined in {}", config.display()))?;
-    atomic_write_text(output, &spec.render_yum_repo(), Some(0o644))
+    atomic_write_text(output, &spec.render_yum_repo()?, Some(0o644))
         .map_err(|error| error.to_string())
 }
 
@@ -67,7 +67,7 @@ fn render_container(args: &[String]) -> Result<(), String> {
         .find(|pair| pair[0] == "--box")
         .map(|pair| pair[1].as_str())
         .unwrap_or("kyth-ai-dev");
-    let wrapper = render_distrobox_wrapper(&tool, &description, box_name);
+    let wrapper = render_distrobox_wrapper(&tool, &description, box_name)?;
     atomic_write_text(output, &wrapper, Some(0o755)).map_err(|error| error.to_string())
 }
 

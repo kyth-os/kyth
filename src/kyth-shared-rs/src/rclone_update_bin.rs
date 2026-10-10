@@ -77,6 +77,26 @@ fn version_line_matches(first_line: &str, target: &str) -> bool {
     first_line.split_whitespace().nth(1) == Some(target)
 }
 
+/// Parse a strict X.Y.Z version triple. Returns None for anything else.
+fn parse_rclone_version(version: &str) -> Option<(u64, u64, u64)> {
+    let mut parts = version.split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next()?.parse().ok()?;
+    if parts.next().is_some() {
+        return None;
+    }
+    Some((major, minor, patch))
+}
+
+/// Returns Some(true) if target is older than installed (downgrade),
+/// Some(false) if not, None if either version is unparsable (abstain).
+fn is_downgrade(installed: &str, target: &str) -> Option<bool> {
+    let installed = parse_rclone_version(installed)?;
+    let target = parse_rclone_version(target)?;
+    Some(target < installed)
+}
+
 fn main() -> std::process::ExitCode {
     let mut rclone_ver = env::var("RCLONE_VERSION").unwrap_or_default();
     if rclone_ver.is_empty() {
@@ -115,6 +135,14 @@ fn main() -> std::process::ExitCode {
         if installed == target_ver {
             println!("rclone already current: v{installed}");
             return std::process::ExitCode::SUCCESS;
+        }
+        // M1: refuse downgrades — a moved/compromised `latest` pointer must
+        // not silently install an older vulnerable rclone.
+        if let Some(true) = is_downgrade(&installed, &target_ver) {
+            fail(
+                format!("ERROR: refusing rclone downgrade: installed v{installed}, target v{target_ver}"),
+                None,
+            );
         }
     }
     let basename = format!("rclone-{rclone_ver}-linux-amd64");
@@ -265,5 +293,25 @@ mod tests {
         assert!(!version_line_matches("rclone v1.65.0", "v1.66.0"));
         assert!(!version_line_matches("", "v1.66.0"));
         assert!(!version_line_matches("rclone v1.66.01", "v1.66.0"));
+    }
+
+    #[test]
+    fn parses_strict_semver_triples_only() {
+        assert_eq!(parse_rclone_version("1.66.0"), Some((1, 66, 0)));
+        assert_eq!(parse_rclone_version("1.66"), None);
+        assert_eq!(parse_rclone_version("1.66.0.1"), None);
+        assert_eq!(parse_rclone_version("v1.66.0"), None);
+        assert_eq!(parse_rclone_version(""), None);
+    }
+
+    #[test]
+    fn downgrade_detection() {
+        // M1: target older than installed = downgrade.
+        assert_eq!(is_downgrade("1.66.0", "1.65.0"), Some(true));
+        assert_eq!(is_downgrade("1.66.0", "1.66.0"), Some(false));
+        assert_eq!(is_downgrade("1.65.0", "1.66.0"), Some(false));
+        // Unparsable versions abstain.
+        assert_eq!(is_downgrade("bad", "1.66.0"), None);
+        assert_eq!(is_downgrade("1.66.0", "bad"), None);
     }
 }

@@ -72,6 +72,17 @@ pub fn finalize_staged(reboot: bool) -> Result<String, String> {
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_string());
     }
+    // Close the read-write window prepare_boot() opened: /boot stays rw
+    // until the next reboot otherwise, widening the bootloader-write window
+    // on every update/switch. Best-effort — a failed remount must not fail
+    // an otherwise successful finalize.
+    if !successful(
+        "mount",
+        &["-o", "remount,ro", "/boot"],
+        Duration::from_secs(15),
+    ) {
+        eprintln!("kyth-finalize-staged: could not remount /boot read-only");
+    }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
