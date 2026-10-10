@@ -26,8 +26,10 @@ KERNEL_FLAVOR="$(cat /usr/share/kyth/kernel-flavor 2>/dev/null || echo fedora)"
 # daily layer does not need to refresh DNF metadata.
 command -v openssl >/dev/null
 install -Dm 0644 "${CERT}" /usr/share/kyth/secureboot/kyth-secureboot.cer
-openssl x509 -in "${CERT}" -outform DER -out /tmp/kyth-secureboot.der
-install -Dm 0644 /tmp/kyth-secureboot.der /usr/share/kyth/secureboot/kyth-secureboot.der
+der_tmp="$(mktemp)"
+trap 'rm -f "${der_tmp}"' EXIT
+openssl x509 -in "${CERT}" -outform DER -out "${der_tmp}"
+install -Dm 0644 "${der_tmp}" /usr/share/kyth/secureboot/kyth-secureboot.der
 install -Dm 0755 /ctx/kyth-enroll-mok /usr/bin/kyth-enroll-mok
 install -Dm 0644 /ctx/kyth-enroll-mok.service /usr/lib/systemd/system/kyth-enroll-mok.service
 

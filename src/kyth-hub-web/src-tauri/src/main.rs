@@ -1007,20 +1007,9 @@ fn focus_start(minutes: u32) -> Result<String, String> {
             true
         }
     });
-    // Kill inhibitors orphaned by a previous Hub process (crash/restart
-    // reparents the `sleep` child, which then holds idle:sleep with no UI
-    // to cancel it). Live sessions in this process are spared.
-    let live_pids: Vec<u32> = sessions
-        .values()
-        .map(|session| session.child.id())
-        .collect();
-    drop(sessions);
-    let orphans = kyth_shared::system::process::reap_stale_focus_inhibits(&live_pids);
-    if orphans > 0 {
-        eprintln!(
-            "focus: reaped {orphans} orphaned sleep inhibitor(s) from a previous Hub process"
-        );
-    }
+    // M1: hold the lock across reap + spawn + insert. The previous code
+    // dropped the lock before reaping, allowing a concurrent focus_start
+    // to reap the just-spawned child before it was inserted into the map.
     let child = std::process::Command::new("systemd-inhibit")
         .args([
             "--what=idle:sleep",
@@ -1031,6 +1020,7 @@ fn focus_start(minutes: u32) -> Result<String, String> {
         ])
         .spawn()
         .map_err(|error| format!("could not keep the PC awake: {error}"))?;
+    let child_pid = child.id();
     let id = format!(
         "focus-{}",
         std::time::SystemTime::now()
@@ -1038,11 +1028,29 @@ fn focus_start(minutes: u32) -> Result<String, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    let mut sessions = focus_sessions()
-        .lock()
-        .map_err(|_| "focus session store is unavailable".to_string())?;
     let ends_at = std::time::Instant::now() + std::time::Duration::from_secs(minutes as u64 * 60);
     sessions.insert(id.clone(), FocusSession { child, ends_at });
+    // Kill inhibitors orphaned by a previous Hub process (crash/restart
+    // reparents the `sleep` child, which then holds idle:sleep with no UI
+    // to cancel it). Live sessions in this process are spared, including
+    // the child we just spawned.
+    let live_pids: Vec<u32> = sessions
+        .values()
+        .map(|session| session.child.id())
+        .collect();
+    // The new child is in the map, so its PID is in live_pids. Drop the
+    // lock before the (potentially slow) reaper to avoid blocking other
+    // focus operations.
+    drop(sessions);
+    let orphans = kyth_shared::system::process::reap_stale_focus_inhibits(&live_pids);
+    if orphans > 0 {
+        eprintln!(
+            "focus: reaped {orphans} orphaned sleep inhibitor(s) from a previous Hub process"
+        );
+    }
+    // Sanity: our child should still be alive (we hold no lock now, but
+    // the reaper was given our PID in the keep list).
+    debug_assert!(live_pids.contains(&child_pid));
     Ok(id)
 }
 

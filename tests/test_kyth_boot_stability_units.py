@@ -566,7 +566,7 @@ class BootStabilityUnitTests(unittest.TestCase):
         )
         self.assertIn("RemainAfterExit=yes", body)
         self.assertIn("StateDirectory=kyth/migrations", body)
-        self.assertIn("ReadWritePaths=-/usr/local/bin -/var/home -/root", body)
+        self.assertIn("ReadWritePaths=-/root", body)
         self.assertNotIn("PrivateUsers=yes", body)
 
     def test_flathub_setup_skips_offline_and_can_write_flatpak_state(self) -> None:

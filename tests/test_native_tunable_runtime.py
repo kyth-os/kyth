@@ -61,6 +61,10 @@ class NativeTunableRuntimeTest(unittest.TestCase):
                 "XDG_CONFIG_HOME": str(config),
                 "XDG_RUNTIME_DIR": str(runtime),
                 "KYTH_TEST_MODE": "1",
+                # Test harness runs as root; the FORCE override permits
+                # test-mode path redirection in the isolated test env.
+                # Never set in production.
+                "KYTH_TEST_MODE_FORCE": "1",
             }
         )
         return environment

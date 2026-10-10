@@ -12,6 +12,11 @@ RemainAfterExit=yes
 # remount,rw is EINVAL on the root-subvol bind; bind,rw is the working layout.
 # '-' so a missing /boot mount cannot fail sysinit.
 ExecStart=-/usr/libexec/kyth-finalize-staged prepare-boot
+NoNewPrivileges=yes
+ProtectSystem=strict
+# /boot must stay writable (RequiresMountsFor above); allowlist it explicitly
+# since ProtectSystem=strict would otherwise make it read-only.
+ReadWritePaths=/boot
 
 [Install]
 WantedBy=sysinit.target

@@ -402,12 +402,12 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Stable publishes from scheduled rebuilds or the repository owner (push
-    # or manual dispatch) go through the reviewer-free stable-release-auto
-    # environment; only builds triggered by anyone else keep the manual
-    # approval gate on stable-release. Manual dispatches carry no original_*
-    # inputs, so fall back to the actor who dispatched this run.
-    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || (inputs.original_event == 'schedule' || (inputs.original_actor || github.actor) == github.repository_owner) && 'stable-release-auto' || 'stable-release' }}
+    # Stable publishes go through the manual approval gate on stable-release.
+    # The previous expression trusted `inputs.original_actor` (free-text on
+    # manual dispatch, forgeable by any write-collaborator) and compared a
+    # user login against the org name (never matches). Schedule-triggered
+    # rebuilds use the reviewer-free stable-release-auto environment.
+    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || (inputs.original_event == 'schedule' && 'stable-release-auto' || 'stable-release') }}
     permissions:
       actions: write
       contents: write
@@ -482,6 +482,31 @@ jobs:
       - name: Setup Cosign
         uses: ./.github/actions/setup-cosign
 
+      # H1: verify build provenance BEFORE minting signatures. The old order
+      # signed first, then "verified" — the cosign verify trivially passed
+      # on signatures this job just created, making this a signing oracle
+      # for any digest a write-collaborator supplies via workflow_dispatch.
+      - name: Verify build provenance before signing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.meta.outputs.digest }}
+          GITHUB_SHA_META: ${{ steps.meta.outputs.github_sha }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh attestation verify "oci://${IMAGE}@${DIGEST}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/build.yml" \
+              --source-digest "${GITHUB_SHA_META}" \
+              --deny-self-hosted-runners; then
+              exit 0
+            fi
+            echo "Provenance not visible yet (attempt ${attempt}/5); retrying..."
+            sleep 10
+          done
+          echo "::error::Build provenance could not be verified for ${IMAGE}@${DIGEST} — refusing to sign"
+          exit 1
+
       - name: Sign container image
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
@@ -509,14 +534,12 @@ jobs:
           echo "digest=${SBOM_DIGEST}" >> "$GITHUB_OUTPUT"
           cosign sign -y "${IMAGE}@${SBOM_DIGEST}"
 
-      - name: Verify published signatures and build provenance
+      - name: Verify published signatures
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE: ${{ steps.meta.outputs.image }}
           DIGEST: ${{ steps.meta.outputs.digest }}
           SBOM_DIGEST: ${{ steps.attach_sbom.outputs.digest }}
-          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
-          GITHUB_SHA_META: ${{ steps.meta.outputs.github_sha }}
         run: |
           IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/supply-chain\\.yml@refs/heads/(main|testing)$"
           ISSUER="https://token.actions.githubusercontent.com"
@@ -529,20 +552,8 @@ jobs:
             --certificate-identity-regexp "${IDENTITY}" \
             --certificate-oidc-issuer "${ISSUER}" \
             "${IMAGE}@${SBOM_DIGEST}"
-
-          for attempt in 1 2 3 4 5; do
-            if gh attestation verify "oci://${IMAGE}@${DIGEST}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/build.yml" \
-              --source-digest "${GITHUB_SHA_META}" \
-              --deny-self-hosted-runners; then
-              exit 0
-            fi
-            echo "Provenance not visible yet (attempt ${attempt}/5); retrying..."
-            sleep 10
-          done
-          echo "::error::Build provenance could not be verified for ${IMAGE}@${DIGEST}"
-          exit 1
+          # Build provenance was verified BEFORE signing (see
+          # "Verify build provenance before signing" above).
 
       - name: Dispatch Live ISO after image verification
         if: inputs.dispatch_iso == 'true' || inputs.dispatch_iso == true

@@ -202,9 +202,12 @@ class ReleaseChainingContracts(unittest.TestCase):
         ).read_text(encoding="utf-8")
         build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         publish = workflow.split("  publish:", 1)[1]
-        verify_at = publish.index(
-            "- name: Verify published signatures and build provenance"
-        )
+        # H1: provenance must be verified BEFORE signing (not after).
+        provenance_at = publish.index("- name: Verify build provenance before signing")
+        sign_at = publish.index("- name: Sign container image")
+        self.assertLess(provenance_at, sign_at)
+        # Signatures must be verified before ISO dispatch.
+        verify_at = publish.index("- name: Verify published signatures")
         dispatch_at = publish.index(
             "- name: Dispatch Live ISO after image verification"
         )

@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: '05 10 * * 0' # 10:05am UTC weekly on Sundays — rebuilds both :latest and :testing with fresh upstream packages
   workflow_dispatch:
+    inputs:
+      skip_validation:
+        description: 'Skip the Validation gate (use only for emergency rebuilds)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
   # `workflow_run` always executes the DEFAULT branch's copy of this file, so a
   # testing push was built by main's (F44) workflow no matter what testing's
   # copy said. A push trigger runs the pushed branch's own copy, which is the
@@ -47,9 +56,36 @@ jobs:
         with:
           script: |
             const eventName = context.eventName;
-            // schedule / manual dispatch bypass the gate
-            if (eventName === 'schedule' || eventName === 'workflow_dispatch') {
-              core.setOutput('ok', 'true');
+            // H2: schedule and workflow_dispatch no longer blanket-bypass the
+            // Validation gate. Schedule checks for a successful Validation run
+            // on the branch tip; manual dispatch requires an explicit opt-out.
+            if (eventName === 'schedule') {
+              const branch = context.ref.replace('refs/heads/', '');
+              const sha = context.sha;
+              core.setOutput('head_sha', sha);
+              core.setOutput('head_branch', branch);
+              const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                head_sha: sha,
+                per_page: 50,
+              });
+              const validation = data.workflow_runs.find((r) => r.name === 'Validation' && r.status === 'completed');
+              const ok = validation && validation.conclusion === 'success';
+              core.info(`Schedule: Validation ${validation ? validation.conclusion : 'not found'} for ${sha} — ${ok ? 'proceeding' : 'gating build'}`);
+              core.setOutput('ok', ok ? 'true' : 'false');
+              return;
+            }
+            if (eventName === 'workflow_dispatch') {
+              // Manual dispatch requires explicit skip_validation=true to
+              // bypass; defaults to requiring Validation.
+              const skip = context.payload.inputs && context.payload.inputs.skip_validation === 'true';
+              if (skip) {
+                core.warning('Validation gate explicitly skipped via skip_validation input');
+                core.setOutput('ok', 'true');
+              } else {
+                core.setOutput('ok', 'false');
+              }
               core.setOutput('head_sha', context.sha);
               core.setOutput('head_branch', context.ref.replace('refs/heads/', ''));
               return;

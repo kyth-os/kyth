@@ -1,10 +1,13 @@
 label: "KYTHOS-45-LIVE"
+# H4: live ISO boots enforcing (no enforcing=0). The installer daemon
+# handles LUKS passphrases and full-disk writes as root; SELinux must be
+# active in the live session, not just on installed systems.
 grub2:
   timeout: 10
   entries:
     - name: "Try KythOS Live"
-      linux: "/images/pxeboot/vmlinuz quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 root=live:CDLABEL=KYTHOS-45-LIVE rd.live.image kyth.live=1 enforcing=0"
+      linux: "/images/pxeboot/vmlinuz quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 root=live:CDLABEL=KYTHOS-45-LIVE rd.live.image kyth.live=1 enforcing=1"
       initrd: "/images/pxeboot/initrd.img"
     - name: "Try KythOS Live (Basic Graphics)"
-      linux: "/images/pxeboot/vmlinuz quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 root=live:CDLABEL=KYTHOS-45-LIVE rd.live.image kyth.live=1 enforcing=0 nomodeset"
+      linux: "/images/pxeboot/vmlinuz quiet rhgb splash rd.plymouth=1 plymouth.enable=1 plymouth.ignore-serial-consoles systemd.show_status=false rd.systemd.show_status=false loglevel=3 rd.udev.log_level=3 vt.global_cursor_default=0 root=live:CDLABEL=KYTHOS-45-LIVE rd.live.image kyth.live=1 enforcing=1 nomodeset"
       initrd: "/images/pxeboot/initrd.img"

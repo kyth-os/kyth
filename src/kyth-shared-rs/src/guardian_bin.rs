@@ -1,4 +1,5 @@
 use serde_json::{json, Value};
+use std::io::IsTerminal;
 use std::path::Path;
 use std::time::{Duration, Instant};
 

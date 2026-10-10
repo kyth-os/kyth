@@ -21,7 +21,7 @@ pub fn config_path(path: Option<impl AsRef<Path>>) -> PathBuf {
     if let Some(path) = path {
         return path.as_ref().to_path_buf();
     }
-    if std::env::var("KYTH_TEST_MODE").ok().as_deref() == Some("1") {
+    if crate::system::test_mode_active() {
         if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
             return PathBuf::from(config).join("kyth/sched-arbiter.toml");
         }
@@ -197,7 +197,7 @@ pub fn flag_path(path: Option<impl AsRef<Path>>) -> PathBuf {
     if let Some(path) = path {
         return path.as_ref().to_path_buf();
     }
-    if std::env::var("KYTH_TEST_MODE").ok().as_deref() == Some("1") {
+    if crate::system::test_mode_active() {
         if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
             return PathBuf::from(runtime).join("sched-arbiter.json");
         }

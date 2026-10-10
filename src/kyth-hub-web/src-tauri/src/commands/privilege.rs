@@ -126,7 +126,10 @@ fn validate_network_share(payload: &PrivilegedPayload, adding: bool) -> Result<(
         return Err("invalid share name".to_string());
     }
     let mount_point = share_text(payload, "mount_point", false, 4096)?;
-    let approved_mount = ["/mnt/", "/media/", "/run/media/", "/home/"];
+    // L1: /home/ removed from approved prefixes. Mounting over an existing
+    // user directory (e.g. /home/user/Documents) hides the user's real
+    // files — a local DoS/confusion primitive.
+    let approved_mount = ["/mnt/", "/media/", "/run/media/"];
     if !approved_mount
         .iter()
         .any(|prefix| mount_point.starts_with(prefix))

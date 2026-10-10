@@ -104,6 +104,12 @@ const ALLOWED_FLATPAKS: &[&str] = &[
 /// Validate Flatpak app IDs against the server-side allowlist.
 /// Returns the deduplicated valid IDs, or an error if any ID is not allowed.
 pub fn validate_flatpaks(ids: &[String]) -> Result<Vec<String>, String> {
+    // L2: bound the array size before iterating. A malicious client could
+    // send a huge array; the 64-entry cap is well above the legitimate
+    // maximum (4 bundles + 12 individual = 16 apps).
+    if ids.len() > 64 {
+        return Err("too many Flatpak apps requested".to_string());
+    }
     let mut seen = std::collections::HashSet::new();
     let mut valid = Vec::new();
     for id in ids {

@@ -9,7 +9,11 @@ CURL_COMMON_ARGS=(--fail --retry 5 --retry-delay 2 --retry-all-errors --connect-
 # on shared GitHub Actions runner IP ranges. Token is injected via BuildKit secret
 # and never written to any image layer. Falls back gracefully to unauthenticated
 # calls when building locally without the secret.
+#
+# The token is passed via `curl -K` with process substitution, not `-H` on the
+# command line, so the secret never appears in /proc argv. The substitution is
+# evaluated once at source time; the fd stays valid for the shell's lifetime.
 CURL_AUTH_ARGS=()
 if [[ -f /run/secrets/github_token ]]; then
-	CURL_AUTH_ARGS=(-H "Authorization: token $(cat /run/secrets/github_token)")
+	CURL_AUTH_ARGS=(-K <(printf 'header = "Authorization: token %s"\n' "$(cat /run/secrets/github_token)"))
 fi

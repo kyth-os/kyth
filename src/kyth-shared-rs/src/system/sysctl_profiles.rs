@@ -290,7 +290,7 @@ fn paths(spec: &Spec, path: Option<&Path>) -> (PathBuf, PathBuf) {
 }
 
 fn default_drop_in(drop_in: &str) -> PathBuf {
-    if std::env::var("KYTH_TEST_MODE").ok().as_deref() == Some("1") {
+    if crate::system::test_mode_active() {
         if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
             return PathBuf::from(config).join("kyth/sysctl.d").join(drop_in);
         }

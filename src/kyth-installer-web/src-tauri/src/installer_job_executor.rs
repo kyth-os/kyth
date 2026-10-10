@@ -188,6 +188,19 @@ impl NativeInstallRequest {
         let disk = text("disk", "");
         let (target_disk_model, target_disk_serial, target_disk_size_bytes) =
             probe_disk_identity(&disk);
+        // Software step: extract Flatpak IDs from the request and validate
+        // against the server-side allowlist.
+        let flatpaks: Vec<String> = object
+            .get("flatpaks")
+            .and_then(|v| v.as_array())
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|v| v.as_str().map(String::from))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let flatpaks = crate::installer_plan::validate_flatpaks(&flatpaks)
+            .map_err(|e| format!("invalid flatpaks: {e}"))?;
         Ok(Self {
             storage: InstallerPlanInput {
                 disk,
@@ -200,6 +213,7 @@ impl NativeInstallRequest {
                 target_disk_serial,
                 target_disk_model,
                 target_disk_size_bytes,
+                flatpaks,
             },
             execution: InstallerExecutionInput {
                 bootc: crate::installer_bootc::BootcInstallInput {
@@ -809,40 +823,68 @@ impl NativePhaseExecutor {
         }
     }
 
-    /// Install Flatpaks selected on the software step.
-    /// Runs `flatpak install --system` for each validated app ID.
-    /// Best-effort: individual failures are logged but don't fail the install.
+    /// Stage Flatpak selections for first-boot installation.
+    /// M2: installing on the live host would land in the ISO's /var and
+    /// vanish on reboot. Instead, write the validated app IDs into the
+    /// target and ship a oneshot systemd unit that installs them on first
+    /// boot, then disables itself.
     fn install_selected_flatpaks(
         &self,
         phase: Phase,
-        cancellation: &CancellationToken,
+        deploy_root: &str,
     ) -> Result<(), NativePhaseError> {
-        use std::process::Command;
+        use std::fs;
 
-        for app_id in &self.storage_plan.flatpaks {
-            if cancellation.is_cancelled() {
-                return Err(NativePhaseError::Execution {
-                    phase,
-                    message: "Flatpak install cancelled".to_string(),
-                });
-            }
-            // App IDs were validated against the server-side allowlist at
-            // plan time; pass as a single argv element (no shell).
-            let mut command = Command::new("flatpak");
-            command.args(["install", "--system", "-y", "--noninteractive", app_id]);
-            match command.output() {
-                Ok(output) if output.status.success() => {
-                    eprintln!("kyth-installer: installed Flatpak {app_id}");
-                }
-                Ok(output) => {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("kyth-installer: failed to install Flatpak {app_id}: {stderr}");
-                }
-                Err(error) => {
-                    eprintln!("kyth-installer: failed to run flatpak for {app_id}: {error}");
-                }
-            }
+        if self.storage_plan.flatpaks.is_empty() {
+            return Ok(());
         }
+
+        // Write the app list into the target.
+        let kyth_etc = format!("{deploy_root}/etc/kyth");
+        fs::create_dir_all(&kyth_etc).map_err(|e| NativePhaseError::Execution {
+            phase,
+            message: format!("failed to create {kyth_etc}: {e}"),
+        })?;
+        let list_path = format!("{kyth_etc}/first-boot-flatpaks");
+        fs::write(&list_path, self.storage_plan.flatpaks.join("\n")).map_err(|e| {
+            NativePhaseError::Execution {
+                phase,
+                message: format!("failed to write {list_path}: {e}"),
+            }
+        })?;
+
+        // Oneshot unit: installs each app, then disables itself.
+        // App IDs were validated against the server-side allowlist at plan
+        // time; the unit reads them from the file (no shell interpolation
+        // of untrusted data — the while-read loop quotes "$app").
+        let unit = "[Unit]\nDescription=Install user-selected Flatpaks on first boot\nAfter=network-online.target\nWants=network-online.target\nConditionPathExists=/etc/kyth/first-boot-flatpaks\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/bash -c 'while read -r app; do [ -n \"$app\" ] && /usr/bin/flatpak install --system -y --noninteractive \"$app\" || echo \"failed: $app\"; done < /etc/kyth/first-boot-flatpaks; rm -f /etc/kyth/first-boot-flatpaks'\nExecStartPost=/usr/bin/systemctl disable kyth-first-boot-flatpaks.service\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n";
+        let unit_path =
+            format!("{deploy_root}/etc/systemd/system/kyth-first-boot-flatpaks.service");
+        fs::write(&unit_path, unit).map_err(|e| NativePhaseError::Execution {
+            phase,
+            message: format!("failed to write {unit_path}: {e}"),
+        })?;
+
+        // Enable via symlink (systemctl not available for the target here).
+        let wants_dir = format!("{deploy_root}/etc/systemd/system/multi-user.target.wants");
+        fs::create_dir_all(&wants_dir).map_err(|e| NativePhaseError::Execution {
+            phase,
+            message: format!("failed to create {wants_dir}: {e}"),
+        })?;
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            "../kyth-first-boot-flatpaks.service",
+            format!("{wants_dir}/kyth-first-boot-flatpaks.service"),
+        )
+        .map_err(|e| NativePhaseError::Execution {
+            phase,
+            message: format!("failed to enable first-boot unit: {e}"),
+        })?;
+
+        eprintln!(
+            "kyth-installer: staged {} Flatpaks for first-boot install",
+            self.storage_plan.flatpaks.len()
+        );
         Ok(())
     }
 
@@ -1002,12 +1044,12 @@ impl NativePhaseExecutor {
             return Err(error);
         }
         // H4: configure_complete marker after the configure steps succeed.
-        // Software step: install selected Flatpaks. Best-effort — a failed
-        // Flatpak install must not fail the whole installation, but it is
-        // logged for the transaction report.
+        // Software step: stage selected Flatpaks for first-boot install.
+        // Best-effort — a staging failure must not fail the whole
+        // installation, but it is logged for the transaction report.
         if !self.storage_plan.flatpaks.is_empty() {
-            if let Err(error) = self.install_selected_flatpaks(phase, cancellation) {
-                eprintln!("kyth-installer: Flatpak install failed (non-fatal): {error}");
+            if let Err(error) = self.install_selected_flatpaks(phase, &deploy_root) {
+                eprintln!("kyth-installer: Flatpak staging failed (non-fatal): {error}");
             }
         }
         self.record_journal(phase, "configure", OpState::Completed)?;

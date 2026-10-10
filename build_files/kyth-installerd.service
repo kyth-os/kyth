@@ -13,6 +13,10 @@ Type=simple
 # boundary is the LIVE-SESSION UID itself — any process running as that UID
 # can read the token and drive this privileged API directly. The live image
 # must not grant the session UID to untrusted code during installation.
+#
+# H3: systemd sandboxing. This daemon runs as root with destructive disk
+# operations; a memory-safety or parsing bug must not yield unconstrained
+# root. Disk access via explicit DeviceAllow; everything else locked down.
 ExecStart=/usr/bin/kyth-installerd --socket-path /run/kyth-installer/api.sock --session-token-file /run/kyth-installer/session-token --socket-group liveuser
 EnvironmentFile=-/etc/kyth-installer.env
 User=root
@@ -20,7 +24,28 @@ Group=root
 RuntimeDirectory=kyth-installer
 RuntimeDirectoryMode=0750
 UMask=0077
+# Filesystem containment
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
 ReadWritePaths=/run/kyth-installer /var/tmp /var/log
+# Kernel containment
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+NoNewPrivileges=yes
+# Syscall and network containment
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_UNIX
+# Device access: installer needs raw disk access for partitioning.
+# Closed by default; allow block devices explicitly.
+DevicePolicy=strict
+DeviceAllow=/dev/sd* rw
+DeviceAllow=/dev/nvme* rw
+DeviceAllow=/dev/vd* rw
+DeviceAllow=/dev/hd* rw
+DeviceAllow=/dev/mapper/* rw
+DeviceAllow=/dev/dm-* rw
 Restart=on-failure
 RestartSec=1
 TimeoutStartSec=30

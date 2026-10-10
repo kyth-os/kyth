@@ -241,7 +241,6 @@ unexpected="$(printf '%s\n' "${output}" |
 		-e '^Failed to turn off SO_PASSRIGHTS on user lookup socket, ignoring: Operation not permitted$' \
 		-e '^Failed to enable SO_PASSCRED on handoff timestamp socket(, ignoring)?: Operation not permitted$' \
 		-e '^ERROR: ld\.so: object .* cannot be preloaded .* ignored\.$' \
-		-e '^Configuration file .* is marked world-writable\. Please remove world writability permission bits\. Proceeding anyway\.$' \
 		-e "${stale_host_cycle_filter}" \
 		-e '^(motd-news|apt-daily|apt-daily-upgrade)\.timer: Timer unit lacks value setting\. Refusing\.$' \
 		-e '^multi-user\.target: Wants dependency dropin .*syslog\.service target .*rsyslog\.service has different name$' ||

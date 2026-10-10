@@ -22,6 +22,14 @@ build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0
     set -euo pipefail
     PODMAN="./build_files/scripts/rootful-podman.sh"
 
+    # Fail closed: the base image must be digest-pinned (@sha256:). An
+    # unpinned tag lets the upstream registry silently swap the base.
+    if [[ "{{ base_image }}" != *"@sha256:"* ]]; then
+        echo "ERROR: base_image is not digest-pinned: {{ base_image }}" >&2
+        echo "Refusing to build — set BASE_IMAGE to a @sha256:-qualified reference." >&2
+        exit 1
+    fi
+
     resolve_version() {
         local query="$1"
         if [[ -x /run/host/usr/bin/distrobox-host-exec ]]; then
@@ -38,8 +46,12 @@ build-base base_image=default_base_image kernel_flavor="fedora" enable_nvidia="0
             --certificate-identity-regexp='^https://github\.com/fedora[^/]*/' \
             {{ base_image }} \
             || { echo "ERROR: base image signature verification failed" >&2; exit 1; }
+    elif [[ "${KYTH_SKIP_COSIGN_VERIFY:-0}" == "1" ]]; then
+        echo "WARNING: KYTH_SKIP_COSIGN_VERIFY=1 — base image signature verification SKIPPED. Do not ship this image." >&2
     else
-        echo "WARNING: cosign not found — skipping signature verification."
+        echo "ERROR: cosign not found — refusing to build without base image signature verification." >&2
+        echo "Set KYTH_SKIP_COSIGN_VERIFY=1 to bypass explicitly (local test images only)." >&2
+        exit 1
     fi
     if ! ${PODMAN} image exists {{ base_image }}; then
         echo "Refreshing upstream base image {{ base_image }}..."

@@ -8,8 +8,11 @@ checksum_dir="${cache_dir}/checksums"
 mkdir -p "${cache_dir}" "${bin_dir}" "${checksum_dir}"
 
 ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-1.7.7}"
+ACTIONLINT_SHA256="${ACTIONLINT_SHA256:-023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757}"
 HADOLINT_VERSION="${HADOLINT_VERSION:-2.14.0}"
+HADOLINT_SHA256="${HADOLINT_SHA256:-6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47}"
 JUST_VERSION="${JUST_VERSION:-1.52.0}"
+JUST_SHA256="${JUST_SHA256:-e0a712614574d45625332529c864754e26782422b7c7db931466180a618f092d}"
 SHELLCHECK_VERSION="${SHELLCHECK_VERSION:-0.10.0}"
 SHELLCHECK_SHA256="${SHELLCHECK_SHA256:-6c881ab0698e4e6ea235245f22832860544f17ba386442fe7e9d629f8cbedf87}"
 ZIZMOR_VERSION="${ZIZMOR_VERSION:-1.25.2}"
@@ -73,17 +76,17 @@ download_and_verify() {
 download_and_verify "actionlint" \
 	"actionlint_${ACTIONLINT_VERSION}_linux_amd64.tar.gz" \
 	"https://github.com/rhysd/actionlint/releases/download/v${ACTIONLINT_VERSION}" \
-	"actionlint_${ACTIONLINT_VERSION}_checksums.txt" "actionlint"
+	"${ACTIONLINT_SHA256}" "actionlint"
 
 download_and_verify "hadolint" \
 	"hadolint-linux-x86_64" \
 	"https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}" \
-	"hadolint-linux-x86_64.sha256" ""
+	"${HADOLINT_SHA256}" ""
 
 download_and_verify "just" \
 	"just-${JUST_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
 	"https://github.com/casey/just/releases/download/${JUST_VERSION}" \
-	"SHA256SUMS" "just"
+	"${JUST_SHA256}" "just"
 
 download_and_verify "shellcheck" \
 	"shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" \

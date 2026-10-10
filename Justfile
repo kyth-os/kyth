@@ -450,8 +450,11 @@ enable-proton-next:
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Cutting Proton next (umu main / Proton-CachyOS slr nightly, stable baked):"
-    echo "  mkdir -p ~/.local/share/Steam/compatibilitytools.d"
-    echo "  curl -L https://github.com/Open-Wine-Components/umu-proton/releases/latest/download/umu-proton.tar.gz | tar -xz -C ~/.local/share/Steam/compatibilitytools.d"
+    echo "  mkdir -p ~/.local/share/Steam/compatibilitytools.d /tmp/umu-proton-next"
+    echo "  TAG=\$(curl -fsSL https://api.github.com/repos/Open-Wine-Components/umu-proton/releases/latest | jq -r .tag_name)"
+    echo "  cd /tmp/umu-proton-next && curl -fsSL -O https://github.com/Open-Wine-Components/umu-proton/releases/download/\${TAG}/\${TAG}.tar.gz -O https://github.com/Open-Wine-Components/umu-proton/releases/download/\${TAG}/\${TAG}.sha512sum"
+    echo "  sha512sum -c \${TAG}.sha512sum && tar -xz -f \${TAG}.tar.gz -C ~/.local/share/Steam/compatibilitytools.d"
+    echo "  # Or use the verified recipe: just install-umu"
 
 # PSI-gated btrfs+zram+irq cutting edge (Cachy no gate) (N46)
 [group('Utility')]
