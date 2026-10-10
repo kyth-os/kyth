@@ -144,6 +144,31 @@ else
   PYTHONPATH=build_files/kyth_shared:build_files/kyth-installer timeout --foreground 600 python3 -m unittest discover -s tests -b
 fi
 
+# Rust unit tests — added 2026-10-10 after a missing test import in
+# rclone_update_bin.rs broke `cargo test` in CI (failing Validation on three
+# consecutive pushes) while local `just test`/`just validate` stayed green.
+# CI's Validation workflow runs these; local validate must too.
+echo "==> Rust unit tests"
+if [[ ${validate_fast} -eq 1 ]]; then
+	echo "==> Rust unit tests SKIPPED (--fast) — CI validation.yml gates the full suite"
+else
+	for manifest in src/kyth-shared-rs/Cargo.toml src/kyth-hub-web/src-tauri/Cargo.toml src/kyth-installer-web/src-tauri/Cargo.toml; do
+		echo "--- cargo test --manifest-path ${manifest}"
+		# --no-run first to catch compile errors in test code without running
+		cargo test --quiet --manifest-path "${manifest}" --no-run || {
+			echo "Rust test compilation failed for ${manifest}" >&2
+			exit 1
+		}
+	done
+	# Actually run the tests (shared-rs is the one with unit tests; the Tauri
+	# crates' tests are exercised via their build checks in CI, but compiling
+	# their test targets catches the same class of bug).
+	cargo test --quiet --manifest-path src/kyth-shared-rs/Cargo.toml || {
+		echo "Rust unit tests failed" >&2
+		exit 1
+	}
+fi
+
 echo "==> Structured configuration"
 while IFS= read -r -d '' file; do
 	[[ -f "${file}" ]] || continue
