@@ -9,7 +9,7 @@
 [Download stable](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-latest.iso) · [Try testing](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-testing.iso) · [Get help](https://github.com/kyth-os/kyth/discussions) · [Report a bug](https://github.com/kyth-os/kyth/issues)
 
 [![Build](https://github.com/kyth-os/kyth/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/kyth-os/kyth/actions/workflows/build.yml)
-[![Live ISO](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml/badge.svg)](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml)
+[![Live ISO](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml/badge.svg?branch=testing)](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml)
 [![CVE Scan](https://github.com/kyth-os/kyth/actions/workflows/cve-scan.yml/badge.svg)](https://github.com/kyth-os/kyth/actions/workflows/cve-scan.yml)
 
 </div>
