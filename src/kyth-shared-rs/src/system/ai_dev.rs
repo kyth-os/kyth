@@ -582,7 +582,10 @@ mod tests {
         // M1: pinned hash verified before execution; never piped to bash.
         assert!(body.contains("sha256sum -c"));
         assert!(body.contains("034845e34289813ff5fb7fd3e071ec69f6b14aee8ba297a477b31dda6374cb86"));
-        assert!(!body.contains("| bash"), "installer must not be piped to bash");
+        assert!(
+            !body.contains("| bash"),
+            "installer must not be piped to bash"
+        );
         let rpm = host_install_command(codex_desktop).unwrap();
         let rpm_body = rpm.join("\n");
         assert!(rpm_body.contains("dnf install -y"));

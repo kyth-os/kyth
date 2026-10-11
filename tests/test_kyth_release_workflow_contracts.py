@@ -216,7 +216,12 @@ class ReleaseChainingContracts(unittest.TestCase):
             "permissions:", 1
         )[0]
         self.assertIn("dispatch_iso", dispatch_inputs)
-        self.assertIn('"dispatch_iso": "true"', build)
+        # ISO dispatch is per-flavor: fedora legs pass "true", cachy legs
+        # "false" (only the fedora flavor builds the live ISO). The gating
+        # contract is that dispatch happens after signature verification.
+        self.assertIn('"dispatch_iso":', build)
+        self.assertIn("matrix.kernel_flavor", build)
+        self.assertRegex(build, r"dispatch_iso.*fedora.*'\"true\"'")
         self.assertIn("inputs.dispatch_iso", publish)
 
 

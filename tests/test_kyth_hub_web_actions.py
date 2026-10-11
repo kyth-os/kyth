@@ -178,6 +178,9 @@ class HubWebCoverageTests(unittest.TestCase):
                 "fetchUpdateStatus",
                 "fetchPendingUpdatesSummary",
                 "fetchUpdateHealth",
+                # Module-internal constant (not a backend-wired read); used
+                # by the confirmUserAction wrapper inside liveData.ts itself.
+                "DESTRUCTIVE_PRIVILEGED_OPS",
             }
         ]
         self.assertEqual(

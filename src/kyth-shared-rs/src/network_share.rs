@@ -74,9 +74,7 @@ pub fn validate_mount_point(value: Option<&Value>) -> Result<String, String> {
     // and this helper now agree).
     let depth = path.split('/').filter(|part| !part.is_empty()).count();
     if depth < 2 {
-        return Err(
-            "mount_point must be a subdirectory, not a prefix root".into(),
-        );
+        return Err("mount_point must be a subdirectory, not a prefix root".into());
     }
     Ok(path)
 }

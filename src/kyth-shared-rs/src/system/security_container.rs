@@ -538,7 +538,14 @@ mod tests {
     fn konsole_uses_dash_e_other_terminals_use_dash_dash() {
         assert_eq!(
             kali_enter_argv("/usr/bin/konsole", "kali"),
-            vec!["/usr/bin/konsole", "-e", "distrobox", "enter", "--root", "kali"],
+            vec![
+                "/usr/bin/konsole",
+                "-e",
+                "distrobox",
+                "enter",
+                "--root",
+                "kali"
+            ],
         );
         assert_eq!(
             kali_enter_argv("xterm", "kali"),

@@ -10392,7 +10392,7 @@
       "cutover": "replace installed curl-common.sh entry point after parity gates",
       "function_inventory": [
         {
-          "name": "__main__",
+          "name": "github_api_curl",
           "owner": "fixture::build_files/scripts/lib/curl-common.sh",
           "ownership": "build-only"
         }
@@ -14061,6 +14061,36 @@
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "build-time",
       "rollback": "restore previous installed 36-disable-rpm-ostree-automatic.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
+      "cutover": "replace installed 37-containers-signature-policy.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/sysconfig/systemd/37-containers-signature-policy.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "37-containers-signature-policy.sh",
+      "owner": "fixture::build_files/scripts/sysconfig/systemd/37-containers-signature-policy.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/sysconfig/systemd/37-containers-signature-policy.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/sysconfig/systemd/37-containers-signature-policy.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed 37-containers-signature-policy.sh entry point",
       "runtime_active": false,
       "runtime_authority": "build-only",
       "runtime_scope": "build",

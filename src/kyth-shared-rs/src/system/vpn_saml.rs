@@ -64,9 +64,9 @@ pub fn validate_profile(
     // backslashes, and shell metacharacters) is rejected before either
     // use. Empty is allowed (some deployments use certificate-only auth).
     if username.len() > 256
-        || !username.bytes().all(|byte| {
-            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'@' | b'-')
-        })
+        || !username
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'@' | b'-'))
     {
         return Err("VPN username contains unsupported characters".into());
     }

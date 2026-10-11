@@ -867,22 +867,24 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
         })
         .is_err()
     {
-    {
-        // The timeout thread failed to spawn. The child was just created and
-        // cannot have been reaped yet, so the probe trivially succeeds.
-        // Scope the guard so it is released before wait() re-locks.
-        let _guard = child.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
-        if unsafe { libc::kill(process_group, 0) } == 0 {
-            unsafe {
-                libc::kill(-process_group, libc::SIGKILL);
+        {
+            // The timeout thread failed to spawn. The child was just created and
+            // cannot have been reaped yet, so the probe trivially succeeds.
+            // Scope the guard so it is released before wait() re-locks.
+            let _guard = child
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if unsafe { libc::kill(process_group, 0) } == 0 {
+                unsafe {
+                    libc::kill(-process_group, libc::SIGKILL);
+                }
             }
         }
-    }
-    let _ = child
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .wait();
-    return 1;
+        let _ = child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .wait();
+        return 1;
     }
     // Drain stderr concurrently so a verbose child can never fill the pipe
     // and deadlock the stdout loop below.

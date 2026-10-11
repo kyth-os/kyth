@@ -113,8 +113,16 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn("allowlisted_path", production)
         self.assertEqual(production.count("Command::new("), 1)
         self.assertIn("Command::new(program).args(args).spawn()", production)
-        self.assertIn('("/usr/bin/plasmawindowed", &["org.kde.plasma.networkmanagement"])', production)
-        self.assertIn('("/usr/bin/kcmshell6", &["kcm_networkmanagement"])', production)
+        # Whitespace-tolerant: rustfmt may lay the tuples out over multiple
+        # lines; the contract is absolute paths, never PATH lookup.
+        self.assertRegex(
+            production,
+            r'\(\s*"/usr/bin/plasmawindowed"\s*,\s*&\["org\.kde\.plasma\.networkmanagement"\]\s*\)',
+        )
+        self.assertRegex(
+            production,
+            r'\(\s*"/usr/bin/kcmshell6"\s*,\s*&\["kcm_networkmanagement"\]\s*\)',
+        )
         # The only filesystem read allowed in the unprivileged shell is the
         # launcher-written 0600 tokens file (--tokens-file): no writes, no
         # directory access, no generic bridge.

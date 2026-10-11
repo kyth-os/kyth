@@ -27,10 +27,6 @@ LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 SystemCallArchitectures=native
-# Seccomp allowlist: the watcher fetches/parses remote OCI registry JSON as
-# root. @mount is required — the filter is inherited by the `bootc upgrade`
-# child, which performs the deployment mount operations.
-SystemCallFilter=@system-service @mount
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 CacheDirectory=kyth
 CacheDirectoryMode=0700

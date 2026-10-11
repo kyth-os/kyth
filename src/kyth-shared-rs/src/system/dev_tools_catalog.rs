@@ -68,7 +68,10 @@ pub enum InstallMethod {
     /// must be updated in this catalog whenever upstream changes the
     /// script (the installer refuses to run on mismatch - it never
     /// silently accepts a changed script).
-    HostScript { url: &'static str, sha256: &'static str },
+    HostScript {
+        url: &'static str,
+        sha256: &'static str,
+    },
     /// Download this URL (an `.rpm`) and `dnf install ./<file>` it on the
     /// host. Used for vendor-signed desktop packages that configure their
     /// own update repo on first install (e.g. the official ChatGPT/Codex
