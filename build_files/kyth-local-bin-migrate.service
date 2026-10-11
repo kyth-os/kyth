@@ -17,11 +17,12 @@ PrivateTmp=yes
 NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=read-only
-# Marker is /var/lib/kyth/migrations; binaries live on ostree-writable
-# /usr/local; user autostart files are under /var/home.
+# Marker is /var/lib/kyth/migrations (StateDirectory, always writable).
+# The migration only rewrites root-owned helper shims, so /usr/local and
+# /var/home stay read-only under ProtectSystem=strict / ProtectHome.
 StateDirectory=kyth/migrations
 StateDirectoryMode=0700
-ReadWritePaths=-/usr/local/bin -/var/home -/root
+ReadWritePaths=-/root
 ProtectClock=yes
 ProtectKernelTunables=yes
 ProtectKernelModules=yes

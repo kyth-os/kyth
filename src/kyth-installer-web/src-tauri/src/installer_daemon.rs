@@ -33,13 +33,13 @@ const MAX_LOG_RESPONSE_BYTES: u64 = 1024 * 1024;
 fn transaction_path() -> PathBuf {
     std::env::var_os("KYTH_INSTALLER_TRANSACTION")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/run/kyth-installer/transaction.json"))
+        .unwrap_or_else(|| PathBuf::from("/run/kyth-installer/txn/transaction.json"))
 }
 
 fn failure_summary_path() -> PathBuf {
     std::env::var_os("KYTH_INSTALLER_FAILURE_SUMMARY")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/run/kyth-installer/failure.json"))
+        .unwrap_or_else(|| PathBuf::from("/run/kyth-installer/txn/failure.json"))
 }
 
 fn installer_log_path() -> PathBuf {
@@ -118,6 +118,11 @@ fn resize_op_params(
         .get("ntfs_verified_clean")
         .and_then(serde_json::Value::as_bool)
     {
+        // SECURITY: Do NOT trust the client-supplied value. The NTFS dirty
+        // bit must be re-verified at commit time via a root-owned live check
+        // (see stamp_ntfs_attestation). Staging-time values are advisory only.
+        // We preserve the client's claim here for the journal's validate()
+        // gate, but commit-time stamping will overwrite it with a live probe.
         params["ntfs_verified_clean"] = serde_json::Value::Bool(ntfs_clean);
     }
     if let Some(ac) = value
@@ -133,6 +138,75 @@ fn resize_op_params(
 /// reading at commit time, when the shrink gate evaluates power state.
 fn stamp_shrink_power_attestation(journal: &mut super::installer_journal::PartitionJournal) {
     stamp_shrink_power_attestation_in(journal, Path::new("/sys/class/power_supply"));
+}
+
+/// Re-verify NTFS dirty bit at commit time, replacing any client-supplied
+/// `ntfs_verified_clean` value. The client's staging-time attestation is not
+/// trustworthy: Windows may have run (setting the dirty bit) between staging
+/// and commit. This root-owned live probe runs immediately before the shrink.
+fn stamp_ntfs_attestation(journal: &mut super::installer_journal::PartitionJournal) {
+    for op in &mut journal.ops {
+        if op.kind != "resize" {
+            continue;
+        }
+        let target = op
+            .params
+            .get("partition")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("");
+        if target.is_empty() {
+            continue;
+        }
+        // Only NTFS targets need the dirty-bit check. We determine this from
+        // the op params (fs_type) if present, otherwise probe via blkid.
+        // Fail closed: if fs_type is absent and blkid cannot positively
+        // identify a non-NTFS filesystem, run the check.
+        let fs_type = op.params.get("fs_type").and_then(serde_json::Value::as_str);
+        let needs_check = match fs_type {
+            Some(fs) => fs == "ntfs" || fs == "ntfs3",
+            None => probe_fs_type_is_ntfs(target),
+        };
+        if needs_check {
+            let clean = ntfs_volume_is_clean(target);
+            op.params["ntfs_verified_clean"] = serde_json::Value::Bool(clean);
+        }
+    }
+}
+
+/// Probe the live filesystem type of a device via blkid.
+/// Returns true if the device is NTFS or its type cannot be determined
+/// (fail closed). Returns false only when blkid positively identifies a
+/// non-NTFS filesystem.
+fn probe_fs_type_is_ntfs(device: &str) -> bool {
+    let output = run_probe("/usr/sbin/blkid", &["-o", "value", "-s", "TYPE", device]);
+    match output {
+        Ok(out) if out.status.success() => {
+            let fs = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+            // Empty output (no filesystem detected) is not proof of non-NTFS;
+            // stay conservative and run the check.
+            fs.is_empty() || fs == "ntfs" || fs == "ntfs3"
+        }
+        // blkid missing or failed: fail closed, assume NTFS and check it.
+        _ => true,
+    }
+}
+
+/// Check if an NTFS volume has its dirty bit clear via `ntfsfix --no-action`.
+/// Returns false (dirty/unknown) on any error — fail closed.
+fn ntfs_volume_is_clean(device: &str) -> bool {
+    // ntfsfix -n: do not write anything, just report. Exit 0 with "No errors"
+    // or similar indicates clean. We parse stderr for dirty indicators.
+    let output = run_probe("/usr/sbin/ntfsfix", &["-n", device]);
+    match output {
+        Ok(out) => {
+            let stderr = String::from_utf8_lossy(&out.stderr).to_lowercase();
+            let stdout = String::from_utf8_lossy(&out.stdout).to_lowercase();
+            let combined = format!("{stdout} {stderr}");
+            // If ntfsfix reports the volume as dirty or needing repair, it's not clean.
+            !combined.contains("dirty") && !combined.contains("corrupt") && out.status.success()
+        }
+        Err(_) => false, // Fail closed if we can't run the check
+    }
 }
 
 fn stamp_shrink_power_attestation_in(
@@ -255,6 +329,20 @@ impl NativeJournalRegistry {
                     Ok(journal) => journal,
                     Err(error) => return (400, serde_json::json!({"ok": false, "message": error})),
                 };
+                // M4: the commit path requires a staging-time disk identity
+                // and fails closed without one. Refuse the staging now with
+                // an actionable message instead of letting the commit fail
+                // later; a missing identity here means the lsblk probe
+                // itself failed (size is always reported when it works).
+                if journal.disk_model.is_none()
+                    && journal.disk_serial.is_none()
+                    && journal.disk_size_bytes.is_none()
+                {
+                    return (
+                        400,
+                        serde_json::json!({"ok": false, "message": "Could not capture the target disk identity (lsblk MODEL/SERIAL/SIZE); refusing to stage partition changes."}),
+                    );
+                }
                 journal.add_op("new_table", serde_json::json!({"table_type": table_type}));
                 let pending = journal.ops.len();
                 *active = Some(journal);
@@ -464,6 +552,10 @@ impl NativeJournalRegistry {
                 // (per the documented "confirmed online at commit time"
                 // contract), replacing any client-supplied value.
                 stamp_shrink_power_attestation(&mut journal);
+                // Commit-time NTFS dirty-bit re-verification: the client's
+                // staging-time `ntfs_verified_clean` is not trustworthy.
+                // Re-probe live here, replacing any client-supplied value.
+                stamp_ntfs_attestation(&mut journal);
                 match super::installer_journal::commit_request(
                     super::installer_journal::JournalCommitInput { journal },
                 ) {
@@ -539,15 +631,28 @@ impl NativeJobRegistry {
         Ok(receipt)
     }
 
-    fn cancel(&self) -> Result<(), String> {
+    fn cancel(&self, job_id: u64) -> Result<(), String> {
         let active = self
             .active
             .lock()
             .map_err(|_| "native installer job state is unavailable".to_string())?;
-        active
+        let supervisor = active
             .as_ref()
-            .ok_or_else(|| "No installation is running to cancel.".to_string())?
-            .cancel()
+            .ok_or_else(|| "No installation is running to cancel.".to_string())?;
+        // M7: bind the cancel to the job it names. A replayed or stale
+        // cancel for a finished job must not SIGKILL a newer install that
+        // started under a different job id. The mutex is held across the
+        // check and the cancel, so no new job can slip in between.
+        let active_job_id = supervisor.snapshot()?.job_id;
+        if active_job_id != Some(job_id) {
+            return Err(format!(
+                "Cancel refused: job_id {job_id} does not match the active installation (job_id {}).",
+                active_job_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_else(|| "none".to_string())
+            ));
+        }
+        supervisor.cancel()
     }
 
     fn snapshot(&self) -> Result<Option<JobSnapshot>, String> {
@@ -724,6 +829,12 @@ fn listener(options: &Options) -> Result<UnixListener, String> {
     Ok(socket)
 }
 
+/// Kernel-attested peer UID for a connected Unix socket (SO_PEERCRED).
+///
+/// This proves the peer's UID, nothing more: it cannot distinguish the
+/// installer shell from any other process running as the same live-session
+/// UID, and it says nothing about which binary the peer is. See the trust
+/// boundary note on `handle`.
 fn peer_uid(stream: &UnixStream) -> Result<u32, String> {
     let mut credentials = libc::ucred {
         pid: 0,
@@ -991,10 +1102,7 @@ fn add_display_sizes(value: &mut serde_json::Value) {
 }
 
 fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
-    let output = Command::new(program)
-        .args(args)
-        .output()
-        .map_err(|error| format!("could not run {program}: {error}"))?;
+    let output = run_probe(program, args)?;
     if !output.status.success() {
         return Err(format!(
             "{program} failed with exit code {}: {}",
@@ -1003,6 +1111,21 @@ fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
         ));
     }
     String::from_utf8(output.stdout).map_err(|_| format!("{program} returned non-UTF-8 output"))
+}
+
+/// Bounded runner for read-only probes (lsblk, blockdev, findmnt, blkid,
+/// ntfsfix). A wedged device must never hang a daemon worker forever: 32
+/// hung probes (MAX_ACTIVE_CLIENTS) would 503 everything including
+/// /api/cancel. 30s is generous for slow devices but always bounded; on
+/// timeout the child is killed and an error is returned, never a hang.
+fn run_probe(program: &str, args: &[&str]) -> Result<Output, String> {
+    let child = Command::new(program)
+        .args(args)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("could not run {program}: {error}"))?;
+    wait_for_child(child, program, Duration::from_secs(30))
 }
 
 fn wait_for_child(mut child: Child, operation: &str, timeout: Duration) -> Result<Output, String> {
@@ -1035,10 +1158,10 @@ fn wait_for_child(mut child: Child, operation: &str, timeout: Duration) -> Resul
 fn disk_exists(disk: &str) -> Result<(), String> {
     let disk = super::installer_plan::normalize_device_path(disk)
         .ok_or_else(|| "Invalid or unsafe disk.".to_string())?;
-    let output = Command::new("/usr/bin/lsblk")
-        .args(["--noheadings", "--output", "TYPE", &disk])
-        .output()
-        .map_err(|error| format!("could not inspect {disk}: {error}"))?;
+    let output = run_probe(
+        "/usr/bin/lsblk",
+        &["--noheadings", "--output", "TYPE", disk.as_str()],
+    )?;
     if !output.status.success()
         || !String::from_utf8_lossy(&output.stdout)
             .lines()
@@ -1232,10 +1355,7 @@ fn findmnt_sources(path: &str, recursive: bool) -> Result<Vec<String>, String> {
         args.push("-R");
     }
     args.extend(["-n", "-o", "SOURCE", path]);
-    let output = Command::new("/usr/bin/findmnt")
-        .args(args)
-        .output()
-        .map_err(|error| format!("could not run findmnt: {error}"))?;
+    let output = run_probe("/usr/bin/findmnt", &args)?;
     // findmnt uses exit code 1 for a path with no matching mount. That is a
     // normal result for optional live-media paths, unlike a probe failure.
     if !output.status.success() && output.status.code() != Some(1) {
@@ -1348,8 +1468,12 @@ fn read_only_storage_route(
                 "/usr/bin/lsblk",
                 &args.iter().map(String::as_str).collect::<Vec<_>>(),
             )?;
+            let sector = command_output("/usr/bin/blockdev", &["--getss", &disk])?
+                .trim()
+                .parse::<u64>()
+                .map_err(|_| "blockdev returned an invalid sector size".to_string())?;
             let mut value =
-                serde_json::to_value(installer_storage::parse_partitions(&snapshot)?)
+                serde_json::to_value(installer_storage::parse_partitions(&snapshot, sector)?)
                     .map_err(|error| format!("could not serialize partition inventory: {error}"))?;
             add_display_sizes(&mut value);
             Ok(Some(value))
@@ -1690,6 +1814,24 @@ fn native_stream(
     }
 }
 
+/// TRUST BOUNDARY — READ BEFORE WEAKENING ANYTHING HERE.
+///
+/// The daemon socket is 0660 root:<live-session-group> and every request
+/// must present the per-launch session token, but the effective trust
+/// boundary is the LIVE-SESSION UID, not the token:
+///
+/// * The per-shell token file is mode 0600 owned by the session user, so
+///   ANY process running as that UID can read it (same-uid file access)
+///   and drive the privileged API directly, bypassing the UI entirely.
+/// * The optional `--peer-uid` SO_PEERCRED check (see `peer_uid`) only
+///   rejects peers with a DIFFERENT uid; it cannot distinguish between
+///   two processes that share the session UID.
+///
+/// In other words: the session token authenticates "this connection comes
+/// from the live session", not "this connection comes from the installer
+/// shell". The live image must therefore treat every process running as
+/// the live-session user as fully privileged over the installer API, and
+/// must not grant that UID to untrusted code during installation.
 fn handle(
     mut client: UnixStream,
     token: &str,
@@ -1933,6 +2075,25 @@ fn handle(
         return Ok(());
     }
     if method == "POST" && route == "/api/reboot" {
+        // Rebooting the machine is not something a stray or replayed
+        // request should trigger: the caller must explicitly confirm in
+        // the JSON body. Both frontends send `{"confirm": true}` from
+        // their reboot buttons.
+        let confirmed = request_body(&request)
+            .ok()
+            .and_then(|body| body.get("confirm").and_then(serde_json::Value::as_bool))
+            .unwrap_or(false);
+        if !confirmed {
+            json_response(
+                &mut client,
+                "400 Bad Request",
+                &serde_json::json!({
+                    "ok": false,
+                    "error": "Reboot requires an explicit confirmation ({\"confirm\": true})."
+                }),
+            );
+            return Ok(());
+        }
         let _storage_guard = storage_gate
             .lock()
             .map_err(|_| "installer storage operation gate is unavailable".to_string())?;
@@ -2001,6 +2162,23 @@ fn handle(
         return Ok(());
     }
     if method == "POST" && route == "/api/cancel" {
+        // M7: a cancel names the job it cancels. Without the binding, a
+        // replayed or stale cancel for a finished job would kill whatever
+        // install is active — possibly a newer job mid-mkfs/parted/bootc.
+        let requested_job_id = request_body(&request)
+            .ok()
+            .and_then(|body| body.get("job_id").and_then(serde_json::Value::as_u64));
+        let Some(requested_job_id) = requested_job_id else {
+            json_response(
+                &mut client,
+                "400 Bad Request",
+                &serde_json::json!({
+                    "ok": false,
+                    "message": "Cancel requires the active job id in the request body ({\"job_id\": N})."
+                }),
+            );
+            return Ok(());
+        };
         if native_registry.snapshot()?.is_none() {
             json_response(
                 &mut client,
@@ -2012,7 +2190,7 @@ fn handle(
             );
             return Ok(());
         }
-        match native_registry.cancel() {
+        match native_registry.cancel(requested_job_id) {
             Ok(()) => json_response(
                 &mut client,
                 "200 OK",
@@ -2401,8 +2579,26 @@ mod tests {
         assert!(registry.snapshot().unwrap().is_none());
         assert!(registry.replay(0).unwrap().is_none());
         assert_eq!(
-            registry.cancel().unwrap_err(),
+            registry.cancel(1).unwrap_err(),
             "No installation is running to cancel."
+        );
+    }
+
+    #[test]
+    fn native_job_registry_cancel_rejects_mismatched_job_id() {
+        // M7: a cancel naming the wrong job must not touch the active
+        // supervisor. The pre-start supervisor has no job id yet, so any
+        // named id exercises the mismatch branch without spawning a worker.
+        let request = start_request(
+            r#"{"disk":"sda","install_mode":"wipe","username":"alice","password":"secret","confirm_backup":true,"confirm_erase":true,"acknowledged-irreversible":true}"#,
+        );
+        let executor = native_executor_from_start(&request).expect("native plan should validate");
+        let registry = super::NativeJobRegistry::default();
+        *registry.active.lock().unwrap() = Some(super::NativeSupervisor::new(executor));
+        let error = registry.cancel(42).unwrap_err();
+        assert!(
+            error.contains("does not match"),
+            "mismatched cancel must be refused, got: {error}"
         );
     }
 

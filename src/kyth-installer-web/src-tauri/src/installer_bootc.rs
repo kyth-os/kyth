@@ -33,10 +33,10 @@ pub(crate) struct BootcInstallInput {
     #[serde(default)]
     pub encryption: String,
     /// TPM recovery acknowledgement for `tpm2` installs. TPM-bound LUKS has
-    /// no passphrase: a board swap, TPM reset, or PCR change makes the disk
-    /// permanently unrecoverable unless a recovery key was escrowed (Hub
-    /// shows the escrow flow and sets this only after the user confirms).
-    /// `tpm2` without this acknowledgement fails closed.
+    /// no passphrase. No recovery key is generated or stored. If the TPM is
+    /// reset or the board is replaced, the encrypted disk cannot be
+    /// recovered. The installer sets this only after the user acknowledges
+    /// that risk. `tpm2` without this acknowledgement fails closed.
     #[serde(default)]
     pub tpm_recovery_ack: bool,
 }
@@ -95,7 +95,7 @@ pub(crate) fn build_plan(input: BootcInstallInput) -> Result<BootcInstallPlan, S
     }
     if encryption == "tpm2" && !input.tpm_recovery_ack {
         return Err(
-            "TPM encryption needs a recovery plan first: TPM-bound LUKS has no passphrase, so a board swap, TPM reset, or PCR change permanently destroys access unless a recovery key was escrowed. Confirm the recovery-key escrow step before installing."
+            "TPM encryption was requested without acknowledging the recovery risk: No recovery key is generated or stored. If the TPM is reset or the board is replaced, the encrypted disk cannot be recovered. Confirm you accept this risk before installing."
                 .to_string(),
         );
     }
@@ -313,7 +313,11 @@ mod tests {
             ..input("to-disk")
         })
         .expect_err("tpm2 without a recovery plan must fail closed");
-        assert!(error.contains("recovery plan"), "unexpected error: {error}");
+        // The message must stay honest: no escrow flow exists.
+        assert!(
+            error.contains("No recovery key is generated or stored. If the TPM is reset or the board is replaced, the encrypted disk cannot be recovered."),
+            "unexpected error: {error}"
+        );
     }
 
     #[test]

@@ -18,8 +18,13 @@ if [[ ! -f "${ROOTFS_ISO}" ]]; then
 	if mkdir -p "$(dirname "${ROOTFS_ISO}")" && cp "${KYTH_ISO}" "${ROOTFS_ISO}"; then
 		:
 	else
-		patched=/tmp/kyth-titanoboa-build_iso.sh
-		sed "s|iso_config_file=/rootfs/usr/lib/bootc-image-builder/iso.yaml|iso_config_file=${KYTH_ISO}|" \
+		# Escape sed-replacement metacharacters (&, \, the | delimiter) in the
+		# path before interpolating it into the replacement string.
+		escaped_kyth_iso="${KYTH_ISO//\\/\\\\}"
+		escaped_kyth_iso="${escaped_kyth_iso//&/\\&}"
+		escaped_kyth_iso="${escaped_kyth_iso//|/\\|}"
+		patched="$(mktemp)"
+		sed "s|iso_config_file=/rootfs/usr/lib/bootc-image-builder/iso.yaml|iso_config_file=${escaped_kyth_iso}|" \
 			"${TITANOBOA_ISO}" >"${patched}"
 		chmod +x "${patched}"
 		exec "${patched}"

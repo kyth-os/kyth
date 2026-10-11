@@ -14,8 +14,14 @@ fn main() {
         return;
     }
     println!("kyth-selinux-relabel-home: relabeling login-critical /var/home paths for deployment {deployment}");
+    // A failed relabel must never be stamped as done (M6): stamping on
+    // failure would skip the retry forever and leave login-critical paths
+    // mislabeled for the whole deployment. Track success across all
+    // restorecon calls and only stamp when every one succeeded.
+    let mut ok = true;
     if !selinux_relabel::restorecon_forced(&["/var/home".to_string()]) {
         eprintln!("kyth-selinux-relabel-home: warning: restorecon failed for /var/home");
+        ok = false;
     }
     if let Ok(homes) = std::fs::read_dir("/var/home") {
         for home in homes.flatten() {
@@ -29,8 +35,13 @@ fn main() {
                     "kyth-selinux-relabel-home: warning: restorecon failed for {}",
                     path.display()
                 );
+                ok = false;
             }
         }
     }
-    selinux_relabel::write_stamp(&stamp_dir, STAMP, &deployment);
+    if ok {
+        selinux_relabel::write_stamp(&stamp_dir, STAMP, &deployment);
+    } else {
+        eprintln!("kyth-selinux-relabel-home: relabel incomplete, will retry on next boot (no stamp written)");
+    }
 }

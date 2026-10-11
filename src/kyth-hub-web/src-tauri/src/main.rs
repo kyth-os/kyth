@@ -266,7 +266,7 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
 /// probes; a sync command pinned a Tauri worker (and the UI's await) for
 /// the whole run. The shared single-flight slot in `execute_recipe` makes
 /// a double-click return "already running" instead of a second repair.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = kyth_shared::guardian::load_state();
@@ -287,7 +287,7 @@ async fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
     .map_err(|error| format!("Guardian repair task failed: {error}"))?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn guardian_dismiss(recipe_id: String) -> Result<String, String> {
     kyth_shared::guardian::dismiss_recommendation(&recipe_id)
 }
@@ -499,10 +499,17 @@ fn smb_save_configured_share(share: SmbConfiguredShare) -> Result<SmbActionResul
     if !valid_smb_configured_share(&share) {
         return Err("invalid SMB share configuration".to_string());
     }
-    let mut shares = load_smb_configured_shares();
-    shares.retain(|existing| existing.name != share.name);
-    shares.push(share);
-    save_smb_configured_shares(&shares)?;
+    // Serialize the load-modify-save against concurrent invocations: without
+    // the lock, two rapid saves interleave (both read, both modify, last
+    // writer silently wins) and one share definition is lost.
+    let path = smb_config_path()?;
+    kyth_shared::atomic_io::with_file_lock(&path, || {
+        let mut shares = load_smb_configured_shares();
+        shares.retain(|existing| existing.name != share.name);
+        shares.push(share);
+        save_smb_configured_shares(&shares)
+    })
+    .map_err(|error| format!("could not lock SMB configuration: {error}"))??;
     Ok(SmbActionResult {
         state: "complete".into(),
         detail: "Network share configuration saved.".into(),
@@ -519,9 +526,16 @@ fn smb_remove_configured_share(name: String) -> Result<SmbActionResult, String> 
     {
         return Err("invalid SMB share name".to_string());
     }
-    let mut shares = load_smb_configured_shares();
-    shares.retain(|existing| existing.name != name);
-    save_smb_configured_shares(&shares)?;
+    // Same read-modify-write lock as smb_save_configured_share: the load,
+    // retain, and save must all happen under the lock, or a concurrent save
+    // racing this removal would resurrect the deleted share.
+    let path = smb_config_path()?;
+    kyth_shared::atomic_io::with_file_lock(&path, || {
+        let mut shares = load_smb_configured_shares();
+        shares.retain(|existing| existing.name != name);
+        save_smb_configured_shares(&shares)
+    })
+    .map_err(|error| format!("could not lock SMB configuration: {error}"))??;
     Ok(SmbActionResult {
         state: "complete".into(),
         detail: "Network share configuration removed.".into(),
@@ -993,20 +1007,9 @@ fn focus_start(minutes: u32) -> Result<String, String> {
             true
         }
     });
-    // Kill inhibitors orphaned by a previous Hub process (crash/restart
-    // reparents the `sleep` child, which then holds idle:sleep with no UI
-    // to cancel it). Live sessions in this process are spared.
-    let live_pids: Vec<u32> = sessions
-        .values()
-        .map(|session| session.child.id())
-        .collect();
-    drop(sessions);
-    let orphans = kyth_shared::system::process::reap_stale_focus_inhibits(&live_pids);
-    if orphans > 0 {
-        eprintln!(
-            "focus: reaped {orphans} orphaned sleep inhibitor(s) from a previous Hub process"
-        );
-    }
+    // M1: hold the lock across reap + spawn + insert. The previous code
+    // dropped the lock before reaping, allowing a concurrent focus_start
+    // to reap the just-spawned child before it was inserted into the map.
     let child = std::process::Command::new("systemd-inhibit")
         .args([
             "--what=idle:sleep",
@@ -1017,6 +1020,7 @@ fn focus_start(minutes: u32) -> Result<String, String> {
         ])
         .spawn()
         .map_err(|error| format!("could not keep the PC awake: {error}"))?;
+    let child_pid = child.id();
     let id = format!(
         "focus-{}",
         std::time::SystemTime::now()
@@ -1024,11 +1028,29 @@ fn focus_start(minutes: u32) -> Result<String, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    let mut sessions = focus_sessions()
-        .lock()
-        .map_err(|_| "focus session store is unavailable".to_string())?;
     let ends_at = std::time::Instant::now() + std::time::Duration::from_secs(minutes as u64 * 60);
     sessions.insert(id.clone(), FocusSession { child, ends_at });
+    // Kill inhibitors orphaned by a previous Hub process (crash/restart
+    // reparents the `sleep` child, which then holds idle:sleep with no UI
+    // to cancel it). Live sessions in this process are spared, including
+    // the child we just spawned.
+    let live_pids: Vec<u32> = sessions
+        .values()
+        .map(|session| session.child.id())
+        .collect();
+    // The new child is in the map, so its PID is in live_pids. Drop the
+    // lock before the (potentially slow) reaper to avoid blocking other
+    // focus operations.
+    drop(sessions);
+    let orphans = kyth_shared::system::process::reap_stale_focus_inhibits(&live_pids);
+    if orphans > 0 {
+        eprintln!(
+            "focus: reaped {orphans} orphaned sleep inhibitor(s) from a previous Hub process"
+        );
+    }
+    // Sanity: our child should still be alive (we hold no lock now, but
+    // the reaper was given our PID in the keep list).
+    debug_assert!(live_pids.contains(&child_pid));
     Ok(id)
 }
 
@@ -1239,7 +1261,7 @@ struct PipewireApplyResponse {
     ok: bool,
     detail: String,
 }
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn apply_pipewire_quantum(preset: String, dry_run: bool) -> PipewireApplyResponse {
     let (ok, detail) = kyth_shared::system::pipewire::apply_pipewire_quantum(&preset, dry_run);
     PipewireApplyResponse { ok, detail }
@@ -1307,7 +1329,7 @@ async fn installed_flatpaks() -> Vec<kyth_shared::system::software_catalog::Inst
         .unwrap_or_default()
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     let job = format!(
@@ -1487,7 +1509,7 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     let job = format!(
@@ -1629,7 +1651,7 @@ struct PlasmaApplyResponse {
     ok: bool,
     detail: String,
 }
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn apply_plasma_preset(preset: String, dry_run: bool) -> PlasmaApplyResponse {
     let (ok, detail) = kyth_shared::system::plasma_hdr::apply_preset(&preset, dry_run);
     PlasmaApplyResponse { ok, detail }
@@ -1877,7 +1899,30 @@ fn exe_handler_untrust(sha256: String) -> Result<(), String> {
 #[tauri::command]
 fn exe_handler_launch_umu(path: String) -> Result<(), String> {
     let path = regular_handler_path(&path)?;
-    kyth_shared::system::windows_installer::launch_in_umu(&path)
+    // Gate on the trust store: only exes explicitly trusted for the umu
+    // runner may launch directly. Anything else must go through the dialog.
+    let file = open_nofollow_umu(&path).ok_or("could not open file")?;
+    let digest =
+        kyth_shared::system::exe_trust::full_sha256_file(&file).ok_or("could not hash file")?;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or("no home")?;
+    match kyth_shared::system::exe_trust::trusted_runner(&home, &digest).as_deref() {
+        Some(kyth_shared::system::exe_trust::RUNNER_UMU) => {
+            kyth_shared::system::windows_installer::launch_in_umu(&path)
+        }
+        _ => Err("not trusted for direct launch; use the dialog".into()),
+    }
+}
+
+/// Open a file with O_NOFOLLOW for the umu launch path: a symlink swapped in
+/// after `regular_handler_path`'s checks fails the open instead of redirecting it.
+fn open_nofollow_umu(path: &Path) -> Option<std::fs::File> {
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .ok()
 }
 
 /// First-boot app status for the Play checklist: whether the background
@@ -1942,40 +1987,45 @@ fn exe_handler_set_auto_bottles(enabled: bool) -> Result<(), String> {
     // Parse-modify-write, preserving every other key/section: a bare
     // fs::write of the two known lines would discard anything else a user
     // or a future version stores here. Atomic temp + fsync + rename so a
-    // crash mid-write never leaves a truncated file.
-    let desired = format!("auto_bottles={}", if enabled { "true" } else { "false" });
-    let mut lines: Vec<String> = match fs::read_to_string(&path) {
-        Ok(text) => text.lines().map(str::to_string).collect(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => return Err(format!("Could not save preference: {error}")),
-    };
-    let mut in_section = false;
-    let mut section_seen = false;
-    let mut key_written = false;
-    for line in &mut lines {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            in_section = trimmed == "[exe-handler]";
-            section_seen = section_seen || in_section;
-        } else if in_section
-            && trimmed
-                .split_once('=')
-                .is_some_and(|(key, _)| key.trim() == "auto_bottles")
-        {
-            *line = desired.clone();
-            key_written = true;
+    // crash mid-write never leaves a truncated file. The whole
+    // read-modify-write runs under an exclusive file lock so two rapid
+    // toggles cannot interleave (both read, both modify, last writer wins).
+    kyth_shared::atomic_io::with_file_lock(&path, || {
+        let desired = format!("auto_bottles={}", if enabled { "true" } else { "false" });
+        let mut lines: Vec<String> = match fs::read_to_string(&path) {
+            Ok(text) => text.lines().map(str::to_string).collect(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(format!("Could not save preference: {error}")),
+        };
+        let mut in_section = false;
+        let mut section_seen = false;
+        let mut key_written = false;
+        for line in &mut lines {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                in_section = trimmed == "[exe-handler]";
+                section_seen = section_seen || in_section;
+            } else if in_section
+                && trimmed
+                    .split_once('=')
+                    .is_some_and(|(key, _)| key.trim() == "auto_bottles")
+            {
+                *line = desired.clone();
+                key_written = true;
+            }
         }
-    }
-    if !key_written {
-        if !section_seen {
-            lines.push("[exe-handler]".to_string());
+        if !key_written {
+            if !section_seen {
+                lines.push("[exe-handler]".to_string());
+            }
+            lines.push(desired);
         }
-        lines.push(desired);
-    }
-    let mut rendered = lines.join("\n");
-    rendered.push('\n');
-    kyth_shared::atomic_io::atomic_write_text(&path, &rendered, Some(0o600))
-        .map_err(|error| format!("Could not save preference: {error}"))
+        let mut rendered = lines.join("\n");
+        rendered.push('\n');
+        kyth_shared::atomic_io::atomic_write_text(&path, &rendered, Some(0o600))
+            .map_err(|error| format!("Could not save preference: {error}"))
+    })
+    .map_err(|error| format!("Could not lock preference file: {error}"))?
 }
 
 #[tauri::command]
@@ -1991,7 +2041,7 @@ fn exe_handler_open_flathub(search_term: String) -> Result<(), String> {
         .map_err(|error| format!("Could not open Flathub: {error}"))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     // Bounded lookup: a bare `status()` blocks this command for as long
@@ -2012,7 +2062,7 @@ fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn exe_handler_launch_flatpak(app_id: String) -> Result<(), String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     if !kyth_shared::system::software_catalog::is_flatpak_installed(&app_id) {

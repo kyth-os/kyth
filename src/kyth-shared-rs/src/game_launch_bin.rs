@@ -20,7 +20,7 @@ fn on_path(name: &str) -> bool {
         .unwrap_or(false)
 }
 
-fn parse_args(args: &[String]) -> (bool, Vec<String>) {
+fn parse_args(args: &[String]) -> Result<(bool, Vec<String>), String> {
     let mut use_gamemode = true;
     let mut profile = "gaming".to_string();
     let mut cmd_start = 0;
@@ -42,13 +42,20 @@ fn parse_args(args: &[String]) -> (bool, Vec<String>) {
             break;
         }
     }
-    let _ = profile;
+    // Only the "gaming" profile exists. A different profile used to be
+    // silently accepted and discarded, so callers believed they were
+    // selecting a profile with zero effect. Fail loudly instead.
+    if profile != "gaming" {
+        return Err(format!(
+            "unsupported game profile {profile:?}: only \"gaming\" is implemented"
+        ));
+    }
     let cmd = if cmd_start < args.len() {
         args[cmd_start..].to_vec()
     } else {
         Vec::new()
     };
-    (use_gamemode, cmd)
+    Ok((use_gamemode, cmd))
 }
 
 /// Directory for per-user "a game is running" hints. `/run/kyth` is
@@ -76,8 +83,31 @@ fn mark_gaming_hint() {
     // the entire session. The old constant content could only be removed on
     // the exec-failure path, leaking the hint — and the gaming tunables —
     // until reboot after every successful launch.
-    if std::fs::write(gaming_hint_path(), std::process::id().to_string()).is_err() {
-        return;
+    //
+    // O_NOFOLLOW|O_CREAT|O_EXCL: /run/kyth-gaming is 1777, so another user
+    // could pre-plant a symlink at our hint path; plain fs::write would have
+    // followed it (arbitrary file truncate). Fail closed on any pre-existing
+    // path instead.
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let path = gaming_hint_path();
+        let mut file = match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o644)
+            .custom_flags(libc::O_NOFOLLOW)
+            .open(&path)
+        {
+            Ok(f) => f,
+            Err(_) => return,
+        };
+        use std::io::Write;
+        if file
+            .write_all(std::process::id().to_string().as_bytes())
+            .is_err()
+        {
+            return;
+        }
     }
     if on_path("kyth-readahead-hint") {
         let _ = run_bounded(
@@ -95,6 +125,32 @@ fn exec_argv(argv: &[String]) -> std::io::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn args(words: &[&str]) -> Vec<String> {
+        words.iter().map(|w| w.to_string()).collect()
+    }
+
+    #[test]
+    fn default_gaming_profile_is_accepted() {
+        let (use_gamemode, cmd) = parse_args(&args(&["-p", "gaming", "--", "mygame"]))
+            .expect("the documented -p gaming profile must keep working");
+        assert!(use_gamemode);
+        assert_eq!(cmd, vec!["mygame".to_string()]);
+    }
+
+    #[test]
+    fn unknown_profile_fails_loudly_instead_of_silently_ignored() {
+        let error = parse_args(&args(&["--profile", "performance", "--", "mygame"]))
+            .expect_err("an unimplemented profile must not be silently discarded");
+        assert!(
+            error.contains("performance"),
+            "error should name the profile"
+        );
+        assert!(
+            error.contains("gaming"),
+            "error should name the supported profile"
+        );
+    }
 
     #[test]
     fn launch_reuses_fresh_arbiter_flag_without_scheduler_probes() {
@@ -168,7 +224,13 @@ where
 }
 
 fn launch(args: &[String]) -> i32 {
-    let (use_gamemode, cmd) = parse_args(args);
+    let (use_gamemode, cmd) = match parse_args(args) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            eprintln!("kyth-game-launch: {error}");
+            return 1;
+        }
+    };
     if cmd.is_empty() {
         let state = current_desired_state();
         if let Ok(rendered) = serde_json::to_string_pretty(&state.as_value()) {

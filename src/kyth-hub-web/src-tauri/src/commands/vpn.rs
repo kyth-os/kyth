@@ -852,7 +852,7 @@ pub(crate) fn open_vpn_app(app: AppHandle) -> Result<String, String> {
     Ok("Opened native VPN controls in the Hub.".into())
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn vpn_connect(
     app: AppHandle,
     gateway: String,

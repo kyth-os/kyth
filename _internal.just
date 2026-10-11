@@ -102,7 +102,7 @@ _build-bib $target_image $tag $type $config: (_rootful_load_image target_image t
 
         REG_PORT=$(just _find-free-port 5099)
         docker run -d --rm --name "${REG_NAME}" \
-            -p "127.0.0.1:${REG_PORT}:5000" docker.io/library/registry:2
+            -p "127.0.0.1:${REG_PORT}:5000" docker.io/library/registry:2@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
         BIB_IMAGE_REF="localhost:${REG_PORT}/${target_image##*/}:${tag}"
         docker tag "${target_image}:${tag}" "${BIB_IMAGE_REF}"
         docker push "${BIB_IMAGE_REF}"

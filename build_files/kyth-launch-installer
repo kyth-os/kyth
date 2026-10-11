@@ -59,13 +59,28 @@ KYTH_SOURCE_DIGEST="${KYTH_SOURCE_DIGEST:-}"
 
 umask 077
 /usr/bin/install -d -m 0750 -o root -g liveuser "${LAUNCH_DIR}"
+# Serialize installer sessions: rotating the token for a second shell would
+# invalidate the first shell's authentication and restarting the daemon could
+# interrupt its install. The lock is held through the child shell lifetime.
+exec 9>/run/lock/kyth-installer.lock
+if ! /usr/bin/flock -n 9; then
+	msg="The KythOS installer is already running. Return to the open installer window."
+	command -v kdialog >/dev/null 2>&1 && kdialog --error "${msg}" || true
+	command -v zenity >/dev/null 2>&1 && zenity --error --text "${msg}" || true
+	exit 1
+fi
+# The session token below is 0600 owned by the session user; the live-session
+# UID remains the trust boundary while the installer is running.
 session_token="$(/usr/bin/openssl rand -hex 32)"
+# Both native shell loaders validate both fields before retaining the session.
+# Unix transport uses only the session, but an empty bootstrap discards it.
+bootstrap_token="$(/usr/bin/openssl rand -hex 32)"
 token_tmp="${TOKEN_FILE}.$$"
 printf '%s' "${session_token}" > "${token_tmp}"
 /usr/bin/chmod 0600 "${token_tmp}"
 /usr/bin/mv -fT -- "${token_tmp}" "${TOKEN_FILE}"
 /usr/bin/install -d -m 0700 -o "${session_user}" -g "${session_gid}" "${CLIENT_TOKEN_DIR}"
-/usr/bin/printf '{"bootstrap_token":"","session_token":"%s"}\n' "${session_token}" > "${CLIENT_TOKEN_TMP}"
+/usr/bin/printf '{"bootstrap_token":"%s","session_token":"%s"}\n' "${bootstrap_token}" "${session_token}" > "${CLIENT_TOKEN_TMP}"
 /usr/bin/chown "${session_user}:${session_gid}" "${CLIENT_TOKEN_TMP}"
 /usr/bin/chmod 0600 "${CLIENT_TOKEN_TMP}"
 /usr/bin/mv -fT -- "${CLIENT_TOKEN_TMP}" "${CLIENT_TOKEN_FILE}"
@@ -74,7 +89,7 @@ cleanup() {
 	/usr/bin/systemctl stop kyth-installerd.service >/dev/null 2>&1 || true
 	/usr/bin/rm -f -- "${TOKEN_FILE}" "${token_tmp}" "${CLIENT_TOKEN_FILE}" "${CLIENT_TOKEN_TMP}"
 	/usr/bin/rmdir -- "${CLIENT_TOKEN_DIR}" 2>/dev/null || true
-	unset session_token
+	unset session_token bootstrap_token
 }
 trap cleanup EXIT HUP INT TERM
 
@@ -84,7 +99,10 @@ trap cleanup EXIT HUP INT TERM
 	echo "native launcher uid=$(id -u) session_user=${session_user}"
 } >> "${LAUNCH_LOG}" 2>&1
 
-/usr/bin/systemctl start kyth-installerd.service >> "${LAUNCH_LOG}" 2>&1
+# Always reload the daemon after writing this launch's token. `systemctl start`
+# is a no-op for an already-active daemon, which would keep an old token and
+# answer the new shell's first request with 403 Forbidden.
+/usr/bin/systemctl restart kyth-installerd.service >> "${LAUNCH_LOG}" 2>&1
 /usr/bin/systemctl is-active --quiet kyth-installerd.service
 
 /usr/sbin/runuser -u "${session_user}" -- /usr/bin/env \

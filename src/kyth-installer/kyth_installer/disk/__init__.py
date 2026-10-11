@@ -32,6 +32,7 @@ from ._util import (  # noqa: F401
 )
 
 from ._probe import (  # noqa: F401
+    LiveUsbProbeFailed,
     _running_system_disk,
     _get_live_usb_disk,
     _parent_disk,

@@ -16,11 +16,10 @@ source "../../lib/config-helpers.sh"
 # Fail closed here — wiring a nonexistent module would silently break wallet
 # unlock at login while the build looks green.
 #
-# Fedora 45's plasmalogin stack may also ship pam_oo7 lines (the new default
-# secrets provider). KythOS standardizes on KWallet — every app pin, the
-# kwalletrc defaults, and the wallet-unlock SELinux work target it — so exactly
-# one provider must auto-start at login. Any active pam_oo7 line is commented
-# out here; if we ever migrate to oo7 this block is the single place to flip.
+# Fedora 45's oo7 transition was deferred for KDE; this KythOS image
+# keeps KWallet. If another PAM stack has active pam_oo7 rules, disable them
+# here so exactly one provider auto-starts. If we migrate, this block is the
+# single place to flip.
 #
 # We also inject a relabeling helper that runs BEFORE pam_kwallet's session
 # hook. The kwalletd directory can end up labeled default_t when first created
@@ -46,19 +45,19 @@ for PAM_FILE in /etc/pam.d/plasmalogin /usr/lib/pam.d/plasmalogin; do
 	fi
 	KWALLET_PAM_MODULE="$(basename "${KWALLET_PAM_SO}")"
 
-	# Single secrets provider: neutralize any ACTIVE pam_oo7 line. Lines that
-	# are already commented out (or use the "-" disabled prefix) are left alone.
-	if grep -qE '^[[:space:]]*(auth|session)[[:space:]]+.*pam_oo7' "${PAM_FILE}"; then
-		sed -i -E 's/^([[:space:]]*)((auth|session)[[:space:]]+.*pam_oo7.*)$/\1# \2  # kyth: KWallet is the single secrets provider/' "${PAM_FILE}"
+	# Single secrets provider: neutralize every active pam_oo7 rule. PAM's
+	# leading '-' is an active module-type modifier, not a comment/disable marker.
+	if grep -qE '^[[:space:]]*-?(auth|session)[[:space:]]+.*pam_oo7' "${PAM_FILE}"; then
+		sed -i -E 's/^([[:space:]]*)(-?(auth|session)[[:space:]]+.*pam_oo7.*)$/\1# \2  # kyth: KWallet is the single secrets provider/' "${PAM_FILE}"
 	fi
 
-	# Only treat UNCOMMENTED pam_kwallet lines as already wired; a commented
-	# (or "-" prefixed) vendor line must not satisfy the guard.
-	if ! grep -qE "^[[:space:]]*(auth|session)[[:space:]]+.*${KWALLET_PAM_MODULE}" "${PAM_FILE}"; then
+	# Recognize both ordinary and '-' prefixed active PAM rules. A leading
+	# '-' only suppresses logging when a module is missing; the rule still runs.
+	if ! grep -qE "^[[:space:]]*-?(auth|session)[[:space:]]+.*${KWALLET_PAM_MODULE}" "${PAM_FILE}"; then
 		printf '\nauth     optional     %s\nsession  optional     pam_exec.so /usr/libexec/kyth-kwallet-relabel\nsession  optional     %s auto_start\n' \
 			"${KWALLET_PAM_MODULE}" "${KWALLET_PAM_MODULE}" >>"${PAM_FILE}"
 	elif ! grep -q kyth-kwallet-relabel "${PAM_FILE}"; then
-		awk -v mod="${KWALLET_PAM_MODULE}" '!done && $0 ~ mod && /auto_start/ {
+		awk -v mod="${KWALLET_PAM_MODULE}" '!done && $0 ~ /^[[:space:]]*-?session[[:space:]]/ && index($0, mod) && /auto_start/ {
             print "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel"
             done=1
         } { print }' "${PAM_FILE}" >/tmp/kyth-plasmalogin.tmp && mv /tmp/kyth-plasmalogin.tmp "${PAM_FILE}"

@@ -121,7 +121,7 @@ fn validate_selection(
 /// host-level tool's own install command in sequence. Reported as a single
 /// tracked job so the wizard's progress view has one thing to poll, with
 /// `update_job` phase text marking which stage is running.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 pub(crate) fn dev_tools_install_selection(
     selected_ids: Vec<String>,
 ) -> Result<DevToolsActionLaunch, String> {

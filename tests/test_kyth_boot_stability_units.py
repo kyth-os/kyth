@@ -47,7 +47,7 @@ class BootStabilityUnitTests(unittest.TestCase):
             subs = os.path.join(tmp, "file_contexts.subs_dist")
             with open(subs, "w", encoding="utf-8") as handle:
                 handle.write(original)
-            os.chmod(subs, 0o600)
+            os.chmod(subs, 0o644)
             env = {**os.environ, "KYTH_SELINUX_SUBS_DIST": subs}
             for _ in range(2):  # second pass must be a no-op
                 result = subprocess.run(
@@ -65,7 +65,7 @@ class BootStabilityUnitTests(unittest.TestCase):
             # Every other alias, including look-alike prefixes, is preserved.
             expected = [l for l in original.splitlines() if l.split()[:1] != ["/var/home"]]
             self.assertEqual(lines, expected)
-            self.assertEqual(oct(os.stat(subs).st_mode & 0o777), "0o600")
+            self.assertEqual(oct(os.stat(subs).st_mode & 0o777), "0o644")
             missing = subprocess.run(
                 ["bash", str(VAR_HOME_ALIAS_FRAGMENT)],
                 env={**env, "KYTH_SELINUX_SUBS_DIST": os.path.join(tmp, "absent")},
@@ -74,6 +74,112 @@ class BootStabilityUnitTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(missing.returncode, 0, "absent policy file must not fail the build")
+
+    def test_persisted_var_home_alias_is_removed_before_login_relabel(self) -> None:
+        """The prior image's /etc overlay survives upgrades; remove its alias at boot."""
+        import os
+        import tempfile
+
+        helper = ROOT / "build_files/scripts/sysconfig/kyth-selinux-var-home-alias"
+        self.assertTrue(helper.is_file(), "install a runtime /var/home alias repair helper")
+        unit = SELINUX_UNIT.read_text(encoding="utf-8")
+        fast_unit = unit.split("RELABELEOF", 1)[1].split("RELABELEOF", 1)[0]
+        self.assertIn("ExecStartPre=/usr/libexec/kyth-selinux-var-home-alias", fast_unit)
+        self.assertLess(
+            fast_unit.index("ExecStartPre=/usr/libexec/kyth-selinux-var-home-alias"),
+            fast_unit.index("ExecStart=/usr/libexec/kyth-selinux-relabel-home"),
+        )
+        helper_source = (SELINUX_UNIT.parent / "../kyth-selinux-var-home-alias").resolve()
+        self.assertTrue(helper_source.is_file(), "the image fragment must stage the runtime helper")
+        self.assertIn(
+            "install -m 0755 ../kyth-selinux-var-home-alias /usr/libexec/kyth-selinux-var-home-alias",
+            unit,
+        )
+
+        original = "/var/home /home\n/var/home-backup /keep\n/var/roothome /root\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            subs = pathlib.Path(tmp) / "file_contexts.subs_dist"
+            subs.write_text(original, encoding="utf-8")
+            env = {**os.environ, "KYTH_SELINUX_SUBS_DIST": str(subs)}
+            for _ in range(2):
+                result = subprocess.run(
+                    ["bash", str(helper)], env=env, capture_output=True, text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                subs.read_text(encoding="utf-8"),
+                "/var/home-backup /keep\n/var/roothome /root\n",
+            )
+
+    def test_kwallet_pam_bridge_does_not_duplicate_dash_prefixed_rules(self) -> None:
+        """PAM's leading '-' suppresses missing-module logging; it does not disable the rule."""
+        import os
+        import tempfile
+
+        helper = ROOT / "build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure"
+        source = helper.read_text(encoding="utf-8")
+        live_paths = "for PAM_FILE in /etc/pam.d/plasmalogin /usr/lib/pam.d/plasmalogin; do"
+        self.assertIn(live_paths, source)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            pam_file = root / "plasmalogin"
+            pam_file.write_text(
+                "#%PAM-1.0\n-auth optional pam_kwallet5.so\n"
+                "-auth optional pam_oo7.so\n"
+                "-session optional pam_kwallet5.so auto_start\n"
+                "auth     optional     pam_kwallet5.so\n"
+                "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel\n"
+                "session  optional     pam_kwallet5.so auto_start\n",
+                encoding="utf-8",
+            )
+            isolated_helper = root / "ensure-pam"
+            isolated_helper.write_text(
+                source.replace(live_paths, f"for PAM_FILE in {pam_file}; do"),
+                encoding="utf-8",
+            )
+            bin_dir = root / "bin"
+            bin_dir.mkdir()
+            rpm_stub = bin_dir / "rpm"
+            rpm_stub.write_text(
+                "#!/bin/sh\nprintf '%s\\n' /usr/lib64/security/pam_kwallet5.so\n",
+                encoding="utf-8",
+            )
+            rpm_stub.chmod(0o755)
+            env = {**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin"}
+
+            for _ in range(2):
+                result = subprocess.run(
+                    ["bash", str(isolated_helper)], env=env, capture_output=True,
+                    text=True, check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+            lines = pam_file.read_text(encoding="utf-8").splitlines()
+            active_auth = [
+                line for line in lines
+                if re.match(r"^\s*-?auth\s+.*pam_kwallet5\.so(?:\s|$)", line)
+            ]
+            active_session = [
+                (index, line) for index, line in enumerate(lines)
+                if re.match(r"^\s*-?session\s+.*pam_kwallet5\.so.*auto_start", line)
+            ]
+            self.assertEqual(active_auth, ["-auth optional pam_kwallet5.so"])
+            self.assertEqual(len(active_session), 1)
+            index, _ = active_session[0]
+            self.assertEqual(lines[index - 1], "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel")
+            self.assertEqual(sum("kyth-kwallet-relabel" in line for line in lines), 1)
+            self.assertEqual(
+                sum("pam_oo7.so" in line and not line.lstrip().startswith("#") for line in lines),
+                0,
+            )
+
+        build_fragment = (
+            ROOT / "build_files/scripts/sysconfig/desktop/26-kwallet-pam-bridge-wire-pam-kwallet5-so-into-the-s.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("^[[:space:]]*-?(auth|session)", build_fragment)
+        self.assertIn("$0 ~ /^[[:space:]]*-?session[[:space:]]/", build_fragment)
 
     def test_selinux_home_relabel_is_capped_and_still_before_greeter(self) -> None:
         """The login-critical relabel must stay bounded and gate the greeter;
@@ -460,7 +566,7 @@ class BootStabilityUnitTests(unittest.TestCase):
         )
         self.assertIn("RemainAfterExit=yes", body)
         self.assertIn("StateDirectory=kyth/migrations", body)
-        self.assertIn("ReadWritePaths=-/usr/local/bin -/var/home -/root", body)
+        self.assertIn("ReadWritePaths=-/root", body)
         self.assertNotIn("PrivateUsers=yes", body)
 
     def test_flathub_setup_skips_offline_and_can_write_flatpak_state(self) -> None:
@@ -491,7 +597,7 @@ class BootStabilityUnitTests(unittest.TestCase):
                 stub = os.path.join(tmp, "nmcli")
                 with open(stub, "w", encoding="utf-8") as handle:
                     handle.write(f"#!/bin/sh\nprintf '{nmcli_output}'\n")
-                os.chmod(stub, 0o700)
+                os.chmod(stub, 0o755)
                 result = subprocess.run(
                     ["bash", "-c", f"set -euo pipefail\n{line}\n{default}\nprintf '%s' \"$wifi_connected\""],
                     env={**os.environ, "PATH": f"{tmp}:{os.environ['PATH']}"},

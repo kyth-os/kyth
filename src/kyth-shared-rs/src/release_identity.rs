@@ -30,17 +30,20 @@ pub fn build_identity(
     if source_sha.len() < 8 {
         return Err("source SHA must contain at least eight characters".into());
     }
+    // M13: reject newlines/CRs in workflow-controlled fields to prevent
+    // $GITHUB_OUTPUT injection via crafted run_number/run_attempt.
+    for (name, value) in [("run_number", run_number), ("run_attempt", run_attempt)] {
+        if value.contains('\n') || value.contains('\r') {
+            return Err(format!("{name} must not contain newlines"));
+        }
+    }
     let date = build_date
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
         .unwrap_or_else(current_utc_date);
-    let release_id = format!(
-        "{}-{}-{}-{}",
-        date,
-        &source_sha[..8],
-        run_number,
-        run_attempt
-    );
+    // M13: char-boundary-safe truncation — byte-slicing a non-ASCII SHA panics.
+    let short_sha: String = source_sha.chars().take(8).collect();
+    let release_id = format!("{date}-{short_sha}-{run_number}-{run_attempt}");
     Ok(ReleaseIdentity {
         source_sha: source_sha.into(),
         release_id: release_id.clone(),
@@ -111,5 +114,29 @@ mod tests {
             identity.github_output(),
             "source_sha=0123456789\nrelease_id=20260829-01234567-1-1\niso_basename=kyth-live-latest-20260829-01234567-1-1.iso\nchannel_basename=kyth-live-latest.iso\nimmutable_tag=iso-latest-20260829-01234567-1-1\nartifact_name=kyth-live-iso-latest-20260829-01234567-1-1\n"
         );
+    }
+
+    #[test]
+    fn rejects_newlines_and_handles_non_ascii_sha() {
+        // M13: newlines in run_number/run_attempt must be rejected (GITHUB_OUTPUT injection).
+        assert!(build_identity(
+            "latest",
+            "0123456789abcdef",
+            "1\ninjected=x",
+            "1",
+            Some("20260829")
+        )
+        .is_err());
+        assert!(build_identity(
+            "latest",
+            "0123456789abcdef",
+            "1",
+            "1\rinjected=x",
+            Some("20260829")
+        )
+        .is_err());
+        // M13: non-ASCII SHA must not panic on truncation.
+        let identity = build_identity("latest", "éééééééééé", "1", "1", Some("20260829")).unwrap();
+        assert!(identity.release_id.starts_with("20260829-éééééééé-1-1"));
     }
 }

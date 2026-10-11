@@ -7,6 +7,7 @@
 use std::env;
 use std::fs;
 use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use kyth_shared::system::gaming_activity::{active_uids_from_loginctl, is_gaming_process};
@@ -94,8 +95,17 @@ fn hardware_caps() -> (bool, bool) {
     )
 }
 
-fn collect_sample() -> PerfSample {
-    let (has_nvidia, has_amd) = hardware_caps();
+/// Set by SIGHUP: GPU hardware cannot change at runtime in practice, but a
+/// re-probe hook keeps the cached caps honest after e.g. a driver install
+/// without restarting the daemon.
+static REPROBE_HARDWARE: AtomicBool = AtomicBool::new(false);
+
+extern "C" fn on_hup(_signal: libc::c_int) {
+    REPROBE_HARDWARE.store(true, Ordering::SeqCst);
+}
+
+fn collect_sample(hw_caps: (bool, bool)) -> PerfSample {
+    let (has_nvidia, has_amd) = hw_caps;
     let pressure = read_first(&["/proc/pressure/cpu", "/sys/fs/cgroup/cpu.pressure"])
         .and_then(|text| pressure_avg10(&text))
         .unwrap_or(0.0);
@@ -195,8 +205,8 @@ fn apply_policy(policy: &PerfPolicy) -> bool {
     true
 }
 
-fn cycle(print: bool) -> bool {
-    let sample = collect_sample();
+fn cycle(print: bool, hw_caps: (bool, bool), last_policy: &mut Option<PerfPolicy>) -> bool {
+    let sample = collect_sample(hw_caps);
     let policy = choose_policy(&sample);
     if print {
         println!(
@@ -205,7 +215,18 @@ fn cycle(print: bool) -> bool {
                 .unwrap_or_else(|_| "{}".into())
         );
     }
-    apply_policy(&policy)
+    // Skip the config rewrite + sysctl subprocess storm when the policy is
+    // unchanged: apply_policy rewrites watched config files and forks
+    // `sysctl -w` once per key every 5s tick, even when nothing changed.
+    // PerfPolicy derives PartialEq, so this is a deep comparison.
+    if last_policy.as_ref() == Some(&policy) {
+        return true;
+    }
+    let ok = apply_policy(&policy);
+    if ok {
+        *last_policy = Some(policy);
+    }
+    ok
 }
 
 fn usage() {
@@ -230,15 +251,29 @@ fn main() -> std::process::ExitCode {
         }
     }
 
+    // Async-signal-safe: the handler only flips an atomic flag.
+    unsafe {
+        libc::signal(libc::SIGHUP, on_hup as *const () as libc::sighandler_t);
+    }
+
+    // Hardware inventory (full sysfs walk) is evaluated once at startup and
+    // cached: GPU presence does not change at runtime. SIGHUP re-probes
+    // without a daemon restart (e.g. after a driver install).
+    let mut hw_caps = hardware_caps();
+    let mut last_policy: Option<PerfPolicy> = None;
+
     if once {
-        return if cycle(print) {
+        return if cycle(print, hw_caps, &mut last_policy) {
             std::process::ExitCode::SUCCESS
         } else {
             std::process::ExitCode::from(1)
         };
     }
     loop {
-        let _ = cycle(false);
+        if REPROBE_HARDWARE.swap(false, Ordering::SeqCst) {
+            hw_caps = hardware_caps();
+        }
+        let _ = cycle(false, hw_caps, &mut last_policy);
         std::thread::sleep(LOOP_INTERVAL);
     }
 }

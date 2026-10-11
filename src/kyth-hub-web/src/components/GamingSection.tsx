@@ -320,7 +320,7 @@ export function GamingSection({ section }: { section: HubSection }) {
   const [proton, setProton] = useState<ProtonDbResult[]>([]);
   const [antiCheat, setAntiCheat] = useState<AntiCheatEntry[] | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("gaming");
+  const { status, busy, run } = useSectionAction(["hub-action", "gaming"]);
   useEffect(() => {
     let c = false;
     Promise.all([

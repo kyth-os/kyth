@@ -162,10 +162,17 @@ fn hardware_capabilities() -> Option<Vec<String>> {
     })
 }
 
+fn btrfs_root_from_mounts(mounts: &str) -> bool {
+    mounts.lines().any(|line| {
+        let mut fields = line.split_whitespace();
+        fields.nth(1) == Some("/") && fields.next() == Some("btrfs")
+    })
+}
+
 /// Collect the same local, read-only evidence used by the doctor CLI.
 pub fn collect_report() -> DoctorReport {
     let btrfs_root = std::fs::read_to_string("/proc/mounts")
-        .map(|mounts| mounts.contains("btrfs"))
+        .map(|mounts| btrfs_root_from_mounts(&mounts))
         .unwrap_or(false);
     evaluate(&DoctorInputs {
         has_cachy_kernel: has_cachy_kernel(),
@@ -181,6 +188,16 @@ pub fn collect_report() -> DoctorReport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn btrfs_root_requires_btrfs_on_the_root_mount() {
+        let mounts =
+            "/dev/root / ext4 rw,relatime 0 0\n/dev/archive /mnt/archive btrfs rw,relatime 0 0\n";
+        assert!(!super::btrfs_root_from_mounts(mounts));
+        assert!(super::btrfs_root_from_mounts(
+            "/dev/root / btrfs rw,relatime 0 0\n"
+        ));
+    }
 
     fn stack_check(name: &str, passed: bool, advisory: bool) -> StackCheck {
         StackCheck {

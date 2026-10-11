@@ -215,7 +215,12 @@ pub fn inspect_installer(
     path: impl AsRef<Path>,
 ) -> Result<InstallerRequest, InstallerInspectionError> {
     let path = path.as_ref();
-    if path.is_symlink() || !path.is_file() {
+    // `/proc/self/fd/N` names an already-open descriptor (kyth-exe-handler's
+    // TOCTOU fix opens with O_NOFOLLOW and hashes the descriptor): the
+    // symlink is ours, not attacker input, so the symlink rejection below
+    // does not apply to it.
+    let is_proc_fd = path.starts_with("/proc/self/fd");
+    if (!is_proc_fd && path.is_symlink()) || !path.is_file() {
         return Err(invalid(
             "Choose a regular, non-symbolic-link installer file.",
         ));
@@ -386,17 +391,17 @@ pub fn flatpak_install_commands() -> [Vec<String>; 2] {
 /// natively double-clicked game: detached stdio, no pipe to drain, and the
 /// caller does not wait.
 pub fn umu_available() -> bool {
+    // Pinned absolute path only: a PATH lookup could resolve to a
+    // user-writable early PATH dir (e.g. ~/.local/bin), letting malware plant
+    // a fake umu-run that executes with the trusted game exe as its argument.
     Path::new("/usr/bin/umu-run").is_file()
-        || std::env::var_os("PATH")
-            .map(|paths| std::env::split_paths(&paths).any(|dir| dir.join("umu-run").is_file()))
-            .unwrap_or(false)
 }
 
 pub fn launch_in_umu(exe: &Path) -> Result<(), String> {
     if !umu_available() {
         return Err("umu-run is not installed".to_string());
     }
-    Command::new("umu-run")
+    Command::new("/usr/bin/umu-run")
         .arg(exe)
         .stdin(Stdio::null())
         .stdout(Stdio::null())

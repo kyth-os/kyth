@@ -25,6 +25,20 @@ pub struct InstallerPlanInput {
     pub free_region_start: i64,
     #[serde(default)]
     pub free_region_end: i64,
+    /// Disk identity captured at selection time (lsblk MODEL/SERIAL/SIZE).
+    /// Populated by the executor, never trusted from the client; consumed by
+    /// `verify_disk_identity` to confirm the selected disk is the disk being
+    /// installed to.
+    #[serde(default)]
+    pub target_disk_serial: Option<String>,
+    #[serde(default)]
+    pub target_disk_model: Option<String>,
+    #[serde(default)]
+    pub target_disk_size_bytes: Option<u64>,
+    /// Flatpak app IDs selected on the software step. Validated against a
+    /// server-side allowlist; installed during the configure phase.
+    #[serde(default)]
+    pub flatpaks: Vec<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -36,6 +50,77 @@ pub struct InstallerPlan {
     pub resize_bytes: u64,
     pub free_region_start: Option<u64>,
     pub free_region_end: Option<u64>,
+    /// NTFS partition size in bytes recorded before a guided shrink, so a
+    /// retried install can detect an already-completed shrink instead of
+    /// shrinking twice. Set by the executor at request time (before any
+    /// destructive step), not by plan validation.
+    pub pre_shrink_bytes: Option<u64>,
+    /// Disk identity captured at selection time; see `InstallerPlanInput`.
+    pub target_disk_serial: Option<String>,
+    pub target_disk_model: Option<String>,
+    pub target_disk_size_bytes: Option<u64>,
+    /// Validated Flatpak app IDs from the software step.
+    pub flatpaks: Vec<String>,
+}
+
+/// Server-side allowlist for the software step. The frontend sends app IDs;
+/// the backend only installs IDs on this list. This prevents a tampered
+/// client from installing arbitrary Flatpaks.
+const ALLOWED_FLATPAKS: &[&str] = &[
+    // Gaming bundle
+    "com.valvesoftware.Steam",
+    "com.heroicgameslauncher.hgl",
+    "com.discordapp.Discord",
+    "org.prismlauncher.PrismLauncher",
+    // Development bundle
+    "com.visualstudio.code",
+    "io.dbeaver.DBeaverCommunity",
+    "io.podman_desktop.PodmanDesktop",
+    // Creative bundle
+    "org.gimp.GIMP",
+    "org.kde.kdenlive",
+    "org.blender.Blender",
+    "org.audacityteam.Audacity",
+    // Productivity bundle
+    "org.libreoffice.LibreOffice",
+    "org.mozilla.firefox",
+    "org.mozilla.Thunderbird",
+    "org.videolan.VLC",
+    // Individual picks
+    "com.spotify.Client",
+    "org.telegram.desktop",
+    "com.slack.Slack",
+    "us.zoom.Zoom",
+    "org.keepassxc.KeePassXC",
+    "org.gnome.Calculator",
+    "org.gnome.TextEditor",
+    "io.github.zen_browser.zen",
+    "com.github.tchx84.Flatseal",
+    "org.flameshot.Flameshot",
+    "com.obsproject.Studio",
+    "org.inkscape.Inkscape",
+];
+
+/// Validate Flatpak app IDs against the server-side allowlist.
+/// Returns the deduplicated valid IDs, or an error if any ID is not allowed.
+pub fn validate_flatpaks(ids: &[String]) -> Result<Vec<String>, String> {
+    // L2: bound the array size before iterating. A malicious client could
+    // send a huge array; the 64-entry cap is well above the legitimate
+    // maximum (4 bundles + 12 individual = 16 apps).
+    if ids.len() > 64 {
+        return Err("too many Flatpak apps requested".to_string());
+    }
+    let mut seen = std::collections::HashSet::new();
+    let mut valid = Vec::new();
+    for id in ids {
+        if !ALLOWED_FLATPAKS.contains(&id.as_str()) {
+            return Err(format!("Unsupported Flatpak app: {id}"));
+        }
+        if seen.insert(id.clone()) {
+            valid.push(id.clone());
+        }
+    }
+    Ok(valid)
 }
 
 pub(crate) fn normalize_device_path(raw: &str) -> Option<String> {
@@ -142,6 +227,9 @@ pub fn build_plan(input: InstallerPlanInput) -> Result<InstallerPlan, String> {
         (None, None)
     };
 
+    // Software step: validate Flatpak IDs against the server-side allowlist.
+    let flatpaks = validate_flatpaks(&input.flatpaks)?;
+
     Ok(InstallerPlan {
         mode,
         disk,
@@ -150,6 +238,13 @@ pub fn build_plan(input: InstallerPlanInput) -> Result<InstallerPlan, String> {
         resize_bytes,
         free_region_start,
         free_region_end,
+        // Recorded by the executor before any destructive step; plan
+        // validation itself never probes live disks.
+        pre_shrink_bytes: None,
+        target_disk_serial: input.target_disk_serial,
+        target_disk_model: input.target_disk_model,
+        target_disk_size_bytes: input.target_disk_size_bytes,
+        flatpaks,
     })
 }
 
@@ -167,6 +262,10 @@ mod tests {
             resize_gib: 0,
             free_region_start: 0,
             free_region_end: 0,
+            target_disk_serial: None,
+            target_disk_model: None,
+            target_disk_size_bytes: None,
+            flatpaks: Vec::new(),
         }
     }
 
@@ -305,5 +404,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn validate_flatpaks_accepts_allowlisted_ids() {
+        let ids = vec![
+            "com.valvesoftware.Steam".to_string(),
+            "org.gimp.GIMP".to_string(),
+        ];
+        assert_eq!(validate_flatpaks(&ids).unwrap(), ids);
+    }
+
+    #[test]
+    fn validate_flatpaks_rejects_unknown_ids() {
+        let ids = vec![
+            "com.valvesoftware.Steam".to_string(),
+            "evil.app".to_string(),
+        ];
+        assert!(validate_flatpaks(&ids).is_err());
+    }
+
+    #[test]
+    fn validate_flatpaks_deduplicates() {
+        let ids = vec![
+            "com.valvesoftware.Steam".to_string(),
+            "com.valvesoftware.Steam".to_string(),
+        ];
+        assert_eq!(
+            validate_flatpaks(&ids).unwrap(),
+            vec!["com.valvesoftware.Steam".to_string()]
+        );
+    }
+
+    #[test]
+    fn validate_flatpaks_accepts_empty() {
+        assert!(validate_flatpaks(&[]).unwrap().is_empty());
     }
 }

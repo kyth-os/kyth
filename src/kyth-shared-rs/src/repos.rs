@@ -31,7 +31,22 @@ fn default_repo_type() -> String {
 }
 
 impl RepoSpec {
-    pub fn render_yum_repo(&self) -> String {
+    /// Validate a field for safe interpolation into a .repo file.
+    /// M2: newlines would allow injecting arbitrary repo directives
+    /// (e.g. `gpgcheck=0`), silently disabling signature verification.
+    fn validate_repo_field(name: &str, value: &str) -> Result<(), String> {
+        if value.contains('\n') || value.contains('\r') {
+            return Err(format!("repo field {name} must not contain newlines"));
+        }
+        Ok(())
+    }
+
+    pub fn render_yum_repo(&self) -> Result<String, String> {
+        Self::validate_repo_field("name", &self.name)?;
+        Self::validate_repo_field("description", &self.description)?;
+        Self::validate_repo_field("baseurl", &self.baseurl)?;
+        Self::validate_repo_field("type", &self.repo_type)?;
+        Self::validate_repo_field("gpgkey", &self.gpgkey)?;
         let mut lines = vec![
             format!("[{}]", self.name),
             format!("name={}", self.description),
@@ -44,7 +59,7 @@ impl RepoSpec {
         if !self.gpgkey.is_empty() {
             lines.push(format!("gpgkey={}", self.gpgkey));
         }
-        format!("{}\n", lines.join("\n"))
+        Ok(format!("{}\n", lines.join("\n")))
     }
 }
 
@@ -75,10 +90,37 @@ mod tests {
         })).unwrap();
         assert!(spec.enabled);
         assert_eq!(spec.repo_type, "rpm");
-        assert!(spec.render_yum_repo().contains("repo_gpgcheck=1"));
-        assert!(spec
-            .render_yum_repo()
-            .ends_with("gpgkey=https://example.test/key\n"));
+        let rendered = spec.render_yum_repo().unwrap();
+        assert!(rendered.contains("repo_gpgcheck=1"));
+        assert!(rendered.ends_with("gpgkey=https://example.test/key\n"));
+    }
+
+    #[test]
+    fn rejects_newline_injection_in_every_interpolated_field() {
+        // M2: a newline in any interpolated field could inject `gpgcheck=0`.
+        for field in ["name", "description", "baseurl", "type", "gpgkey"] {
+            for payload in ["evil\ngpgcheck=0", "evil\r\ngpgcheck=0"] {
+                let mut value = serde_json::json!({
+                    "name": "demo", "description": "Demo", "baseurl": "https://example.test",
+                    "type": "rpm", "gpgkey": ""
+                });
+                value[field] = serde_json::Value::String(payload.to_string());
+                let spec: RepoSpec = serde_json::from_value(value).unwrap();
+                assert!(
+                    spec.render_yum_repo().is_err(),
+                    "field {field} accepted newline payload"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn rejects_section_header_injection_via_name() {
+        let spec: RepoSpec = serde_json::from_value(serde_json::json!({
+            "name": "x]\n[evil", "description": "Demo", "baseurl": "https://example.test"
+        }))
+        .unwrap();
+        assert!(spec.render_yum_repo().is_err());
     }
 
     #[test]

@@ -8,6 +8,7 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::io::Write;
 use std::os::unix::process::CommandExt;
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
@@ -30,6 +31,17 @@ pub(crate) struct PartitionJournal {
     pub committed: bool,
     pub root_partition: Option<String>,
     pub irreversible_completed: bool,
+    /// Disk identity (lsblk MODEL/SERIAL/SIZE) captured at staging time
+    /// (M4). The commit path re-verifies it and fails closed on mismatch,
+    /// so a disk re-enumerated between staging and commit cannot receive
+    /// another disk's `new_table`. `#[serde(default)]` keeps journals
+    /// serialized before these fields existed readable.
+    #[serde(default)]
+    pub disk_model: Option<String>,
+    #[serde(default)]
+    pub disk_serial: Option<String>,
+    #[serde(default)]
+    pub disk_size_bytes: Option<u64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -115,12 +127,19 @@ impl PartitionJournal {
     pub(crate) fn new(disk: &str) -> Result<Self, String> {
         let disk = normalize_device_path(disk)
             .ok_or_else(|| "Invalid disk path for journal.".to_string())?;
+        // M4: capture the disk identity at staging time. Best-effort here
+        // so unit tests and unprivileged staging keep working; the commit
+        // path fails closed when no identity was captured.
+        let identity = crate::installer_storage::read_disk_identity(&disk).ok();
         Ok(Self {
             disk,
             ops: Vec::new(),
             committed: false,
             root_partition: None,
             irreversible_completed: false,
+            disk_model: identity.as_ref().and_then(|id| id.model.clone()),
+            disk_serial: identity.as_ref().and_then(|id| id.serial.clone()),
+            disk_size_bytes: identity.as_ref().and_then(|id| id.size_bytes),
         })
     }
 
@@ -909,6 +928,13 @@ fn run_disk_operation(operation: installer_disk::DiskOperationInput) -> Result<(
     let mut command = Command::new(&plan.argv[0]);
     command.args(&plan.argv[1..]);
     command.process_group(0);
+    // M9: own process group, but the parent-death signal is about parent
+    // death, not the group: if the daemon dies mid-commit, this partition
+    // tool must die with it instead of writing on after the flock is
+    // released and racing a restarted daemon's retry.
+    unsafe {
+        command.pre_exec(crate::installer_stream::parent_death_signal);
+    }
     if plan.needs_confirmation {
         command.stdin(Stdio::piped());
     }
@@ -981,8 +1007,25 @@ fn runtime_lsblk(disk: &str) -> Result<Value, String> {
 }
 
 fn runtime_partition_records(disk: &str) -> Result<Vec<PartitionRecord>, String> {
-    let snapshot = runtime_lsblk(disk)?;
-    installer_storage::parse_partitions(&snapshot.to_string())
+    let disk =
+        normalize_device_path(disk).ok_or_else(|| "disk must be a safe device path".to_string())?;
+    // lsblk START counts sectors: scale by the device's logical sector
+    // size from blockdev --getss, the same source free_regions validates.
+    let sector_size = Command::new("/usr/bin/blockdev")
+        .args(["--getss", &disk])
+        .output()
+        .map_err(|error| format!("could not probe {disk} sector size: {error}"))
+        .and_then(|output| {
+            if !output.status.success() {
+                return Err(format!("could not probe {disk} sector size"));
+            }
+            String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u64>()
+                .map_err(|_| format!("blockdev returned an invalid sector size for {disk}"))
+        })?;
+    let snapshot = runtime_lsblk(&disk)?;
+    installer_storage::parse_partitions(&snapshot.to_string(), sector_size)
 }
 
 fn runtime_disk_metadata(disk: &str) -> Result<(String, u64), String> {
@@ -1057,6 +1100,31 @@ fn runtime_partitions() -> Result<HashMap<String, u32>, String> {
     }
     walk(&value, &mut result);
     Ok(result)
+}
+
+/// Resolve the PARTUUID for a partition number on a disk from a fresh lsblk
+/// probe. Destructive DiskOperationInput variants (L11) bind the bare
+/// partition number to the selection-time PARTUUID so a renumbered or
+/// replaced partition fails closed instead of being deleted, resized,
+/// or reflagged.
+fn partuuid_of(disk: &str, part_num: u32) -> Result<String, String> {
+    let output = Command::new("/usr/bin/lsblk")
+        .args([
+            "--json",
+            "--bytes",
+            "--paths",
+            "--output",
+            "NAME,TYPE,PARTN,PARTUUID",
+            disk,
+        ])
+        .output()
+        .map_err(|error| format!("could not probe partition identity: {error}"))?;
+    if !output.status.success() {
+        return Err("lsblk could not probe partition identity".to_string());
+    }
+    let stdout = String::from_utf8(output.stdout)
+        .map_err(|_| "lsblk returned non-UTF8 output".to_string())?;
+    crate::installer_storage::partuuid_for_partition_number(&stdout, disk, part_num)
 }
 
 fn find_new_partition(
@@ -1172,32 +1240,14 @@ fn shrink_filesystem(partition: &str, fs: &str, new_size: u64) -> Result<(), Str
                 stage: "resize".to_string(),
             })?;
         }
-        "btrfs" => {
-            let directory = tempfile::Builder::new()
-                .prefix("kyth-btrfs-resize-")
-                .tempdir()
-                .map_err(|error| format!("could not create Btrfs resize mountpoint: {error}"))?;
-            let mountpoint = directory.path().to_string_lossy().into_owned();
-            run_disk_operation(installer_disk::DiskOperationInput::MountFilesystem {
-                device: partition.to_string(),
-                mountpoint: mountpoint.clone(),
-                options: Vec::new(),
-                bind: false,
-            })?;
-            let resize = run_disk_operation(installer_disk::DiskOperationInput::FilesystemResize {
-                device: mountpoint.clone(),
-                fs: "btrfs".to_string(),
-                new_size_bytes: new_size,
-                stage: "resize".to_string(),
-            });
-            let unmount =
-                run_disk_operation(installer_disk::DiskOperationInput::UnmountFilesystem {
-                    mountpoint,
-                    recursive: false,
-                    lazy: false,
-                });
-            resize.and(unmount)?;
-        }
+        // NOTE: there is deliberately no "btrfs" arm. `btrfs filesystem
+        // resize` operates on a MOUNTPOINT, but the typed
+        // `FilesystemResize` builder only accepts /dev/ device paths
+        // (`required_device` rejects anything else), so a btrfs shrink
+        // cannot be expressed through it — the old arm that mounted at a
+        // tempdir and passed the mountpoint as `device` could never have
+        // run. Shrinking btrfs stays unsupported: fail closed here rather
+        // than half-building a resize the executor cannot honor.
         _ => {
             return Err(format!(
                 "Shrinking {fs} filesystems is not supported by this installer."
@@ -1211,6 +1261,10 @@ fn execute_operation(
     operation: &mut PartitionOperation,
     journal: &PartitionJournal,
     irreversible: &mut bool,
+    // M13: the disk's real logical sector size, probed once at commit time.
+    // partition_end/alignment math needs the real size; 512 is only valid
+    // for lsblk START scaling per HIGH 1.
+    sector_size: u64,
 ) -> Result<String, String> {
     let params = &mut operation.params;
     let target = value_string(params, "partition");
@@ -1236,15 +1290,17 @@ fn execute_operation(
                         start: 1024 * 1024,
                         size: BIOS_BOOT_BYTES,
                         label: "biosboot".to_string(),
-                        sector_size: 512,
+                        sector_size,
                     },
                 )?;
                 let bios =
                     find_new_partition(&journal.disk, &before_bios, 1024 * 1024, BIOS_BOOT_BYTES)?;
                 let number = part_num(&bios, &runtime_partitions()?)?;
+                let expected_partuuid = partuuid_of(&journal.disk, number)?;
                 run_disk_operation(installer_disk::DiskOperationInput::SetPartitionFlag {
                     disk: journal.disk.clone(),
                     part_num: number,
+                    expected_partuuid,
                     flag: "bios_grub".to_string(),
                     enabled: true,
                 })?;
@@ -1260,7 +1316,7 @@ fn execute_operation(
                 size,
                 fs: value_string(params, "fs_type"),
                 label: value_string(params, "label"),
-                sector_size: 512,
+                sector_size,
             })?;
             let created = find_new_partition(&journal.disk, &before, start, size)?;
             params["partition"] = Value::String(created.clone());
@@ -1271,13 +1327,18 @@ fn execute_operation(
                     device: created.clone(),
                     fs,
                     label: value_string(params, "label"),
+                    // M14: the mkfs target must resolve to this journal's
+                    // selected disk; build_mkfs fails closed on mismatch.
+                    expected_disk: journal.disk.clone(),
                 })?;
             }
             if is_efi_mountpoint(&value_string(params, "mountpoint")) {
                 let number = part_num(&created, &runtime_partitions()?)?;
+                let expected_partuuid = partuuid_of(&journal.disk, number)?;
                 run_disk_operation(installer_disk::DiskOperationInput::SetPartitionFlag {
                     disk: journal.disk.clone(),
                     part_num: number,
+                    expected_partuuid,
                     flag: "esp".to_string(),
                     enabled: true,
                 })?;
@@ -1286,15 +1347,25 @@ fn execute_operation(
         }
         "delete" => {
             let number = part_num(&target, &before)?;
+            let expected_partuuid = partuuid_of(&journal.disk, number)?;
             run_disk_operation(installer_disk::DiskOperationInput::DeletePartition {
                 disk: journal.disk.clone(),
                 part_num: number,
+                expected_partuuid,
             })?;
             Ok(target)
         }
         "resize" => {
-            let number = part_num(&target, &before)?;
             let new_size = value_u64(params, "new_size_bytes", 0);
+            // Independent of the validate pass: a missing or zero resize
+            // target is a data-destruction primitive. The execute path must
+            // not trust that validation ran (e.g. journals handed directly
+            // to the exec binary). Reject here, unconditionally.
+            if new_size == 0 {
+                return Err(format!(
+                    "refusing resize of {target}: new_size_bytes is missing or zero"
+                ));
+            }
             // Earlier journal operations may have reformatted this partition.
             // Probe the live filesystem immediately before resizing instead
             // of using the pre-commit snapshot's stale filesystem type.
@@ -1306,16 +1377,23 @@ fn execute_operation(
                 .map(|part| part.start_bytes)
                 .ok_or_else(|| format!("partition geometry for {target} is unavailable"))?;
             // A successful filesystem shrink cannot be undone by restoring
-            // the old partition table. Mark this before starting the shrink
-            // so a later resizepart failure also skips a harmful restore.
-            *irreversible = true;
+            // the old partition table. Mark irreversible only after the shrink
+            // succeeds, so a failed shrink (zero mutation) still allows rollback.
             shrink_filesystem(&target, &fs, new_size)?;
+            *irreversible = true;
+            // The shrink shell-outs above can take minutes; re-resolve the
+            // partition number from a fresh snapshot immediately before
+            // resizing the partition itself. The pre-shrink number may be
+            // stale if the table changed under us.
+            let number = part_num(&target, &runtime_partitions()?)?;
+            let expected_partuuid = partuuid_of(&journal.disk, number)?;
             run_disk_operation(installer_disk::DiskOperationInput::ResizePartition {
                 disk: journal.disk.clone(),
                 part_num: number,
+                expected_partuuid,
                 start,
                 new_size,
-                sector_size: 512,
+                sector_size,
             })?;
             Ok(target)
         }
@@ -1330,23 +1408,32 @@ fn execute_operation(
                     && value_string(&item.params, "partition") == target
             });
             if !created_here {
-                // Formatting an existing filesystem is irreversible even if
-                // the utility exits non-zero after partially writing it.
+                // A failed mkfs can still have written superblocks: once the
+                // format process starts on a pre-existing partition, the old
+                // filesystem is unrecoverable even if mkfs reports failure.
+                // Mark irreversible BEFORE spawning mkfs so a failed format
+                // can never report a clean rollback.
                 *irreversible = true;
             }
             run_disk_operation(installer_disk::DiskOperationInput::FormatFilesystem {
                 device: target.clone(),
                 fs: value_string(params, "fs_type"),
                 label: value_string(params, "label"),
+                // M14: the mkfs target must resolve to this journal's
+                // selected disk; build_mkfs fails closed on mismatch.
+                expected_disk: journal.disk.clone(),
             })?;
             Ok(target)
         }
         "set_mountpoint" => {
+            let number = part_num(&target, &before)?;
+            let expected_partuuid = partuuid_of(&journal.disk, number)?;
             if let Some(esp_flag) = esp_flag_operation(
                 &value_string(params, "mountpoint"),
                 &target,
                 &journal.disk,
                 &before,
+                expected_partuuid,
             )? {
                 run_disk_operation(esp_flag)?;
             }
@@ -1361,6 +1448,7 @@ fn esp_flag_operation(
     target: &str,
     disk: &str,
     partitions: &HashMap<String, u32>,
+    expected_partuuid: String,
 ) -> Result<Option<installer_disk::DiskOperationInput>, String> {
     if !is_efi_mountpoint(mountpoint) {
         return Ok(None);
@@ -1369,6 +1457,7 @@ fn esp_flag_operation(
     Ok(Some(installer_disk::DiskOperationInput::SetPartitionFlag {
         disk: disk.to_string(),
         part_num,
+        expected_partuuid,
         flag: "esp".to_string(),
         enabled: true,
     }))
@@ -1408,8 +1497,61 @@ fn root_partition(journal: &PartitionJournal) -> Option<String> {
     (roots.len() == 1).then(|| roots[0].clone())
 }
 
+/// Best-effort crash-safety markers for partition-table rollback.
+///
+/// Written next to — not inside — the journal backup tempdir (which is
+/// deleted on drop), each marker fsync'd along with its parent directory.
+/// If the machine crashes mid-rollback, a later rescue probe can tell
+/// "rollback started but never completed" apart from "rollback completed"
+/// or "no rollback was attempted" (the latter leaves no markers; the
+/// journal's `irreversible_completed` flag covers the no-rollback case).
+///
+/// Marker writes never fail the rollback path itself: every error here is
+/// swallowed, because a failed marker must not turn a successful restore
+/// into a reported failure.
+fn write_rollback_marker(backup_dir: &Path, disk: &str, stage: &str, detail: &str) {
+    let (Some(parent), Some(base)) = (backup_dir.parent(), backup_dir.file_name()) else {
+        return;
+    };
+    let marker = parent.join(format!("{}.rollback-{stage}", base.to_string_lossy()));
+    let content = format!("disk={disk}\nstage={stage}\ndetail={detail}\n");
+    let result = (|| -> Result<(), std::io::Error> {
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&marker)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()?;
+        std::fs::OpenOptions::new()
+            .read(true)
+            .open(parent)?
+            .sync_all()
+    })();
+    let _ = result;
+}
+
 pub(crate) fn commit_request(input: JournalCommitInput) -> Result<Value, String> {
-    commit_request_with_target_guard(input, crate::installer_guard::validate_target_disk)
+    // M4: the manual journal commit must prove the disk is the one the
+    // plan was staged against. Rebuild the staging-time identity and run
+    // the identity-checking guard; a journal with no captured identity
+    // (or a swapped/re-enumerated disk) fails closed before the first
+    // privileged disk probe or write.
+    let identity = crate::installer_storage::DiskIdentity {
+        serial: input.journal.disk_serial.clone(),
+        model: input.journal.disk_model.clone(),
+        size_bytes: input.journal.disk_size_bytes,
+    };
+    if identity.serial.is_none() && identity.model.is_none() && identity.size_bytes.is_none() {
+        return Err(
+            "partition journal has no staging-time disk identity; restage the partition plan before committing"
+                .to_string(),
+        );
+    }
+    commit_request_with_target_guard(input, |disk| {
+        crate::installer_guard::validate_target_disk_with_identity(disk, &identity)
+    })
 }
 
 fn commit_request_with_target_guard(
@@ -1421,6 +1563,11 @@ fn commit_request_with_target_guard(
     // check here, immediately before the first privileged disk probe or write.
     validate_target(&input.journal.disk)?;
     let _lock = crate::installer_guard::acquire_disk_lock(&input.journal.disk)?;
+    // M13: probe the disk's real logical sector size once, under the lock,
+    // and thread it into every journal operation. logical_sector_size fails
+    // closed unless the value is a sane power of two (512/1024/2048/4096);
+    // partition_end/alignment math in the disk plans needs the real size.
+    let sector_size = crate::installer_disk::logical_sector_size(&input.journal.disk)?;
     let current_parts = runtime_partition_records(&input.journal.disk)?;
     let (table_type, disk_size_bytes) = runtime_disk_metadata(&input.journal.disk)?;
     let errors = validate(&input.journal, &current_parts, &table_type, disk_size_bytes);
@@ -1446,6 +1593,14 @@ fn commit_request_with_target_guard(
     })?;
 
     let mut irreversible = false;
+    // NOTE: the manual commit path has no durable per-op markers. The `step`
+    // events emitted below are in-memory only: a crash mid-commit leaves no
+    // started/completed record of which op was in flight, only the fsync'd
+    // rollback markers (for reversible ops) and the partition-table backup
+    // taken above. The durable journal module owns per-op markers for the
+    // guided installer phases, but this path never opens one — wiring it in
+    // would need ESP discovery and mount before the first op, which does not
+    // exist in the partition-editor flow.
     for index in 0..input.journal.ops.len() {
         let kind = input.journal.ops[index].kind.clone();
         let target = value_string(&input.journal.ops[index].params, "partition");
@@ -1457,6 +1612,7 @@ fn commit_request_with_target_guard(
             &mut input.journal.ops[index],
             &journal_snapshot,
             &mut irreversible,
+            sector_size,
         ) {
             Ok(completed_target) => {
                 emit_event(
@@ -1465,21 +1621,52 @@ fn commit_request_with_target_guard(
             }
             Err(error) => {
                 if !irreversible {
+                    // L7: the rollback below is itself not crash-safe, so
+                    // bracket it with fsync'd markers. A later rescue probe
+                    // can tell "rollback started but never completed" apart
+                    // from "rollback completed" or "no rollback attempted".
+                    let started_detail = format!("op {kind} on {target} failed: {error}");
+                    write_rollback_marker(
+                        directory.path(),
+                        &input.journal.disk,
+                        "started",
+                        &started_detail,
+                    );
                     if let Err(restore_error) =
                         run_disk_operation(installer_disk::DiskOperationInput::RestoreTable {
                             disk: input.journal.disk.clone(),
                             backup_path: backup_path.clone(),
                         })
                     {
+                        write_rollback_marker(
+                            directory.path(),
+                            &input.journal.disk,
+                            "completed",
+                            &format!("{started_detail}; partition-table rollback also failed: {restore_error}"),
+                        );
                         input.journal.irreversible_completed = true;
+                        // M12: the partition-table backup is the one recovery
+                        // artifact, and this is the path that needs it. Never
+                        // delete it here: persist the tempdir in place and
+                        // report the path so Rescue mode can find it. It lives
+                        // on tmpfs (/tmp), so it survives process death but
+                        // not reboot.
+                        let backup_dir = directory.keep();
                         return Ok(serde_json::json!({
                             "ok": false,
                             "irreversible": true,
                             "recovery_required": true,
+                            "backup_dir": backup_dir.to_string_lossy(),
                             "message": format!("{error}; partition-table rollback also failed: {restore_error}"),
                             "journal": input.journal,
                         }));
                     }
+                    write_rollback_marker(
+                        directory.path(),
+                        &input.journal.disk,
+                        "completed",
+                        &format!("{started_detail}; partition table restored"),
+                    );
                 }
                 input.journal.irreversible_completed = irreversible;
                 return Ok(serde_json::json!({
@@ -1824,25 +2011,51 @@ mod tests {
     #[test]
     fn assigning_existing_partition_to_efi_mountpoint_sets_esp_flag() {
         let partitions = HashMap::from([("/dev/sda1".to_string(), 1)]);
-        let operation = esp_flag_operation("/boot/efi", "/dev/sda1", "/dev/sda", &partitions)
-            .expect("EFI flag plan should be valid")
-            .expect("EFI assignment must set the ESP flag");
-        let plan = installer_disk::build_plan(operation).expect("ESP flag plan should validate");
-        assert!(plan
-            .argv
-            .windows(2)
-            .any(|pair| pair == ["set".to_string(), "1".to_string()]));
-        assert!(plan.argv.iter().any(|argument| argument == "esp"));
-        assert!(
-            esp_flag_operation("/home", "/dev/sda1", "/dev/sda", &partitions)
-                .expect("non-ESP assignment is valid")
-                .is_none()
-        );
-        assert!(
-            esp_flag_operation("/boot/efi/", "/dev/sda1", "/dev/sda", &partitions)
-                .expect("normalized EFI assignment is valid")
-                .is_some()
-        );
+        // build_plan now probes live hardware (L11 identity assertion), so
+        // unit tests assert on the constructed operation instead.
+        let operation = esp_flag_operation(
+            "/boot/efi",
+            "/dev/sda1",
+            "/dev/sda",
+            &partitions,
+            "12345678-1234-1234-1234-123456789abc".to_string(),
+        )
+        .expect("EFI flag plan should be valid")
+        .expect("EFI assignment must set the ESP flag");
+        match operation {
+            installer_disk::DiskOperationInput::SetPartitionFlag {
+                disk,
+                part_num,
+                flag,
+                enabled,
+                expected_partuuid,
+            } => {
+                assert_eq!(disk, "/dev/sda");
+                assert_eq!(part_num, 1);
+                assert_eq!(flag, "esp");
+                assert!(enabled);
+                assert_eq!(expected_partuuid, "12345678-1234-1234-1234-123456789abc");
+            }
+            other => panic!("expected SetPartitionFlag, got {other:?}"),
+        }
+        assert!(esp_flag_operation(
+            "/home",
+            "/dev/sda1",
+            "/dev/sda",
+            &partitions,
+            "12345678-1234-1234-1234-123456789abc".to_string(),
+        )
+        .expect("non-ESP assignment is valid")
+        .is_none());
+        assert!(esp_flag_operation(
+            "/boot/efi/",
+            "/dev/sda1",
+            "/dev/sda",
+            &partitions,
+            "12345678-1234-1234-1234-123456789abc".to_string(),
+        )
+        .expect("normalized EFI assignment is valid")
+        .is_some());
     }
 
     #[test]
@@ -1863,6 +2076,22 @@ mod tests {
         assert_eq!(journal.disk, "/dev/sda");
         assert!(journal.ops.is_empty());
         assert!(!journal.committed);
+    }
+
+    #[test]
+    fn partition_commit_fails_closed_without_staging_time_disk_identity() {
+        // M4: a journal with no captured identity (staging probe failed,
+        // or a hand-built payload) must fail closed, never fall back to
+        // the non-identity disk check.
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.disk_model = None;
+        journal.disk_serial = None;
+        journal.disk_size_bytes = None;
+        let error = commit_request(JournalCommitInput { journal }).unwrap_err();
+        assert!(
+            error.contains("no staging-time disk identity"),
+            "identity-less commit must fail closed, got: {error}"
+        );
     }
 
     #[test]
@@ -1958,7 +2187,16 @@ mod tests {
         let decoded: PartitionJournal = serde_json::from_str(&encoded).expect("journal parses");
         assert_eq!(decoded, journal);
         assert_eq!(decoded.root_partition.as_deref(), Some("/dev/sda2"));
-        journal.rollback_metadata();
+        // A committed journal cannot be rolled back.
+        assert!(journal.rollback_metadata().is_err());
+        assert!(journal.committed);
+    }
+
+    #[test]
+    fn rollback_clears_uncommitted_journal() {
+        let mut journal = PartitionJournal::new("/dev/sda").expect("valid disk path");
+        journal.add_op("create", json!({"size_bytes": 34359738368_u64}));
+        journal.rollback_metadata().expect("uncommitted rollback");
         assert!(!journal.committed);
         assert!(journal.ops.is_empty());
         assert!(journal.root_partition.is_none());
@@ -1990,6 +2228,9 @@ mod tests {
                 committed: false,
                 root_partition: None,
                 irreversible_completed: false,
+                disk_model: None,
+                disk_serial: None,
+                disk_size_bytes: None,
             },
             current_parts: Vec::new(),
             table_type: "gpt".to_string(),

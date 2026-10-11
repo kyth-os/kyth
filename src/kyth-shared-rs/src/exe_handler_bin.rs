@@ -9,6 +9,8 @@
 //! recorded runner with no UI. Anything else forwards to the Hub dialog.
 
 use std::env;
+use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::AsRawFd;
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
 
@@ -49,12 +51,32 @@ fn regular_path(raw: &str) -> Result<PathBuf, String> {
 
 /// Trusted fast path: exact-content match launches with no dialog.
 /// Returns None when the file is not trusted (caller forwards to Hub).
+///
+/// TOCTOU-hardened: the file is opened once with O_NOFOLLOW, hashed through
+/// the open descriptor, and executed via `/proc/self/fd/N`. The path is never
+/// re-opened, so a swap/replace/delete of the path between the trust lookup
+/// and launch cannot change the executed bytes. The `File` must stay alive
+/// until the child has spawned (its `/proc/self/fd/N` reference keeps the
+/// description open in the child even afterwards).
 fn try_trusted_launch(path: &std::path::Path) -> Option<ExitCode> {
-    let digest = exe_trust::full_sha256(path)?;
+    let file = open_nofollow(path)?;
+    let digest = exe_trust::full_sha256_file(&file)?;
     let runner = exe_trust::trusted_runner(&home_dir(), &digest)?;
-    match runner.as_str() {
+    let fd_path = fd_exec_path(&file)?;
+    let result = match runner.as_str() {
         exe_trust::RUNNER_BOTTLES => {
-            let request = windows_installer::inspect_installer(path).ok()?;
+            let request = windows_installer::inspect_installer(&fd_path).ok()?;
+            // The Bottles lane stages a copy by path and re-hashes it, but
+            // that re-hash reads the path, not our descriptor: confirm
+            // inspection saw the same bytes we hashed, closing the swap
+            // window between the trust lookup and inspection. Anything
+            // else falls back to the Hub dialog (fail closed).
+            if request.sha256 != digest {
+                eprintln!(
+                    "kyth-exe-handler: installer changed after trust check; falling back to dialog"
+                );
+                return None;
+            }
             match windows_installer::launch_in_bottles(&request, home_dir()) {
                 Ok(_) => Some(ExitCode::SUCCESS),
                 Err(error) => {
@@ -66,7 +88,7 @@ fn try_trusted_launch(path: &std::path::Path) -> Option<ExitCode> {
                 }
             }
         }
-        exe_trust::RUNNER_UMU => match windows_installer::launch_in_umu(path) {
+        exe_trust::RUNNER_UMU => match windows_installer::launch_in_umu(&fd_path) {
             Ok(_) => Some(ExitCode::SUCCESS),
             Err(error) => {
                 eprintln!("kyth-exe-handler: trusted umu launch failed: {error}");
@@ -74,7 +96,38 @@ fn try_trusted_launch(path: &std::path::Path) -> Option<ExitCode> {
             }
         },
         _ => None,
+    };
+    // Keep the descriptor open across the launch above; the drop order is
+    // now explicit rather than relying on NLL.
+    drop(file);
+    result
+}
+
+/// Open a file with O_NOFOLLOW: a symlink swapped in after `regular_path`'s
+/// canonicalization fails the open instead of redirecting it.
+fn open_nofollow(path: &std::path::Path) -> Option<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .ok()
+}
+
+/// Clear CLOEXEC on `file`'s descriptor and return its `/proc/self/fd/N`
+/// path, suitable for handing to a child process. Returns None (fail closed)
+/// if the descriptor flags cannot be changed.
+fn fd_exec_path(file: &std::fs::File) -> Option<PathBuf> {
+    let fd = file.as_raw_fd();
+    // SAFETY: fcntl F_GETFD/F_SETFD on our own open descriptor; no pointers
+    // cross the unsafe boundary.
+    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
+    if flags < 0 {
+        return None;
     }
+    if unsafe { libc::fcntl(fd, libc::F_SETFD, flags & !libc::FD_CLOEXEC) } < 0 {
+        return None;
+    }
+    Some(PathBuf::from(format!("/proc/self/fd/{fd}")))
 }
 
 fn forward_to_hub(path: &str) -> ExitCode {

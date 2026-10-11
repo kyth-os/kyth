@@ -21,9 +21,26 @@ pub(crate) fn acquire_disk_lock(disk: &str) -> Result<File, String> {
         .custom_flags(libc::O_CLOEXEC)
         .open(&disk)
         .map_err(|error| format!("could not lock {disk} for exclusive use: {error}"))?;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0
-        && std::env::var("KYTH_INSTALL_ALLOW_NO_DISK_LOCK").as_deref() != Ok("1")
-    {
+    let lock_failed = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0;
+    // Dev-only escape hatch: in debug builds, KYTH_INSTALL_ALLOW_NO_DISK_LOCK=1
+    // skips the exclusive disk lock. Release builds ignore the env var
+    // entirely — a failed flock is always an error there, so a leaked
+    // developer shell or ambient environment can never silently disable
+    // exclusive disk access during destructive operations.
+    #[cfg(debug_assertions)]
+    let bypass_allowed = std::env::var("KYTH_INSTALL_ALLOW_NO_DISK_LOCK").as_deref() == Ok("1");
+    #[cfg(not(debug_assertions))]
+    let bypass_allowed = false;
+    if lock_failed && bypass_allowed {
+        // SECURITY: Loud warning when the disk-lock bypass engages. This is a
+        // dev escape hatch; if it ever leaks into production, destructive disk
+        // ops run without exclusive access.
+        eprintln!(
+            "WARNING: KYTH_INSTALL_ALLOW_NO_DISK_LOCK=1 bypassed exclusive disk lock for {disk}. \
+             Destructive operations will proceed without protection against concurrent access."
+        );
+    }
+    if lock_failed && !bypass_allowed {
         return Err(format!(
             "another process is using {disk}; close other installers and retry"
         ));
@@ -107,7 +124,28 @@ fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
 
 /// Re-probe all disk ancestry and live mounts immediately before mutation.
 pub(crate) fn validate_target_disk(disk: &str) -> Result<(), String> {
+    validate_target_disk_inner(disk, None)
+}
+
+/// Re-probe disk ancestry, live mounts, and the selection-time disk
+/// identity immediately before mutation. The executor calls this variant
+/// once the storage plan carries the expected disk identity, so a swapped
+/// or re-enumerated disk fails closed instead of being written to.
+pub(crate) fn validate_target_disk_with_identity(
+    disk: &str,
+    expected: &installer_storage::DiskIdentity,
+) -> Result<(), String> {
+    validate_target_disk_inner(disk, Some(expected))
+}
+
+fn validate_target_disk_inner(
+    disk: &str,
+    expected: Option<&installer_storage::DiskIdentity>,
+) -> Result<(), String> {
     let disk = normalized(disk)?;
+    if let Some(expected) = expected {
+        installer_storage::verify_disk_identity(&disk, expected)?;
+    }
     let disk_snapshot = command_output(
         "/usr/bin/lsblk",
         &[

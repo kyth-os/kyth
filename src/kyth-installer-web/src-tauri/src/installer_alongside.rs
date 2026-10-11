@@ -33,18 +33,12 @@ fn safe_path(raw: &str, label: &str) -> Result<PathBuf, String> {
     Ok(PathBuf::from(value))
 }
 
+/// Device validation reuses the shared installer device gate
+/// (`installer_plan::normalize_device_path`): the local check used to accept
+/// arbitrarily nested `/dev/foo/bar` paths.
 fn safe_device(raw: &str) -> Result<String, String> {
-    let value = raw.trim();
-    if !value.starts_with("/dev/")
-        || value.contains("..")
-        || value.contains("//")
-        || !value
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'/' | b'_' | b'-' | b'.'))
-    {
-        return Err("target device must be a safe /dev path".into());
-    }
-    Ok(value.to_owned())
+    crate::installer_plan::normalize_device_path(raw)
+        .ok_or_else(|| "target device must be a safe /dev path".into())
 }
 
 pub(crate) fn validate(input: &AlongsideHomeInput) -> Result<(PathBuf, String, PathBuf), String> {
@@ -182,15 +176,19 @@ mod tests {
 
     #[test]
     fn rejects_unsafe_alongside_inputs() {
-        let base = AlongsideHomeInput {
-            config_root: "/mnt/target".into(),
-            target_device: "/dev/sda3".into(),
-            fstab_path: "/mnt/target/etc/fstab".into(),
-        };
-        assert!(validate(&AlongsideHomeInput {
-            target_device: "/dev/sda;id".into(),
-            ..base
-        })
-        .is_err());
+        for target_device in [
+            "/dev/sda;id",
+            // The old local gate accepted arbitrarily nested device paths.
+            "/dev/foo/bar",
+            "/dev/../etc",
+            "/dev/",
+        ] {
+            let base = AlongsideHomeInput {
+                config_root: "/mnt/target".into(),
+                target_device: target_device.into(),
+                fstab_path: "/mnt/target/etc/fstab".into(),
+            };
+            assert!(validate(&base).is_err(), "{target_device} must be rejected");
+        }
     }
 }

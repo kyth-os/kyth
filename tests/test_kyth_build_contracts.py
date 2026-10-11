@@ -111,6 +111,55 @@ class ShippedCommandContracts(unittest.TestCase):
         self.assertIn("hub", keywords)
         self.assertNotIn("pulse", keywords)
 
+    def test_hub_runtime_window_icons_use_the_launcher_branding(self):
+        import hashlib
+        import json
+
+        tauri_dir = ROOT / "src/kyth-hub-web/src-tauri"
+        config = json.loads((tauri_dir / "tauri.conf.json").read_text(encoding="utf-8"))
+        expected_icons = {
+            "icons/32x32.png": "da17e2678a1be6e0c73ef2b2df83374d5361a94a2d8ac17668265edf19b1292d",
+            "icons/128x128.png": "f928da798928fc24282f6ee9f7e03d6551706093da05963e7c699c1f5c574cc9",
+            "icons/128x128@2x.png": "3799230a74b60a309ab7a75a7099a09214c915a8c1b352836bd3a3fdd47a182e",
+            "icons/icon.png": "ab0db7b8974e9d4f0b4dc2f867ed877ff5e4d805dc149870787161e630b6ff02",
+        }
+        self.assertEqual(set(config["bundle"]["icon"]), set(expected_icons))
+        for relative_path, expected_digest in expected_icons.items():
+            with self.subTest(icon=relative_path):
+                actual = hashlib.sha256((tauri_dir / relative_path).read_bytes()).hexdigest()
+                self.assertEqual(
+                    actual,
+                    expected_digest,
+                    "Hub's runtime window icon must match the Kyth launcher art",
+                )
+
+    def test_hub_wayland_app_id_resolves_to_hidden_desktop_entry(self):
+        import json
+
+        tauri_conf = ROOT / "src/kyth-hub-web/src-tauri/tauri.conf.json"
+        app_id = json.loads(tauri_conf.read_text(encoding="utf-8"))["identifier"]
+        alias = ROOT / "src/kyth-hub-web/src/data" / f"{app_id}.desktop"
+        self.assertTrue(alias.is_file(), "ship a desktop entry named for the Wayland app-id")
+
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        parser.read(alias, encoding="utf-8")
+        entry = parser["Desktop Entry"]
+        self.assertEqual(entry.get("nodisplay", "").lower(), "true")
+        main = configparser.ConfigParser(interpolation=None, strict=False)
+        main.read(ROOT / "src/kyth-hub-web/src/data/kyth-welcome.desktop", encoding="utf-8")
+        self.assertEqual(entry["exec"], main["Desktop Entry"]["exec"])
+        self.assertEqual(entry["icon"], main["Desktop Entry"]["icon"])
+        self.assertEqual(entry["startupwmclass"], app_id)
+
+        installer = (
+            BUILD_FILES / "scripts/branding/23-kyth-helper-ctx-installs.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            f'${{_hub_data_src}}/{app_id}.desktop', installer,
+            "install the Wayland app-id alias beside the visible launcher",
+        )
+        self.assertIn(f"/usr/share/applications/{app_id}.desktop", installer)
+
     def test_hub_desktop_entries_match_tauri_app_id(self):
         # Regression pin: Tauri defaults enableGTKAppId to false, which leaves
         # the Hub without its own GTK/Wayland app-id. Enable it and keep every

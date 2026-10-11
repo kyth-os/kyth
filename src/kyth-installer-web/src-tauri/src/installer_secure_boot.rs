@@ -9,6 +9,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
+use zeroize::Zeroizing;
 
 const MOKUTIL: &str = "/usr/bin/mokutil";
 const CERTIFICATE: &str = "/usr/share/kyth/secureboot/kyth-secureboot.der";
@@ -49,7 +50,10 @@ pub(crate) struct SecureBootPlan {
 /// into a command-line argument, an event, or an error message. The helper
 /// intentionally owns the certificate and mokutil paths so callers cannot
 /// turn this operation into an arbitrary file or process bridge.
-#[derive(Clone, Debug, Deserialize)]
+///
+/// No Debug impl on purpose: the MOK password must never be formattable
+/// into a log line, event, or diagnostic message.
+#[derive(Clone, Deserialize)]
 pub(crate) struct SecureBootStageInput {
     #[serde(default = "default_kernel")]
     pub kernel: String,
@@ -149,19 +153,22 @@ pub(crate) fn classify_import(exit_code: i32) -> &'static str {
     }
 }
 
-fn command_text(args: &[&str]) -> Result<String, String> {
-    let output = Command::new(MOKUTIL)
-        .args(args)
-        .output()
-        .map_err(|error| format!("could not inspect Secure Boot state: {error}"))?;
-    if !output.status.success() {
-        return Err("Secure Boot probe failed".to_string());
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+fn command_text(args: &[&str], cancel_requested: impl Fn() -> bool) -> Result<String, String> {
+    // M11: the mokutil probes were unbounded; only the import had MOK_TIMEOUT.
+    // A wedged mokutil must not hang the worker, so bound every probe with
+    // the shared cancel-checked helper.
+    let mut command = Command::new(MOKUTIL);
+    command.args(args);
+    crate::installer_stream::run_output_timeout(
+        &mut command,
+        cancel_requested,
+        Duration::from_secs(30),
+        "Secure Boot probe",
+    )
 }
 
-fn contains_key(args: &[&str]) -> bool {
-    command_text(args)
+fn contains_key(args: &[&str], cancel_requested: impl Fn() -> bool) -> bool {
+    command_text(args, cancel_requested)
         .map(|output| output.contains("KythOS Secure Boot"))
         .unwrap_or(false)
 }
@@ -176,8 +183,8 @@ fn parse_secure_boot_state(output: &str) -> &'static str {
     }
 }
 
-fn secure_boot_state() -> &'static str {
-    command_text(&["--sb-state"])
+fn secure_boot_state(cancel_requested: impl Fn() -> bool) -> &'static str {
+    command_text(&["--sb-state"], cancel_requested)
         .map(|output| parse_secure_boot_state(&output))
         .unwrap_or("unknown")
 }
@@ -194,7 +201,11 @@ fn stage_certificate(
         .spawn()
         .map_err(|error| format!("could not stage Secure Boot enrollment: {error}"))?;
     if let Some(mut stdin) = child.stdin.take() {
-        if let Err(error) = stdin.write_all(format!("{password}\n").as_bytes()) {
+        // Wrap the formatted transient immediately: a bare `format!` String
+        // would leave a non-zeroized copy of the password on the heap.
+        // `staged` lives until after the write below completes.
+        let staged: Zeroizing<String> = Zeroizing::new(format!("{password}\n"));
+        if let Err(error) = stdin.write_all(staged.as_bytes()) {
             let _ = child.kill();
             let _ = child.wait();
             return Err(format!(
@@ -260,13 +271,13 @@ pub(crate) fn stage_with_cancellation(
     }
     let certificate_present = Path::new(CERTIFICATE).is_file();
     let mokutil_present = Path::new(MOKUTIL).is_file();
-    let state = secure_boot_state();
-    let enrolled = if mokutil_present && contains_key(&["--list-enrolled"]) {
+    let state = secure_boot_state(&cancel_requested);
+    let enrolled = if mokutil_present && contains_key(&["--list-enrolled"], &cancel_requested) {
         "yes"
     } else {
         "no"
     };
-    let pending = if mokutil_present && contains_key(&["--list-new"]) {
+    let pending = if mokutil_present && contains_key(&["--list-new"], &cancel_requested) {
         "yes"
     } else {
         "no"
@@ -283,8 +294,13 @@ pub(crate) fn stage_with_cancellation(
     if plan.action != "import-certificate" {
         return Ok(plan);
     }
-    validate_stage_password(&input.password)?;
-    match stage_certificate(&input.password, cancel_requested)? {
+    // The password lives in a Zeroizing wrapper from here on: the heap
+    // allocation is overwritten when it drops, so the secret does not
+    // linger in freed memory after staging (or after a validation
+    // failure). The executor-side copy is wrapped by the other worker.
+    let password = Zeroizing::new(input.password);
+    validate_stage_password(&password)?;
+    match stage_certificate(&password, cancel_requested)? {
         "staged" => Ok(SecureBootPlan {
             state: "staged".to_string(),
             action: "import-certificate".to_string(),

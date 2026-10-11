@@ -12,6 +12,19 @@ from ..config import _IS_LIVE_SESSION
 
 _logger = logging.getLogger(__name__)
 
+class LiveUsbProbeFailed(RuntimeError):
+    """The live boot media was found but its disk could not be resolved.
+
+    Raised by :func:`_get_live_usb_disk` only in a live session, when a
+    ``/run/initramfs/live`` (or ``/run/initramfs/iso``) mount source exists
+    but every lsblk lookup failed to map it to a disk. Every other
+    protection layer depends on the same lsblk tooling, so a disk list
+    built in this state could offer the live USB as a wipe target.
+
+    Callers must fail closed — offer no install targets — rather than
+    presenting a disk list that may include the unprotected boot media.
+    """
+
 def _running_system_disk() -> str:
     # Returns the raw mount SOURCE for "/" (which may be a partition, an LVM
     # logical volume, or a LUKS dm-crypt mapping) — callers resolve this up
@@ -121,6 +134,13 @@ def _blkid_device(match: str) -> str:
 
 
 def _get_live_usb_disk() -> Optional[str]:
+    # Collect every live-media source we can see but cannot resolve, then
+    # decide once both paths have been tried: a live session whose boot
+    # media is mounted-but-unresolvable must fail closed (raise
+    # LiveUsbProbeFailed) rather than return None and leave the USB
+    # unprotected. Outside a live session the old warn-and-None behavior
+    # stands — the running-disk protection covers the installed case.
+    unresolved: list[str] = []
     for path in ("/run/initramfs/live", "/run/initramfs/iso"):
         source = ""
         try:
@@ -161,6 +181,13 @@ def _get_live_usb_disk() -> Optional[str]:
             _logger.debug("_get_live_usb_disk: findmnt probe of %s failed", path, exc_info=True)
         if source:
             _logger.warning("_get_live_usb_disk: all lsblk fallbacks failed for %s — live USB may be exposed as wipe candidate", source)
+            unresolved.append(f"{path} (source {source})")
+    if unresolved and _IS_LIVE_SESSION:
+        raise LiveUsbProbeFailed(
+            "Live boot media is mounted but its disk could not be resolved "
+            f"({'; '.join(unresolved)}). No install target is offered until "
+            "discovery recovers."
+        )
     return None
 
 
