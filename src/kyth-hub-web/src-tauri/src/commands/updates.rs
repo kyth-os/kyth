@@ -655,15 +655,20 @@ pub(crate) struct JustRecipeResponse {
 }
 
 #[tauri::command]
-pub(crate) fn just_list() -> Vec<JustRecipeResponse> {
-    kyth_shared::system::just::just_list()
-        .into_iter()
-        .map(|recipe| JustRecipeResponse {
-            name: recipe.name,
-            params: recipe.params,
-            comment: recipe.comment,
-        })
-        .collect()
+pub(crate) async fn just_list() -> Vec<JustRecipeResponse> {
+    // P6: `just --list` is bounded at 10 s; keep it off the async workers.
+    tauri::async_runtime::spawn_blocking(|| {
+        kyth_shared::system::just::just_list()
+            .into_iter()
+            .map(|recipe| JustRecipeResponse {
+                name: recipe.name,
+                params: recipe.params,
+                comment: recipe.comment,
+            })
+            .collect::<Vec<_>>()
+    })
+    .await
+    .unwrap_or_default()
 }
 
 fn just_output_detail(recipe: &str, output: &std::process::Output) -> String {

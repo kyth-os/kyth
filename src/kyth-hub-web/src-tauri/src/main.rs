@@ -336,9 +336,17 @@ struct MesaOverlayResponse {
     detail: String,
 }
 #[tauri::command]
-fn mesa_overlay_dry_run() -> MesaOverlayResponse {
-    let (ok, detail) = kyth_shared::system::mesa_version::mesa_overlay_dry_run();
-    MesaOverlayResponse { ok, detail }
+async fn mesa_overlay_dry_run() -> MesaOverlayResponse {
+    // P6: the dnf5 probe is bounded at 10 s; keep it off the async workers.
+    tauri::async_runtime::spawn_blocking(|| {
+        let (ok, detail) = kyth_shared::system::mesa_version::mesa_overlay_dry_run();
+        MesaOverlayResponse { ok, detail }
+    })
+    .await
+    .unwrap_or(MesaOverlayResponse {
+        ok: false,
+        detail: "Mesa overlay dry-run did not complete.".to_string(),
+    })
 }
 
 #[derive(serde::Serialize)]
@@ -347,7 +355,7 @@ struct SmbBrowseResponse {
     detail: String,
 }
 #[tauri::command]
-fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
+async fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
     if let Some(host) = host.as_deref() {
         if !kyth_shared::system::smb::is_valid_smb_host(host) {
             return SmbBrowseResponse {
@@ -356,8 +364,17 @@ fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
             };
         }
     }
-    let (ok, detail) = kyth_shared::system::smb::smb_browse_dry_run(host.as_deref());
-    SmbBrowseResponse { ok, detail }
+    // P6: the network browse is bounded at 10 s; keep it off the async
+    // runtime workers.
+    tauri::async_runtime::spawn_blocking(move || {
+        let (ok, detail) = kyth_shared::system::smb::smb_browse_dry_run(host.as_deref());
+        SmbBrowseResponse { ok, detail }
+    })
+    .await
+    .unwrap_or(SmbBrowseResponse {
+        ok: false,
+        detail: "SMB browse did not complete.".to_string(),
+    })
 }
 #[tauri::command]
 fn smb_mount(share: String) -> Result<String, String> {
@@ -1332,8 +1349,12 @@ struct DeploymentInfoResponse {
 }
 
 #[tauri::command]
-fn gaming_library() -> Vec<kyth_shared::system::gaming_library::LauncherEntry> {
-    kyth_shared::system::gaming_library::gaming_library_scan()
+async fn gaming_library() -> Vec<kyth_shared::system::gaming_library::LauncherEntry> {
+    // P6: the library scan walks Steam/Heroic/Lutris/Bottles directories and
+    // must not sit on an async runtime worker while it does.
+    tauri::async_runtime::spawn_blocking(kyth_shared::system::gaming_library::gaming_library_scan)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1347,8 +1368,16 @@ fn familiar_apps() -> Vec<kyth_shared::system::software_catalog::FamiliarApp> {
 }
 
 #[tauri::command]
-fn appstream_search(query: String) -> Vec<kyth_shared::system::software_catalog::AppStreamApp> {
-    kyth_shared::system::software_catalog::appstream_search(&query)
+async fn appstream_search(
+    query: String,
+) -> Vec<kyth_shared::system::software_catalog::AppStreamApp> {
+    // P6: `flatpak search` is bounded at 10 s; keep that wait off the async
+    // runtime workers.
+    tauri::async_runtime::spawn_blocking(move || {
+        kyth_shared::system::software_catalog::appstream_search(&query)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1619,7 +1648,7 @@ fn anti_cheat_table() -> Vec<kyth_shared::system::gaming_compat::AntiCheatEntry>
     kyth_shared::system::gaming_compat::anti_cheat_table()
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct CompatibilityGameResponse {
     name: String,
     anticheat: String,
@@ -1641,10 +1670,17 @@ struct CompatibilityBundle {
 /// the frontend only owns filtering and presentation.
 #[tauri::command]
 fn compatibility_games() -> Vec<CompatibilityGameResponse> {
-    const BUNDLED: &str = include_str!("../../src/data/compat_games.json");
-    serde_json::from_str::<CompatibilityBundle>(BUNDLED)
-        .map(|bundle| bundle.games)
-        .unwrap_or_default()
+    // Cheap P6 cleanup: parse the bundled JSON once per process instead of
+    // on every invoke.
+    static PARSED: std::sync::OnceLock<Vec<CompatibilityGameResponse>> = std::sync::OnceLock::new();
+    PARSED
+        .get_or_init(|| {
+            const BUNDLED: &str = include_str!("../../src/data/compat_games.json");
+            serde_json::from_str::<CompatibilityBundle>(BUNDLED)
+                .map(|bundle| bundle.games)
+                .unwrap_or_default()
+        })
+        .clone()
 }
 
 #[tauri::command]

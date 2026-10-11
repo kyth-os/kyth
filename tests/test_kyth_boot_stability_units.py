@@ -627,8 +627,12 @@ class BootStabilityUnitTests(unittest.TestCase):
         )
         self.assertIn("Wants=network-online.target kyth-flathub-setup.service", body)
         self.assertNotIn("Requires=network-online.target", body)
-        self.assertIn("ExecCondition=", body)
-        self.assertIn("kyth-runtime flathub-setup", body)
+        # P5: the Steam install must not hold up the boot milestone, and the
+        # redundant flathub-setup ExecCondition is gone — the binary itself
+        # fails soft ("will retry next boot") when Flathub is absent.
+        self.assertIn("WantedBy=graphical.target", body)
+        self.assertNotIn("WantedBy=multi-user.target", body)
+        self.assertNotIn("ExecCondition=", body)
         self.assertIn("will retry next boot", body)
         self.assertNotIn("ExecStartPost=/bin/touch", body)
 
