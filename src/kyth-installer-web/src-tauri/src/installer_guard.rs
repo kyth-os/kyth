@@ -81,32 +81,6 @@ pub(crate) fn validate_target_snapshots(
     Ok(())
 }
 
-fn findmnt_sources(path: &str, recursive: bool) -> Result<Vec<String>, String> {
-    let mut args = Vec::with_capacity(5);
-    if recursive {
-        args.push("-R");
-    }
-    args.extend(["-n", "-o", "SOURCE", path]);
-    let output = std::process::Command::new("/usr/bin/findmnt")
-        .args(args)
-        .output()
-        .map_err(|error| format!("could not run findmnt: {error}"))?;
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(format!(
-            "findmnt failed with exit code {}: {}",
-            output.status.code().unwrap_or(1),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8(output.stdout)
-        .map_err(|_| "findmnt returned non-UTF-8 output".to_string())?
-        .lines()
-        .map(str::trim)
-        .filter(|source| source.starts_with("/dev/"))
-        .map(str::to_string)
-        .collect())
-}
-
 fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
     let output = std::process::Command::new(program)
         .args(args)
@@ -166,20 +140,13 @@ fn validate_target_disk_inner(
             "NAME,PKNAME,TYPE",
         ],
     )?;
-    let mut protected_sources = Vec::new();
-    for mount in [
-        "/",
-        "/boot",
-        "/boot/efi",
-        "/sysroot",
-        "/run/initramfs/live",
-        "/run/initramfs/iso",
-    ] {
-        protected_sources.extend(findmnt_sources(mount, false)?);
-    }
-    protected_sources.extend(findmnt_sources("/run/initramfs", true)?);
-    protected_sources.extend(findmnt_sources("/run/media", true)?);
-    let current_source = findmnt_sources("/", false)?.into_iter().next();
+    // P8: one batched findmnt call replaces nine sequential per-path probes.
+    let mounts = installer_storage::MountTable::parse(&command_output(
+        "/usr/bin/findmnt",
+        &["--json", "-o", "TARGET,SOURCE"],
+    )?)?;
+    let protected_sources = mounts.protected_sources();
+    let current_source = mounts.current_source();
     validate_target_snapshots(
         &disk_snapshot,
         &ancestry_snapshot,

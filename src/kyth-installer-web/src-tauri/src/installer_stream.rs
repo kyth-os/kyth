@@ -26,6 +26,14 @@ const STREAM_READ_CHUNK: usize = 64 * 1024;
 const STREAM_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const MAX_INSTALLER_LOG_BYTES: u64 = 1024 * 1024;
 const DEFAULT_OPERATION_TIMEOUT: Duration = Duration::from_secs(4 * 60 * 60);
+/// Warn once after this long without any child output. The operation may be
+/// stalled (e.g. a wedged image download); surfacing it early beats waiting
+/// for the absolute timeout.
+const OPERATION_STALL_WARN_AFTER: Duration = Duration::from_secs(10 * 60);
+/// Kill the child after this long with zero output bytes. Every healthy
+/// installer helper (bootc, mkfs, sgdisk, ntfsresize) streams progress while
+/// it works; a fully silent child is wedged, not slow.
+const OPERATION_STALL_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 fn append_installer_log_at(path: &std::path::Path, line: &str) {
     let Ok(mut file) = OpenOptions::new()
@@ -274,6 +282,7 @@ fn run_child(
     }
     let mut buffer = [0u8; STREAM_READ_CHUNK];
     let mut output_closed = false;
+    let mut stall_warned = false;
     loop {
         if cancel_requested() {
             kill_process_group(child);
@@ -282,12 +291,36 @@ fn run_child(
                     .to_string(),
             );
         }
-        if started.elapsed() >= timeout {
+        let elapsed = started.elapsed();
+        if elapsed >= timeout {
             kill_process_group(child);
             return Err(format!(
                 "Command timed out after {} seconds",
                 timeout.as_secs()
             ));
+        }
+        // P14: wire the model's stall watchdog into the executor loop. The
+        // absolute timeout above only bounds total runtime; a download that
+        // wedges 5 minutes in would otherwise hang silently for hours.
+        let elapsed_secs = elapsed.as_secs();
+        if !stall_warned && model.idle_seconds(elapsed_secs) >= OPERATION_STALL_WARN_AFTER.as_secs()
+        {
+            stall_warned = true;
+            let warning = format!(
+                "warning: no installer output for {} minutes; the operation may be stalled",
+                OPERATION_STALL_WARN_AFTER.as_secs() / 60
+            );
+            append_installer_log(&warning);
+            println!("{warning}");
+        }
+        if let Some(error) = model.timeout_error(
+            elapsed_secs,
+            OPERATION_STALL_TIMEOUT.as_secs(),
+            u64::MAX,
+            None,
+        ) {
+            kill_process_group(child);
+            return Err(error);
         }
         if !output_closed {
             match output.read(&mut buffer) {
@@ -456,6 +489,13 @@ impl StreamingCommandModel {
 
     pub(crate) fn cancellation_requested(&self) -> bool {
         self.cancelled
+    }
+
+    /// Seconds since the child last produced any stdout bytes. The
+    /// executor's stall watchdog uses this to detect a wedged child that
+    /// neither exits nor emits progress.
+    pub(crate) fn idle_seconds(&self, now: u64) -> u64 {
+        now.saturating_sub(self.last_activity)
     }
 
     pub(crate) fn observe_network(&mut self, now: u64, rx_bytes: u64, total_bytes: u64) {
@@ -747,5 +787,27 @@ mod tests {
             .timeout_error(221, 20, 100, Some(200))
             .unwrap()
             .contains("output"));
+    }
+
+    #[test]
+    fn stall_watchdog_fires_on_silent_child_and_resets_on_output() {
+        // P14: the executor loop wires the model's io-stall clock into
+        // long-running children. A child that never emits a byte must be
+        // detected; any output resets the clock.
+        let mut model = StreamingCommandModel::new(0, 0);
+        assert_eq!(model.idle_seconds(1799), 1799);
+        assert!(model
+            .timeout_error(1799, OPERATION_STALL_TIMEOUT.as_secs(), u64::MAX, None)
+            .is_none());
+        let error = model
+            .timeout_error(1801, OPERATION_STALL_TIMEOUT.as_secs(), u64::MAX, None)
+            .expect("stall watchdog must fire on a silent child");
+        assert!(error.contains("no output"), "{error}");
+        // A single progress line resets the watchdog.
+        model.feed(b"progress\n", 1801);
+        assert_eq!(model.idle_seconds(1801), 0);
+        assert!(model
+            .timeout_error(3599, OPERATION_STALL_TIMEOUT.as_secs(), u64::MAX, None)
+            .is_none());
     }
 }

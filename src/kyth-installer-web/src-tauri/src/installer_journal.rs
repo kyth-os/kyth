@@ -10,6 +10,7 @@ use std::io::Write;
 use std::os::unix::process::CommandExt;
 use std::path::Path;
 use std::process::{Command, Stdio};
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use crate::installer_disk;
@@ -1006,6 +1007,47 @@ fn runtime_lsblk(disk: &str) -> Result<Value, String> {
         .map_err(|error| format!("invalid lsblk snapshot for {disk}: {error}"))
 }
 
+/// Manual partition staging validates every op against a disk snapshot, so
+/// staging several ops used to re-scan per op (P16). Cache the lsblk
+/// snapshot briefly: staging never mutates the disk, and commits
+/// invalidate. `runtime_partitions` (used mid-commit to detect newly
+/// created partitions) intentionally stays uncached.
+const PARTITION_SNAPSHOT_TTL: Duration = Duration::from_secs(5);
+static PARTITION_SNAPSHOT_CACHE: OnceLock<Mutex<HashMap<String, (Instant, Value)>>> =
+    OnceLock::new();
+
+fn cached_runtime_lsblk(disk: &str) -> Result<Value, String> {
+    let disk =
+        normalize_device_path(disk).ok_or_else(|| "disk must be a safe device path".to_string())?;
+    let cache = PARTITION_SNAPSHOT_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    {
+        let guard = cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some((at, value)) = guard.get(&disk) {
+            if at.elapsed() < PARTITION_SNAPSHOT_TTL {
+                return Ok(value.clone());
+            }
+        }
+    }
+    let value = runtime_lsblk(&disk)?;
+    cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(disk.clone(), (Instant::now(), value.clone()));
+    Ok(value)
+}
+
+/// Drop cached partition snapshots after the disk was mutated.
+pub(crate) fn invalidate_partition_snapshot_cache() {
+    if let Some(cache) = PARTITION_SNAPSHOT_CACHE.get() {
+        cache
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
+    }
+}
+
 fn runtime_partition_records(disk: &str) -> Result<Vec<PartitionRecord>, String> {
     let disk =
         normalize_device_path(disk).ok_or_else(|| "disk must be a safe device path".to_string())?;
@@ -1024,14 +1066,14 @@ fn runtime_partition_records(disk: &str) -> Result<Vec<PartitionRecord>, String>
                 .parse::<u64>()
                 .map_err(|_| format!("blockdev returned an invalid sector size for {disk}"))
         })?;
-    let snapshot = runtime_lsblk(&disk)?;
+    let snapshot = cached_runtime_lsblk(&disk)?;
     installer_storage::parse_partitions(&snapshot.to_string(), sector_size)
 }
 
 fn runtime_disk_metadata(disk: &str) -> Result<(String, u64), String> {
     let disk =
         normalize_device_path(disk).ok_or_else(|| "disk must be a safe device path".to_string())?;
-    let snapshot = runtime_lsblk(&disk)?;
+    let snapshot = cached_runtime_lsblk(&disk)?;
     snapshot
         .get("blockdevices")
         .and_then(Value::as_array)
@@ -1563,6 +1605,9 @@ fn commit_request_with_target_guard(
     // check here, immediately before the first privileged disk probe or write.
     validate_target(&input.journal.disk)?;
     let _lock = crate::installer_guard::acquire_disk_lock(&input.journal.disk)?;
+    // P16: the pre-commit validation below must see the live disk, not a
+    // snapshot cached during staging.
+    invalidate_partition_snapshot_cache();
     // M13: probe the disk's real logical sector size once, under the lock,
     // and thread it into every journal operation. logical_sector_size fails
     // closed unless the value is a sane power of two (512/1024/2048/4096);
@@ -1620,6 +1665,9 @@ fn commit_request_with_target_guard(
                 )?;
             }
             Err(error) => {
+                // The disk may be partially mutated: drop cached snapshots
+                // so the next staging or commit re-probes.
+                invalidate_partition_snapshot_cache();
                 if !irreversible {
                     // L7: the rollback below is itself not crash-safe, so
                     // bracket it with fsync'd markers. A later rescue probe
@@ -1681,6 +1729,8 @@ fn commit_request_with_target_guard(
     input.journal.irreversible_completed = irreversible;
     input.journal.root_partition = root_partition(&input.journal);
     input.journal.committed = true;
+    // The disk was mutated: cached snapshots are stale from here on.
+    invalidate_partition_snapshot_cache();
     Ok(serde_json::json!({
         "ok": true,
         "root_partition": input.journal.root_partition,
@@ -2552,5 +2602,17 @@ mod tests {
                 assert!(errors.is_empty(), "{}: {errors:?}", case.name);
             }
         }
+    }
+
+    #[test]
+    fn partition_snapshot_cache_rejects_unsafe_paths_without_probing() {
+        // P16: normalization runs before any cache lookup or lsblk probe,
+        // so hostile paths fail without spawning anything.
+        assert!(cached_runtime_lsblk("/etc/passwd").is_err());
+        assert!(cached_runtime_lsblk("").is_err());
+        assert!(cached_runtime_lsblk("/dev/../etc/passwd").is_err());
+        // Invalidation is always safe, even with a cold cache.
+        invalidate_partition_snapshot_cache();
+        invalidate_partition_snapshot_cache();
     }
 }

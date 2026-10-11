@@ -5,6 +5,7 @@
 //! and the typed helper boundary. The Python installer tree is source-only
 //! compatibility material and never binds or serves the packaged socket.
 
+use std::collections::HashMap;
 use std::ffi::CString;
 use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
@@ -16,8 +17,9 @@ use std::process::{Child, Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::OnceLock;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use super::installer_job::{EventReplay, JobSnapshot, JobSupervisor, StartReceipt};
 use super::installer_job_executor::{NativeInstallRequest, NativePhaseExecutor};
@@ -560,6 +562,10 @@ impl NativeJournalRegistry {
                     super::installer_journal::JournalCommitInput { journal },
                 ) {
                     Ok(response) => {
+                        // The disk may have been mutated (or partially
+                        // mutated on failure): drop cached probes so the
+                        // next read re-probes.
+                        invalidate_storage_caches();
                         if response.get("ok").and_then(serde_json::Value::as_bool) == Some(true) {
                             if let Ok(committed) = serde_json::from_value::<
                                 super::installer_journal::PartitionJournal,
@@ -1365,29 +1371,92 @@ fn native_rescue_probe() -> serde_json::Value {
     probe
 }
 
-fn findmnt_sources(path: &str, recursive: bool) -> Result<Vec<String>, String> {
-    let mut args = Vec::with_capacity(5);
-    if recursive {
-        args.push("-R");
+/// Read-only storage probes are expensive (lsblk + blockdev + findmnt) and
+/// the UI polls them while the disk screen is open. Cache probe results
+/// briefly: staging operations never mutate the disk, so a short TTL is
+/// safe, and every mutating commit invalidates explicitly.
+const STORAGE_PROBE_TTL: Duration = Duration::from_secs(5);
+
+struct CachedDiskScan {
+    snapshot: String,
+    sector_size: u64,
+}
+
+static DISK_SCAN_CACHE: OnceLock<Mutex<HashMap<String, (Instant, CachedDiskScan)>>> =
+    OnceLock::new();
+static DISKS_RESPONSE_CACHE: OnceLock<Mutex<Option<(Instant, serde_json::Value)>>> =
+    OnceLock::new();
+
+fn lock_or_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+/// Shared lsblk + sector-size probe for one disk, cached briefly (P7): the
+/// partitions view and the free-space computation used to run the identical
+/// scan back to back.
+fn cached_disk_scan(disk: &str) -> Result<(String, u64), String> {
+    let cache = DISK_SCAN_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    {
+        let guard = lock_or_recover(cache);
+        if let Some((at, scan)) = guard.get(disk) {
+            if at.elapsed() < STORAGE_PROBE_TTL {
+                return Ok((scan.snapshot.clone(), scan.sector_size));
+            }
+        }
     }
-    args.extend(["-n", "-o", "SOURCE", path]);
-    let output = run_probe("/usr/bin/findmnt", &args)?;
-    // findmnt uses exit code 1 for a path with no matching mount. That is a
-    // normal result for optional live-media paths, unlike a probe failure.
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(format!(
-            "findmnt failed with exit code {}: {}",
-            output.status.code().unwrap_or(1),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
+    let args = storage_lsblk_args(Some(disk));
+    let snapshot = command_output(
+        "/usr/bin/lsblk",
+        &args.iter().map(String::as_str).collect::<Vec<_>>(),
+    )?;
+    let sector_size = command_output("/usr/bin/blockdev", &["--getss", disk])?
+        .trim()
+        .parse::<u64>()
+        .map_err(|_| "blockdev returned an invalid sector size".to_string())?;
+    let result = (snapshot.clone(), sector_size);
+    lock_or_recover(cache).insert(
+        disk.to_string(),
+        (
+            Instant::now(),
+            CachedDiskScan {
+                snapshot,
+                sector_size,
+            },
+        ),
+    );
+    Ok(result)
+}
+
+fn cached_disks_response() -> Option<serde_json::Value> {
+    let cache = DISKS_RESPONSE_CACHE.get_or_init(|| Mutex::new(None));
+    let guard = lock_or_recover(cache);
+    guard.as_ref().and_then(|(at, value)| {
+        if at.elapsed() < STORAGE_PROBE_TTL {
+            Some(value.clone())
+        } else {
+            None
+        }
+    })
+}
+
+fn store_disks_response(value: &serde_json::Value) {
+    let cache = DISKS_RESPONSE_CACHE.get_or_init(|| Mutex::new(None));
+    *lock_or_recover(cache) = Some((Instant::now(), value.clone()));
+}
+
+/// Drop all cached storage probes. Called after any operation that mutates
+/// partition tables so the next read re-probes instead of serving the
+/// pre-mutation view.
+fn invalidate_storage_caches() {
+    if let Some(cache) = DISK_SCAN_CACHE.get() {
+        lock_or_recover(cache).clear();
     }
-    Ok(String::from_utf8(output.stdout)
-        .map_err(|_| "findmnt returned non-UTF-8 output".to_string())?
-        .lines()
-        .map(str::trim)
-        .filter(|source| source.starts_with("/dev/"))
-        .map(str::to_string)
-        .collect())
+    if let Some(cache) = DISKS_RESPONSE_CACHE.get() {
+        *lock_or_recover(cache) = None;
+    }
+    super::installer_journal::invalidate_partition_snapshot_cache();
 }
 
 fn storage_lsblk_args(disk: Option<&str>) -> Vec<String> {
@@ -1431,6 +1500,12 @@ fn read_only_storage_route(
             |error| format!("could not serialize installer runtime: {error}"),
         )?)),
         "/api/disks" => {
+            // P8: the disk inventory is polled while the disk screen is
+            // open; serve the cached response briefly instead of
+            // re-probing on every poll.
+            if let Some(cached) = cached_disks_response() {
+                return Ok(Some(cached));
+            }
             let disk_snapshot = command_output(
                 "/usr/bin/lsblk",
                 &storage_lsblk_args(None)
@@ -1438,39 +1513,26 @@ fn read_only_storage_route(
                     .map(String::as_str)
                     .collect::<Vec<_>>(),
             )?;
-            let ancestry_snapshot = command_output(
-                "/usr/bin/lsblk",
-                &[
-                    "--json",
-                    "--bytes",
-                    "--paths",
-                    "--output",
-                    "NAME,PKNAME,TYPE",
-                ],
-            )?;
-            let mut protected_sources = Vec::new();
-            for mount in [
-                "/",
-                "/boot",
-                "/boot/efi",
-                "/sysroot",
-                "/run/initramfs/live",
-                "/run/initramfs/iso",
-            ] {
-                protected_sources.extend(findmnt_sources(mount, false)?);
-            }
-            protected_sources.extend(findmnt_sources("/run/initramfs", true)?);
-            protected_sources.extend(findmnt_sources("/run/media", true)?);
-            let current_source = findmnt_sources("/", false)?.into_iter().next();
+            // The full snapshot already carries NAME/PKNAME/TYPE, so it
+            // doubles as the ancestry snapshot: no second lsblk probe.
+            // P8: one batched findmnt call replaces nine sequential
+            // per-path probes.
+            let mounts = installer_storage::MountTable::parse(&command_output(
+                "/usr/bin/findmnt",
+                &["--json", "-o", "TARGET,SOURCE"],
+            )?)?;
+            let protected_sources = mounts.protected_sources();
+            let current_source = mounts.current_source();
             let records = installer_storage::runtime_disks_from_snapshots(
                 &disk_snapshot,
-                &ancestry_snapshot,
+                &disk_snapshot,
                 &protected_sources,
                 current_source.as_deref(),
             )?;
             let mut value = serde_json::to_value(records)
                 .map_err(|error| format!("could not serialize disk inventory: {error}"))?;
             add_display_sizes(&mut value);
+            store_disks_response(&value);
             Ok(Some(value))
         }
         "/api/partitions" => {
@@ -1479,15 +1541,9 @@ fn read_only_storage_route(
             };
             let disk = super::installer_plan::normalize_device_path(&disk)
                 .ok_or_else(|| "invalid disk query path".to_string())?;
-            let args = storage_lsblk_args(Some(&disk));
-            let snapshot = command_output(
-                "/usr/bin/lsblk",
-                &args.iter().map(String::as_str).collect::<Vec<_>>(),
-            )?;
-            let sector = command_output("/usr/bin/blockdev", &["--getss", &disk])?
-                .trim()
-                .parse::<u64>()
-                .map_err(|_| "blockdev returned an invalid sector size".to_string())?;
+            // P7: shares the cached scan with /api/free-space instead of
+            // re-running lsblk + blockdev.
+            let (snapshot, sector) = cached_disk_scan(&disk)?;
             let mut value =
                 serde_json::to_value(installer_storage::parse_partitions(&snapshot, sector)?)
                     .map_err(|error| format!("could not serialize partition inventory: {error}"))?;
@@ -1500,15 +1556,7 @@ fn read_only_storage_route(
             };
             let disk = super::installer_plan::normalize_device_path(&disk)
                 .ok_or_else(|| "invalid disk query path".to_string())?;
-            let args = storage_lsblk_args(Some(&disk));
-            let snapshot = command_output(
-                "/usr/bin/lsblk",
-                &args.iter().map(String::as_str).collect::<Vec<_>>(),
-            )?;
-            let sector = command_output("/usr/bin/blockdev", &["--getss", &disk])?
-                .trim()
-                .parse::<u64>()
-                .map_err(|_| "blockdev returned an invalid sector size".to_string())?;
+            let (snapshot, sector) = cached_disk_scan(&disk)?;
             let mut value =
                 serde_json::to_value(installer_storage::free_regions(&snapshot, &disk, sector)?)
                     .map_err(|error| {
@@ -2308,10 +2356,11 @@ pub fn run(args: &[String]) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        header_count, json_status, merge_report_state, native_executor_from_start,
-        native_pending_request, native_request_from_start, normalize_start_request, options,
-        query_value, read_request_with_timeout, read_session_token, route_allowed, tokens_equal,
-        NativeJournalRegistry,
+        cached_disks_response, header_count, invalidate_storage_caches, json_status,
+        merge_report_state, native_executor_from_start, native_pending_request,
+        native_request_from_start, normalize_start_request, options, query_value,
+        read_request_with_timeout, read_session_token, route_allowed, store_disks_response,
+        tokens_equal, NativeJournalRegistry,
     };
     use serde_json::Value;
     use std::fs;
@@ -2816,5 +2865,18 @@ mod tests {
         );
         stamp_shrink_power_attestation_in(&mut journal, battery.path());
         assert_eq!(journal.ops[0].params["on_ac_power"], false);
+    }
+
+    #[test]
+    fn disks_response_cache_roundtrips_and_invalidates() {
+        // P8: the /api/disks response cache serves polls briefly; any
+        // mutation path drops it via invalidate_storage_caches.
+        invalidate_storage_caches();
+        assert!(cached_disks_response().is_none());
+        let value = serde_json::json!({"disks": []});
+        store_disks_response(&value);
+        assert_eq!(cached_disks_response(), Some(value));
+        invalidate_storage_caches();
+        assert!(cached_disks_response().is_none());
     }
 }

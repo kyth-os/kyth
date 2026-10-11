@@ -44,6 +44,113 @@ struct LsblkDevice {
     children: Vec<LsblkDevice>,
 }
 
+/// Mounts whose backing block devices the installer must never target:
+/// the live session itself lives on them.
+const PROTECTED_MOUNT_TARGETS: [&str; 6] = [
+    "/",
+    "/boot",
+    "/boot/efi",
+    "/sysroot",
+    "/run/initramfs/live",
+    "/run/initramfs/iso",
+];
+/// Subtrees whose block-device mounts are also protected (live media,
+/// USB drives used for backups/exports).
+const PROTECTED_MOUNT_SUBTREES: [&str; 2] = ["/run/initramfs", "/run/media"];
+
+/// Mount table from a single `findmnt --json -o TARGET,SOURCE` call.
+///
+/// The disk inventory and the target-disk guard used to spawn nine
+/// sequential per-path `findmnt` probes; one batched call replaces them
+/// all. Parse is pure so the classification is unit-testable without a
+/// live system.
+#[derive(Debug, Default)]
+pub(crate) struct MountTable {
+    /// (target, source) pairs, recursively flattened from findmnt's tree.
+    entries: Vec<(String, String)>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FindmntTree {
+    #[serde(default)]
+    filesystems: Vec<FindmntEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct FindmntEntry {
+    #[serde(default)]
+    target: String,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    children: Vec<FindmntEntry>,
+}
+
+impl MountTable {
+    /// Parse `findmnt --json -o TARGET,SOURCE` output.
+    pub(crate) fn parse(output: &str) -> Result<Self, String> {
+        let tree: FindmntTree = serde_json::from_str(output)
+            .map_err(|error| format!("could not parse findmnt output: {error}"))?;
+        let mut table = Self::default();
+        fn collect(entry: &FindmntEntry, table: &mut MountTable) {
+            // Only block devices can be installer targets; pseudo
+            // filesystems (tmpfs, overlay, ...) are never protected.
+            if entry.source.starts_with("/dev/") {
+                table
+                    .entries
+                    .push((entry.target.clone(), entry.source.clone()));
+            }
+            for child in &entry.children {
+                collect(child, table);
+            }
+        }
+        for entry in &tree.filesystems {
+            collect(entry, &mut table);
+        }
+        Ok(table)
+    }
+
+    fn sources_matching(&self, mut matches: impl FnMut(&str) -> bool) -> Vec<String> {
+        let mut seen = std::collections::HashSet::new();
+        let mut sources = Vec::new();
+        for (target, source) in &self.entries {
+            if matches(target) && seen.insert(source.clone()) {
+                sources.push(source.clone());
+            }
+        }
+        sources
+    }
+
+    /// Block-device sources mounted exactly at `target`.
+    pub(crate) fn sources_at(&self, target: &str) -> Vec<String> {
+        self.sources_matching(|candidate| candidate == target)
+    }
+
+    /// Block-device sources mounted at `prefix` or anywhere beneath it.
+    pub(crate) fn sources_under(&self, prefix: &str) -> Vec<String> {
+        self.sources_matching(|candidate| {
+            candidate == prefix || candidate.starts_with(&format!("{prefix}/"))
+        })
+    }
+
+    /// Every live-session block-device source the installer must not target.
+    pub(crate) fn protected_sources(&self) -> Vec<String> {
+        let mut sources = Vec::new();
+        for target in PROTECTED_MOUNT_TARGETS {
+            sources.extend(self.sources_at(target));
+        }
+        for prefix in PROTECTED_MOUNT_SUBTREES {
+            sources.extend(self.sources_under(prefix));
+        }
+        sources
+    }
+
+    /// Block-device source of the `/` mount, if any.
+    pub(crate) fn current_source(&self) -> Option<String> {
+        self.sources_at("/").into_iter().next()
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct DiskRecord {
     pub name: String,
@@ -1788,5 +1895,38 @@ mod tests {
         let ambiguous = two_esp("");
         assert!(storage_preflight_from_snapshot(&ambiguous, "/dev/sda", 512).is_err());
         assert!(efi_partition_from_snapshot(&ambiguous, "/dev/sda", 512).is_err());
+    }
+
+    #[test]
+    fn mount_table_flattens_findmnt_tree_and_classifies() {
+        // P8: one batched findmnt call replaces nine sequential probes.
+        // Nested children must be flattened; pseudo filesystems ignored.
+        let output = r#"{"filesystems":[
+            {"target":"/","source":"/dev/sda3","children":[
+                {"target":"/boot","source":"/dev/sda2"},
+                {"target":"/run/media/usb","source":"/dev/sdb1"},
+                {"target":"/sys","source":"sysfs[/sys]"}
+            ]},
+            {"target":"/run/initramfs/live","source":"/dev/sr0"}
+        ]}"#;
+        let table = MountTable::parse(output).expect("findmnt JSON parses");
+        assert_eq!(table.sources_at("/"), vec!["/dev/sda3".to_string()]);
+        assert_eq!(table.sources_at("/boot"), vec!["/dev/sda2".to_string()]);
+        // Pseudo filesystems are never collected.
+        assert!(table.sources_at("/sys").is_empty());
+        // Subtree query includes the prefix itself and everything below.
+        assert_eq!(
+            table.sources_under("/run/media"),
+            vec!["/dev/sdb1".to_string()]
+        );
+        let protected = table.protected_sources();
+        for source in ["/dev/sda3", "/dev/sda2", "/dev/sr0", "/dev/sdb1"] {
+            assert!(
+                protected.contains(&source.to_string()),
+                "{source} protected"
+            );
+        }
+        assert_eq!(table.current_source().as_deref(), Some("/dev/sda3"));
+        assert!(MountTable::parse("not json").is_err());
     }
 }
