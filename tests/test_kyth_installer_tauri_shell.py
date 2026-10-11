@@ -4,6 +4,9 @@ from __future__ import annotations
 import json
 import pathlib
 import re
+import os
+import subprocess
+import tempfile
 import unittest
 
 
@@ -138,6 +141,38 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertNotIn("kyth_installer", launcher)
         self.assertNotIn("app.py", launcher)
         self.assertNotIn("--bootstrap-token", launcher)
+
+    def test_launcher_tokens_pass_both_shell_validators(self):
+        """Exercise the shipped formatter and each real Rust token predicate."""
+        launcher = LAUNCHER.read_text()
+        formatter = next(line for line in launcher.splitlines()
+                         if line.startswith("/usr/bin/printf '{\"bootstrap_token\""))
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            token_file = root / "tokens.json"
+            session = "a" * 64
+            subprocess.run(
+                ["bash", "-eu", "-c", formatter], check=True,
+                env={**os.environ, "session_token": session,
+                     "bootstrap_token": "b" * 64, "CLIENT_TOKEN_TMP": str(token_file)},
+            )
+            tokens = json.loads(token_file.read_text())
+            self.assertEqual(tokens["session_token"], session)
+            for shell in (SHELL_RS, NATIVE_RS):
+                match = re.search(
+                    r"fn valid_child_token\(value: &str\) -> bool \{.*?\n\}",
+                    shell.read_text(), re.DOTALL,
+                )
+                assert match is not None, f"token validator missing in {shell}"
+                predicate = match.group(0)
+                probe = root / "probe.rs"
+                probe.write_text(predicate + "\nfn main() {\n"
+                                 + f'assert!(valid_child_token({json.dumps(tokens["bootstrap_token"])}), "bootstrap rejected");\n'
+                                 + f'assert!(valid_child_token({json.dumps(tokens["session_token"])}), "session rejected");\n'
+                                 + "}\n")
+                subprocess.run(["rustc", str(probe), "-o", str(root / "probe")], check=True)
+                result = subprocess.run([str(root / "probe")], capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, f"{shell.name}: {result.stderr}")
 
     def test_frontend_uses_backend_token_and_fixed_dev_proxy(self):
         api = (INSTALLER_WEB / "src/api.ts").read_text()

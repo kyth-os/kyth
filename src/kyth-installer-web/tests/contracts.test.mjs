@@ -82,7 +82,7 @@ test("installer auth, navigation, and progress stream fail safely", () => {
   assert.doesNotMatch(api, /session_token/);
   assert.match(api, /EventSource reconnects automatically/);
   assert.match(api, /readyState === EventSource\.CLOSED/);
-  assert.match(app, /name === "install" \|\| step === "install"/);
+  assert.match(app, /const canNavigate = step !== "install" && name !== "install"/);
   assert.match(app, /name !== "install"/);
 });
 test("React account and hostname rules match the shared installer contract", async () => {
