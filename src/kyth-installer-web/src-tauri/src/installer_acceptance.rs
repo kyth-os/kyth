@@ -78,7 +78,7 @@ mod tests {
                 DiskOperationInput::DeletePartition {
                     disk: "/dev/sda".into(),
                     part_num: 2,
-                    expected_partuuid: "test-partuuid".into(),
+                    expected_partuuid: installer_disk::tests::FIXTURE_PARTUUID.into(),
                 },
                 "/usr/sbin/parted",
                 false,
@@ -90,10 +90,21 @@ mod tests {
                     start: 1_048_576,
                     new_size: 4 * 1024 * 1024,
                     sector_size: 512,
-                    expected_partuuid: "test-partuuid".into(),
+                    expected_partuuid: installer_disk::tests::FIXTURE_PARTUUID.into(),
                 },
                 "/usr/sbin/parted",
                 true,
+            ),
+            (
+                DiskOperationInput::SetPartitionFlag {
+                    disk: "/dev/sda".into(),
+                    part_num: 2,
+                    flag: "esp".into(),
+                    enabled: true,
+                    expected_partuuid: installer_disk::tests::FIXTURE_PARTUUID.into(),
+                },
+                "/usr/sbin/parted",
+                false,
             ),
             (
                 DiskOperationInput::FilesystemResize {
@@ -118,11 +129,62 @@ mod tests {
         ];
 
         for (operation, executable, needs_confirmation) in cases {
-            let plan = installer_disk::build_plan(operation).expect("safe disk plan");
+            let plan =
+                installer_disk::tests::build_fixture_plan(operation).expect("safe disk plan");
             assert_eq!(plan.argv.first().map(String::as_str), Some(executable));
             assert_eq!(plan.needs_confirmation, needs_confirmation);
             assert!(plan.argv.iter().all(|argument| !argument.contains("..")));
         }
+    }
+
+    #[test]
+    fn disposable_media_partition_operations_reject_changed_identity() {
+        let stale_uuid = "00000000-0000-0000-0000-000000000000";
+        for operation in [
+            DiskOperationInput::DeletePartition {
+                disk: "/dev/sda".into(),
+                part_num: 2,
+                expected_partuuid: stale_uuid.into(),
+            },
+            DiskOperationInput::ResizePartition {
+                disk: "/dev/sda".into(),
+                part_num: 2,
+                start: 1_048_576,
+                new_size: 4 * 1024 * 1024,
+                sector_size: 512,
+                expected_partuuid: stale_uuid.into(),
+            },
+            DiskOperationInput::SetPartitionFlag {
+                disk: "/dev/sda".into(),
+                part_num: 2,
+                flag: "esp".into(),
+                enabled: true,
+                expected_partuuid: stale_uuid.into(),
+            },
+        ] {
+            let error = installer_disk::tests::build_fixture_plan(operation)
+                .expect_err("selection-time PARTUUID must match the fresh observation");
+            assert_eq!(
+                error,
+                "partition identity changed since selection; refusing to operate on a different partition."
+            );
+        }
+    }
+
+    #[test]
+    fn disposable_media_format_rejects_a_different_selected_disk() {
+        let error =
+            installer_disk::tests::build_fixture_plan(DiskOperationInput::FormatFilesystem {
+                device: "/dev/sda2".into(),
+                fs: "ext4".into(),
+                label: "KythRoot".into(),
+                expected_disk: "/dev/sdb".into(),
+            })
+            .expect_err("formatting a partition on the wrong disk must fail closed");
+        assert_eq!(
+            error,
+            "mkfs target is not on the install plan's selected disk; refusing to format."
+        );
     }
 
     #[test]
@@ -185,7 +247,10 @@ mod tests {
 
         let directory = tempfile::tempdir().expect("transaction directory");
         installer_transaction::allow_test_transaction_base(directory.path());
-        let failure_path = directory.path().join("failure.json");
+        let failure_path = directory
+            .path()
+            .join(installer_transaction::TRANSACTION_SUBDIR)
+            .join("failure.json");
         let state = TransactionState {
             schema_version: 1,
             transaction_id: "acceptance".into(),

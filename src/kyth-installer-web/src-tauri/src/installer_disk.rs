@@ -372,10 +372,11 @@ fn assert_partition_identity(
     disk: &str,
     part_num: u32,
     expected_partuuid: &str,
+    probes: &impl DiskProbes,
 ) -> Result<(), String> {
     let expected = safe_partuuid(expected_partuuid)?;
     let disk = required_device(disk, "disk")?;
-    let snapshot = lsblk_snapshot(Some(&disk), "NAME,PARTN,PARTUUID,TYPE")?;
+    let snapshot = probes.lsblk_snapshot(Some(&disk), "NAME,PARTN,PARTUUID,TYPE")?;
     let actual =
         crate::installer_storage::partuuid_for_partition_number(&snapshot, &disk, part_num)?;
     if !actual.eq_ignore_ascii_case(&expected) {
@@ -419,6 +420,31 @@ fn sfdisk_binary() -> Result<&'static str, String> {
         .ok_or_else(|| {
             "sfdisk is required for MBR partition table backup but is not installed.".to_string()
         })
+}
+
+/// Trusted, read-only probe seam, private to this module. Requests cannot
+/// supply a provider or bypass any guard: both OS and fixture observations
+/// feed the same identity checks, storage validators, and argv builders.
+trait DiskProbes {
+    fn lsblk_snapshot(&self, disk: Option<&str>, columns: &str) -> Result<String, String>;
+    fn logical_sector_size(&self, disk: &str) -> Result<u64, String>;
+    fn partition_table_type(&self, disk: &str) -> Result<String, String>;
+}
+
+struct OsDiskProbes;
+
+impl DiskProbes for OsDiskProbes {
+    fn lsblk_snapshot(&self, disk: Option<&str>, columns: &str) -> Result<String, String> {
+        lsblk_snapshot(disk, columns)
+    }
+
+    fn logical_sector_size(&self, disk: &str) -> Result<u64, String> {
+        logical_sector_size(disk)
+    }
+
+    fn partition_table_type(&self, disk: &str) -> Result<String, String> {
+        probe_partition_table_type(disk)
+    }
 }
 
 /// Partitions are aligned to 1 MiB (or the sector size, whichever is
@@ -491,10 +517,11 @@ fn build_mkfs(
     fs: String,
     label: String,
     expected_disk: String,
+    probes: &impl DiskProbes,
 ) -> Result<DiskPlan, String> {
     let device = required_device(&device, "filesystem device")?;
     let expected_disk = required_device(&expected_disk, "expected disk")?;
-    let snapshot = lsblk_snapshot(
+    let snapshot = probes.lsblk_snapshot(
         None,
         "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,PARTN,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO,PKNAME",
     )?;
@@ -510,7 +537,7 @@ fn build_mkfs(
                 .to_string(),
         );
     }
-    let sector_size = logical_sector_size(&disk)?;
+    let sector_size = probes.logical_sector_size(&disk)?;
     crate::installer_storage::validate_format_target(&snapshot, &disk, &device, sector_size)?;
     build_mkfs_plan(device, fs, label)
 }
@@ -680,9 +707,16 @@ fn build_set_partition_flag(
 }
 
 pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> {
+    build_plan_with_probes(input, &OsDiskProbes)
+}
+
+fn build_plan_with_probes(
+    input: DiskOperationInput,
+    probes: &impl DiskProbes,
+) -> Result<DiskPlan, String> {
     match input {
         DiskOperationInput::BackupTable { disk, backup_path } => {
-            let table_type = probe_partition_table_type(&disk)?;
+            let table_type = probes.partition_table_type(&disk)?;
             let sfdisk = match table_type.as_str() {
                 "dos" => Some(sfdisk_binary()?),
                 _ => None,
@@ -690,7 +724,7 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             table_backup_plan(disk, backup_path, &table_type, sfdisk)
         }
         DiskOperationInput::RestoreTable { disk, backup_path } => {
-            let table_type = probe_partition_table_type(&disk)?;
+            let table_type = probes.partition_table_type(&disk)?;
             let sfdisk = match table_type.as_str() {
                 "dos" => Some(sfdisk_binary()?),
                 _ => None,
@@ -765,7 +799,7 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             part_num,
             expected_partuuid,
         } => {
-            assert_partition_identity(&disk, part_num, &expected_partuuid)?;
+            assert_partition_identity(&disk, part_num, &expected_partuuid, probes)?;
             build_delete_partition(disk, part_num)
         }
         DiskOperationInput::ResizePartition {
@@ -776,7 +810,7 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             sector_size,
             expected_partuuid,
         } => {
-            assert_partition_identity(&disk, part_num, &expected_partuuid)?;
+            assert_partition_identity(&disk, part_num, &expected_partuuid, probes)?;
             build_resize_partition(disk, part_num, start, new_size, sector_size)
         }
         DiskOperationInput::FilesystemCheck { device } => {
@@ -851,7 +885,7 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             enabled,
             expected_partuuid,
         } => {
-            assert_partition_identity(&disk, part_num, &expected_partuuid)?;
+            assert_partition_identity(&disk, part_num, &expected_partuuid, probes)?;
             build_set_partition_flag(disk, part_num, flag, enabled)
         }
         DiskOperationInput::FormatFilesystem {
@@ -859,7 +893,7 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
             fs,
             label,
             expected_disk,
-        } => build_mkfs(device, fs, label, expected_disk),
+        } => build_mkfs(device, fs, label, expected_disk, probes),
         DiskOperationInput::BtrfsSubvolumeCreate { mountpoint, name } => {
             let mountpoint = safe_mountpoint(&mountpoint)?;
             let name = safe_btrfs_subvolume_name(&name)?;
@@ -901,8 +935,66 @@ pub(crate) fn build_plan(input: DiskOperationInput) -> Result<DiskPlan, String> 
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
+
+    pub(crate) const FIXTURE_PARTUUID: &str = "9a3b4c5d-6e7f-4a9b-8c1d-2e3f4a5b6c7d";
+    const SNAPSHOT: &str = r#"{
+        "blockdevices": [{
+            "name": "/dev/sda", "type": "disk", "size": 10737418240, "ro": false,
+            "children": [{
+                "name": "/dev/sda2", "pkname": "/dev/sda", "type": "part", "partn": 2,
+                "partuuid": "9a3b4c5d-6e7f-4a9b-8c1d-2e3f4a5b6c7d",
+                "size": 4294967296, "start": 2048, "ro": false, "mountpoints": [null]
+            }]
+        }]
+    }"#;
+
+    struct FixtureDiskProbes<'a> {
+        snapshot: &'a str,
+        sector_size: u64,
+    }
+
+    impl DiskProbes for FixtureDiskProbes<'_> {
+        fn lsblk_snapshot(&self, disk: Option<&str>, columns: &str) -> Result<String, String> {
+            // Check the real guard requests the identity or full ancestry
+            // probe, rather than teaching the fixture any security policy.
+            assert_eq!(
+                columns,
+                if disk.is_some() {
+                    "NAME,PARTN,PARTUUID,TYPE"
+                } else {
+                    "NAME,SIZE,TYPE,FSTYPE,PARTTYPE,PARTN,LABEL,MOUNTPOINT,MOUNTPOINTS,START,RO,PKNAME"
+                }
+            );
+            Ok(self.snapshot.to_string())
+        }
+
+        fn logical_sector_size(&self, disk: &str) -> Result<u64, String> {
+            assert_eq!(
+                disk, "/dev/sda",
+                "sector probe must use the resolved parent"
+            );
+            Ok(self.sector_size)
+        }
+
+        fn partition_table_type(&self, disk: &str) -> Result<String, String> {
+            assert_eq!(disk, "/dev/sda");
+            Ok("gpt".into())
+        }
+    }
+
+    // Only read-only observations are synthetic. Dispatch, all guards, and
+    // argv projection are the exact same code invoked by public build_plan.
+    pub(crate) fn build_fixture_plan(input: DiskOperationInput) -> Result<DiskPlan, String> {
+        build_plan_with_probes(
+            input,
+            &FixtureDiskProbes {
+                snapshot: SNAPSHOT,
+                sector_size: 512,
+            },
+        )
+    }
 
     fn device() -> String {
         "/dev/sda".to_string()
@@ -946,10 +1038,10 @@ mod tests {
             ["/usr/sbin/mkfs.fat", "-F32", "-n", "EFI", "/dev/sda"]
         );
 
-        // The guarded entry point re-probes before building argv: /dev/sda
+        // The snapshot validator runs before building argv: /dev/sda
         // is a whole disk, never a validated replace target, so planning a
         // format for it fails closed instead of projecting mkfs argv.
-        let error = build_plan(DiskOperationInput::FormatFilesystem {
+        let error = build_fixture_plan(DiskOperationInput::FormatFilesystem {
             device: device(),
             fs: "fat32".into(),
             label: "EFI".into(),
@@ -960,6 +1052,86 @@ mod tests {
             error.contains("known disk") || error.contains("not present"),
             "{error}"
         );
+        let error = build_fixture_plan(DiskOperationInput::FormatFilesystem {
+            device: "/dev/sda2".into(),
+            fs: "fat32".into(),
+            label: "EFI".into(),
+            expected_disk: "/dev/sdb".into(),
+        })
+        .expect_err("a partition on another disk must fail closed");
+        assert!(error.contains("selected disk"), "{error}");
+    }
+
+    #[test]
+    fn injected_format_observations_run_every_storage_guard() {
+        let format = || DiskOperationInput::FormatFilesystem {
+            device: "/dev/sda2".into(),
+            fs: "ext4".into(),
+            label: "KythRoot".into(),
+            expected_disk: device(),
+        };
+        let base: serde_json::Value = serde_json::from_str(SNAPSHOT).unwrap();
+        for (field, value, expected_error) in [
+            (
+                "parttype",
+                serde_json::json!("c12a7328-f81f-11d2-ba4b-00a0c93ec93b"),
+                "EFI system partition",
+            ),
+            ("mountpoints", serde_json::json!(["/mnt/data"]), "mounted"),
+            ("ro", serde_json::json!(true), "read-only"),
+            (
+                "children",
+                serde_json::json!([{"name": "/dev/mapper/active", "type": "crypt"}]),
+                "active mappings",
+            ),
+            ("pkname", serde_json::json!(null), "known disk"),
+            ("type", serde_json::json!("crypt"), "not present"),
+        ] {
+            let mut snapshot = base.clone();
+            snapshot["blockdevices"][0]["children"][0][field] = value;
+            let snapshot = snapshot.to_string();
+            let error = build_plan_with_probes(
+                format(),
+                &FixtureDiskProbes {
+                    snapshot: &snapshot,
+                    sector_size: 512,
+                },
+            )
+            .expect_err("unsafe observed target must fail through the production guard");
+            assert!(error.contains(expected_error), "{field}: {error}");
+        }
+        for sector_size in [0, 1000, 8192] {
+            let error = build_plan_with_probes(
+                format(),
+                &FixtureDiskProbes {
+                    snapshot: SNAPSHOT,
+                    sector_size,
+                },
+            )
+            .expect_err("unsupported observed sector size must fail closed");
+            assert!(error.contains("unsupported sector size"), "{error}");
+        }
+        assert_eq!(
+            build_plan_with_probes(
+                format(),
+                &FixtureDiskProbes {
+                    snapshot: SNAPSHOT,
+                    sector_size: 4096
+                },
+            )
+            .expect("4Kn observation follows the same guard path")
+            .argv,
+            ["/usr/sbin/mkfs.ext4", "-F", "-L", "KythRoot", "/dev/sda2"]
+        );
+        let error = build_plan_with_probes(
+            format(),
+            &FixtureDiskProbes {
+                snapshot: "not JSON",
+                sector_size: 512,
+            },
+        )
+        .expect_err("malformed observations must fail closed");
+        assert!(error.contains("invalid lsblk snapshot"), "{error}");
     }
 
     #[test]
@@ -1278,14 +1450,14 @@ mod tests {
                 expected_partuuid: "9a3b4c5d-6e7f-8a9b-0c1d-2e3f4a5b6c7d".into(),
             },
             DiskOperationInput::FormatFilesystem {
-                device: device(),
+                device: "/dev/sda2".into(),
                 fs: "zfs".into(),
                 label: String::new(),
                 expected_disk: device(),
             },
         ];
         for input in cases {
-            assert!(build_plan(input).is_err());
+            assert!(build_fixture_plan(input).is_err());
         }
         assert!(build_plan(DiskOperationInput::BtrfsSubvolumeCreate {
             mountpoint: "/tmp/kyth-btrfs-root".into(),
@@ -1369,13 +1541,25 @@ mod tests {
             let error = build_plan(input).expect_err("missing identity must fail closed");
             assert!(error.contains("partition UUID"), "{error}");
         }
-        // A well-formed PARTUUID that the fresh probe cannot confirm fails
+        // A well-formed PARTUUID that the synthetic probe cannot confirm fails
         // closed too, whether the disk is absent or the number now points
         // at a different partition.
-        assert!(build_plan(DiskOperationInput::DeletePartition {
+        assert!(build_fixture_plan(DiskOperationInput::DeletePartition {
             disk: device(),
             part_num: 2,
             expected_partuuid: "9a3b4c5d-6e7f-8a9b-0c1d-2e3f4a5b6c7d".into(),
+        })
+        .is_err());
+        assert!(build_fixture_plan(DiskOperationInput::DeletePartition {
+            disk: device(),
+            part_num: 2,
+            expected_partuuid: FIXTURE_PARTUUID.into(),
+        })
+        .is_ok());
+        assert!(build_fixture_plan(DiskOperationInput::DeletePartition {
+            disk: device(),
+            part_num: 3,
+            expected_partuuid: FIXTURE_PARTUUID.into(),
         })
         .is_err());
 

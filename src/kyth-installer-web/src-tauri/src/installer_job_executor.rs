@@ -164,6 +164,7 @@ impl NativeInstallRequest {
             }
             Some(
                 serde_json::from_value(serde_json::json!({
+                    "disk": text("disk", ""),
                     "config_root": target_root.clone(),
                     "fstab_path": format!("{target_root}/etc/fstab"),
                     "mounts": mounts,
@@ -364,6 +365,10 @@ pub(crate) struct NativePhaseExecutor {
     /// H4: crash-recovery journal, opened before the first destructive
     /// mutation of the Storage phase.
     durable_journal: Mutex<Option<DurableJournal>>,
+    // Per-executor fixture injection; never part of the HTTP request or a
+    // production build. DurableJournal still validates and persists normally.
+    #[cfg(test)]
+    journal_staging: Option<PathBuf>,
 }
 
 impl NativePhaseExecutor {
@@ -415,6 +420,8 @@ impl NativePhaseExecutor {
             storage_target: Mutex::new(None),
             secure_boot_state: Mutex::new(None),
             durable_journal: Mutex::new(None),
+            #[cfg(test)]
+            journal_staging: None,
         })
     }
 
@@ -453,7 +460,19 @@ impl NativePhaseExecutor {
             storage_target: Mutex::new(None),
             secure_boot_state: Mutex::new(None),
             durable_journal: Mutex::new(None),
+            #[cfg(test)]
+            journal_staging: None,
         }
+    }
+
+    #[cfg(test)]
+    fn from_request_with_journal_staging(
+        request: NativeInstallRequest,
+        staging: &Path,
+    ) -> Result<Self, String> {
+        let mut executor = Self::from_request(request)?;
+        executor.journal_staging = Some(staging.to_path_buf());
+        Ok(executor)
     }
 
     fn new_transaction_id() -> String {
@@ -1515,6 +1534,8 @@ impl NativePhaseExecutor {
         } else {
             FILESYSTEM_STAGING_MOUNTPOINT
         });
+        #[cfg(test)]
+        let staging = self.journal_staging.as_deref().unwrap_or(staging);
         // Best-effort: a probe failure here must not block the install; the
         // staging fallback is always available.
         let esp_mount: Option<PathBuf> = (|| {
@@ -3110,7 +3131,10 @@ mod tests {
                 "resize_ntfs",
                 serde_json::json!({"resize_partition": "sda2", "resize_gib": 64}),
             ),
-            ("manual", serde_json::json!({"target_partition": "sda3"})),
+            (
+                "manual",
+                serde_json::json!({"target_partition": "sda3", "uuid": "12345678-1234-1234-1234-123456789abc"}),
+            ),
         ] {
             let mut body = serde_json::json!({
                 "disk": "sda",
@@ -3249,6 +3273,7 @@ mod tests {
                 target_disk_serial: None,
                 target_disk_model: None,
                 target_disk_size_bytes: None,
+                flatpaks: Vec::new(),
             },
             execution: InstallerExecutionInput {
                 bootc: BootcInstallInput {
@@ -3317,21 +3342,32 @@ mod tests {
             "install_mode": "manual",
             "target_partition": "/dev/sda2",
             "acknowledged_irreversible": true,
-            "uuid": "test-manual-uuid",
+            "uuid": "12345678-1234-1234-1234-123456789abc",
             "mounts": [{
                 "partition": "/dev/sda3",
                 "mountpoint": "/home",
-                "fstype": "btrfs"
+                "fstype": "btrfs",
+                "uuid": "abcdef12-1234-1234-1234-123456789abc"
             }]
         }))
         .expect("manual request should parse");
         let mounts = request
             .manual_mounts
             .expect("manual mounts should be retained");
+        assert_eq!(mounts.disk, "/dev/sda");
+        assert_eq!(mounts.config_root, FILESYSTEM_STAGING_MOUNTPOINT);
+        assert_eq!(
+            mounts.fstab_path,
+            format!("{FILESYSTEM_STAGING_MOUNTPOINT}/etc/fstab")
+        );
         assert_eq!(mounts.mounts.len(), 1);
         assert_eq!(mounts.mounts[0].partition, "/dev/sda3");
         assert_eq!(mounts.mounts[0].mountpoint, "/home");
         assert_eq!(mounts.mounts[0].fstype, "btrfs");
+        assert_eq!(
+            mounts.mounts[0].uuid,
+            "abcdef12-1234-1234-1234-123456789abc"
+        );
     }
 
     #[test]
@@ -3381,6 +3417,7 @@ mod tests {
 
     #[test]
     fn image_phase_refuses_unverifiable_embedded_source_before_bootc() {
+        let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
         let mut missing = request(false);
         missing.execution.bootc.source_imgref = "oci:/nonexistent/kyth/image:latest".into();
         let executor =
@@ -3396,6 +3433,7 @@ mod tests {
 
     #[test]
     fn image_phase_refuses_unpinned_docker_source() {
+        let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
         // M6: a tag-based docker:// reference is mutable after the ISO was
         // built, so it can no longer pass through to fetch-time checks: it
         // must be digest-pinned and verified before bootc runs.
@@ -3408,6 +3446,10 @@ mod tests {
             .expect_err("unpinned docker source must fail closed");
         assert!(error.to_string().contains("digest-pinned"), "{error}");
     }
+
+    // Source pins are process-global; keep fixture mutation and verification
+    // in one critical section so parallel tests cannot read another fixture.
+    static SOURCE_ENV_LOCK: Mutex<()> = Mutex::new(());
 
     /// Set up a digest-pinned docker source test: temp ISO metadata +
     /// signature bundle, env pins pointed at them. Returns the previous env
@@ -3489,6 +3531,7 @@ mod tests {
 
     #[test]
     fn image_phase_verifies_digest_pinned_docker_source() {
+        let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
         let digest_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let (_dir, old) = pinned_docker_fixture(digest_hex);
         let result = (|| {
@@ -3505,6 +3548,7 @@ mod tests {
 
     #[test]
     fn image_phase_refuses_docker_source_with_mismatched_env_pin() {
+        let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
         let digest_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let (_dir, old) = pinned_docker_fixture(digest_hex);
         // Tamper with the environment pin only: the reference digest no
@@ -3528,6 +3572,7 @@ mod tests {
 
     #[test]
     fn image_phase_refuses_docker_source_with_tampered_bundle() {
+        let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
         let digest_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let (dir, old) = pinned_docker_fixture(digest_hex);
         // Rewrite the bundle so its digest no longer matches the metadata's
@@ -3665,6 +3710,7 @@ mod tests {
         crate::installer_transaction::allow_test_transaction_base(directory.path());
         request.transaction_path = directory
             .path()
+            .join(crate::installer_transaction::TRANSACTION_SUBDIR)
             .join("transaction.json")
             .to_string_lossy()
             .into_owned();
@@ -3691,6 +3737,7 @@ mod tests {
         let mut request = request(false);
         request.transaction_path = directory
             .path()
+            .join(crate::installer_transaction::TRANSACTION_SUBDIR)
             .join("transaction.json")
             .to_string_lossy()
             .into_owned();
@@ -3699,8 +3746,13 @@ mod tests {
         executor
             .execute_phase_typed(Phase::Complete, &CancellationToken::default())
             .expect("native completion should persist transaction");
-        let transaction = std::fs::read_to_string(directory.path().join("transaction.json"))
-            .expect("native transaction should exist");
+        let transaction = std::fs::read_to_string(
+            directory
+                .path()
+                .join(crate::installer_transaction::TRANSACTION_SUBDIR)
+                .join("transaction.json"),
+        )
+        .expect("native transaction should exist");
         assert!(transaction.contains("Native installer completed successfully"));
         assert!(!transaction.contains("secret"));
     }
@@ -3712,6 +3764,7 @@ mod tests {
         let mut request = request(false);
         request.transaction_path = directory
             .path()
+            .join(crate::installer_transaction::TRANSACTION_SUBDIR)
             .join("transaction.json")
             .to_string_lossy()
             .into_owned();
@@ -3723,8 +3776,13 @@ mod tests {
             .execute_phase_typed(Phase::Prepare, &CancellationToken::default())
             .expect("native preparation should persist transaction");
         let transaction: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(directory.path().join("transaction.json"))
-                .expect("native preparation transaction should exist"),
+            &std::fs::read_to_string(
+                directory
+                    .path()
+                    .join(crate::installer_transaction::TRANSACTION_SUBDIR)
+                    .join("transaction.json"),
+            )
+            .expect("native preparation transaction should exist"),
         )
         .expect("native preparation transaction should be JSON");
         assert_eq!(transaction["status"], "prepared");
@@ -3746,14 +3804,20 @@ mod tests {
         let mut request = request(false);
         request.transaction_path = directory
             .path()
+            .join(crate::installer_transaction::TRANSACTION_SUBDIR)
             .join("transaction.json")
             .to_string_lossy()
             .into_owned();
         let executor = NativePhaseExecutor::from_request(request)
             .expect("typed native install request should validate");
         executor.record_failed(Phase::Storage, "native failure secret-free");
-        let transaction = std::fs::read_to_string(directory.path().join("transaction.json"))
-            .expect("native failure transaction should exist");
+        let transaction = std::fs::read_to_string(
+            directory
+                .path()
+                .join(crate::installer_transaction::TRANSACTION_SUBDIR)
+                .join("transaction.json"),
+        )
+        .expect("native failure transaction should exist");
         assert!(transaction.contains("native failure secret-free"));
         assert!(!transaction.contains("password_hash"));
         assert!(!transaction.contains("mok_password"));
@@ -3761,19 +3825,37 @@ mod tests {
 
     #[test]
     fn wipe_storage_is_owned_by_bootc_and_resize_has_a_native_path() {
-        let executor = NativePhaseExecutor::from_request(request(false))
-            .expect("typed native install request should validate");
+        let directory = tempfile::tempdir().expect("temporary journal directory");
+        let executor = NativePhaseExecutor::from_request_with_journal_staging(
+            request(false),
+            directory.path(),
+        )
+        .expect("typed native install request should validate");
         let cancellation = CancellationToken::default();
         assert_eq!(
             executor.execute_phase_typed(Phase::Storage, &cancellation),
             Ok(())
         );
         let mut resize = request(false);
+        let journal_path = directory.path().join(JOURNAL_FILE_NAME);
+        let state = DurableJournal::load(&journal_path).expect("storage opens a real journal");
+        assert!(state.ops.is_empty(), "wipe mutations are owned by bootc");
+        executor
+            .record_journal(Phase::Storage, "image_write", OpState::Completed)
+            .expect("fixture journal records durably");
+        executor
+            .open_durable_journal(Phase::Storage)
+            .expect("reopening preserves recovery state");
+        assert!(executor
+            .journal_completed(Phase::Storage, "image_write")
+            .expect("recovery state remains readable"));
         resize.storage.install_mode = "resize_ntfs".into();
         resize.storage.resize_partition = "sda2".into();
         resize.storage.resize_gib = 40;
+        let resize_directory = tempfile::tempdir().expect("temporary resize journal directory");
         let executor =
-            NativePhaseExecutor::from_request(resize).expect("resize plan should validate");
+            NativePhaseExecutor::from_request_with_journal_staging(resize, resize_directory.path())
+                .expect("resize plan should validate");
         assert!(matches!(
             executor.execute_phase_typed(Phase::Storage, &cancellation),
             Err(NativePhaseError::Execution {
