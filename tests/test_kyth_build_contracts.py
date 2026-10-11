@@ -725,10 +725,12 @@ class BuildAssemblyContracts(unittest.TestCase):
     def test_rust_binaries_copy_after_package_install_layers(self):
         """A Rust-only change must not invalidate the expensive package
         install/upgrade layers: every COPY --from=hub-web-builder except the
-        two build-time dependencies must sit below the upgrade layer.
+        three build-time dependencies must sit below the upgrade layer.
         kyth-build-support is invoked by package fragments during
         packages-static.sh; /ctx/kyth-vscode-wallet is executed by a
         sysconfig-static fragment — both stay copied early by necessity.
+        kyth-tunable-rs stays early per the packaging contract (it must be
+        installed before sysconfig-static.sh runs).
         The support-binary block must additionally precede the sysconfig.sh
         layer, which executes kyth-fix-system-accounts at build time."""
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
@@ -745,6 +747,7 @@ class BuildAssemblyContracts(unittest.TestCase):
             if line.startswith("COPY --from=hub-web-builder")
             and "kyth-build-support" not in line
             and "/ctx/kyth-vscode-wallet" not in line
+            and "kyth-tunable-rs" not in line
         ]
         self.assertTrue(copies, "no COPY --from=hub-web-builder lines found")
         for i, line in copies:

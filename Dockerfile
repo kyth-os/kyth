@@ -298,6 +298,12 @@ RUN : "cache-bust:plymouth=${PLYMOUTH_HASH}" && \
 # (see its tail) so they don't linger as duplicate content in the final image.
 COPY build_files/game-performance build_files/kyth-shader-preheat build_files/kyth-sched-arbiter build_files/kyth-power-arbiter build_files/kyth-power-arbiter.service build_files/kyth-storage-gate build_files/kyth-readahead-hint build_files/kyth-shader-prune /ctx/
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-vscode-wallet /ctx/kyth-vscode-wallet
+# kyth-tunable-rs stays early too: the packaging contract requires it to be
+# installed before sysconfig-static.sh runs (see
+# test_tunable_dispatcher_is_native_and_runs_once_after_all_binaries_are_copied).
+# One small COPY layer is a negligible invalidation cost versus the 37-binary
+# block that moved below the upgrade layer.
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable-rs /usr/bin/kyth-tunable-rs
 
 # The shared Python package is used only by build-time renderers and the
 # repository's compatibility tests. All supported installed Kyth entry points
@@ -399,7 +405,6 @@ COPY --from=hub-web-builder --chmod=0755 /build/kyth-hardware-policy /usr/bin/ky
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-qualify /usr/bin/kyth-qualify
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-memory-tune /usr/bin/kyth-memory-tune
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-sysctl-compose /usr/bin/kyth-sysctl-compose
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable-rs /usr/bin/kyth-tunable-rs
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-game-boost /usr/bin/kyth-game-boost
 # Build cache boundary: post-upgrade service wiring and account repair.
 # Re-enforces display-manager symlinks that dnf5 upgrade can reset, and enables/
