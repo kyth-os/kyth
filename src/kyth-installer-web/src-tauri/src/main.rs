@@ -177,9 +177,14 @@ fn installer_execution_plan(
 }
 
 fn network_selector_candidates() -> [(&'static str, &'static [&'static str]); 2] {
+    // M4: absolute paths, never PATH lookup — a hijacked PATH in the live
+    // session must not redirect the installer's GUI into attacker code.
     [
-        ("plasmawindowed", &["org.kde.plasma.networkmanagement"]),
-        ("kcmshell6", &["kcm_networkmanagement"]),
+        (
+            "/usr/bin/plasmawindowed",
+            &["org.kde.plasma.networkmanagement"],
+        ),
+        ("/usr/bin/kcmshell6", &["kcm_networkmanagement"]),
     ]
 }
 
@@ -524,8 +529,11 @@ mod transport_tests {
         assert_eq!(
             network_selector_candidates(),
             [
-                ("plasmawindowed", &["org.kde.plasma.networkmanagement"][..]),
-                ("kcmshell6", &["kcm_networkmanagement"][..]),
+                (
+                    "/usr/bin/plasmawindowed",
+                    &["org.kde.plasma.networkmanagement"][..]
+                ),
+                ("/usr/bin/kcmshell6", &["kcm_networkmanagement"][..]),
             ]
         );
     }

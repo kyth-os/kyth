@@ -90,6 +90,20 @@ impl Phase {
             Self::Storage | Self::Image | Self::Configure | Self::SecureBoot
         )
     }
+
+    /// L2: the only legal forward move. The tracker must advance one phase
+    /// at a time — a jump like Prepare -> Complete would let a confused or
+    /// malicious frontend claim completion without the work.
+    fn successor(self) -> Option<Self> {
+        match self {
+            Self::Prepare => Some(Self::Storage),
+            Self::Storage => Some(Self::Image),
+            Self::Image => Some(Self::Configure),
+            Self::Configure => Some(Self::SecureBoot),
+            Self::SecureBoot => Some(Self::Complete),
+            Self::Complete => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -206,9 +220,12 @@ pub(crate) fn apply(input: OrchestrationInput) -> Result<OrchestrationResponse, 
                     lifecycle.as_str()
                 ));
             }
-            if next < phase {
+            // L2: advance exactly one phase. Backwards moves and forward
+            // jumps (e.g. Prepare -> Complete) are rejected; only the
+            // immediate successor of the current phase is accepted.
+            if Some(next) != phase.successor() {
                 return Err(format!(
-                    "Installer phase cannot move backwards: {} -> {}",
+                    "Installer phase must advance one step at a time: {} -> {} is not allowed",
                     phase.as_str(),
                     next.as_str()
                 ));
@@ -391,6 +408,26 @@ mod tests {
         request.phase = "configure".to_string();
         request.target = "image".to_string();
         assert!(apply(request).is_err());
+    }
+
+    #[test]
+    fn phases_cannot_skip_forward_or_restate() {
+        // L2: Prepare -> Complete in one jump must fail, and so must
+        // re-asserting the current phase; only the immediate successor
+        // advances the tracker.
+        let mut request = input("phase");
+        request.lifecycle = "installing".to_string();
+        request.target = "complete".to_string();
+        let error = apply(request.clone()).expect_err("forward skip must fail");
+        assert!(error.contains("one step at a time"), "{error}");
+        request.target = "prepare".to_string();
+        let error = apply(request.clone()).expect_err("re-asserting the current phase must fail");
+        assert!(error.contains("one step at a time"), "{error}");
+        request.target = "storage".to_string();
+        assert!(
+            apply(request).is_ok(),
+            "the immediate successor must advance"
+        );
     }
 
     #[test]

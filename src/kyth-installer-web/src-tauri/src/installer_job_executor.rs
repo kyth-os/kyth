@@ -8,6 +8,7 @@
 
 use std::collections::HashSet;
 use std::fmt;
+use std::net::ToSocketAddrs;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 use std::sync::Mutex;
@@ -128,7 +129,10 @@ impl NativeInstallRequest {
         let password_hash = {
             let supplied_hash = text("password_hash", "");
             if supplied_hash.is_empty() && !username.is_empty() {
-                crate::installer_accounts::hash_password(&text("password", ""))?
+                // M5: the plaintext password is zeroized on drop instead of
+                // lingering in heap memory for the daemon's lifetime.
+                let plaintext = zeroize::Zeroizing::new(text("password", ""));
+                crate::installer_accounts::hash_password(&plaintext)?
             } else {
                 supplied_hash
             }
@@ -371,6 +375,45 @@ pub(crate) struct NativePhaseExecutor {
     journal_staging: Option<PathBuf>,
 }
 
+/// M1: fail closed before any destructive phase when the image source needs
+/// the network. Resolves the `docker://host/...` registry host and
+/// TCP-connects to its HTTPS port with a short timeout; DNS or connect
+/// failure refuses the install rather than wiping the disk first.
+/// `KYTH_INSTALLER_NETWORK_PROBE=off` skips the probe (test fixtures only;
+/// the live ISO never sets it).
+fn probe_registry_reachability(source_imgref: &str) -> Result<(), String> {
+    if std::env::var("KYTH_INSTALLER_NETWORK_PROBE").as_deref() == Ok("off") {
+        return Ok(());
+    }
+    let host = source_imgref
+        .strip_prefix("docker://")
+        .and_then(|rest| rest.split('/').next())
+        .filter(|host| !host.is_empty())
+        .ok_or_else(|| {
+            "image source requires the network but is not a docker:// reference".to_string()
+        })?;
+    let addrs: Vec<std::net::SocketAddr> = format!("{host}:443")
+        .to_socket_addrs()
+        .map_err(|_| {
+            format!(
+                "cannot reach the image registry {host}: DNS resolution failed; \
+                 connect to the network before installing"
+            )
+        })?
+        .collect();
+    let reachable = addrs.into_iter().any(|addr| {
+        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(10)).is_ok()
+    });
+    if reachable {
+        Ok(())
+    } else {
+        Err(format!(
+            "cannot reach the image registry {host}:443 within 10s; \
+             connect to the network before installing"
+        ))
+    }
+}
+
 impl NativePhaseExecutor {
     pub(crate) fn from_request(request: NativeInstallRequest) -> Result<Self, String> {
         let bootc_request = request.execution.bootc.clone();
@@ -382,6 +425,7 @@ impl NativePhaseExecutor {
         let secure_boot_force_stage = request.execution.secure_boot.force_stage;
         let secure_boot_password = zeroize::Zeroizing::new(request.secure_boot_password);
         let transaction_path = request.transaction_path;
+        let skip_fetch_check = request.execution.bootc.skip_fetch_check;
         let mut storage_plan = installer_plan::build_plan(request.storage)?;
         // H2: record the pre-shrink NTFS size in the plan before any
         // destructive step, so a retried install can detect an
@@ -395,6 +439,15 @@ impl NativePhaseExecutor {
             }
         }
         let execution_plan = installer_executor::build_plan(request.execution)?;
+        // M1: the frontend's network-setup step is advisory, not a gate: a
+        // crafted /api/start request could bypass it. The Storage phase is
+        // destructive and runs before the Image phase downloads anything, so
+        // probe registry reachability here and fail closed before the job
+        // slot is claimed. `skip_fetch_check` remains the explicit opt-out
+        // (it already bypasses the reachability preflight).
+        if execution_plan.bootc.requires_network && !skip_fetch_check {
+            probe_registry_reachability(&source_imgref)?;
+        }
         let transaction_id = Self::new_transaction_id();
         let transaction = Self::initial_transaction(
             &storage_plan,
@@ -842,6 +895,67 @@ impl NativePhaseExecutor {
         }
     }
 
+    /// M2/L5: write `contents` to `path` atomically: temp file in the same
+    /// directory with explicit 0644 permissions, fsync the file, rename over
+    /// the target, fsync the directory. A kill/crash mid-write leaves either
+    /// the old file or the complete new one, never a truncated file.
+    fn write_file_atomic(
+        path: &str,
+        contents: &[u8],
+        phase: Phase,
+    ) -> Result<(), NativePhaseError> {
+        use std::fs;
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let parent =
+            std::path::Path::new(path)
+                .parent()
+                .ok_or_else(|| NativePhaseError::Execution {
+                    phase,
+                    message: format!("cannot stage {path}: no parent directory"),
+                })?;
+        let tmp_path = format!("{path}.new");
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o644)
+            .open(&tmp_path)
+            .map_err(|e| NativePhaseError::Execution {
+                phase,
+                message: format!("failed to write {tmp_path}: {e}"),
+            })?;
+        // mode() only applies on create; a stale temp file from a crashed
+        // run keeps whatever permissions it had.
+        fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o644)).map_err(|e| {
+            NativePhaseError::Execution {
+                phase,
+                message: format!("failed to set permissions on {tmp_path}: {e}"),
+            }
+        })?;
+        file.write_all(contents)
+            .and_then(|()| file.sync_all())
+            .map_err(|e| NativePhaseError::Execution {
+                phase,
+                message: format!("failed to write {tmp_path}: {e}"),
+            })?;
+        drop(file);
+        fs::rename(&tmp_path, path).map_err(|e| NativePhaseError::Execution {
+            phase,
+            message: format!("failed to stage {path}: {e}"),
+        })?;
+        // fsync the directory so the rename itself is durable.
+        let dir = fs::File::open(parent).map_err(|e| NativePhaseError::Execution {
+            phase,
+            message: format!("failed to sync parent of {path}: {e}"),
+        })?;
+        dir.sync_all().map_err(|e| NativePhaseError::Execution {
+            phase,
+            message: format!("failed to sync parent of {path}: {e}"),
+        })?;
+        Ok(())
+    }
+
     /// Stage Flatpak selections for first-boot installation.
     /// M2: installing on the live host would land in the ISO's /var and
     /// vanish on reboot. Instead, write the validated app IDs into the
@@ -859,46 +973,57 @@ impl NativePhaseExecutor {
         }
 
         // Write the app list into the target.
+        // M2/L4/L5: atomic write (temp file + rename + directory sync) with
+        // explicit 0644 and a trailing newline, so a crash mid-write cannot
+        // leave a truncated list on the installed system.
         let kyth_etc = format!("{deploy_root}/etc/kyth");
         fs::create_dir_all(&kyth_etc).map_err(|e| NativePhaseError::Execution {
             phase,
             message: format!("failed to create {kyth_etc}: {e}"),
         })?;
         let list_path = format!("{kyth_etc}/first-boot-flatpaks");
-        fs::write(&list_path, self.storage_plan.flatpaks.join("\n")).map_err(|e| {
-            NativePhaseError::Execution {
-                phase,
-                message: format!("failed to write {list_path}: {e}"),
-            }
-        })?;
+        let list_contents = format!("{}\n", self.storage_plan.flatpaks.join("\n"));
+        Self::write_file_atomic(&list_path, list_contents.as_bytes(), phase)?;
 
         // Oneshot unit: installs each app, then disables itself.
         // App IDs were validated against the server-side allowlist at plan
         // time; the unit reads them from the file (no shell interpolation
         // of untrusted data — the while-read loop quotes "$app").
-        let unit = "[Unit]\nDescription=Install user-selected Flatpaks on first boot\nAfter=network-online.target\nWants=network-online.target\nConditionPathExists=/etc/kyth/first-boot-flatpaks\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/bash -c 'while read -r app; do [ -n \"$app\" ] && /usr/bin/flatpak install --system -y --noninteractive \"$app\" || echo \"failed: $app\"; done < /etc/kyth/first-boot-flatpaks; rm -f /etc/kyth/first-boot-flatpaks'\nExecStartPost=/usr/bin/systemctl disable kyth-first-boot-flatpaks.service\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n";
+        // L3: per-app failures are recorded in
+        // /etc/kyth/first-boot-flatpaks.failed (atomically moved into place
+        // only when non-empty) instead of being silently discarded, so the
+        // Hub/first-boot UX can surface them. The failure file is never
+        // deleted by this unit; only the consumed app list is.
+        let unit = "[Unit]\nDescription=Install user-selected Flatpaks on first boot\nAfter=network-online.target\nWants=network-online.target\nConditionPathExists=/etc/kyth/first-boot-flatpaks\n\n[Service]\nType=oneshot\nExecStart=/usr/bin/bash -c 'failed=/etc/kyth/first-boot-flatpaks.failed.tmp; : > \"$failed\"; while read -r app; do [ -n \"$app\" ] || continue; /usr/bin/flatpak install --system -y --noninteractive \"$app\" || { echo \"failed: $app\"; printf \"%s\\n\" \"$app\" >> \"$failed\"; }; done < /etc/kyth/first-boot-flatpaks; if [ -s \"$failed\" ]; then mv \"$failed\" /etc/kyth/first-boot-flatpaks.failed; echo \"some Flatpaks failed; see /etc/kyth/first-boot-flatpaks.failed\"; else rm -f \"$failed\"; fi; rm -f /etc/kyth/first-boot-flatpaks'\nExecStartPost=/usr/bin/systemctl disable kyth-first-boot-flatpaks.service\nRemainAfterExit=yes\n\n[Install]\nWantedBy=multi-user.target\n";
         let unit_path =
             format!("{deploy_root}/etc/systemd/system/kyth-first-boot-flatpaks.service");
-        fs::write(&unit_path, unit).map_err(|e| NativePhaseError::Execution {
-            phase,
-            message: format!("failed to write {unit_path}: {e}"),
-        })?;
+        Self::write_file_atomic(&unit_path, unit.as_bytes(), phase)?;
 
         // Enable via symlink (systemctl not available for the target here).
+        // M3: idempotent — a retried install converges instead of failing
+        // with EEXIST.
         let wants_dir = format!("{deploy_root}/etc/systemd/system/multi-user.target.wants");
         fs::create_dir_all(&wants_dir).map_err(|e| NativePhaseError::Execution {
             phase,
             message: format!("failed to create {wants_dir}: {e}"),
         })?;
-        #[cfg(unix)]
-        std::os::unix::fs::symlink(
-            "../kyth-first-boot-flatpaks.service",
-            format!("{wants_dir}/kyth-first-boot-flatpaks.service"),
-        )
-        .map_err(|e| NativePhaseError::Execution {
-            phase,
-            message: format!("failed to enable first-boot unit: {e}"),
-        })?;
+        let link_path = format!("{wants_dir}/kyth-first-boot-flatpaks.service");
+        let link_target = "../kyth-first-boot-flatpaks.service";
+        let already_enabled = fs::symlink_metadata(&link_path)
+            .ok()
+            .filter(|meta| meta.file_type().is_symlink())
+            .and_then(|_| fs::read_link(&link_path).ok())
+            .is_some_and(|target| target.to_string_lossy() == link_target);
+        if !already_enabled {
+            let _ = fs::remove_file(&link_path);
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(link_target, &link_path).map_err(|e| {
+                NativePhaseError::Execution {
+                    phase,
+                    message: format!("failed to enable first-boot unit: {e}"),
+                }
+            })?;
+        }
 
         eprintln!(
             "kyth-installer: staged {} Flatpaks for first-boot install",
@@ -3418,6 +3543,9 @@ mod tests {
     #[test]
     fn image_phase_refuses_unverifiable_embedded_source_before_bootc() {
         let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
+        // M1: the registry probe is hermetic off in tests.
+        let old_probe = std::env::var("KYTH_INSTALLER_NETWORK_PROBE").ok();
+        std::env::set_var("KYTH_INSTALLER_NETWORK_PROBE", "off");
         let mut missing = request(false);
         missing.execution.bootc.source_imgref = "oci:/nonexistent/kyth/image:latest".into();
         let executor =
@@ -3429,11 +3557,18 @@ mod tests {
             error.to_string().contains("refusing bootc install"),
             "{error}"
         );
+        match old_probe {
+            Some(value) => std::env::set_var("KYTH_INSTALLER_NETWORK_PROBE", value),
+            None => std::env::remove_var("KYTH_INSTALLER_NETWORK_PROBE"),
+        }
     }
 
     #[test]
     fn image_phase_refuses_unpinned_docker_source() {
         let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
+        // M1: the registry probe is hermetic off in tests.
+        let old_probe = std::env::var("KYTH_INSTALLER_NETWORK_PROBE").ok();
+        std::env::set_var("KYTH_INSTALLER_NETWORK_PROBE", "off");
         // M6: a tag-based docker:// reference is mutable after the ISO was
         // built, so it can no longer pass through to fetch-time checks: it
         // must be digest-pinned and verified before bootc runs.
@@ -3445,6 +3580,115 @@ mod tests {
             .verify_install_source(Phase::Image)
             .expect_err("unpinned docker source must fail closed");
         assert!(error.to_string().contains("digest-pinned"), "{error}");
+        match old_probe {
+            Some(value) => std::env::set_var("KYTH_INSTALLER_NETWORK_PROBE", value),
+            None => std::env::remove_var("KYTH_INSTALLER_NETWORK_PROBE"),
+        }
+    }
+
+    #[test]
+    fn from_request_fails_closed_before_destructive_phase_without_network() {
+        // M1: the registry probe runs during plan validation, before the
+        // job slot is claimed and long before the destructive Storage phase.
+        let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
+        let mut offline = request(false);
+        offline.execution.bootc.source_imgref = "docker://127.0.0.1/kyth-os/kyth:latest".into();
+        let error = match NativePhaseExecutor::from_request(offline) {
+            Ok(_) => panic!("unreachable registry must refuse before the job starts"),
+            Err(error) => error,
+        };
+        assert!(error.contains("127.0.0.1"), "{error}");
+    }
+
+    #[test]
+    fn registry_probe_fails_closed_on_unresolvable_host() {
+        let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
+        // 127.0.0.1:443 deterministically refuses: no registry is
+        // reachable, so the probe must fail closed without needing DNS.
+        let error = probe_registry_reachability("docker://127.0.0.1/kyth-os/kyth:latest")
+            .expect_err("unresolvable registry must fail closed");
+        assert!(error.contains("127.0.0.1"), "{error}");
+    }
+
+    #[test]
+    fn registry_probe_rejects_non_docker_reference() {
+        let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
+        let error = probe_registry_reachability("oci:/usr/share/kyth/image:latest")
+            .expect_err("non-docker reference must fail closed");
+        assert!(error.contains("docker://"), "{error}");
+    }
+
+    #[test]
+    fn registry_probe_off_switch_skips_network() {
+        let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
+        let old_probe = std::env::var("KYTH_INSTALLER_NETWORK_PROBE").ok();
+        std::env::set_var("KYTH_INSTALLER_NETWORK_PROBE", "off");
+        let result = probe_registry_reachability("docker://127.0.0.1/kyth-os/kyth:latest");
+        match old_probe {
+            Some(value) => std::env::set_var("KYTH_INSTALLER_NETWORK_PROBE", value),
+            None => std::env::remove_var("KYTH_INSTALLER_NETWORK_PROBE"),
+        }
+        assert!(result.is_ok(), "off switch must skip the probe");
+    }
+
+    #[test]
+    fn flatpak_staging_is_atomic_idempotent_and_permissioned() {
+        // M2/M3/L3/L4/L5: the staged list ends with a newline, files are
+        // 0644 regardless of umask, no stale temp files remain, per-app
+        // failures are surfaced in a .failed file, and re-staging converges.
+        let mut executor =
+            NativePhaseExecutor::from_request(request(false)).expect("request should validate");
+        executor.storage_plan.flatpaks = vec![
+            "com.valvesoftware.Steam".to_string(),
+            "com.discordapp.Discord".to_string(),
+        ];
+        let dir = tempfile::tempdir().expect("temp deploy root");
+        let deploy_root = dir.path().to_str().unwrap();
+        // The deployed image always ships /etc/systemd/system; the temp
+        // fixture must provide it too.
+        std::fs::create_dir_all(dir.path().join("etc/systemd/system")).expect("systemd dir");
+        executor
+            .install_selected_flatpaks(Phase::Configure, deploy_root)
+            .expect("staging should succeed");
+        let list_path = dir.path().join("etc/kyth/first-boot-flatpaks");
+        let unit_path = dir
+            .path()
+            .join("etc/systemd/system/kyth-first-boot-flatpaks.service");
+        let link_path = dir
+            .path()
+            .join("etc/systemd/system/multi-user.target.wants/kyth-first-boot-flatpaks.service");
+        // L4: trailing newline.
+        let contents = std::fs::read_to_string(&list_path).expect("list readable");
+        assert_eq!(
+            contents,
+            "com.valvesoftware.Steam\ncom.discordapp.Discord\n"
+        );
+        // L5: explicit 0644, not umask-dependent.
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            list_path.metadata().unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        assert_eq!(
+            unit_path.metadata().unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        // M2: no stale temp files left behind.
+        assert!(!dir.path().join("etc/kyth/first-boot-flatpaks.new").exists());
+        // L3: the unit records per-app failures instead of discarding them.
+        let unit = std::fs::read_to_string(&unit_path).expect("unit readable");
+        assert!(unit.contains("first-boot-flatpaks.failed"));
+        // M3: re-staging converges (idempotent symlink).
+        executor
+            .install_selected_flatpaks(Phase::Configure, deploy_root)
+            .expect("re-staging should succeed");
+        let target = std::fs::read_link(&link_path).expect("symlink readable");
+        assert_eq!(
+            target.to_string_lossy(),
+            "../kyth-first-boot-flatpaks.service"
+        );
+        let contents2 = std::fs::read_to_string(&list_path).expect("list readable");
+        assert_eq!(contents, contents2);
     }
 
     // Source pins are process-global; keep fixture mutation and verification
@@ -3516,11 +3760,15 @@ mod tests {
         (dir, old)
     }
 
-    fn restore_env(old: (Option<String>, Option<String>, Option<String>)) {
+    fn restore_env(
+        old: (Option<String>, Option<String>, Option<String>),
+        old_probe: Option<String>,
+    ) {
         for (key, value) in [
             ("KYTH_SOURCE_DIGEST", old.0),
             ("KYTH_SOURCE_METADATA", old.1),
             ("KYTH_SOURCE_SIGNATURE", old.2),
+            ("KYTH_INSTALLER_NETWORK_PROBE", old_probe),
         ] {
             match value {
                 Some(value) => std::env::set_var(key, value),
@@ -3532,6 +3780,9 @@ mod tests {
     #[test]
     fn image_phase_verifies_digest_pinned_docker_source() {
         let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
+        // M1: the registry probe is hermetic off in tests.
+        let old_probe = std::env::var("KYTH_INSTALLER_NETWORK_PROBE").ok();
+        std::env::set_var("KYTH_INSTALLER_NETWORK_PROBE", "off");
         let digest_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let (_dir, old) = pinned_docker_fixture(digest_hex);
         let result = (|| {
@@ -3542,13 +3793,16 @@ mod tests {
                 NativePhaseExecutor::from_request(pinned).expect("request shape should validate");
             executor.verify_install_source(Phase::Image)
         })();
-        restore_env(old);
+        restore_env(old, old_probe);
         result.expect("pinned docker source matching the ISO release should verify");
     }
 
     #[test]
     fn image_phase_refuses_docker_source_with_mismatched_env_pin() {
         let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
+        // M1: the registry probe is hermetic off in tests.
+        let old_probe = std::env::var("KYTH_INSTALLER_NETWORK_PROBE").ok();
+        std::env::set_var("KYTH_INSTALLER_NETWORK_PROBE", "off");
         let digest_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let (_dir, old) = pinned_docker_fixture(digest_hex);
         // Tamper with the environment pin only: the reference digest no
@@ -3565,7 +3819,7 @@ mod tests {
                 NativePhaseExecutor::from_request(pinned).expect("request shape should validate");
             executor.verify_install_source(Phase::Image)
         })();
-        restore_env(old);
+        restore_env(old, old_probe);
         let error = result.expect_err("mismatched env pin must fail closed");
         assert!(error.to_string().contains("KYTH_SOURCE_DIGEST"), "{error}");
     }
@@ -3573,6 +3827,9 @@ mod tests {
     #[test]
     fn image_phase_refuses_docker_source_with_tampered_bundle() {
         let _source_env = SOURCE_ENV_LOCK.lock().expect("source environment lock");
+        // M1: the registry probe is hermetic off in tests.
+        let old_probe = std::env::var("KYTH_INSTALLER_NETWORK_PROBE").ok();
+        std::env::set_var("KYTH_INSTALLER_NETWORK_PROBE", "off");
         let digest_hex = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
         let (dir, old) = pinned_docker_fixture(digest_hex);
         // Rewrite the bundle so its digest no longer matches the metadata's
@@ -3590,7 +3847,7 @@ mod tests {
                 NativePhaseExecutor::from_request(pinned).expect("request shape should validate");
             executor.verify_install_source(Phase::Image)
         })();
-        restore_env(old);
+        restore_env(old, old_probe);
         result.expect_err("tampered bundle must fail closed");
     }
 

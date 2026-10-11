@@ -911,6 +911,22 @@ fn header_value<'a>(headers: &'a str, name: &str) -> Option<&'a str> {
     })
 }
 
+/// L1: compare session tokens in constant time. `==` on byte slices
+/// short-circuits on the first differing byte, leaking the shared prefix
+/// length to a local timing attacker over the Unix socket.
+fn tokens_equal(provided: &str, expected: &str) -> bool {
+    let a = provided.as_bytes();
+    let b = expected.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff: u8 = 0;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 fn header_count(headers: &str, name: &str) -> usize {
     headers
         .lines()
@@ -1854,7 +1870,8 @@ fn handle(
     let (method, target, headers) = request_parts(&request)?;
     if !route_allowed(method, target)
         || header_count(headers, "X-Kyth-Session-Token") != 1
-        || header_value(headers, "X-Kyth-Session-Token") != Some(token)
+        || !header_value(headers, "X-Kyth-Session-Token")
+            .is_some_and(|provided| tokens_equal(provided, token))
     {
         forbidden(&mut client);
         return Ok(());
@@ -2293,7 +2310,7 @@ mod tests {
     use super::{
         header_count, json_status, merge_report_state, native_executor_from_start,
         native_pending_request, native_request_from_start, normalize_start_request, options,
-        query_value, read_request_with_timeout, read_session_token, route_allowed,
+        query_value, read_request_with_timeout, read_session_token, route_allowed, tokens_equal,
         NativeJournalRegistry,
     };
     use serde_json::Value;
@@ -2304,6 +2321,17 @@ mod tests {
     use std::sync::atomic::AtomicUsize;
     use std::sync::Arc;
     use tempfile::tempdir;
+
+    #[test]
+    fn session_tokens_compare_equal_only_on_exact_match() {
+        // L1: constant-time comparison — exact match only, no prefix oracle.
+        assert!(tokens_equal("abc123", "abc123"));
+        assert!(tokens_equal("", ""));
+        assert!(!tokens_equal("abc123", "abc124"));
+        assert!(!tokens_equal("abc12", "abc123"));
+        assert!(!tokens_equal("abc123", "abc12"));
+        assert!(!tokens_equal("", "abc123"));
+    }
 
     #[test]
     fn daemon_client_slots_are_bounded_and_released() {
