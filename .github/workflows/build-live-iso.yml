@@ -673,55 +673,6 @@ jobs:
             echo "::warning::Grype scan of previous SBOM failed"
           [[ -f "${OUT}" ]] && echo "path=${OUT}" >> "$GITHUB_OUTPUT"
 
-      - name: Generate ISO release changelog
-        id: iso_changelog
-        env:
-          GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
-          SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
-          SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
-          SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
-          GRYPE_CURRENT: ${{ steps.grype_current.outputs.path }}
-          GRYPE_PREVIOUS: ${{ steps.grype_previous.outputs.path }}
-          GRYPE_ISO: ${{ steps.grype_iso.outputs.path }}
-        run: |
-          NOTES="$(mktemp --suffix=.md)"
-          IMAGE_VERSION="$(skopeo inspect --no-creds \
-            "docker://${SOURCE_IMAGE}@${SOURCE_DIGEST}" 2>/dev/null \
-            | jq -r '.Labels["org.opencontainers.image.version"] // empty' || true)"
-          # Merge the container-image and ISO-payload Grype results so the
-          # changelog security section covers the full ISO surface.
-          GRYPE_MERGED="${RUNNER_TEMP}/grype-merged.json"
-          python3 - "$GRYPE_MERGED" "${GRYPE_CURRENT:-}" "${GRYPE_ISO:-}" <<'PY'
-          import json, sys
-          out, paths = sys.argv[1], sys.argv[2:]
-          matches, seen = [], set()
-          for p in paths:
-              if not p: continue
-              try:
-                  data = json.load(open(p))
-              except Exception:
-                  continue
-              for m in data.get("matches", []):
-                  key = (m.get("vulnerability", {}).get("id"), m.get("artifact", {}).get("name"), m.get("artifact", {}).get("version"))
-                  if key not in seen:
-                      seen.add(key)
-                      matches.append(m)
-          json.dump({"matches": matches}, open(out, "w"))
-          PY
-          python3 .github/scripts/kyth_changelog.py \
-            --mode iso \
-            --repo "${GH_REPO}" \
-            --branch "${SOURCE_TAG}" \
-            --current-sha "${SOURCE_SHA}" \
-            --image "${SOURCE_IMAGE}" \
-            --current-digest "${SOURCE_DIGEST}" \
-            --image-version "${IMAGE_VERSION}" \
-            --grype-current "${GRYPE_MERGED}" \
-            --grype-previous "${GRYPE_PREVIOUS:-}" \
-            --output "${NOTES}"
-          echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
-
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
         with:
@@ -781,6 +732,56 @@ jobs:
           "${GRYPE_CMD}" "sbom:${SBOM_PATH}" -o json --file "${OUT}" || \
             echo "::warning::Grype scan of ISO payload SBOM failed; ISO CVE data will be incomplete"
           [[ -f "${OUT}" ]] && echo "path=${OUT}" >> "$GITHUB_OUTPUT"
+
+
+      - name: Generate ISO release changelog
+        id: iso_changelog
+        env:
+          GH_REPO: ${{ github.repository }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
+          SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+          SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
+          SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
+          GRYPE_CURRENT: ${{ steps.grype_current.outputs.path }}
+          GRYPE_PREVIOUS: ${{ steps.grype_previous.outputs.path }}
+          GRYPE_ISO: ${{ steps.grype_iso.outputs.path }}
+        run: |
+          NOTES="$(mktemp --suffix=.md)"
+          IMAGE_VERSION="$(skopeo inspect --no-creds \
+            "docker://${SOURCE_IMAGE}@${SOURCE_DIGEST}" 2>/dev/null \
+            | jq -r '.Labels["org.opencontainers.image.version"] // empty' || true)"
+          # Merge the container-image and ISO-payload Grype results so the
+          # changelog security section covers the full ISO surface.
+          GRYPE_MERGED="${RUNNER_TEMP}/grype-merged.json"
+          python3 - "$GRYPE_MERGED" "${GRYPE_CURRENT:-}" "${GRYPE_ISO:-}" <<'PY'
+          import json, sys
+          out, paths = sys.argv[1], sys.argv[2:]
+          matches, seen = [], set()
+          for p in paths:
+              if not p: continue
+              try:
+                  data = json.load(open(p))
+              except Exception:
+                  continue
+              for m in data.get("matches", []):
+                  key = (m.get("vulnerability", {}).get("id"), m.get("artifact", {}).get("name"), m.get("artifact", {}).get("version"))
+                  if key not in seen:
+                      seen.add(key)
+                      matches.append(m)
+          json.dump({"matches": matches}, open(out, "w"))
+          PY
+          python3 .github/scripts/kyth_changelog.py \
+            --mode iso \
+            --repo "${GH_REPO}" \
+            --branch "${SOURCE_TAG}" \
+            --current-sha "${SOURCE_SHA}" \
+            --image "${SOURCE_IMAGE}" \
+            --current-digest "${SOURCE_DIGEST}" \
+            --image-version "${IMAGE_VERSION}" \
+            --grype-current "${GRYPE_MERGED}" \
+            --grype-previous "${GRYPE_PREVIOUS:-}" \
+            --output "${NOTES}"
+          echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cosign
         uses: ./.github/actions/setup-cosign
