@@ -117,11 +117,11 @@ class InstallerTauriShellTests(unittest.TestCase):
         # lines; the contract is absolute paths, never PATH lookup.
         self.assertRegex(
             production,
-            r'\(\s*"/usr/bin/plasmawindowed"\s*,\s*&\["org\.kde\.plasma\.networkmanagement"\]\s*\)',
+            r'\(\s*"/usr/bin/plasmawindowed"\s*,\s*&\["org\.kde\.plasma\.networkmanagement"\]\s*,?\s*\)',
         )
         self.assertRegex(
             production,
-            r'\(\s*"/usr/bin/kcmshell6"\s*,\s*&\["kcm_networkmanagement"\]\s*\)',
+            r'\(\s*"/usr/bin/kcmshell6"\s*,\s*&\["kcm_networkmanagement"\]\s*,?\s*\)',
         )
         # The only filesystem read allowed in the unprivileged shell is the
         # launcher-written 0600 tokens file (--tokens-file): no writes, no
