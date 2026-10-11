@@ -328,6 +328,34 @@ class ConfigHelperTests(unittest.TestCase):
             # should no longer hand-roll a bare `cat >` redirect for their drop.
             self.assertNotIn("cat >/", body, f"{rel} still hand-rolls cat >")
 
+    def test_containers_signature_policy(self):
+        # M7: the update path must verify cosign signatures. The policy files
+        # ship in the image and the sysconfig fragment installs them.
+        import json
+
+        policy_path = ROOT / "build_files" / "config" / "containers" / "policy.json"
+        registries_path = ROOT / "build_files" / "config" / "containers" / "registries.d" / "kyth.yaml"
+        fragment = FRAG_DIR / "systemd" / "37-containers-signature-policy.sh"
+
+        self.assertTrue(policy_path.is_file(), "containers policy.json missing")
+        self.assertTrue(registries_path.is_file(), "containers kyth.yaml missing")
+        self.assertTrue(fragment.is_file(), "signature policy sysconfig fragment missing")
+
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        reqs = policy["transports"]["docker"]["ghcr.io/kyth-os/kyth"]
+        self.assertEqual(reqs[0]["type"], "sigstoreSigned")
+        # Pinned to the supply-chain workflow OIDC identity, not just any signature.
+        self.assertIn("supply-chain", reqs[0]["fulcio"]["subjectUri"])
+        self.assertIn("kyth-os/kyth", reqs[0]["fulcio"]["subjectUri"])
+        self.assertEqual(
+            reqs[0]["fulcio"]["oidcIssuer"],
+            "https://token.actions.githubusercontent.com",
+        )
+
+        body = fragment.read_text(encoding="utf-8")
+        self.assertIn("/etc/containers/policy.json", body)
+        self.assertIn("/etc/containers/registries.d/kyth.yaml", body)
+
 
 if __name__ == "__main__":
     unittest.main()

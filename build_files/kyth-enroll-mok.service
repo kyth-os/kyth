@@ -21,6 +21,9 @@ ReadWritePaths=-/sys/firmware/efi/efivars
 LockPersonality=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
 StandardOutput=journal
 StandardError=journal
 # Runs once ever (marker-gated), at boot — deprioritized so it never

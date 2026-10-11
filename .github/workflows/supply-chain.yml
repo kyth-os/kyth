@@ -15,6 +15,8 @@ on:
         options:
           - latest
           - testing
+          - latest-cachy
+          - testing-cachy
       source_digest:
         description: Immutable image digest to process (required for manual runs)
         required: true
@@ -33,7 +35,7 @@ on:
         required: false
         type: string
       original_event:
-        description: Event that triggered the build workflow. Schedule-triggered stable publishes keep the manual approval gate.
+        description: Event that triggered the build workflow. Schedule-triggered stable publishes use the reviewer-free stable-release-auto environment; manual dispatches use stable-release (manual approval).
         required: false
         type: string
       original_actor:
@@ -135,7 +137,14 @@ jobs:
           build_files/scripts/validate-digest.sh "${BASE_DIGEST}"
           [[ "${UPSTREAM_BASE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)@sha256:[0-9a-f]{64}$ ]]
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
-          test "${KERNEL_FLAVOR}" = fedora
+          # Kernel flavor must match the tag: plain tags are fedora, -cachy
+          # tags are cachy. Both flavors get full supply-chain treatment
+          # (signing, SBOM, CVE scan); the ISO is only built from fedora.
+          if [[ "${TAG}" == *-cachy ]]; then
+            test "${KERNEL_FLAVOR}" = cachy
+          else
+            test "${KERNEL_FLAVOR}" = fedora
+          fi
 
           PREVIOUS_TAG="$(oras repo tags "${IMAGE}" \
             | grep -E "^${TAG}\.[0-9]{8}\.[0-9]+\.[0-9]+\.[0-9a-f]{8}$" \
@@ -302,7 +311,7 @@ jobs:
         run: |
           NOTES="image-changelog-${CURRENT_TAG}.md"
           BRANCH=main
-          if [[ "${SOURCE_TAG}" == "testing" ]]; then
+          if [[ "${SOURCE_TAG}" == "testing" || "${SOURCE_TAG}" == "testing-cachy" ]]; then
             BRANCH=testing
           fi
           GRYPE_ARGS=()
@@ -319,35 +328,6 @@ jobs:
             "${GRYPE_ARGS[@]}" \
             --output "${NOTES}"
           echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
-
-      # The channel tag becomes available before the signature/attestation
-      # approval gate. Publish its digest-bound notes during preparation so
-      # users checking for that image never race the later gated publish job.
-      - name: Publish image changelog release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          VERSION: ${{ steps.image.outputs.current_version }}
-          SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
-          NOTES: ${{ steps.changelog.outputs.path }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
-        run: |
-          RELEASE_TAG="image-${VERSION//./-}"
-          TITLE="Kyth Image - ${VERSION}"
-          PRERELEASE=""
-          if [[ "${SOURCE_TAG}" != "latest" ]]; then
-            PRERELEASE="--prerelease"
-          fi
-
-          if gh release view "${RELEASE_TAG}" &>/dev/null; then
-            gh release edit "${RELEASE_TAG}" --title "${TITLE}" --notes-file "${NOTES}" ${PRERELEASE}
-          else
-            gh release create "${RELEASE_TAG}" \
-              --target "${SOURCE_SHA}" \
-              --title "${TITLE}" \
-              --notes-file "${NOTES}" \
-              ${PRERELEASE}
-          fi
 
       - name: Package publish inputs
         env:
@@ -407,7 +387,7 @@ jobs:
     # manual dispatch, forgeable by any write-collaborator) and compared a
     # user login against the org name (never matches). Schedule-triggered
     # rebuilds use the reviewer-free stable-release-auto environment.
-    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || (inputs.original_event == 'schedule' && 'stable-release-auto' || 'stable-release') }}
+    environment: ${{ (inputs.source_tag == 'testing' || inputs.source_tag == 'testing-cachy') && 'testing-release' || (inputs.original_event == 'schedule' && 'stable-release-auto' || 'stable-release') }}
     permissions:
       actions: write
       contents: write
@@ -450,7 +430,7 @@ jobs:
           NOTES="$(jq -r .notes "${METADATA}")"
 
           [[ "${IMAGE}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]]
-          [[ "${TAG}" == "latest" || "${TAG}" == "testing" ]]
+          [[ "${TAG}" == "latest" || "${TAG}" == "testing" || "${TAG}" == "latest-cachy" || "${TAG}" == "testing-cachy" ]]
           [[ "${TAG}" == "${MATRIX_SOURCE_TAG}" ]]
           [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${GITHUB_SHA_META}" =~ ^[0-9a-f]{40}$ ]]
@@ -459,7 +439,11 @@ jobs:
           [[ "${BUILD_BASE}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+@sha256:[0-9a-f]{64}$ ]]
           [[ "${UPSTREAM_BASE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)@sha256:[0-9a-f]{64}$ ]]
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
-          test "${KERNEL_FLAVOR}" = fedora
+          if [[ "${TAG}" == *-cachy ]]; then
+            test "${KERNEL_FLAVOR}" = cachy
+          else
+            test "${KERNEL_FLAVOR}" = fedora
+          fi
           [[ "${SBOM}" == "$(basename "${SBOM}")" && -s "output/supply-chain/${SBOM}" ]]
           [[ "${NOTES}" == "$(basename "${NOTES}")" && -s "output/supply-chain/${NOTES}" ]]
 
@@ -554,6 +538,35 @@ jobs:
             "${IMAGE}@${SBOM_DIGEST}"
           # Build provenance was verified BEFORE signing (see
           # "Verify build provenance before signing" above).
+
+      # The changelog release now publishes here, inside the gated publish job
+      # AFTER signature verification — never from the ungated prepare job. A
+      # denied publish leaves no public release for an unverified image.
+      - name: Publish image changelog release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
+          NOTES_FILE: output/supply-chain/${{ steps.meta.outputs.notes }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          RELEASE_TAG="image-${VERSION//./-}"
+          TITLE="Kyth Image - ${VERSION}"
+          PRERELEASE=""
+          if [[ "${SOURCE_TAG}" != "latest" ]]; then
+            PRERELEASE="--prerelease"
+          fi
+
+          if gh release view "${RELEASE_TAG}" &>/dev/null; then
+            gh release edit "${RELEASE_TAG}" --title "${TITLE}" --notes-file "${NOTES_FILE}" ${PRERELEASE}
+          else
+            gh release create "${RELEASE_TAG}" \
+              --target "${SOURCE_SHA}" \
+              --title "${TITLE}" \
+              --notes-file "${NOTES_FILE}" \
+              ${PRERELEASE}
+          fi
 
       - name: Dispatch Live ISO after image verification
         if: inputs.dispatch_iso == 'true' || inputs.dispatch_iso == true

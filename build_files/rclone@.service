@@ -9,6 +9,22 @@ Type=simple
 ExecStart=/usr/bin/rclone mount %i: %h/Cloud/%i --vfs-cache-mode writes
 Restart=on-failure
 RestartSec=10
+# Sandboxing: user-context FUSE mount. Needs network (cloud remotes) and the
+# mount syscall family; seccomp is deliberately not applied — the filter would
+# be inherited by rclone's FUSE child and risks breaking mounts.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
 Nice=10
 IOSchedulingClass=idle
 MemoryHigh=256M

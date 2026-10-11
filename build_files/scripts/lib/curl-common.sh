@@ -13,7 +13,13 @@ CURL_COMMON_ARGS=(--fail --retry 5 --retry-delay 2 --retry-all-errors --connect-
 # Create the config pipe for each invocation: source-time substitutions close
 # before curl runs, and retaining a pipe would only authenticate the first call.
 # The token goes through curl -K, never through argv or a generated config file.
+#
+# SECURITY: never run with `set -x` — the printf builtin expansion would log
+# the token. Guard defensively in case a sourcing script enables tracing.
 github_api_curl() {
+	case "${-}" in
+		*x*) set +x ;;
+	esac
 	if [[ -f /run/secrets/github_token ]]; then
 		command curl -K <(printf 'header = "Authorization: token %s"\n' "$(</run/secrets/github_token)") "$@"
 	else

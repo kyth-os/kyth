@@ -94,14 +94,25 @@ install-racing-wheel-drivers:
     fi
 
     echo "  Adding the Terra repo (source: repos.fyralabs.com, same as Bazzite's wheel drivers)…"
+    # Kernel akmods are installed as root-compiled modules: the repo MUST be
+    # signature-verified, not trusted on TLS alone. The Terra 45 public key is
+    # vendored here base64-encoded (same key as build_files/RPM-GPG-KEY-terra;
+    # fingerprint Terra 45 <security@fyralabs.com>); just(1) chokes on the
+    # armor's leading dashes, hence the encoding.
+    TERRA_KEY_B64="LS0tLS1CRUdJTiBQR1AgUFVCTElDIEtFWSBCTE9DSy0tLS0tCkNvbW1lbnQ6IGh0dHBzOi8vZ29wZW5wZ3Aub3JnClZlcnNpb246IEdvcGVuUEdQIDIuOS4wCgp4ak1FYW1GNGd4WUpLd1lCQkFIYVJ3OEJBUWRBTFFkZVFCaS8wZDA5ODRDNkNJWTc5TkluNm9QTFA0UUR5VFNWCloyRTlxZi9OSUZSbGNuSmhJRFExSUR4elpXTjFjbWwwZVVCbWVYSmhiR0ZpY3k1amIyMCt3cjhFRXhZSUFIRUYKZ21waGVJTURDd2tIQ1JDTjNuMFV3Y0k5akRVVUFBQUFBQUFjQUJCellXeDBRRzV2ZEdGMGFXOXVjeTV2Y0dWdQpjR2R3YW5NdWIzSm5qdEYzZTdpcG9sTFlWMGUwL253cHhBSVZDQU1XQUFJQ0dRRUNtd01DSGdFV0lRVENyQUlTClN2RVU4SVpaTGp5TjNuMFV3Y0k5akFBQTBHWUJBSXF6UEI2Mkh2UVBMbnFkVEpHNDBLb292QkpWUUVEV3FpbkgKcGlSKzNsWmRBUDlTTXYxVDVKWmcwMlE0azlmZy96SlY0WkkzOWRSa0QrTWhDNC9GdnVLZkRNNDRCR3BoZUlNUwpDaXNHQVFRQmwxVUJCUUVCQjBCWGdRMGhxZVpsWmZTMlVLV0ZEN0RYVDc2ZVNrMVd4L01Qd0JVWUJsK1ZOd01CCkNnbkNyZ1FZRmdnQVlBV0NhbUY0Z3drUWpkNTlGTUhDUFl3MUZBQUFBQUFBSEFBUWMyRnNkRUJ1YjNSaGRHbHYKYm5NdWIzQmxibkJuY0dwekxtOXlaeTk4VXQ4TWhtaTAzSE9waUNYTlJrb0Ntd3dXSVFUQ3JBSVNTdkVVOElaWgpManlOM24wVXdjSTlqQUFBOG1rQkFPeGhnY291NlNtWWJvelNOQS84aW4rTmsyczAwYWE0eUZ0VUh6ak1nVDY4CkFQc0UvYlVUV2kvdEJWMTNDcmlTWDFHMWhBOGR2VG1YdTRRZzZxWnY4VjB3Q3c9PQo9NFlyWAotLS0tLUVORCBQR1AgUFVCTElDIEtFWSBCTE9DSy0tLS0t"
+    TERRA_KEY="$(mktemp)"; trap 'rm -f "${TERRA_KEY}"' EXIT
+    printf '%s' "${TERRA_KEY_B64}" | base64 -d >"${TERRA_KEY}"
+    sudo install -Dm 0644 "${TERRA_KEY}" /etc/pki/rpm-gpg/RPM-GPG-KEY-terra
+    sudo rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-terra
     printf '%s\n' \
         '[terra-racing-wheels]' \
         'name=Terra Fyra Labs (racing wheel drivers)' \
         'baseurl=https://repos.fyralabs.com/terra$releasever' \
         'enabled=1' \
         'type=rpm' \
-        'repo_gpgcheck=0' \
-        'gpgcheck=0' \
+        'repo_gpgcheck=1' \
+        'gpgcheck=1' \
+        'gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-terra' \
         | sudo tee /etc/yum.repos.d/terra-racing-wheels.repo >/dev/null
 
     installed=()

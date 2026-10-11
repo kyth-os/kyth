@@ -4,6 +4,22 @@ Description=Re-sync KythOS taskbar pins with installed applications
 [Service]
 Type=oneshot
 ExecStart=/usr/bin/kyth-refresh-taskbar-pins
+# Sandboxing: user-context taskbar pin sync. Needs $HOME/.config writes;
+# ProtectHome is intentionally not applied.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+UMask=0077
 Nice=10
 IOSchedulingClass=idle
 MemoryMax=384M

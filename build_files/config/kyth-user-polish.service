@@ -7,6 +7,22 @@ After=graphical-session.target
 Type=oneshot
 ExecStart=/usr/bin/kyth-user-polish
 RemainAfterExit=yes
+# Sandboxing: user-context first-login polish. Needs $HOME writes; ProtectHome
+# is intentionally not applied.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
 Nice=10
 IOSchedulingClass=idle
 MemoryMax=384M
