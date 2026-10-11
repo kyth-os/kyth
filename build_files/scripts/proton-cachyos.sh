@@ -24,7 +24,7 @@ trap 'rm -rf "${TMPDIR_PC}"' EXIT
 release_api="${PROTON_CACHYOS_REPO_API}/tags/${PROTON_CACHYOS_VER}"
 
 release_json="${TMPDIR_PC}/release.json"
-if ! curl -fsSL "${CURL_COMMON_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" "${release_api}" -o "${release_json}"; then
+if ! github_api_curl -fsSL "${CURL_COMMON_ARGS[@]}" "${release_api}" -o "${release_json}"; then
 	echo "Failed to fetch GE-Proton release info from ${release_api}" >&2
 	exit 1
 fi

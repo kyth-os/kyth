@@ -10,10 +10,13 @@ CURL_COMMON_ARGS=(--fail --retry 5 --retry-delay 2 --retry-all-errors --connect-
 # and never written to any image layer. Falls back gracefully to unauthenticated
 # calls when building locally without the secret.
 #
-# The token is passed via `curl -K` with process substitution, not `-H` on the
-# command line, so the secret never appears in /proc argv. The substitution is
-# evaluated once at source time; the fd stays valid for the shell's lifetime.
-CURL_AUTH_ARGS=()
-if [[ -f /run/secrets/github_token ]]; then
-	CURL_AUTH_ARGS=(-K <(printf 'header = "Authorization: token %s"\n' "$(cat /run/secrets/github_token)"))
-fi
+# Create the config pipe for each invocation: source-time substitutions close
+# before curl runs, and retaining a pipe would only authenticate the first call.
+# The token goes through curl -K, never through argv or a generated config file.
+github_api_curl() {
+	if [[ -f /run/secrets/github_token ]]; then
+		command curl -K <(printf 'header = "Authorization: token %s"\n' "$(</run/secrets/github_token)") "$@"
+	else
+		command curl "$@"
+	fi
+}
