@@ -257,10 +257,18 @@ fn link_compatdata(steam_dir: &Path, native: &Path) {
         println!("  Failed to create symlink: {error}");
         let _ = std::fs::remove_file(&tmp_link);
         if let Some(backup_path) = backup.filter(|path| path.exists()) {
-            if target.is_symlink() || target.exists() {
-                let _ = std::fs::remove_file(&target);
-            }
-            if std::fs::rename(&backup_path, &target).is_err() {
+            // Restore is best-effort: attempt the rename directly and only
+            // remove a conflicting target on AlreadyExists, instead of a
+            // check-then-act window between exists() and rename().
+            let restored = match std::fs::rename(&backup_path, &target) {
+                Ok(()) => true,
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let _ = std::fs::remove_file(&target);
+                    std::fs::rename(&backup_path, &target).is_ok()
+                }
+                Err(_) => false,
+            };
+            if !restored {
                 println!(
                     "  WARNING: could not restore compatdata backup from {backup}",
                     backup = backup_path.display()

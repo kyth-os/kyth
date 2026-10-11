@@ -12,7 +12,7 @@ use std::os::unix::process::CommandExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 pub const ARCHIVE_VERSION: u64 = 1;
@@ -822,7 +822,7 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
     let Some((program, rest)) = args.split_first() else {
         return 1;
     };
-    let mut child = match Command::new(program)
+    let child = match Command::new(program)
         .args(rest)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -833,6 +833,12 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
         Err(_) => return 1,
     };
     let process_group = child.id() as libc::pid_t;
+    // Share the child with the timeout thread so the kill decision can be
+    // made race-free: the mutex is held across the liveness probe and the
+    // group kill, so the main thread cannot reap the child (freeing its PID
+    // for reuse) in between.
+    let child = Arc::new(Mutex::new(child));
+    let child_for_timeout = Arc::clone(&child);
     let timed_out = Arc::new(AtomicBool::new(false));
     let (timeout_cancel, timeout_cancel_rx) = std::sync::mpsc::channel();
     let timeout_state = Arc::clone(&timed_out);
@@ -844,23 +850,44 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
                 .is_err()
             {
                 timeout_state.store(true, Ordering::SeqCst);
-                unsafe {
-                    libc::kill(-process_group, libc::SIGKILL);
+                let _guard = child_for_timeout
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                // Probe with signal 0: unlike try_wait() this does not reap
+                // the child, so a zombie still answers and its PID (hence our
+                // PGID) cannot have been recycled. Only signal the group when
+                // the probe proves the PGID is still ours; descendants of an
+                // exited child must still be killed (they may hold our pipes).
+                if unsafe { libc::kill(process_group, 0) } == 0 {
+                    unsafe {
+                        libc::kill(-process_group, libc::SIGKILL);
+                    }
                 }
             }
         })
         .is_err()
     {
-        unsafe {
-            libc::kill(-process_group, libc::SIGKILL);
+    {
+        // The timeout thread failed to spawn. The child was just created and
+        // cannot have been reaped yet, so the probe trivially succeeds.
+        // Scope the guard so it is released before wait() re-locks.
+        let _guard = child.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        if unsafe { libc::kill(process_group, 0) } == 0 {
+            unsafe {
+                libc::kill(-process_group, libc::SIGKILL);
+            }
         }
-        let _ = child.wait();
-        return 1;
+    }
+    let _ = child
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .wait();
+    return 1;
     }
     // Drain stderr concurrently so a verbose child can never fill the pipe
     // and deadlock the stdout loop below.
     let stderr_lines = std::sync::mpsc::channel::<String>();
-    if let Some(stderr) = child.stderr.take() {
+    if let Some(stderr) = child.lock().unwrap().stderr.take() {
         let sender = stderr_lines.0;
         std::thread::Builder::new()
             .name("kyth-transfer-stderr".to_string())
@@ -874,7 +901,7 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
             })
             .ok();
     }
-    let stdout = child.stdout.take().map(BufReader::new);
+    let stdout = child.lock().unwrap().stdout.take().map(BufReader::new);
     let mut lines = stdout.map(BufReader::lines);
     let started = Instant::now();
     let code = loop {
@@ -884,14 +911,15 @@ pub fn stream_command(args: &[String], timeout_secs: u64, on_line: &dyn Fn(&str)
                 on_line(trimmed);
             }
         }
-        match child.try_wait() {
+        match child.lock().unwrap().try_wait() {
             Ok(Some(status)) => break status.code().unwrap_or(1),
             Ok(None) if started.elapsed() <= Duration::from_secs(timeout_secs) => {
                 std::thread::sleep(Duration::from_millis(50));
             }
             _ => {
-                let _ = child.kill();
-                let _ = child.wait();
+                let mut guard = child.lock().unwrap();
+                let _ = guard.kill();
+                let _ = guard.wait();
                 return 1;
             }
         }
