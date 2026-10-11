@@ -128,6 +128,10 @@ const post = <T>(path: string, body: unknown) => request<T>(path, { method: "POS
 
 export const installerApi = {
   config: () => request<Config>("/api/config"),
+  openNetworkSelector: async (): Promise<void> => {
+    if (!inTauriShell()) throw new Error("The Wi-Fi picker is available only in the installer shell.");
+    await invoke("installer_open_network_selector");
+  },
   disks: () => request<Disk[]>("/api/disks"),
   partitions: (disk: string) => request<Partition[]>(`/api/partitions?disk=${encodeURIComponent(disk)}`),
   freeSpace: (disk: string) => request<FreeRegion[]>(`/api/free-space?disk=${encodeURIComponent(disk)}`),

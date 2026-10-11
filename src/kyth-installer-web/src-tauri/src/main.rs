@@ -27,6 +27,7 @@ mod installer_transaction;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
+use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -173,6 +174,28 @@ fn installer_execution_plan(
     let input: installer_executor::InstallerExecutionInput = serde_json::from_value(request)
         .map_err(|error| format!("invalid installer execution request: {error}"))?;
     installer_executor::build_plan(input)
+}
+
+fn network_selector_candidates() -> [(&'static str, &'static [&'static str]); 2] {
+    [
+        ("plasmawindowed", &["org.kde.plasma.networkmanagement"]),
+        ("kcmshell6", &["kcm_networkmanagement"]),
+    ]
+}
+
+#[tauri::command]
+fn installer_open_network_selector() -> Result<(), String> {
+    let mut errors = Vec::new();
+    for (program, args) in network_selector_candidates() {
+        match Command::new(program).args(args).spawn() {
+            Ok(_) => return Ok(()),
+            Err(error) => errors.push(format!("{program}: {error}")),
+        }
+    }
+    Err(format!(
+        "Could not open the Wi-Fi network selector ({})",
+        errors.join("; ")
+    ))
 }
 
 fn connection(state: &tauri::State<InstallerTokens>) -> Result<InstallerConnection, String> {
@@ -485,7 +508,8 @@ fn main() {
             installer_execution_plan,
             installer_request,
             installer_stream,
-            installer_stream_stop
+            installer_stream_stop,
+            installer_open_network_selector
         ])
         .run(tauri::generate_context!())
         .expect("error while running the KythOS installer shell");
@@ -494,6 +518,17 @@ fn main() {
 #[cfg(test)]
 mod transport_tests {
     use super::*;
+
+    #[test]
+    fn network_selector_uses_only_fixed_kde_candidates() {
+        assert_eq!(
+            network_selector_candidates(),
+            [
+                ("plasmawindowed", &["org.kde.plasma.networkmanagement"][..]),
+                ("kcmshell6", &["kcm_networkmanagement"][..]),
+            ]
+        );
+    }
 
     #[test]
     fn long_partition_commits_get_a_matching_client_wait_bound() {

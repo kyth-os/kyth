@@ -111,7 +111,10 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn("installer_request", production)
         self.assertIn("installer_stream", production)
         self.assertIn("allowlisted_path", production)
-        self.assertNotIn("Command::new", production)
+        self.assertEqual(production.count("Command::new("), 1)
+        self.assertIn("Command::new(program).args(args).spawn()", production)
+        self.assertIn('("plasmawindowed", &["org.kde.plasma.networkmanagement"])', production)
+        self.assertIn('("kcmshell6", &["kcm_networkmanagement"])', production)
         # The only filesystem read allowed in the unprivileged shell is the
         # launcher-written 0600 tokens file (--tokens-file): no writes, no
         # directory access, no generic bridge.
