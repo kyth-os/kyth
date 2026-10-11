@@ -260,9 +260,9 @@ pub(crate) fn stage(input: SecureBootStageInput) -> Result<SecureBootPlan, Strin
 
 /// Probe firmware state and stage the fixed KythOS MOK while honoring job
 /// cancellation during the bounded `mokutil` wait.
-pub(crate) fn stage_with_cancellation(
+pub(crate) fn stage_with_cancellation<F: Fn() -> bool + Sync>(
     input: SecureBootStageInput,
-    cancel_requested: impl Fn() -> bool,
+    cancel_requested: F,
 ) -> Result<SecureBootPlan, String> {
     if cancel_requested() {
         return Err(
@@ -271,25 +271,31 @@ pub(crate) fn stage_with_cancellation(
     }
     let certificate_present = Path::new(CERTIFICATE).is_file();
     let mokutil_present = Path::new(MOKUTIL).is_file();
-    let state = secure_boot_state(&cancel_requested);
-    let enrolled = if mokutil_present && contains_key(&["--list-enrolled"], &cancel_requested) {
-        "yes"
-    } else {
-        "no"
-    };
-    let pending = if mokutil_present && contains_key(&["--list-new"], &cancel_requested) {
-        "yes"
-    } else {
-        "no"
-    };
+    // P17: the three firmware probes are independent bounded mokutil calls —
+    // run them concurrently so the worst case is one probe timeout instead
+    // of three sequential ones. Cancellation is still honored inside each
+    // probe via the shared cancel flag.
+    let (state, enrolled, pending) = std::thread::scope(|scope| {
+        let cancel = &cancel_requested;
+        let state_handle = scope.spawn(move || secure_boot_state(|| cancel()));
+        let enrolled_handle =
+            scope.spawn(move || mokutil_present && contains_key(&["--list-enrolled"], || cancel()));
+        let pending_handle =
+            scope.spawn(move || mokutil_present && contains_key(&["--list-new"], || cancel()));
+        (
+            state_handle.join().unwrap_or("unknown"),
+            enrolled_handle.join().unwrap_or(false),
+            pending_handle.join().unwrap_or(false),
+        )
+    });
     let plan = build_plan(SecureBootInput {
         kernel: input.kernel,
         force_stage: input.force_stage,
         certificate_present,
         mokutil_present,
         secure_boot: state.to_string(),
-        enrolled: enrolled.to_string(),
-        pending: pending.to_string(),
+        enrolled: if enrolled { "yes" } else { "no" }.to_string(),
+        pending: if pending { "yes" } else { "no" }.to_string(),
     })?;
     if plan.action != "import-certificate" {
         return Ok(plan);

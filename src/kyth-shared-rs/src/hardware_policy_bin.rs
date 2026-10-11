@@ -14,6 +14,7 @@ use kyth_shared::system::hardware_policy::{self, Evaluation, DEFAULT_POLICY_PATH
 use kyth_shared::system::process::run_bounded;
 
 const STATE_PATH: &str = "/var/lib/kyth/hardware-policy.json";
+const NVIDIA_AKMODS_PENDING_PATH: &str = "/var/lib/kyth/nvidia-akmods-pending";
 const REPORT_PATH: &str = "/var/lib/kyth/hardware-support.json";
 const MODPROBE_PATH: &str = "/etc/modprobe.d/90-kyth-hardware-policy.conf";
 const SCX_PATH: &str = "/etc/scx/scx_loader.conf";
@@ -259,6 +260,58 @@ fn configure_scheduler(candidates: &[String]) -> io::Result<String> {
     Ok(selected)
 }
 
+/// Marker written when the NVIDIA kernel module still needs building after
+/// the fast policy was applied. `kyth-nvidia-akmods.service` is
+/// `ConditionPathExists=` on it, so the slow `akmods --force` build runs
+/// deferred — and retries on later boots if a build is interrupted.
+fn nvidia_akmods_pending_path() -> std::path::PathBuf {
+    env::var_os("KYTH_HARDWARE_POLICY_PENDING")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| NVIDIA_AKMODS_PENDING_PATH.into())
+}
+
+fn nvidia_module_present() -> bool {
+    command_ok(
+        &["modinfo".into(), "nvidia".into()],
+        Duration::from_secs(30),
+    )
+}
+
+fn write_nvidia_akmods_pending(kernel: &str) -> io::Result<()> {
+    atomic_write_text(&nvidia_akmods_pending_path(), kernel, Some(0o644)).map_err(io::Error::other)
+}
+
+fn clear_nvidia_akmods_pending() {
+    match fs::remove_file(nvidia_akmods_pending_path()) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => {
+            eprintln!("kyth-hardware-policy: could not clear NVIDIA akmods pending marker: {error}")
+        }
+    }
+}
+
+/// Best-effort flip of the persisted `nvidia` status field: the build result
+/// must be visible to the Hub even though the deferred unit cannot fail the
+/// already-applied fast policy.
+fn update_nvidia_state(status: &str) {
+    let path = Path::new(STATE_PATH);
+    let mut state: serde_json::Value = fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_else(|| serde_json::json!({}));
+    state["nvidia"] = status.into();
+    if let Err(error) = atomic_write_json(path, &state, Some(0o600)) {
+        eprintln!("kyth-hardware-policy: could not update NVIDIA state: {error}");
+    }
+}
+
+/// Fast hardware policy for NVIDIA: kernel arguments, persistent bootc kargs,
+/// suspend/resume/hibernate enables, and Dynamic Boost. Deliberately excludes
+/// the slow `akmods --force` module build (5-15 min) — that runs deferred in
+/// `kyth-nvidia-akmods.service` so it can neither stall the boot-time policy
+/// run nor be SIGTERM'd by the unit timeout before the policy steps below
+/// run (the failure mode the old 1200s timeout was papering over).
 fn configure_nvidia() -> Result<String, String> {
     if !command_ok(
         &["rpm".into(), "-q".into(), "akmod-nvidia".into()],
@@ -266,39 +319,71 @@ fn configure_nvidia() -> Result<String, String> {
     ) {
         return Err("NVIDIA GPU matched, but akmod-nvidia is missing from the image".into());
     }
+    apply_nvidia_kernel_policy()?;
+    if nvidia_module_present() {
+        clear_nvidia_akmods_pending();
+        return Ok("proprietary-ready".into());
+    }
+    // Module not built for this kernel yet: leave the pending marker and let
+    // the deferred oneshot unit do the slow build. The marker survives a
+    // failed or interrupted build, so the next boot retries automatically.
     let kernel = fs::read_to_string("/proc/sys/kernel/osrelease")
         .unwrap_or_default()
         .trim()
         .to_string();
-    if !command_ok(
-        &["modinfo".into(), "nvidia".into()],
-        Duration::from_secs(30),
-    ) {
-        if kernel.is_empty() {
-            return Err("unable to determine running kernel".into());
-        }
-        let lock =
-            acquire(DEFAULT_LOCK_PATH, DEFAULT_TIMEOUT).map_err(|error| error.to_string())?;
-        if !command_ok(
-            &["modinfo".into(), "nvidia".into()],
-            Duration::from_secs(30),
-        ) {
-            let output = run(
-                &[
-                    "akmods".into(),
-                    "--force".into(),
-                    "--kernels".into(),
-                    kernel,
-                ],
-                DEFAULT_TIMEOUT,
-            )
-            .map_err(|error| error.to_string())?;
-            if !output.status.success() {
-                return Err("NVIDIA module build failed".into());
-            }
-        }
-        drop(lock);
+    if kernel.is_empty() {
+        return Err("unable to determine running kernel".into());
     }
+    if let Err(error) = write_nvidia_akmods_pending(&kernel) {
+        eprintln!("kyth-hardware-policy: could not write NVIDIA akmods pending marker: {error}");
+    }
+    Ok("proprietary-pending".into())
+}
+
+/// Deferred slow path, run by `kyth-nvidia-akmods.service`: build the NVIDIA
+/// kernel module under the akmods lock, then clear the pending marker and
+/// flip the persisted status to `proprietary-ready`.
+fn build_nvidia_akmods() -> Result<(), String> {
+    let kernel = fs::read_to_string("/proc/sys/kernel/osrelease")
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if kernel.is_empty() {
+        return Err("unable to determine running kernel".into());
+    }
+    if nvidia_module_present() {
+        clear_nvidia_akmods_pending();
+        update_nvidia_state("proprietary-ready");
+        return Ok(());
+    }
+    let lock = acquire(DEFAULT_LOCK_PATH, DEFAULT_TIMEOUT).map_err(|error| error.to_string())?;
+    let result = (|| {
+        if nvidia_module_present() {
+            return Ok::<(), String>(());
+        }
+        let output = run(
+            &[
+                "akmods".into(),
+                "--force".into(),
+                "--kernels".into(),
+                kernel,
+            ],
+            DEFAULT_TIMEOUT,
+        )
+        .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            return Err("NVIDIA module build failed".into());
+        }
+        Ok(())
+    })();
+    drop(lock);
+    result?;
+    clear_nvidia_akmods_pending();
+    update_nvidia_state("proprietary-ready");
+    Ok(())
+}
+
+fn apply_nvidia_kernel_policy() -> Result<(), String> {
     let args = "rd.driver.blacklist=nouveau,nova_core modprobe.blacklist=nouveau,nova_core nvidia-drm.modeset=1 nvidia-drm.fbdev=1";
     run_checked(
         &[
@@ -317,17 +402,19 @@ fn configure_nvidia() -> Result<String, String> {
     if let Err(e) = write_bootc_nvidia_kargs() {
         return Err(format!("write bootc NVIDIA kargs: {e}"));
     }
-    for unit in [
-        "nvidia-suspend.service",
-        "nvidia-resume.service",
-        "nvidia-hibernate.service",
-    ] {
-        run_checked(
-            &["systemctl".into(), "enable".into(), unit.into()],
-            &format!("enable {unit}"),
-            Duration::from_secs(30),
-        )?;
-    }
+    // P15: one `systemctl enable` for the three units instead of three
+    // sequential spawns.
+    run_checked(
+        &[
+            "systemctl".into(),
+            "enable".into(),
+            "nvidia-suspend.service".into(),
+            "nvidia-resume.service".into(),
+            "nvidia-hibernate.service".into(),
+        ],
+        "enable NVIDIA suspend/resume/hibernate services",
+        Duration::from_secs(30),
+    )?;
     // Dynamic Boost and clock management on supported laptops. Best-effort:
     // the unit only ships with newer driver packages, and its absence must
     // not fail an otherwise good NVIDIA setup.
@@ -356,7 +443,7 @@ fn configure_nvidia() -> Result<String, String> {
             Duration::from_secs(30),
         )?;
     }
-    Ok("proprietary-ready".into())
+    Ok(())
 }
 
 /// Writes the NVIDIA kernel args to /etc/bootc/kargs.d so they survive
@@ -545,7 +632,7 @@ fn support_matrix(policy: &hardware_policy::Policy) -> String {
 }
 
 fn usage() {
-    eprintln!("usage: kyth-hardware-policy [--policy PATH] [--state PATH] <inventory|evaluate|apply [--force]|status|matrix [--output PATH]|validate [--fail-expired]>");
+    eprintln!("usage: kyth-hardware-policy [--policy PATH] [--state PATH] <inventory|evaluate|apply [--force]|build-nvidia-akmods|status|matrix [--output PATH]|validate [--fail-expired]>");
 }
 
 fn take_option(args: &mut Vec<String>, name: &str) -> Option<String> {
@@ -585,6 +672,12 @@ fn main() -> ExitCode {
             args.iter().any(|arg| arg == "--force"),
         )
         .map(|value| println!("{}", serde_json::to_string_pretty(&value).unwrap())),
+        // Deferred slow path for kyth-nvidia-akmods.service: build the NVIDIA
+        // kernel module under the akmods lock after the fast policy was
+        // already applied (P11).
+        "build-nvidia-akmods" => build_nvidia_akmods().map(|_| {
+            println!("nvidia akmods build complete");
+        }),
         "matrix" => hardware_policy::load_policy(Path::new(&policy)).and_then(|(policy, _)| {
             let rendered = support_matrix(&policy);
             if let Some(output) = take_option(&mut args, "--output") {
@@ -636,6 +729,25 @@ mod tests {
         fs::write(&path, b"partial mutation\n").expect("partial file");
         restore_file(&snapshot).expect("restore");
         assert_eq!(fs::read(&path).expect("restored file"), b"before\n");
+    }
+
+    #[test]
+    fn nvidia_akmods_pending_marker_roundtrips() {
+        // P11: the deferred-build marker is the handoff between the fast
+        // policy run and kyth-nvidia-akmods.service.
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let marker = directory.path().join("nvidia-akmods-pending");
+        std::env::set_var("KYTH_HARDWARE_POLICY_PENDING", &marker);
+        write_nvidia_akmods_pending("6.15.0-test").expect("write marker");
+        assert_eq!(
+            fs::read_to_string(&marker).expect("read marker"),
+            "6.15.0-test"
+        );
+        clear_nvidia_akmods_pending();
+        assert!(!marker.exists());
+        // Clearing an absent marker is a no-op, not an error.
+        clear_nvidia_akmods_pending();
+        std::env::remove_var("KYTH_HARDWARE_POLICY_PENDING");
     }
 
     #[test]

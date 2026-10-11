@@ -9,6 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 PRIVILEGED_UNITS = (
     "kyth-proton-cachyos-update.service",
     "kyth-hw-setup.service",
+    "kyth-nvidia-akmods.service",
     "kyth-probe.service",
     "kyth-batteryd.service",
     "kyth-enroll-mok.service",

@@ -2,7 +2,22 @@
 
 use regex::Regex;
 use serde_json::Value;
+use std::sync::LazyLock;
 use std::time::Duration;
+
+/// Compiled once: `holds_sysroot_lock` runs per `ps` output line, and
+/// recompiling the pattern for every line was pure waste.
+static SYSROOT_LOCK_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?:^|[\s/])bootc\s+(upgrade|switch|rollback|reset)(?:\s|$)")
+        .expect("sysroot lock pattern is a compile-time constant")
+});
+
+/// Compiled once: the image-reference fallback regex for older bootc text
+/// output ran on every `image_reference()` call.
+static IMAGE_REFERENCE_RE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(ghcr\.io/kyth-os/kyth(?::[A-Za-z0-9._-]+)?(?:@sha256:[a-fA-F0-9]+)?)")
+        .expect("image reference pattern is a compile-time constant")
+});
 
 pub fn nested_get<'a>(data: &'a Value, path: &[&str]) -> Option<&'a Value> {
     let mut cur = data;
@@ -145,9 +160,9 @@ pub fn holds_sysroot_lock(cmdline: &str) -> bool {
         let holding = !text.split_whitespace().any(|token| token == "--hold");
         return holding;
     }
-    let Some(captures) = Regex::new(r"(?:^|[\s/])bootc\s+(upgrade|switch|rollback|reset)(?:\s|$)")
-        .ok()
-        .and_then(|pattern| pattern.captures(text))
+    let Some(captures) = SYSROOT_LOCK_RE
+        .captures(text)
+        .and_then(|captures| captures.get(1).map(|m| m.as_str().to_string()))
     else {
         return false;
     };
@@ -155,7 +170,7 @@ pub fn holds_sysroot_lock(cmdline: &str) -> bool {
     // and must not be mistaken for the mutating `upgrade` that does. Treating
     // it as a lock-holder starves every concurrent status read (page loads,
     // kyth-probe) of data for as long as the check is in flight.
-    !(&captures[1] == "upgrade" && text.contains("--check"))
+    !(captures == "upgrade" && text.contains("--check"))
 }
 
 pub fn active_operation() -> Option<String> {
@@ -178,7 +193,13 @@ pub fn active_operation() -> Option<String> {
 }
 
 pub fn fetch_status_text() -> String {
-    if active_operation().is_some() {
+    fetch_status_text_with_active(active_operation().is_some())
+}
+
+/// [`fetch_status_text`], reusing a caller-observed active-operation state so
+/// the `ps` scan runs once per collection cycle instead of once per fetch.
+pub fn fetch_status_text_with_active(active: bool) -> String {
+    if active {
         return String::new();
     }
     for cmd in status_commands(false) {
@@ -193,7 +214,13 @@ pub fn fetch_status_text() -> String {
 }
 
 pub fn fetch_status_data() -> Option<Value> {
-    if active_operation().is_some() {
+    fetch_status_data_with_active(active_operation().is_some())
+}
+
+/// [`fetch_status_data`], reusing a caller-observed active-operation state so
+/// the `ps` scan runs once per collection cycle instead of once per fetch.
+pub fn fetch_status_data_with_active(active: bool) -> Option<Value> {
+    if active {
         return None;
     }
     for cmd in status_commands(true) {
@@ -262,10 +289,7 @@ pub fn image_reference_from_status_with_output(
         }
     }
     if !status_output.is_empty() {
-        let pattern =
-            Regex::new(r"(ghcr\.io/kyth-os/kyth(?::[A-Za-z0-9._-]+)?(?:@sha256:[a-fA-F0-9]+)?)")
-                .ok()?;
-        if let Some(reference) = pattern
+        if let Some(reference) = IMAGE_REFERENCE_RE
             .captures(status_output)
             .and_then(|captures| captures.get(1))
         {

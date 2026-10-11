@@ -51,6 +51,7 @@ systemctl disable NetworkManager-wait-online.service 2>/dev/null || true
 systemctl enable kyth-flathub-setup.service 2>/dev/null || true
 systemctl enable kyth-default-flatpaks.service 2>/dev/null || true
 systemctl enable kyth-hw-setup.service 2>/dev/null || true
+systemctl enable kyth-nvidia-akmods.service 2>/dev/null || true
 systemctl enable kyth-update-watcher.timer 2>/dev/null || true
 systemctl enable kyth-probe.timer 2>/dev/null || true
 if command -v scx_rusty >/dev/null 2>&1; then
