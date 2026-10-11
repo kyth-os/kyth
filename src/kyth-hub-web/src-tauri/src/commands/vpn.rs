@@ -461,7 +461,12 @@ fn start_process(
         loop {
             match rx.recv_timeout(std::time::Duration::from_millis(250)) {
                 Ok(line) => {
-                    let redacted = kyth_shared::system::vpn_saml::redact_log_line(&line);
+                    // Marker-specific pass first (truncates at cookie
+                    // markers), then the broad secret-field redactor as
+                    // defense in depth before anything reaches the UI.
+                    let redacted = kyth_shared::system::process::redact_sensitive_text(
+                        &kyth_shared::system::vpn_saml::redact_log_line(&line),
+                    );
                     if let Some(interface) =
                         kyth_shared::system::vpn_saml::gp_interface_from_log_line(&line)
                     {

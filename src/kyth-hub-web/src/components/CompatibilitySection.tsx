@@ -12,6 +12,7 @@ import {
   runPrivilegedAction,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
+import { ExternalLink } from "./ExternalLink";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
 // "Play > Compatibility" — Secure Boot / anti-cheat readiness plus the
@@ -118,7 +119,7 @@ export function CompatibilitySection({ section }: { section: HubSection }) {
                       {game.anticheat !== "None" && <span className="pill pill-dim">{game.anticheat}</span>}
                     </div>
                     <p className="card-copy" style={{ margin: "5px 0 0", fontSize: 12 }}>{game.note}</p>
-                    {game.source_url && <a href={game.source_url} target="_blank" rel="noreferrer" className="card-copy" style={{ display: "inline-block", marginTop: 5, fontSize: 11 }}>Source: {game.source}</a>}
+                    {game.source_url && <ExternalLink href={game.source_url} className="card-copy" style={{ display: "inline-block", marginTop: 5, fontSize: 11 }}>Source: {game.source}</ExternalLink>}
                   </div>
                 );
               })}
@@ -159,8 +160,8 @@ export function CompatibilitySection({ section }: { section: HubSection }) {
           ))}
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-          <a className="action-button" href="https://www.protondb.com" target="_blank" rel="noreferrer">Open ProtonDB</a>
-          <a className="action-button" href="https://www.xbox.com/play" target="_blank" rel="noreferrer">Open Xbox Cloud Gaming</a>
+          <ExternalLink className="action-button" href="https://www.protondb.com">Open ProtonDB</ExternalLink>
+          <ExternalLink className="action-button" href="https://www.xbox.com/play">Open Xbox Cloud Gaming</ExternalLink>
         </div>
       </div>
 

@@ -538,18 +538,30 @@ export function confirmUserAction(message: string): boolean {
 type PrivilegedPayload = Record<string, string | boolean | number>;
 interface PrivilegedActionLaunch { job: string; state: "running"; detail: string; }
 
+/** Destructive privileged operations: each must present a modal
+ * confirmation naming the irreversible consequence before the backend is
+ * invoked. The privileged-action runner enforces this via the prompt
+ * function + `confirmUserAction`; `removeKaliBox` has its own prompt below. */
+export const DESTRUCTIVE_PRIVILEGED_OPS = [
+  "kernel_switch",
+  "secureboot_enroll",
+  "firmware_update",
+  "nvidia_install",
+  "kali_remove",
+] as const;
+
 function privilegedActionPrompt(operation: string, payload: PrivilegedPayload): string {
   switch (operation) {
     case "bitlocker_unlock":
       return `Unlock ${payload.device ?? "this BitLocker volume"}? The recovery key will be sent only to the local privileged service.`;
     case "kernel_switch":
-      return `Stage the ${payload.flavor ?? "selected"} kernel? This changes the next boot deployment.`;
+      return `Stage the ${payload.flavor ?? "selected"} kernel? This changes the next boot deployment. Only proceed if you are ready to reboot into the new kernel.`;
     case "secureboot_enroll":
-      return "Enroll the KythOS Secure Boot key? This changes firmware trust configuration.";
+      return "Enroll the KythOS Secure Boot key? This permanently changes firmware trust configuration.";
     case "nvidia_install":
-      return "Install the NVIDIA driver? This stages a system image change.";
+      return "Install the NVIDIA driver? This stages a system image change and requires a reboot.";
     case "firmware_update":
-      return "Apply firmware updates? The device may reboot during this operation.";
+      return "Apply firmware updates? The device may reboot during this operation, and firmware changes cannot be undone from the OS.";
     case "network_share_add":
       return `Add network share ${typeof payload.name === "string" ? payload.name : ""}? Its credentials are sent only to the local privileged helper and saved in a protected root-owned file.`;
     case "network_share_remove":
@@ -610,6 +622,17 @@ async function fetchProbeSection<T>(key: string): Promise<T | null> {
   } catch {
     return null;
   }
+}
+
+/** Open an http(s) URL in the system browser via the backend.
+ * Bare target="_blank" anchors would render inside the trusted Hub
+ * webview; callers use this (or <ExternalLink/>) instead. */
+export async function openExternalUrl(url: string): Promise<void> {
+  if (!inTauriShell()) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  await invoke<string>("open_external_url", { url });
 }
 
 export async function fetchUpdateChannel(): Promise<string | null> {

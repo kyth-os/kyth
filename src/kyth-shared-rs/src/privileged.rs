@@ -59,22 +59,25 @@ fn share_text<'a>(
     Ok(value)
 }
 
-fn normalize_mount_point(value: &str) -> String {
+/// Normalize a mount-point path. `..` components are REJECTED, not
+/// popped: popping silently rewrote `/mnt/../home/user/share` into a
+/// prefix the Hub frontend refuses but the daemon accepted.
+fn normalize_mount_point(value: &str) -> Result<String, String> {
     let mut parts = Vec::new();
     for part in value.split('/') {
         match part {
             "" | "." => {}
             ".." => {
-                parts.pop();
+                return Err("mount_point must not contain '..'".to_string());
             }
             part => parts.push(part),
         }
     }
-    if parts.is_empty() {
+    Ok(if parts.is_empty() {
         "/".to_string()
     } else {
         format!("/{}", parts.join("/"))
-    }
+    })
 }
 
 static MOUNT_PATH_RE: OnceLock<Regex> = OnceLock::new();
@@ -102,10 +105,10 @@ fn flatpak_id_re() -> &'static Regex {
 
 fn share_mount_point(payload: &Map<String, Value>) -> Result<String, String> {
     let value = share_text(payload, "mount_point", false, 4096)?;
-    let mount_point = normalize_mount_point(value);
+    let mount_point = normalize_mount_point(value)?;
     if !mount_path_re().is_match(&mount_point)
         || mount_point.contains("//")
-        || !["/mnt/", "/media/", "/run/media/", "/home/"]
+        || !["/mnt/", "/media/", "/run/media/"]
             .iter()
             .any(|prefix| mount_point.starts_with(prefix))
     {
@@ -629,6 +632,22 @@ mod tests {
         std::process::Command::new(if success { "true" } else { "false" })
             .status()
             .expect("exit probe")
+    }
+
+    #[test]
+    fn mount_point_rejects_home_prefix_and_parent_dirs() {
+        use super::share_mount_point;
+        use serde_json::{Map, Value};
+        fn payload(mount_point: &str) -> Map<String, Value> {
+            let mut map = Map::new();
+            map.insert("mount_point".into(), Value::String(mount_point.into()));
+            map
+        }
+        // /home/ is not an approved prefix; '..' fails closed instead of
+        // being popped into a different prefix.
+        assert!(share_mount_point(&payload("/home/alice/share")).is_err());
+        assert!(share_mount_point(&payload("/mnt/../home/alice/share")).is_err());
+        assert!(share_mount_point(&payload("/mnt/media")).is_ok());
     }
 
     #[test]

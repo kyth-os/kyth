@@ -58,8 +58,17 @@ pub fn validate_profile(
     if !VPN_OS_OPTIONS.contains(&os_emulation) {
         return Err("unsupported VPN OS emulation".into());
     }
-    if username.len() > 256 || username.chars().any(char::is_control) {
-        return Err("VPN username contains control characters".into());
+    // Allowlist, not denylist: the username is interpolated into the
+    // on-disk VPN profile (`username = ...`) and passed as an openconnect
+    // argv value. Anything outside this set (including newlines, quotes,
+    // backslashes, and shell metacharacters) is rejected before either
+    // use. Empty is allowed (some deployments use certificate-only auth).
+    if username.len() > 256
+        || !username.bytes().all(|byte| {
+            byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'@' | b'-')
+        })
+    {
+        return Err("VPN username contains unsupported characters".into());
     }
     Ok(())
 }
@@ -680,7 +689,7 @@ mod tests {
         )
         .expect_err("decoded control characters in saml-username must fail closed");
         assert!(
-            error.contains("control characters"),
+            error.contains("unsupported characters"),
             "unexpected error: {error}"
         );
         // An over-long decoded username fails the same gate.
@@ -757,6 +766,28 @@ mod tests {
             parse_saml_acs_response(headers, body),
             Some("prelogin-cookie=abc&saml-username=".into())
         );
+    }
+
+    #[test]
+    fn username_is_allowlisted_before_profile_write() {
+        // The username is interpolated into the on-disk profile and the
+        // openconnect argv; only the allowlist passes.
+        assert!(validate_profile("vpn.example", "gp", "win", "pat.smith@corp-1").is_ok());
+        assert!(validate_profile("vpn.example", "gp", "win", "").is_ok());
+        for bad in [
+            "pat\nusername=x",
+            "pat\r\n",
+            "pat; rm -rf /",
+            "pat\"quoted",
+            "user name",
+            "user/name",
+            "user+tag",
+        ] {
+            assert!(
+                validate_profile("vpn.example", "gp", "win", bad).is_err(),
+                "{bad:?} must be rejected"
+            );
+        }
     }
 
     #[test]

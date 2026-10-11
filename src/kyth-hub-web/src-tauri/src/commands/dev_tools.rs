@@ -217,7 +217,7 @@ pub(crate) fn dev_tools_install_selection(
         for tool in selected_owned.iter().filter(|tool| {
             matches!(
                 tool.install,
-                InstallMethod::HostScript(_) | InstallMethod::HostRpmUrl(_)
+                InstallMethod::HostScript { .. } | InstallMethod::HostRpmUrl(_)
             )
         }) {
             update_job(&worker_job, &format!("Installing {}…", tool.name));

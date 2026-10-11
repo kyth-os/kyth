@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ExternalLink } from "./ExternalLink";
 import {
   cancelUpdateJob,
   checkForUpdates,
@@ -703,7 +704,7 @@ export function UpdatesOverview() {
               {releaseSummary.highlights.length > 0
             ? <ul>{releaseSummary.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
             : <p className="updates-release-empty">A package comparison was not published for this image. Open the full release notes for available build details.</p>}
-              <a href={releaseSummary.release_url} target="_blank" rel="noreferrer">Read full release notes <span aria-hidden="true">↗</span></a>
+              <ExternalLink href={releaseSummary.release_url}>Read full release notes <span aria-hidden="true">↗</span></ExternalLink>
             </>
             : <p className="updates-release-empty">
               {releaseSummaryLoading

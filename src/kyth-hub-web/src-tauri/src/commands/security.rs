@@ -316,7 +316,7 @@ pub(crate) fn sec_host_tool_launch(flatpak_id: String) -> Result<String, String>
         return Err(format!("{} is not installed.", tool.name));
     }
     kyth_shared::system::process::spawn_detached(
-        Command::new("flatpak").args(["run", tool.flatpak]),
+        Command::new("/usr/bin/flatpak").args(["run", tool.flatpak]),
     )
     .map_err(|err| format!("could not launch {}: {err}", tool.name))?;
     Ok(format!("{} launched.", tool.name))

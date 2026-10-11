@@ -784,3 +784,15 @@ test("bug-hunt round 2 closes races and verifier gaps", async () => {
   assert.match(rust, /nearest existing ancestor/, "HOME check must resolve parent symlinks");
   assert.match(rust, /reap_stale_focus_inhibits/, "focus must reap orphaned inhibitors");
 });
+
+test("bug-hunt round 3: destructive privileged ops require modal confirmation", async () => {
+  // kernel_switch, secureboot_enroll, firmware_update, nvidia_install go
+  // through runPrivilegedAction (prompt + confirmUserAction modal);
+  // kali_remove has its own confirmUserAction in removeKaliBox.
+  for (const op of ["kernel_switch", "secureboot_enroll", "firmware_update", "nvidia_install"]) {
+    assert.match(service, new RegExp(`case "${op}":`), `${op} must have a dedicated confirmation prompt`);
+  }
+  assert.match(service, /DESTRUCTIVE_PRIVILEGED_OPS/, "destructive ops must be enumerated in one place");
+  assert.match(service, /confirmUserAction\(privilegedActionPrompt\(operation, payload\)\)/, "privileged actions must confirm via modal before invoking");
+  assert.match(service, /removeKaliBox[\s\S]*?confirmUserAction\("Remove the Kali/, "kali_remove must confirm via modal before invoking");
+});

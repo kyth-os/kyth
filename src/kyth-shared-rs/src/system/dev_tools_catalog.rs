@@ -61,9 +61,14 @@ pub enum InstallMethod {
     InBoxDnf(&'static [&'static str]),
     /// `npm install -g` package names, installed inside the distrobox.
     InBoxNpmGlobal(&'static [&'static str]),
-    /// A `curl -fsSL <url> | bash`-style installer script, run directly on
-    /// the host (these are host-native agent tools, not distrobox CLIs).
-    HostScript(&'static str),
+    /// A `curl -fsSL <url>`-style installer script, run directly on the
+    /// host (these are host-native agent tools, not distrobox CLIs). The
+    /// script is downloaded to a temp file and its SHA-256 is verified
+    /// against `sha256` before execution; a mismatch fails closed. The hash
+    /// must be updated in this catalog whenever upstream changes the
+    /// script (the installer refuses to run on mismatch - it never
+    /// silently accepts a changed script).
+    HostScript { url: &'static str, sha256: &'static str },
     /// Download this URL (an `.rpm`) and `dnf install ./<file>` it on the
     /// host. Used for vendor-signed desktop packages that configure their
     /// own update repo on first install (e.g. the official ChatGPT/Codex
@@ -100,6 +105,41 @@ pub struct DevTool {
     /// from inside the box.
     pub probe_commands: &'static [&'static str],
 }
+
+/// Pinned OpenAI "Codex Linux Repository" RPM signing public key
+/// (fingerprint 3BFA0E4AE8B8CC16A2D9BA684A3B4A566C4660E4).
+/// The ChatGPT desktop RPM is verified against this key - never against
+/// keys from the RPM itself or the system rpmdb - before `dnf install`.
+/// Canonical source: `build_files/RPM-GPG-KEY-openai-chatgpt`.
+pub const OPENAI_CHATGPT_RPM_GPG_KEY: &str = r#"-----BEGIN PGP PUBLIC KEY BLOCK-----
+
+mQINBGpypFUBEACi1Vvzq9pIpA6lj7chbqELuxJtVuzUzxrasa6ZU0yF4yhq7jf8
+3YkJRHwbezBKeQyzJ5lkX0EhXS8aXxUhMAm3PFpAlwcInfKzmV7atJwvaxIw6Rmd
+GYe9fBWKjTN/SmPIjtyxrTznZY97+TfD1AeGZpLaJ8fsnhrC+HkiN2TACiTocgpe
+hFiP0OWK7mWZeTWnY2scpIYXP1Ro7nQv4KacmY4JacTQ7m/HM0Qej/3olhuEv2Cw
+lMVWw57/oHhmTllfLDQOogFQyIVqaaR98y/Eu6cAabSfcsqAAZ2A8vfHYD27z28J
+vLO2PZEJd5ThlnX4Zqv0eIpZdBj//8Sl/MSqTshFZ1NDsRoqwdqw284X5MpnOJ4k
+4Sc2Se8tJxt/nCeibH3dJ504Fb1X/mnOqhCAQ6pVJz4RB5HRlFPSkxVPyag1v1m/
+7T4vie+OR4eqFQNz6mudrOoMmeVIfyL5fbe4cOr4fk/FyvEE2xMgkFatPqXn7vM9
+og+zremPCfwRAFpBPyX74VowFY7llcdaj/w8K5T8PzM14Hb3E4ZKizMluKmTvTq9
+WE1/eSQJLLQqXD5VmtmdUaC/VyE/1ZlIxcA1LWqvEQ327UXREvX/nHsrkKrl956W
+jzkiHFUTsD1NJ0dMfs+csOt8Furb5jZj+HsMmCm9jLdfz5b/4WKLPbvxIwARAQAB
+tBZDb2RleCBMaW51eCBSZXBvc2l0b3J5iQJRBBMBCgA7FiEEO/oOSui4zBai2bpo
+SjtKVmxGYOQFAmpypFUCGwMFCwkIBwICIgIGFQoJCAsCBBYCAwECHgcCF4AACgkQ
+SjtKVmxGYORlCQ/9FyikZo8HQcJBP9E/oXVPds/fQnIFB2qJR2z3DrfYEonNt/ev
+SAySkPPq4/mEOjaI0pFlDDGSaps+FTcJFgoVRTasBIF7JJivvjW9ap8iWEbhhVLe
+IrFLbMLpUcTRntUx7R4fVMJ/1/cGn+NWZmNwS9ORorzSyCH0IAgCw1Xc3ZrjuMbF
+VjdToMC1TiXXCEmlYpQakmQ3Ay1cH0FHC2BBNn1MNVkJdPhpZIZCdhaMPHfYFpyo
+pg8wFvZ5iIcvlbMgyuy8CPJVRWUcYy2dOhEOGnYJnXRPkE3E1hf8YOHNzRlduH89
+6lT9qcEK2+fpLfrVGoc4zscLZ+Ey+Ko6iQRdVE1j67+wNR3hX8ukue574v1N/xxu
+i575jumSE19lEj1sH4+P4gFHOtTbF0JhKKzLctbga0IAwTPKhnt3qzj1U5Yj/MZS
+uEVjrLhdRauOuFBXUclgyVf2w/lE85UUOdlcollsYA6Huq7xDamqf8SslZQGre3E
+I+lhpqJR1cOwDMUzzcl40uTyhrxXXd/bk4QSlhZbwHR25Pnt+ZMtWavlQWS0eDEV
+8djuXAURCmx5WOqAFB/TJe1mn5EvyWg4VFzrY/NVNOpzgY5+Xp7J28z7f637r712
+Eu9j4imVcdPigwS+jf/0f81i2o9b82Y26TN8+EtDLCY841MJ1lrjDrX/dno=
+=Y+3h
+-----END PGP PUBLIC KEY BLOCK-----
+"#;
 
 pub const DEV_TOOLS: &[DevTool] = &[
     // --- Editors & IDEs -----------------------------------------------
@@ -155,7 +195,12 @@ pub const DEV_TOOLS: &[DevTool] = &[
         description: "Open-source assistant harness that runs across your devices and chats.",
         // Runs on the host: it manages its own daemon/session outside the
         // box, same shape as Hermes Desktop below.
-        install: InstallMethod::HostScript("https://openclaw.ai/install.sh"),
+        install: InstallMethod::HostScript {
+            url: "https://openclaw.ai/install.sh",
+            // Pinned 2026-10-11. Re-pin when upstream changes install.sh:
+            // download it and `sha256sum` the file.
+            sha256: "e8ceafd70383b92a0ad94a4ba4524b828743ada6f8b08ec217662896af03c08b",
+        },
         unofficial: false,
         default_selected: false,
         exported_to_host: false,
@@ -167,7 +212,11 @@ pub const DEV_TOOLS: &[DevTool] = &[
         name: "Hermes Desktop",
         category: DevToolCategory::AgentDesktop,
         description: "Nous Research's native desktop app for the Hermes agent — chat, voice, file browser, no terminal required.",
-        install: InstallMethod::HostScript("https://hermes-agent.nousresearch.com/install.sh"),
+        install: InstallMethod::HostScript {
+            url: "https://hermes-agent.nousresearch.com/install.sh",
+            // Pinned 2026-10-11. Re-pin when upstream changes install.sh.
+            sha256: "034845e34289813ff5fb7fd3e071ec69f6b14aee8ba297a477b31dda6374cb86",
+        },
         unofficial: false,
         default_selected: false,
         exported_to_host: false,
@@ -385,7 +434,7 @@ mod tests {
     fn host_script_and_rpm_urls_use_https() {
         for tool in DEV_TOOLS {
             match tool.install {
-                InstallMethod::HostScript(url) | InstallMethod::HostRpmUrl(url) => {
+                InstallMethod::HostScript { url, .. } | InstallMethod::HostRpmUrl(url) => {
                     assert!(url.starts_with("https://"), "{} install url", tool.id);
                 }
                 _ => {}

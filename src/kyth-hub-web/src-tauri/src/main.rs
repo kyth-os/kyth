@@ -813,6 +813,27 @@ fn open_m365_app(name: String) -> Result<String, String> {
     Ok(format!("Opened {name}."))
 }
 
+/// Open an http(s) URL in the system browser. Bare `target="_blank"`
+/// anchors render inside the trusted Hub webview; the frontend routes
+/// external links through here instead. Fixed `/usr/bin/xdg-open` argv
+/// (no shell, no PATH lookup), https-only, bounded length, no control
+/// characters or whitespace.
+#[tauri::command]
+fn open_external_url(url: String) -> Result<String, String> {
+    if url.is_empty()
+        || url.len() > 2048
+        || !url.starts_with("https://")
+        || url.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err("invalid external URL".to_string());
+    }
+    kyth_shared::system::process::spawn_detached(
+        std::process::Command::new("/usr/bin/xdg-open").arg(&url),
+    )
+    .map_err(|error| format!("could not open URL: {error}"))?;
+    Ok("Opened in browser.".to_string())
+}
+
 #[tauri::command]
 fn create_m365_shortcuts() -> Result<String, String> {
     let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?;
@@ -1007,6 +1028,13 @@ fn focus_start(minutes: u32) -> Result<String, String> {
             true
         }
     });
+    // One live focus session at a time: a second start while one is running
+    // would fork a duplicate inhibitor the UI cannot track or stop.
+    if !sessions.is_empty() {
+        return Err(
+            "A focus session is already running; stop it before starting another.".to_string(),
+        );
+    }
     // M1: hold the lock across reap + spawn + insert. The previous code
     // dropped the lock before reaping, allowing a concurrent focus_start
     // to reap the just-spawned child before it was inserted into the map.
@@ -1021,13 +1049,19 @@ fn focus_start(minutes: u32) -> Result<String, String> {
         .spawn()
         .map_err(|error| format!("could not keep the PC awake: {error}"))?;
     let child_pid = child.id();
-    let id = format!(
-        "focus-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
+    // Same-tick double starts share a nanos id: suffix until free so the
+    // second session never silently replaces the first (same generation
+    // discipline as the VPN job store's vpn_collision_id).
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut id = format!("focus-{nanos}");
+    let mut round = 1u32;
+    while sessions.contains_key(&id) {
+        round += 1;
+        id = format!("focus-{nanos}-{round}");
+    }
     let ends_at = std::time::Instant::now() + std::time::Duration::from_secs(minutes as u64 * 60);
     sessions.insert(id.clone(), FocusSession { child, ends_at });
     // Kill inhibitors orphaned by a previous Hub process (crash/restart
@@ -2359,6 +2393,7 @@ fn main() {
             commands::job::job_status,
             commands::job::cancel_job,
             open_m365_app,
+            open_external_url,
             create_m365_shortcuts,
             pst_files,
             convert_pst,

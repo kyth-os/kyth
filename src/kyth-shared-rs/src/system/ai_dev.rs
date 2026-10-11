@@ -282,7 +282,7 @@ pub fn provision_script_for_selection(selected: &[&DevTool]) -> Option<String> {
         match tool.install {
             InstallMethod::InBoxDnf(packages) => dnf_packages.extend(packages),
             InstallMethod::InBoxNpmGlobal(packages) => npm_packages.extend(packages),
-            InstallMethod::HostScript(_)
+            InstallMethod::HostScript { .. }
             | InstallMethod::HostRpmUrl(_)
             | InstallMethod::Manual(_) => {
                 continue;
@@ -332,23 +332,62 @@ pub fn provision_command_for_selection(
 /// Build the host-side install command for one host-level tool (agent
 /// desktop apps, host-native agent CLIs). Distinct from box provisioning:
 /// these run directly on the caller's system, never inside distrobox.
+///
+/// Supply-chain rules, enforced in the generated script:
+/// - `HostScript`: the installer is downloaded to a temp file and its
+///   SHA-256 is verified against the catalog pin before execution. A
+///   mismatch aborts; the script is never piped straight into bash.
+/// - `HostRpmUrl`: the RPM's OpenPGP signature is verified against the
+///   pinned vendor key (in an isolated throwaway keyring, never the
+///   system rpmdb) before `dnf install`. A missing/bad signature aborts.
 pub fn host_install_command(tool: &DevTool) -> Option<Vec<String>> {
     match tool.install {
-        InstallMethod::HostScript(url) => Some(vec![
-            "bash".into(),
-            "-lc".into(),
-            format!("set -euo pipefail; curl -fsSL {} | bash", shell_quote(url)),
-        ]),
+        InstallMethod::HostScript { url, sha256 } => {
+            let script = format!(
+                concat!(
+                    "set -euo pipefail\n",
+                    "tmp=$(mktemp --suffix=.sh)\n",
+                    "trap 'rm -f \"$tmp\"' EXIT\n",
+                    "curl -fsSL {} -o \"$tmp\"\n",
+                    "echo '{}  $tmp' | sha256sum -c -\n",
+                    "bash \"$tmp\"\n"
+                ),
+                shell_quote(url),
+                sha256,
+            );
+            Some(vec!["bash".into(), "-lc".into(), script])
+        }
         InstallMethod::HostRpmUrl(url) => {
             // dnf5 aliases dnf on Fedora; either resolves the same package.
-            Some(vec![
-                "bash".into(),
-                "-lc".into(),
-                format!(
-                    "set -euo pipefail; tmp=$(mktemp --suffix=.rpm); trap 'rm -f \"$tmp\"' EXIT; curl -fsSL {} -o \"$tmp\"; sudo dnf install -y \"$tmp\"",
-                    shell_quote(url),
+            let key = super::dev_tools_catalog::OPENAI_CHATGPT_RPM_GPG_KEY;
+            let script = format!(
+                concat!(
+                    // Verify against the pinned key in an isolated keyring:
+                    // the system rpmdb is never trusted for this check, so
+                    // a key planted by a previous malicious install cannot
+                    // vouch for the new RPM.
+                    "set -euo pipefail\n",
+                    "tmp=$(mktemp --suffix=.rpm)\n",
+                    "keyfile=$(mktemp --suffix=.asc)\n",
+                    "keydb=$(mktemp -d)\n",
+                    "trap 'rm -f \"$tmp\" \"$keyfile\"; rm -rf \"$keydb\"' EXIT\n",
+                    "curl -fsSL {} -o \"$tmp\"\n",
+                    "cat > \"$keyfile\" <<'KYTH_PINNED_KEY_EOF'\n",
+                    "{}\n",
+                    "KYTH_PINNED_KEY_EOF\n",
+                    "rpm --initdb --dbpath \"$keydb\" >/dev/null 2>&1\n",
+                    "rpm --dbpath \"$keydb\" --import \"$keyfile\"\n",
+                    "if ! LC_ALL=C rpm --dbpath \"$keydb\" -K \"$tmp\" 2>&1 | grep -q 'signatures OK'; then\n",
+                    "  echo 'ERROR: RPM signature verification against the pinned vendor key failed; refusing to install.' >&2\n",
+                    "  exit 1\n",
+                    "fi\n",
+                    "echo 'RPM signature verified against pinned vendor key.'\n",
+                    "sudo dnf install -y \"$tmp\"\n"
                 ),
-            ])
+                shell_quote(url),
+                key,
+            );
+            Some(vec!["bash".into(), "-lc".into(), script])
         }
         InstallMethod::Manual(_)
         | InstallMethod::InBoxDnf(_)
@@ -537,12 +576,61 @@ mod tests {
         let codex_desktop = find_dev_tool("codex-desktop").unwrap();
         let claude_desktop = find_dev_tool("claude-desktop").unwrap();
         let script = host_install_command(hermes).unwrap();
-        assert!(script.iter().any(|arg| arg.contains("curl -fsSL")));
-        assert!(script.iter().any(|arg| arg.contains("pipefail")));
+        let body = script.join("\n");
+        assert!(body.contains("curl -fsSL"));
+        assert!(body.contains("pipefail"));
+        // M1: pinned hash verified before execution; never piped to bash.
+        assert!(body.contains("sha256sum -c"));
+        assert!(body.contains("034845e34289813ff5fb7fd3e071ec69f6b14aee8ba297a477b31dda6374cb86"));
+        assert!(!body.contains("| bash"), "installer must not be piped to bash");
         let rpm = host_install_command(codex_desktop).unwrap();
-        assert!(rpm.iter().any(|arg| arg.contains("dnf install -y")));
-        assert!(rpm.iter().any(|arg| arg.contains("trap 'rm -f")));
+        let rpm_body = rpm.join("\n");
+        assert!(rpm_body.contains("dnf install -y"));
+        assert!(rpm_body.contains("trap 'rm -f"));
+        // M2: signature verified against the pinned key before install.
+        assert!(rpm_body.contains("rpm --dbpath"));
+        assert!(rpm_body.contains("signatures OK"));
+        assert!(rpm_body.contains("refusing to install"));
+        assert!(rpm_body.contains("BEGIN PGP PUBLIC KEY BLOCK"));
         assert!(host_install_command(claude_desktop).is_none());
+    }
+
+    #[test]
+    fn trap_uses_plain_quotes_so_temp_files_are_removed() {
+        // L1 regression: the generated trap must be
+        //   trap 'rm -f "$tmp"' EXIT
+        // with plain double quotes. A literal backslash (`\"`) would make
+        // the shell look for a file named `"$tmp"` (with quotes) and leak
+        // the download.
+        use super::super::dev_tools_catalog::find_dev_tool;
+        for id in ["hermes-desktop", "codex-desktop"] {
+            let tool = find_dev_tool(id).unwrap();
+            let body = host_install_command(tool).unwrap().join("\n");
+            assert!(
+                body.contains("trap 'rm -f \"$tmp\""),
+                "{id}: trap must use plain double quotes"
+            );
+            assert!(
+                !body.contains("trap 'rm -f \\\"$tmp"),
+                "{id}: trap must not contain literal backslashes"
+            );
+        }
+        // Execute the exact generated trap form and assert the temp
+        // file is actually removed on EXIT.
+        let probe = std::process::Command::new("bash")
+            .args([
+                "-lc",
+                "tmp=$(mktemp --suffix=.kyth-trap-test); trap 'rm -f \"$tmp\"' EXIT; echo \"$tmp\"",
+            ])
+            .output()
+            .expect("bash must run");
+        assert!(probe.status.success());
+        let tmp = String::from_utf8_lossy(&probe.stdout).trim().to_string();
+        assert!(!tmp.is_empty());
+        assert!(
+            !std::path::Path::new(&tmp).exists(),
+            "trap did not remove {tmp}"
+        );
     }
 
     #[test]
