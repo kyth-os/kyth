@@ -163,7 +163,13 @@ else
 	# Actually run the tests (shared-rs is the one with unit tests; the Tauri
 	# crates' tests are exercised via their build checks in CI, but compiling
 	# their test targets catches the same class of bug).
-	cargo test --quiet --manifest-path src/kyth-shared-rs/Cargo.toml || {
+	# KYTH_TEST_MODE_FORCE=1: this VM runs as root, and test_mode_active()
+	# refuses KYTH_TEST_MODE for euid 0. The FORCE override is the sanctioned
+	# test-harness path (never set in production). CI runners aren't root so
+	# they don't need it, but setting it unconditionally is harmless there.
+	# umask 022: this VM has umask 0007; session_config tests assert 0o644
+	# restored modes, which needs the standard 022.
+	(umask 022 && KYTH_TEST_MODE_FORCE=1 cargo test --quiet --manifest-path src/kyth-shared-rs/Cargo.toml) || {
 		echo "Rust unit tests failed" >&2
 		exit 1
 	}
