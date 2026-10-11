@@ -352,8 +352,11 @@ jobs:
         with:
           # This generates all the tags for your image, you can add custom tags here too!
           # Default tags are "$DEFAULT_TAG" and "$DEFAULT_TAG.$date".
+          # NOTE: the floating tag (testing/latest) is intentionally NOT pushed
+          # here. It is promoted by the supply-chain publish job only after the
+          # image is signed and its changelog release exists — otherwise the
+          # Hub can discover an update before its release notes exist.
           tags: |
-            type=raw,value=${{ steps.resolve_tag.outputs.tag }}
             type=raw,value=${{ steps.checkout_sha.outputs.image_version }}
             type=raw,value=${{ steps.prep.outputs.date_short }}.${{ github.run_number }}.${{ github.run_attempt }}.${{ steps.checkout_sha.outputs.short_sha }},enable=${{ matrix.branch == 'main' && matrix.kernel_flavor == 'fedora' }}
           labels: |

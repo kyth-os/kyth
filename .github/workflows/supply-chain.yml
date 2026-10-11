@@ -568,6 +568,25 @@ jobs:
               ${PRERELEASE}
           fi
 
+      # Promote the floating tag (testing/latest) to the verified digest ONLY
+      # after the changelog release exists. The build job pushes immutable
+      # tags only, so the Hub can never discover an update before its release
+      # notes are published. This also guarantees the floating tag never
+      # points at an unsigned/unscanned image.
+      - name: Promote floating tag to verified digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.meta.outputs.digest }}
+          FLOATING_TAG: ${{ inputs.source_tag }}
+        run: |
+          set -euo pipefail
+          echo "${GH_TOKEN}" | docker login ghcr.io --username "github-actions[bot]" --password-stdin
+          docker buildx imagetools create \
+            --tag "${IMAGE}:${FLOATING_TAG}" \
+            "${IMAGE}@${DIGEST}"
+          echo "Promoted ${IMAGE}:${FLOATING_TAG} to ${DIGEST}"
+
       - name: Dispatch Live ISO after image verification
         if: inputs.dispatch_iso == 'true' || inputs.dispatch_iso == true
         uses: ./.github/actions/dispatch-workflow
