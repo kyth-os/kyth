@@ -21,3 +21,9 @@ __pycache__/
 
 # Local signing material must never enter a container build context.
 cosign.key
+
+# Rust/Node build artifacts — huge locally, never consumed by Dockerfile
+# builds (the builder stage compiles fresh). Excluding them keeps the
+# build context small and avoids spurious cache invalidation.
+**/target/
+**/node_modules/

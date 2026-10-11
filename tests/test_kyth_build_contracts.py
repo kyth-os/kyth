@@ -257,7 +257,10 @@ class BuildAssemblyContracts(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         builder = dockerfile[:dockerfile.index("# Base Image")]
         self.assertIn("COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json", builder)
-        self.assertIn("COPY src/kyth-hub-web /build/kyth-hub-web", builder)
+        # Manifests are copied first for the npm-ci cache layer, then the
+        # full tree — both must be present so the embedded assets exist.
+        self.assertIn("COPY src/kyth-hub-web/package.json src/kyth-hub-web/package-lock.json ./", builder)
+        self.assertIn("COPY src/kyth-hub-web ./", builder)
         self.assertNotIn("COPY src/kyth-welcome", builder)
         self.assertNotIn("source=src/kyth-welcome", builder)
         self.assertIn("src/data/compat_games.json", builder)
@@ -689,6 +692,109 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertIn("KYTH_SOURCE_DIGEST=%s", build)
         self.assertIn("Gate ISO size (8.5 GiB max)", iso_workflow)
         self.assertIn('"${cosign_bin}" verify', build)
+
+    def test_builder_cargo_targets_use_cache_mounts(self):
+        """Rust rebuilds must be incremental: every cargo target dir in the
+        container builds rides on a cache mount, not a throwaway layer dir."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        builder = dockerfile.split("# Base Image", 1)[0]
+        self.assertIn("id=kyth-shared-rs-target,target=/build/kyth-shared-rs/target", builder)
+        self.assertIn("id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target", builder)
+        installer = (ROOT / "installer" / "Containerfile").read_text(encoding="utf-8")
+        self.assertIn("target=/build/kyth-installer-web/src-tauri/target", installer)
+
+    def test_npm_ci_is_its_own_manifest_gated_layer(self):
+        """`npm ci` must re-run only when the JS manifests change, never as
+        part of a combined install+build step invalidated by source edits."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        builder = dockerfile.split("# Base Image", 1)[0]
+        self.assertIn(
+            "COPY src/kyth-hub-web/package.json src/kyth-hub-web/package-lock.json ./",
+            builder,
+        )
+        # The `npm ci` RUN must be a standalone layer: no line may combine
+        # it with `npm run build` (the old `npm ci && npm run build` form).
+        ci_lines = [
+            line for line in builder.splitlines()
+            if "npm ci" in line and not line.strip().startswith("#")
+        ]
+        self.assertTrue(ci_lines, "no npm ci layer in hub-web-builder")
+        for line in ci_lines:
+            self.assertNotIn("npm run build", line)
+
+    def test_rust_binaries_copy_after_package_install_layers(self):
+        """A Rust-only change must not invalidate the expensive package
+        install/upgrade layers: every COPY --from=hub-web-builder except the
+        two build-time dependencies must sit below the upgrade layer.
+        kyth-build-support is invoked by package fragments during
+        packages-static.sh; /ctx/kyth-vscode-wallet is executed by a
+        sysconfig-static fragment — both stay copied early by necessity.
+        The support-binary block must additionally precede the sysconfig.sh
+        layer, which executes kyth-fix-system-accounts at build time."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        main = dockerfile.split("FROM ${BASE_IMAGE}", 1)[1]
+        lines = main.splitlines()
+        upgrade_idx = next(
+            i for i, line in enumerate(lines) if "mesa-git.sh" in line and line.strip().startswith("RUN")
+        )
+        sysconfig_idx = next(
+            i for i, line in enumerate(lines) if "bash /ctx/sysconfig.sh" in line
+        )
+        copies = [
+            (i, line) for i, line in enumerate(lines)
+            if line.startswith("COPY --from=hub-web-builder")
+            and "kyth-build-support" not in line
+            and "/ctx/kyth-vscode-wallet" not in line
+        ]
+        self.assertTrue(copies, "no COPY --from=hub-web-builder lines found")
+        for i, line in copies:
+            self.assertGreater(
+                i, upgrade_idx,
+                f"binary COPY at/above the upgrade layer reintroduces Rust invalidation: {line[:70]}",
+            )
+        # The support binaries sysconfig.sh needs at build time.
+        self.assertIn(
+            "COPY --from=hub-web-builder --chmod=0755 /build/kyth-fix-system-accounts",
+            "\n".join(lines[:sysconfig_idx]),
+        )
+
+    def test_build_time_executed_binaries_are_copied_first(self):
+        """Binaries executed during the build must be COPY'd before the RUN
+        that needs them: /ctx/kyth-vscode-wallet is executed by a
+        sysconfig-static fragment, kyth-fix-system-accounts by sysconfig.sh."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        main = dockerfile.split("FROM ${BASE_IMAGE}", 1)[1]
+        lines = main.splitlines()
+        wallet_copy = next(
+            i for i, line in enumerate(lines)
+            if line.startswith("COPY --from=hub-web-builder") and "/ctx/kyth-vscode-wallet" in line
+        )
+        static_idx = next(
+            i for i, line in enumerate(lines) if "bash /ctx/sysconfig-static.sh" in line
+        )
+        self.assertLess(
+            wallet_copy, static_idx,
+            "sysconfig-static.sh executes /ctx/kyth-vscode-wallet via its fragments; the COPY must precede it",
+        )
+        support_copy = next(
+            i for i, line in enumerate(lines)
+            if line.startswith("COPY --from=hub-web-builder") and "kyth-build-support" in line
+        )
+        packages_idx = next(
+            i for i, line in enumerate(lines) if "bash /ctx/packages-static.sh" in line
+        )
+        self.assertLess(
+            support_copy, packages_idx,
+            "package fragments invoke kyth-build-support; the COPY must precede packages-static.sh",
+        )
+
+    def test_build_context_excludes_rust_and_node_artifacts(self):
+        """target/ and node_modules/ must never enter the build context:
+        they are huge and the builder stages compile fresh."""
+        for ignore in (ROOT / ".dockerignore", ROOT / ".containerignore"):
+            text = ignore.read_text(encoding="utf-8")
+            self.assertIn("**/target/", text, f"{ignore.name} must exclude Rust target dirs")
+            self.assertIn("**/node_modules/", text, f"{ignore.name} must exclude node_modules")
 
 
 if __name__ == "__main__":

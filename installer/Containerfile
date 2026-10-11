@@ -47,9 +47,12 @@ COPY third_party/gtk-glib-0.18.5 /third_party/gtk-glib-0.18.5
 # must be re-declared in this stage; the pre-FROM scope does not propagate.)
 RUN : "cache-bust:installer-web=${INSTALLER_BUILD_HASH}"
 WORKDIR /build/kyth-installer-web
-RUN rm -f node_modules && npm ci && npm run build
+RUN --mount=type=cache,id=kyth-installer-web-npm,target=/root/.npm \
+    rm -f node_modules && npm ci && npm run build
 WORKDIR /build/kyth-installer-web/src-tauri
-RUN cargo build --release --locked && \
+RUN --mount=type=cache,id=kyth-installer-cargo-registry,target=/root/.cargo/registry \
+    --mount=type=cache,id=kyth-installer-target,target=/build/kyth-installer-web/src-tauri/target \
+    cargo build --release --locked && \
     cargo build --release --locked --bin kyth-installer-native && \
     cargo build --release --locked --bin kyth-installerd && \
     cargo build --release --locked --bin kyth-installer-exec && \

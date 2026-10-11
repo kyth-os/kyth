@@ -12,3 +12,7 @@ __pycache__/
 .ruff_cache/
 .mypy_cache/
 cosign.key
+# Rust/Node build artifacts — huge locally, never consumed by Containerfile
+# builds (the builder stage compiles fresh).
+**/target/
+**/node_modules/
