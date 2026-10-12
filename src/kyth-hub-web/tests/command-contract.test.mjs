@@ -348,8 +348,12 @@ test("image build notes are digest-bound and required before publishing", async 
     "the release must publish the prepared notes",
   );
   assert.ok(
-    /docker buildx imagetools create/.test(promotion),
+    /oras tag "\$\{IMAGE\}@\$\{DIGEST\}" "\$\{FLOATING_TAG\}"/.test(promotion),
     "the verified image digest must be promoted",
+  );
+  assert.ok(
+    !/imagetools create/.test(promotion),
+    "promotion must not re-wrap the digest in a synthesized index (breaks SBOM/signature/release-notes digest matching)",
   );
   assert.ok(
     /"\$\{IMAGE\}@\$\{DIGEST\}"/.test(promotion),
