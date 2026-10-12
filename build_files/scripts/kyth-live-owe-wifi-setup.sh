@@ -47,12 +47,14 @@ sleep 1
 declare -A owe_ssids=()
 for _try in 1 2 3 4 5 6; do
 	log "Scan attempt $_try/6"
-	while IFS=: read -r ssid security; do
+	# nmcli escapes literal colons in SSIDs; Bash read must consume those escapes before field splitting.
+	# shellcheck disable=SC2162
+	while IFS=: read ssid security; do
 		[[ -n "${ssid}" && "${ssid}" != "--" ]] || continue
 		[[ "${security}" == *OWE* ]] || continue
 		owe_ssids["${ssid}"]=1
 		log "Found OWE network: ${ssid}"
-	done < <(nmcli --escape no -t -f SSID,SECURITY device wifi list --rescan yes 2>/dev/null || true)
+	done < <(nmcli --escape yes -t -f SSID,SECURITY device wifi list --rescan yes 2>/dev/null || true)
 
 	if [[ "${#owe_ssids[@]}" -gt 0 ]]; then
 		log "Found OWE networks on attempt $_try/6, proceeding"

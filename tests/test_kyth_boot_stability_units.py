@@ -606,6 +606,79 @@ class BootStabilityUnitTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertEqual(result.stdout, expected)
 
+    def test_live_owe_profile_preserves_colons_in_ssid(self) -> None:
+        """A literal colon in the SSID must not be treated as a field separator."""
+        import json
+        import os
+        import tempfile
+
+        source = (ROOT / "build_files/scripts/kyth-live-owe-wifi-setup.sh").read_text(encoding="utf-8")
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_path = pathlib.Path(tmp)
+            cmdline = tmp_path / "cmdline"
+            cmdline.write_text("quiet kyth.live=1", encoding="utf-8")
+            log = tmp_path / "setup.log"
+            script = tmp_path / "setup.sh"
+            source = source.replace("/proc/cmdline", str(cmdline))
+            source = source.replace(
+                'LOG_FILE="/var/log/kyth-live-owe-wifi-setup.log"',
+                f'LOG_FILE="{log}"',
+            )
+            script.write_text(source, encoding="utf-8")
+            script.chmod(0o755)
+
+            bin_dir = tmp_path / "bin"
+            bin_dir.mkdir()
+            nmcli_log = tmp_path / "nmcli.jsonl"
+            nmcli = bin_dir / "nmcli"
+            nmcli.write_text(
+                """#!/usr/bin/python3
+import json
+import os
+import sys
+args = sys.argv[1:]
+with open(os.environ["NMCLI_LOG"], "a", encoding="utf-8") as handle:
+    handle.write(json.dumps(args) + chr(10))
+if args[:2] == ["general", "status"]:
+    print("disconnected")
+elif args[:3] == ["radio", "wifi", "on"]:
+    pass
+elif args[:3] == ["--escape", "yes", "-t"]:
+    print("Cafe" + chr(92) + ":West:OWE")
+elif args[:3] == ["--escape", "no", "-t"]:
+    print("Cafe:West:OWE")
+elif args[:2] == ["connection", "delete"]:
+    sys.exit(10)
+elif args[:2] == ["connection", "add"]:
+    pass
+elif args[:1] == ["-g"] and args[1] == "802-11-wireless-security.key-mgmt":
+    print("owe")
+elif args[:1] == ["-g"] and args[1] == "ipv4.method":
+    print("auto")
+elif args[:2] == ["-t", "-f"]:
+    print("wlan0:wifi:disconnected")
+elif args[:2] == ["connection", "up"]:
+    pass
+else:
+    sys.exit(99)
+""",
+                encoding="utf-8",
+            )
+            nmcli.chmod(0o755)
+            result = subprocess.run(
+                ["bash", str(script)],
+                env={**os.environ, "PATH": f"{bin_dir}:/usr/bin:/bin", "NMCLI_LOG": str(nmcli_log)},
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=30,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            calls = [json.loads(line) for line in nmcli_log.read_text(encoding="utf-8").splitlines()]
+            add_call = next(args for args in calls if args[:2] == ["connection", "add"])
+            ssid_index = add_call.index("ssid")
+            self.assertEqual(add_call[ssid_index + 1], "Cafe:West")
+
     def test_gaming_hint_lives_where_an_unprivileged_game_can_write(self) -> None:
         """/run/kyth is kyth-privileged's root:wheel 0750 RuntimeDirectory, so the
         hint a game launch writes there always failed silently and Wi-Fi
