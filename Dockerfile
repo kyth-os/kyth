@@ -299,8 +299,11 @@ RUN : "cache-bust:plymouth=${PLYMOUTH_HASH}" && \
 COPY build_files/game-performance build_files/kyth-shader-preheat build_files/kyth-sched-arbiter build_files/kyth-power-arbiter build_files/kyth-power-arbiter.service build_files/kyth-storage-gate build_files/kyth-readahead-hint build_files/kyth-shader-prune /ctx/
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-vscode-wallet /ctx/kyth-vscode-wallet
 # kyth-tunable-rs is needed while sysconfig-static executes. The sysctl
-# composer is mounted from the builder stage only for that RUN, so Rust-only
-# changes invalidate the static config layer without busting earlier packages.
+# composer and kyth-finalize-staged are mounted from the builder stage only
+# for that RUN, so Rust-only changes invalidate the static config layer
+# without busting earlier packages. kyth-finalize-staged is mounted (not
+# only COPYed later) because fragment 58 asserts the binary exists while
+# sysconfig-static runs; its permanent COPY stays in the post-upgrade block.
 COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable-rs /usr/bin/kyth-tunable-rs
 
 # The shared Python package is used only by build-time renderers and the
@@ -320,6 +323,7 @@ RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx
     --mount=type=bind,source=build_files/data,target=/ctx/data \
     --mount=type=bind,source=build_files/config,target=/ctx/config \
     --mount=type=bind,from=hub-web-builder,source=/build/kyth-sysctl-compose,target=/usr/bin/kyth-sysctl-compose \
+    --mount=type=bind,from=hub-web-builder,source=/build/kyth-finalize-staged,target=/usr/libexec/kyth-finalize-staged \
     --mount=type=tmpfs,dst=/tmp \
     : "cache-bust:sysconfig=${SYSCONFIG_HASH}" && \
     bash /ctx/sysconfig-static.sh

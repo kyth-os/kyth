@@ -262,6 +262,28 @@ class PythonPackagingTests(unittest.TestCase):
         self.assertIn(mount, static_layer)
         self.assertNotIn("/build/kyth-sysctl-compose /usr/bin/kyth-sysctl-compose", dockerfile)
 
+    def test_finalize_staged_is_mounted_for_static_sysconfig(self):
+        # Fragment 58 asserts /usr/libexec/kyth-finalize-staged exists while
+        # sysconfig-static runs, but the binary's permanent COPY sits in the
+        # post-upgrade block (after the RUN). Without the bind mount the
+        # fragment fails whenever the static layer executes cold (CI run
+        # 38300339358). The COPY must stay: the binary is a runtime tool.
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        fragment = (
+            ROOT / "build_files/scripts/sysconfig/systemd/58-finalize-staged-bootloader.sh"
+        ).read_text()
+        mount = "--mount=type=bind,from=hub-web-builder,source=/build/kyth-finalize-staged,target=/usr/libexec/kyth-finalize-staged"
+        binary_copy = "COPY --from=hub-web-builder --chmod=0755 /build/kyth-finalize-staged /usr/libexec/kyth-finalize-staged"
+        static_layer = dockerfile.split("bash /ctx/sysconfig-static.sh", 1)[0].rsplit("RUN ", 1)[-1]
+
+        self.assertIn("test -x /usr/libexec/kyth-finalize-staged", fragment)
+        self.assertIn(mount, static_layer)
+        self.assertEqual(dockerfile.count(binary_copy), 1)
+        self.assertLess(
+            dockerfile.index("bash /ctx/sysconfig-static.sh"),
+            dockerfile.index(binary_copy),
+        )
+
     def test_shared_modules_use_the_command_runner(self):
         shared_root = ROOT / "build_files/kyth_shared/kyth_shared"
         direct_callers = []
