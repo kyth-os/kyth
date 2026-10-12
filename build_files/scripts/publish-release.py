@@ -8,7 +8,18 @@ from release_identity import r2_download_url
 
 def run_command(args: list[str], check: bool = True) -> subprocess.CompletedProcess:
     print(f"Running: {' '.join(args)}")
-    return subprocess.run(args, check=check, text=True, capture_output=True)
+    result = subprocess.run(args, check=False, text=True, capture_output=True)
+    if result.returncode != 0:
+        # Surface the tool's own output before failing: a bare
+        # CalledProcessError hides WHY gh failed (e.g. "release already
+        # exists" when a racing publish created it first).
+        if result.stdout:
+            print(result.stdout, file=sys.stderr)
+        if result.stderr:
+            print(result.stderr, file=sys.stderr)
+        if check:
+            raise subprocess.CalledProcessError(result.returncode, args)
+    return result
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Create GitHub Releases and upload artifacts.")
@@ -77,7 +88,21 @@ def main() -> int:
     if prerelease:
         create_imm_args.append("--prerelease")
     
-    run_command(create_imm_args)
+    # Create the immutable release — or refresh it if one already exists.
+    # This workflow cancels in progress, so a superseded run's publish job
+    # can create the release moments before this run reaches the same step;
+    # the publish must converge on the existing release, not die on
+    # "already exists" (the loser of that race failed ISO publish on
+    # 2026-10-12 and the winner's release had to be cleaned up by hand).
+    if run_command(["gh", "release", "view", args.immutable_tag], check=False).returncode == 0:
+        edit_imm_args = ["gh", "release", "edit", args.immutable_tag,
+                         "--title", immutable_title,
+                         "--notes-file", str(immutable_notes_file)]
+        if prerelease:
+            edit_imm_args.append("--prerelease")
+        run_command(edit_imm_args)
+    else:
+        run_command(create_imm_args)
 
     # Upload Immutable Artifacts
     iso_path = args.source_dir / args.iso_basename
@@ -88,7 +113,7 @@ def main() -> int:
         f"{iso_path}.intoto.jsonl",
         f"{iso_path}.json"
     ]
-    run_command(["gh", "release", "upload", args.immutable_tag] + upload_imm_files)
+    run_command(["gh", "release", "upload", args.immutable_tag, "--clobber"] + upload_imm_files)
 
     # 2. Generate Channel Release Notes
     channel_notes_lines = [
