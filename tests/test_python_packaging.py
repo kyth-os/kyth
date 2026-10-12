@@ -252,6 +252,16 @@ class PythonPackagingTests(unittest.TestCase):
             dockerfile.index("bash /ctx/scripts/tunable-dispatcher.sh"),
         )
 
+    def test_sysctl_composer_is_copied_before_static_sysconfig_runs(self):
+        dockerfile = (ROOT / "Dockerfile").read_text()
+        fragment = (ROOT / "build_files/scripts/sysconfig/00-sysctl-compose.sh").read_text()
+        binary_copy = "COPY --from=hub-web-builder --chmod=0755 /build/kyth-sysctl-compose /usr/bin/kyth-sysctl-compose"
+
+        self.assertIn("/usr/bin/kyth-sysctl-compose --emit-all", fragment)
+        self.assertIn(binary_copy, dockerfile)
+        self.assertEqual(dockerfile.count(binary_copy), 1)
+        self.assertLess(dockerfile.index(binary_copy), dockerfile.index("bash /ctx/sysconfig-static.sh"))
+
     def test_shared_modules_use_the_command_runner(self):
         shared_root = ROOT / "build_files/kyth_shared/kyth_shared"
         direct_callers = []
