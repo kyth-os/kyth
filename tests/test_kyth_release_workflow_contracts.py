@@ -224,6 +224,27 @@ class ReleaseChainingContracts(unittest.TestCase):
         self.assertRegex(build, r"dispatch_iso.*fedora.*'\"true\"'")
         self.assertIn("inputs.dispatch_iso", publish)
 
+    def test_floating_tag_promotion_preserves_the_verified_digest(self):
+        """Promotion must tag the exact verified digest, never re-wrap it.
+
+        imagetools create synthesizes a new index around a bare manifest, so
+        the floating tag resolves to a digest that matches neither the cosign
+        signature nor the SBOM referrer subject nor the digest line in the
+        release body — the CVE scan then finds no SBOM and the Hub finds no
+        release notes (both look up by digest). oras tag preserves it.
+        """
+        workflow = (
+            ROOT / ".github/workflows/supply-chain.yml"
+        ).read_text(encoding="utf-8")
+        publish = workflow.split("  publish:", 1)[1]
+        promote = publish.split("- name: Promote floating tag to verified digest", 1)[1]
+        self.assertIn('oras tag "${IMAGE}@${DIGEST}" "${FLOATING_TAG}"', promote)
+        self.assertNotIn("imagetools create", promote)
+        # Order still holds: the release is published before promotion.
+        release_at = publish.index("- name: Publish image changelog release")
+        promote_at = publish.index("- name: Promote floating tag to verified digest")
+        self.assertLess(release_at, promote_at)
+
 
 if __name__ == "__main__":
     unittest.main()

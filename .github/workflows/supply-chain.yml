@@ -573,6 +573,14 @@ jobs:
       # tags only, so the Hub can never discover an update before its release
       # notes are published. This also guarantees the floating tag never
       # points at an unsigned/unscanned image.
+      #
+      # oras tag, NOT imagetools create: imagetools wraps a bare manifest in
+      # a freshly synthesized index, so the floating tag would resolve to a
+      # NEW digest that matches nothing — not the cosign signature, not the
+      # SBOM referrer's subject, and not the digest printed in the release
+      # body. That broke the CVE scan's SBOM lookup and the Hub's
+      # release-notes matching (both keyed by digest). oras tag points the
+      # tag at the exact verified digest, manifest or index alike.
       - name: Promote floating tag to verified digest
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -581,10 +589,7 @@ jobs:
           FLOATING_TAG: ${{ inputs.source_tag }}
         run: |
           set -euo pipefail
-          echo "${GH_TOKEN}" | docker login ghcr.io --username "github-actions[bot]" --password-stdin
-          docker buildx imagetools create \
-            --tag "${IMAGE}:${FLOATING_TAG}" \
-            "${IMAGE}@${DIGEST}"
+          oras tag "${IMAGE}@${DIGEST}" "${FLOATING_TAG}"
           echo "Promoted ${IMAGE}:${FLOATING_TAG} to ${DIGEST}"
 
       - name: Dispatch Live ISO after image verification
