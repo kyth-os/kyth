@@ -323,10 +323,33 @@ test("image build notes are digest-bound and required before publishing", async 
   assert.match(supplyChain, /Generate SBOM-powered changelog/);
   assert.match(supplyChain, /--current-digest "\$\{CURRENT_DIGEST\}"/);
   assert.match(supplyChain, /-s "output\/supply-chain\/\$\{NOTES\}"/);
-  assert.match(prepare, /Publish image changelog release/);
-  assert.match(prepare, /gh release (?:create|edit)/);
-  assert.match(prepare, /--notes-file "\$\{NOTES\}"/);
-  assert.doesNotMatch(publish, /Publish image changelog release/);
+  const releaseStep = publish.indexOf("- name: Publish image changelog release");
+  const promoteStep = publish.indexOf("- name: Promote floating tag to verified digest");
+  assert.ok(releaseStep !== -1, "the gated publish job must publish the changelog release");
+  assert.ok(promoteStep !== -1, "the floating tag must be promoted after verification");
+  assert.ok(releaseStep < promoteStep, "release notes must exist before the floating tag is promoted");
+  const release = publish.slice(releaseStep, promoteStep);
+  const promotion = publish.slice(promoteStep);
+  assert.ok(
+    /gh release (?:create|edit)/.test(release),
+    "release publication must create or update a GitHub release",
+  );
+  assert.ok(
+    /--notes-file "\$\{NOTES_FILE\}"/.test(release),
+    "the release must publish the prepared notes",
+  );
+  assert.ok(
+    /docker buildx imagetools create/.test(promotion),
+    "the verified image digest must be promoted",
+  );
+  assert.ok(
+    /"\$\{IMAGE\}@\$\{DIGEST\}"/.test(promotion),
+    "promotion must use the verified digest",
+  );
+  assert.ok(
+    !/gh release (?:create|edit)/.test(prepare),
+    "release publication must not happen in the prepare job",
+  );
 });
 
 test("staging announces download before bootc begins pulling the image", () => {
