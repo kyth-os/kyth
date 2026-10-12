@@ -313,6 +313,15 @@ test("release summary is tied to the checked image and explains unavailable note
   assert.match(updatesRust, /body\.lines\(\)\.any\(\|line\| line\.trim\(\) == expected_digest_line\)/);
 });
 
+test("container build provenance has the required GitHub token permissions", async () => {
+  const build = await readFile(resolve(root, "../../.github/workflows/build.yml"), "utf8");
+  const attestAction = await readFile(resolve(root, "../../.github/actions/attest-artifact/action.yml"), "utf8");
+  const buildPush = build.slice(build.indexOf("  build_push:"), build.indexOf("\n  finalize:", build.indexOf("  build_push:")));
+  assert.ok(buildPush.includes("      id-token: write"), "image build job must have OIDC token access for provenance");
+  assert.ok(buildPush.includes("      attestations: write"), "image build job must be allowed to publish provenance");
+  assert.ok(!attestAction.includes("show-summary:"), "attestation action inputs must match the pinned action version");
+});
+
 test("image build notes are digest-bound and required before publishing", async () => {
   const build = await readFile(resolve(root, "../../.github/workflows/build.yml"), "utf8");
   const supplyChain = await readFile(resolve(root, "../../.github/workflows/supply-chain.yml"), "utf8");

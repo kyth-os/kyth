@@ -42,7 +42,6 @@ runs:
         subject-name: ${{ inputs.subject-name }}
         subject-digest: ${{ inputs.subject-digest }}
         push-to-registry: ${{ inputs.push-to-registry }}
-        show-summary: false
 
     - name: Sign blob with Cosign (Keyless)
       if: inputs.cosign-sign == 'true'
