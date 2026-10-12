@@ -577,7 +577,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/desktop-tools.just",
-          "line": 76
+          "line": 98
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -613,7 +613,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/desktop-tools.just",
-          "line": 96
+          "line": 118
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -649,7 +649,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/desktop-tools.just",
-          "line": 110
+          "line": 132
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -2012,7 +2012,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/gaming/hardware.just",
-          "line": 137
+          "line": 148
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -2043,7 +2043,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/gaming/hardware.just",
-          "line": 141
+          "line": 152
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -2079,7 +2079,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/gaming/hardware.just",
-          "line": 153
+          "line": 164
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -2110,7 +2110,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/gaming/hardware.just",
-          "line": 157
+          "line": 168
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -2327,7 +2327,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/gaming/performance.just",
-          "line": 63
+          "line": 87
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -2358,7 +2358,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/gaming/performance.just",
-          "line": 98
+          "line": 139
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -2389,7 +2389,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/gaming/performance.just",
-          "line": 103
+          "line": 144
         }
       ],
       "source_provenance": "legacy-recipe",
@@ -2420,7 +2420,7 @@
       "legacy_sources": [
         {
           "path": "build_files/just/kyth/gaming/performance.just",
-          "line": 110
+          "line": 151
         }
       ],
       "source_provenance": "legacy-recipe",

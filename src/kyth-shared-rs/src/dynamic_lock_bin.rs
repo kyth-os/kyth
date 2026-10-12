@@ -94,8 +94,19 @@ fn lock_session() -> bool {
 
 fn main() -> std::process::ExitCode {
     unsafe {
-        libc::signal(libc::SIGINT, stop as libc::sighandler_t);
-        libc::signal(libc::SIGTERM, stop as libc::sighandler_t);
+        // sigaction (not signal()) has defined semantics in multithreaded
+        // programs per POSIX. The handler only flips an atomic flag, which is
+        // async-signal-safe. SA_RESTART preserves the previous signal()
+        // behavior for blocking syscalls.
+        let mut action: libc::sigaction = std::mem::zeroed();
+        action.sa_sigaction = stop as libc::sighandler_t;
+        libc::sigemptyset(&mut action.sa_mask);
+        action.sa_flags = libc::SA_RESTART;
+        for &signum in &[libc::SIGINT, libc::SIGTERM] {
+            if libc::sigaction(signum, &action, std::ptr::null_mut()) != 0 {
+                eprintln!("warning: failed to install handler for signal {signum}");
+            }
+        }
     }
     let home = env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
     let override_path = env::var("KYTH_DYNAMIC_LOCK_CONFIG").ok();

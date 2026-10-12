@@ -19,21 +19,56 @@ KWALLET_PAM_MODULE="$(basename "${KWALLET_PAM_SO}")"
 for PAM_FILE in /etc/pam.d/plasmalogin /usr/lib/pam.d/plasmalogin; do
     [ -f "${PAM_FILE}" ] || continue
 
-    # Single secrets provider: neutralize any ACTIVE pam_oo7 line.
-    if grep -qE '^[[:space:]]*(auth|session)[[:space:]]+.*pam_oo7' "${PAM_FILE}"; then
-        sed -i -E 's/^([[:space:]]*)((auth|session)[[:space:]]+.*pam_oo7.*)$/\1# \2  # kyth: KWallet is the single secrets provider/' "${PAM_FILE}"
+    # PAM's leading '-' only suppresses missing-module logging; these rules
+    # still execute. Normalize stale overlays by keeping one KWallet auth/session
+    # call and placing the relabel hook before the first active session call.
+    tmp_file="$(mktemp)"
+    if ! awk -v mod="${KWALLET_PAM_MODULE}" '
+        function active(line, type) {
+            return line ~ ("^[[:space:]]*-?" type "[[:space:]]+")
+        }
+        {
+            if (index($0, "kyth-kwallet-relabel")) next
+            if ((active($0, "auth") || active($0, "session")) && index($0, "pam_oo7")) {
+                sub(/^[[:space:]]*/, "")
+                print "# " $0 "  # kyth: KWallet is the single secrets provider"
+                next
+            }
+            if (active($0, "auth") && index($0, mod)) {
+                if (auth_seen++) next
+            }
+            if (active($0, "session") && index($0, mod) && index($0, "auto_start")) {
+                if (session_seen++) next
+                print "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel"
+            }
+            print
+        }
+        END {
+            if (!auth_seen) print "auth     optional     " mod
+            if (!session_seen) {
+                print "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel"
+                print "session  optional     " mod " auto_start"
+            }
+        }
+    ' "${PAM_FILE}" >"${tmp_file}"; then
+        rm -f -- "${tmp_file}"
+        exit 1
     fi
 
-    # Wire the bridge if not present. Only UNCOMMENTED lines count.
-    if ! grep -qE "^[[:space:]]*(auth|session)[[:space:]]+.*${KWALLET_PAM_MODULE}" "${PAM_FILE}"; then
-        printf '\nauth     optional     %s\nsession  optional     pam_exec.so /usr/libexec/kyth-kwallet-relabel\nsession  optional     %s auto_start\n' \
-            "${KWALLET_PAM_MODULE}" "${KWALLET_PAM_MODULE}" >>"${PAM_FILE}"
-    elif ! grep -q kyth-kwallet-relabel "${PAM_FILE}"; then
-        awk -v mod="${KWALLET_PAM_MODULE}" '!done && $0 ~ mod && /auto_start/ {
-            print "session  optional  pam_exec.so /usr/libexec/kyth-kwallet-relabel"
-            done=1
-        } { print }' "${PAM_FILE}" >/tmp/kyth-pam-ensure.tmp && mv /tmp/kyth-pam-ensure.tmp "${PAM_FILE}"
+    if ! cmp -s "${PAM_FILE}" "${tmp_file}"; then
+        target_file="${PAM_FILE}"
+        if [[ "${PAM_FILE}" == /usr/lib/pam.d/* ]]; then
+            # /usr is immutable on bootc; repair a stale vendor stack via /etc.
+            target_file="/etc/pam.d/${PAM_FILE##*/}"
+            install -d -m 0755 /etc/pam.d
+        fi
+        target_tmp="$(mktemp "${target_file}.kyth.XXXXXX")"
+        cp -- "${tmp_file}" "${target_tmp}"
+        chmod --reference="${PAM_FILE}" "${target_tmp}"
+        restorecon -F "${target_tmp}" >/dev/null 2>&1 || true
+        mv -f -- "${target_tmp}" "${target_file}"
     fi
+    rm -f -- "${tmp_file}"
     # Only the first existing file is the live one.
     break
 done

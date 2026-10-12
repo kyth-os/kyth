@@ -202,9 +202,12 @@ class ReleaseChainingContracts(unittest.TestCase):
         ).read_text(encoding="utf-8")
         build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
         publish = workflow.split("  publish:", 1)[1]
-        verify_at = publish.index(
-            "- name: Verify published signatures and build provenance"
-        )
+        # H1: provenance must be verified BEFORE signing (not after).
+        provenance_at = publish.index("- name: Verify build provenance before signing")
+        sign_at = publish.index("- name: Sign container image")
+        self.assertLess(provenance_at, sign_at)
+        # Signatures must be verified before ISO dispatch.
+        verify_at = publish.index("- name: Verify published signatures")
         dispatch_at = publish.index(
             "- name: Dispatch Live ISO after image verification"
         )
@@ -213,11 +216,34 @@ class ReleaseChainingContracts(unittest.TestCase):
             "permissions:", 1
         )[0]
         self.assertIn("dispatch_iso", dispatch_inputs)
-        self.assertIn('"dispatch_iso": "true"', build)
+        # ISO dispatch is per-flavor: fedora legs pass "true", cachy legs
+        # "false" (only the fedora flavor builds the live ISO). The gating
+        # contract is that dispatch happens after signature verification.
+        self.assertIn('"dispatch_iso":', build)
+        self.assertIn("matrix.kernel_flavor", build)
+        self.assertRegex(build, r"dispatch_iso.*fedora.*'\"true\"'")
         self.assertIn("inputs.dispatch_iso", publish)
-        # Preserve stable-channel VM acceptance without racing image signing;
-        # the testing/F45 channel remains acceptance-free.
-        self.assertIn('"run_acceptance": "${{ inputs.source_tag == \'latest\' && \'true\' || \'false\' }}"', publish)
+
+    def test_floating_tag_promotion_preserves_the_verified_digest(self):
+        """Promotion must tag the exact verified digest, never re-wrap it.
+
+        imagetools create synthesizes a new index around a bare manifest, so
+        the floating tag resolves to a digest that matches neither the cosign
+        signature nor the SBOM referrer subject nor the digest line in the
+        release body — the CVE scan then finds no SBOM and the Hub finds no
+        release notes (both look up by digest). oras tag preserves it.
+        """
+        workflow = (
+            ROOT / ".github/workflows/supply-chain.yml"
+        ).read_text(encoding="utf-8")
+        publish = workflow.split("  publish:", 1)[1]
+        promote = publish.split("- name: Promote floating tag to verified digest", 1)[1]
+        self.assertIn('oras tag "${IMAGE}@${DIGEST}" "${FLOATING_TAG}"', promote)
+        self.assertNotIn("imagetools create", promote)
+        # Order still holds: the release is published before promotion.
+        release_at = publish.index("- name: Publish image changelog release")
+        promote_at = publish.index("- name: Promote floating tag to verified digest")
+        self.assertLess(release_at, promote_at)
 
 
 if __name__ == "__main__":

@@ -21,9 +21,26 @@ pub(crate) fn acquire_disk_lock(disk: &str) -> Result<File, String> {
         .custom_flags(libc::O_CLOEXEC)
         .open(&disk)
         .map_err(|error| format!("could not lock {disk} for exclusive use: {error}"))?;
-    if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0
-        && std::env::var("KYTH_INSTALL_ALLOW_NO_DISK_LOCK").as_deref() != Ok("1")
-    {
+    let lock_failed = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0;
+    // Dev-only escape hatch: in debug builds, KYTH_INSTALL_ALLOW_NO_DISK_LOCK=1
+    // skips the exclusive disk lock. Release builds ignore the env var
+    // entirely — a failed flock is always an error there, so a leaked
+    // developer shell or ambient environment can never silently disable
+    // exclusive disk access during destructive operations.
+    #[cfg(debug_assertions)]
+    let bypass_allowed = std::env::var("KYTH_INSTALL_ALLOW_NO_DISK_LOCK").as_deref() == Ok("1");
+    #[cfg(not(debug_assertions))]
+    let bypass_allowed = false;
+    if lock_failed && bypass_allowed {
+        // SECURITY: Loud warning when the disk-lock bypass engages. This is a
+        // dev escape hatch; if it ever leaks into production, destructive disk
+        // ops run without exclusive access.
+        eprintln!(
+            "WARNING: KYTH_INSTALL_ALLOW_NO_DISK_LOCK=1 bypassed exclusive disk lock for {disk}. \
+             Destructive operations will proceed without protection against concurrent access."
+        );
+    }
+    if lock_failed && !bypass_allowed {
         return Err(format!(
             "another process is using {disk}; close other installers and retry"
         ));
@@ -64,32 +81,6 @@ pub(crate) fn validate_target_snapshots(
     Ok(())
 }
 
-fn findmnt_sources(path: &str, recursive: bool) -> Result<Vec<String>, String> {
-    let mut args = Vec::with_capacity(5);
-    if recursive {
-        args.push("-R");
-    }
-    args.extend(["-n", "-o", "SOURCE", path]);
-    let output = std::process::Command::new("/usr/bin/findmnt")
-        .args(args)
-        .output()
-        .map_err(|error| format!("could not run findmnt: {error}"))?;
-    if !output.status.success() && output.status.code() != Some(1) {
-        return Err(format!(
-            "findmnt failed with exit code {}: {}",
-            output.status.code().unwrap_or(1),
-            String::from_utf8_lossy(&output.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8(output.stdout)
-        .map_err(|_| "findmnt returned non-UTF-8 output".to_string())?
-        .lines()
-        .map(str::trim)
-        .filter(|source| source.starts_with("/dev/"))
-        .map(str::to_string)
-        .collect())
-}
-
 fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
     let output = std::process::Command::new(program)
         .args(args)
@@ -107,7 +98,28 @@ fn command_output(program: &str, args: &[&str]) -> Result<String, String> {
 
 /// Re-probe all disk ancestry and live mounts immediately before mutation.
 pub(crate) fn validate_target_disk(disk: &str) -> Result<(), String> {
+    validate_target_disk_inner(disk, None)
+}
+
+/// Re-probe disk ancestry, live mounts, and the selection-time disk
+/// identity immediately before mutation. The executor calls this variant
+/// once the storage plan carries the expected disk identity, so a swapped
+/// or re-enumerated disk fails closed instead of being written to.
+pub(crate) fn validate_target_disk_with_identity(
+    disk: &str,
+    expected: &installer_storage::DiskIdentity,
+) -> Result<(), String> {
+    validate_target_disk_inner(disk, Some(expected))
+}
+
+fn validate_target_disk_inner(
+    disk: &str,
+    expected: Option<&installer_storage::DiskIdentity>,
+) -> Result<(), String> {
     let disk = normalized(disk)?;
+    if let Some(expected) = expected {
+        installer_storage::verify_disk_identity(&disk, expected)?;
+    }
     let disk_snapshot = command_output(
         "/usr/bin/lsblk",
         &[
@@ -128,20 +140,13 @@ pub(crate) fn validate_target_disk(disk: &str) -> Result<(), String> {
             "NAME,PKNAME,TYPE",
         ],
     )?;
-    let mut protected_sources = Vec::new();
-    for mount in [
-        "/",
-        "/boot",
-        "/boot/efi",
-        "/sysroot",
-        "/run/initramfs/live",
-        "/run/initramfs/iso",
-    ] {
-        protected_sources.extend(findmnt_sources(mount, false)?);
-    }
-    protected_sources.extend(findmnt_sources("/run/initramfs", true)?);
-    protected_sources.extend(findmnt_sources("/run/media", true)?);
-    let current_source = findmnt_sources("/", false)?.into_iter().next();
+    // P8: one batched findmnt call replaces nine sequential per-path probes.
+    let mounts = installer_storage::MountTable::parse(&command_output(
+        "/usr/bin/findmnt",
+        &["--json", "-o", "TARGET,SOURCE"],
+    )?)?;
+    let protected_sources = mounts.protected_sources();
+    let current_source = mounts.current_source();
     validate_target_snapshots(
         &disk_snapshot,
         &ancestry_snapshot,

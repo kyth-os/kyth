@@ -61,10 +61,19 @@ install-jetbrains-toolbox:
     APPIMAGE_DIR="${HOME}/.local/share/JetBrains/Toolbox"
 
     echo "Fetching latest JetBrains Toolbox release..."
-    download_url=$(curl -fsSL "${TOOLBOX_REPO}" \
+    release_json=$(curl -fsSL "${TOOLBOX_REPO}")
+    download_url=$(printf '%s' "${release_json}" \
         | jq -r '.TBA[0].downloads.linux.link // empty')
+    checksum_url=$(printf '%s' "${release_json}" \
+        | jq -r '.TBA[0].downloads.linux.checksumLink // empty')
     if [[ -z "${download_url}" ]]; then
         echo "ERROR: JetBrains Toolbox did not publish a Linux download URL." >&2
+        exit 1
+    fi
+    # Refuse to install without a published checksum: an unverified
+    # download from a "latest" pointer is a supply-chain downgrade risk.
+    if [[ -z "${checksum_url}" ]]; then
+        echo "ERROR: JetBrains Toolbox did not publish a checksum for this release — refusing to install." >&2
         exit 1
     fi
 
@@ -74,6 +83,16 @@ install-jetbrains-toolbox:
 
     echo "Downloading ${tarball}..."
     curl -fsSL -o "${tmpdir}/${tarball}" "${download_url}"
+    echo "Verifying checksum..."
+    curl -fsSL -o "${tmpdir}/${tarball}.sha256" "${checksum_url}"
+    # JetBrains ships "<hash>  <filename>" (coreutils format); fall back to
+    # bare-hash if the format ever changes.
+    if grep -q " " "${tmpdir}/${tarball}.sha256" 2>/dev/null; then
+        (cd "${tmpdir}" && sha256sum -c "${tarball}.sha256")
+    else
+        expected=$(tr -d '[:space:]' < "${tmpdir}/${tarball}.sha256")
+        echo "${expected}  ${tmpdir}/${tarball}" | sha256sum -c -
+    fi
 
     mkdir -p "${APPIMAGE_DIR}" "${INSTALL_DIR}"
     tar -xzf "${tmpdir}/${tarball}" -C "${tmpdir}"

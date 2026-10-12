@@ -44,6 +44,26 @@ class TitanoboaIsoWrapperTests(unittest.TestCase):
         self.assertIn("TITANOBOA_ISO:-/src/titanoboa-build_iso.sh", wrapper)
         self.assertIn("KYTH_ISO:-/kyth/iso.yaml", wrapper)
 
+    def test_titanoboa_runtime_uses_the_live_fedora_45_manifest(self) -> None:
+        # Keep the CI and local ISO paths on Fedora's canonical registry and
+        # pin the digest currently served by its :45 tag. A stale digest makes
+        # Podman fail with "manifest unknown" before Titanoboa starts.
+        expected = (
+            "registry.fedoraproject.org/fedora:45@sha256:"
+            "cc55518dc3593184519ae4184a814a26d6405b42713762d57353659fd7105445"
+        )
+        for path in (LIVE, WORKFLOW):
+            with self.subTest(path=path.name):
+                text = path.read_text(encoding="utf-8")
+                self.assertTrue(
+                    expected in text,
+                    f"{path.name} must pin the current Fedora 45 runtime manifest",
+                )
+                self.assertTrue(
+                    "quay.io/fedora/fedora:45@" not in text,
+                    f"{path.name} must use Fedora's canonical registry",
+                )
+
     def test_vendored_build_iso_matches_the_pinned_upstream_contract(self) -> None:
         vendored = VENDORED.read_text(encoding="utf-8")
         self.assertIn("Zeglius/titanoboa @ 7737f47", vendored)

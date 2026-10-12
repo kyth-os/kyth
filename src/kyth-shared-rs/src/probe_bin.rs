@@ -34,7 +34,14 @@ fn main() -> std::process::ExitCode {
         kyth_shared::system::probe::fresh_system_sections()
     };
     let fresh_keys = fresh.keys().map(String::as_str).collect::<Vec<_>>();
-    let skip = kyth_shared::system::probe::cacheable_sections_to_skip(&fresh_keys);
+    let mut skip = kyth_shared::system::probe::cacheable_sections_to_skip(&fresh_keys);
+    if system {
+        // P1: the two network-backed `flatpak remote-ls --updates` queries
+        // (30s timeout each) stay off the boot-critical system probe. The
+        // user timer refreshes this section within 10 minutes of login, and
+        // the Hub falls back to a live query for a missing section.
+        skip.extend(kyth_shared::system::probe::deferred_system_sections());
+    }
     let mut sections = kyth_shared::system::probe::collect_snapshot_skipping(&skip);
     kyth_shared::system::probe::merge_fresh_sections(&mut sections, fresh);
     if print_only {

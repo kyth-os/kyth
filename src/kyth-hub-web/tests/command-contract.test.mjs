@@ -19,8 +19,15 @@ const vpn = await readFile(resolve(root, "src/components/VpnSection.tsx"), "utf8
 const exeDialog = await readFile(resolve(root, "src/components/ExeHandlerDialog.tsx"), "utf8");
 const gaming = await readFile(resolve(root, "src/components/GamingSection.tsx"), "utf8");
 const actions = await readFile(resolve(root, "src/components/SectionActions.tsx"), "utf8");
+const repairSection = await readFile(resolve(root, "src/components/RepairSection.tsx"), "utf8");
+const channelsSection = await readFile(resolve(root, "src/components/ChannelsSection.tsx"), "utf8");
 const rust = await readFile(resolve(root, "src-tauri/src/main.rs"), "utf8");
 const updatesRust = await readFile(resolve(root, "src-tauri/src/commands/updates.rs"), "utf8");
+const gamingRust = await readFile(resolve(root, "src-tauri/src/commands/gaming.rs"), "utf8");
+const securityRust = await readFile(resolve(root, "src-tauri/src/commands/security.rs"), "utf8");
+const vpnRust = await readFile(resolve(root, "src-tauri/src/commands/vpn.rs"), "utf8");
+const devToolsRust = await readFile(resolve(root, "src-tauri/src/commands/dev_tools.rs"), "utf8");
+const sharedGuardianRust = await readFile(resolve(root, "../kyth-shared-rs/src/guardian.rs"), "utf8");
 const safeUpgradeRust = await readFile(resolve(root, "../kyth-shared-rs/src/safe_upgrade_bin.rs"), "utf8");
 const privilegeRust = await readFile(resolve(root, "src-tauri/src/commands/privilege.rs"), "utf8");
 const parity = await readFile(resolve(root, "PARITY.md"), "utf8");
@@ -116,6 +123,47 @@ test("Hub action payloads use the canonical snake_case IPC field names", () => {
   ];
   for (const [snippet, command] of expected) assert.ok(service.includes(snippet), `${command} must use ${snippet}`);
   assert.match(service, /"install_flatpak", \{ app_id: appId \}/, "startExeHandlerFlatpakInstall must use app_id");
+});
+
+test("sections resume only jobs from every domain their actions actually use", () => {
+  assert.ok(actions.includes("trackedDomain?: JobDomain | readonly JobDomain[]"), "the action hook must accept multiple job domains");
+  assert.ok(actions.includes(".map((domain) => ({ domain, job: getInFlightJob(domain) }))"), "resumption must search every configured action domain");
+  assert.ok(gaming.includes('useSectionAction(["hub-action", "gaming"])'));
+  assert.ok(repairSection.includes('useSectionAction(["update", "install", "hub-action"])'));
+  assert.ok(channelsSection.includes('useSectionAction("update")'));
+});
+
+test("Guardian storage verification runs only after an explicit completed maintenance result", () => {
+  const storage = sharedGuardianRust.match(/"storage\.maint"\s*=>\s*\{([\s\S]*?)\n\s*\}/)?.[1] ?? "";
+  assert.notEqual(storage, "", "storage Guardian executor not found");
+  assert.match(storage, /maintenance_output_complete/, "skipped or partial maintenance must not proceed to scrub verification");
+});
+
+test("snake_case frontend payloads match Tauri command argument deserialization", () => {
+  // Tauri's command macro defaults to camelCase, so these commands must
+  // explicitly bind the snake_case keys that liveData.ts sends.
+  const commands = [
+    [rust, "uninstall_flatpak"],
+    [rust, "install_flatpak"],
+    [rust, "exe_handler_flatpak_installed"],
+    [rust, "exe_handler_launch_flatpak"],
+    [securityRust, "sec_host_tool_install"],
+    [securityRust, "sec_host_tool_uninstall"],
+    [securityRust, "sec_host_tool_launch"],
+    [gamingRust, "gaming_tool_install"],
+    [gamingRust, "gaming_tool_uninstall"],
+    [gamingRust, "gaming_tool_launch"],
+    [rust, "apply_pipewire_quantum"],
+    [rust, "apply_plasma_preset"],
+    [rust, "guardian_execute_recipe"],
+    [rust, "guardian_dismiss"],
+    [devToolsRust, "dev_tools_install_selection"],
+    [vpnRust, "vpn_connect"],
+  ];
+  for (const [source, command] of commands) {
+    const annotation = new RegExp(`#\\[tauri::command\\(rename_all = "snake_case"\\)\\]\\s*(?:(?:pub(?:\\([^)]*\\))?)\\s+)?(?:async\\s+)?fn ${command}\\b`);
+    assert.match(source, annotation, `${command} must deserialize snake_case frontend argument names`);
+  }
 });
 
 test("native bridge calls have a default deadline and polling uses a shorter probe deadline", () => {
@@ -265,6 +313,15 @@ test("release summary is tied to the checked image and explains unavailable note
   assert.match(updatesRust, /body\.lines\(\)\.any\(\|line\| line\.trim\(\) == expected_digest_line\)/);
 });
 
+test("container build provenance has the required GitHub token permissions", async () => {
+  const build = await readFile(resolve(root, "../../.github/workflows/build.yml"), "utf8");
+  const attestAction = await readFile(resolve(root, "../../.github/actions/attest-artifact/action.yml"), "utf8");
+  const buildPush = build.slice(build.indexOf("  build_push:"), build.indexOf("\n  finalize:", build.indexOf("  build_push:")));
+  assert.ok(buildPush.includes("      id-token: write"), "image build job must have OIDC token access for provenance");
+  assert.ok(buildPush.includes("      attestations: write"), "image build job must be allowed to publish provenance");
+  assert.ok(!attestAction.includes("show-summary:"), "attestation action inputs must match the pinned action version");
+});
+
 test("image build notes are digest-bound and required before publishing", async () => {
   const build = await readFile(resolve(root, "../../.github/workflows/build.yml"), "utf8");
   const supplyChain = await readFile(resolve(root, "../../.github/workflows/supply-chain.yml"), "utf8");
@@ -275,10 +332,37 @@ test("image build notes are digest-bound and required before publishing", async 
   assert.match(supplyChain, /Generate SBOM-powered changelog/);
   assert.match(supplyChain, /--current-digest "\$\{CURRENT_DIGEST\}"/);
   assert.match(supplyChain, /-s "output\/supply-chain\/\$\{NOTES\}"/);
-  assert.match(prepare, /Publish image changelog release/);
-  assert.match(prepare, /gh release (?:create|edit)/);
-  assert.match(prepare, /--notes-file "\$\{NOTES\}"/);
-  assert.doesNotMatch(publish, /Publish image changelog release/);
+  const releaseStep = publish.indexOf("- name: Publish image changelog release");
+  const promoteStep = publish.indexOf("- name: Promote floating tag to verified digest");
+  assert.ok(releaseStep !== -1, "the gated publish job must publish the changelog release");
+  assert.ok(promoteStep !== -1, "the floating tag must be promoted after verification");
+  assert.ok(releaseStep < promoteStep, "release notes must exist before the floating tag is promoted");
+  const release = publish.slice(releaseStep, promoteStep);
+  const promotion = publish.slice(promoteStep);
+  assert.ok(
+    /gh release (?:create|edit)/.test(release),
+    "release publication must create or update a GitHub release",
+  );
+  assert.ok(
+    /--notes-file "\$\{NOTES_FILE\}"/.test(release),
+    "the release must publish the prepared notes",
+  );
+  assert.ok(
+    /oras tag "\$\{IMAGE\}@\$\{DIGEST\}" "\$\{FLOATING_TAG\}"/.test(promotion),
+    "the verified image digest must be promoted",
+  );
+  assert.ok(
+    !/imagetools create/.test(promotion),
+    "promotion must not re-wrap the digest in a synthesized index (breaks SBOM/signature/release-notes digest matching)",
+  );
+  assert.ok(
+    /"\$\{IMAGE\}@\$\{DIGEST\}"/.test(promotion),
+    "promotion must use the verified digest",
+  );
+  assert.ok(
+    !/gh release (?:create|edit)/.test(prepare),
+    "release publication must not happen in the prepare job",
+  );
 });
 
 test("staging announces download before bootc begins pulling the image", () => {
@@ -568,7 +652,7 @@ test("stale UI states recover without manual navigation", () => {
   assert.match(vpn, /onOnlineRefetch\(/, "mount-only VPN reads must re-run on reconnect");
   assert.match(service, /\} catch \{\n    return null;\n  \}\n\}/, "probe invoke failures must not be cached as null");
   assert.match(hubPage, /Unknown section/, "unknown ?section= must render a notice, not a blank page");
-  assert.match(actions, /getInFlightJob\(trackedDomain\) !== undefined/, "resumed note must read the tracked slot live");
+  assert.ok(actions.includes(".find((entry) => entry.job !== undefined)"), "resumed note must look for an active job in every configured domain");
 });
 
 test("routing and init failures stay visible", () => {
@@ -703,7 +787,8 @@ test("bug-hunt round 6: fail closed everywhere", async () => {
   assert.match(planCommit, /marker could not be/, "NTFS marker failure must abort");
   assert.match(planCommit, /Could not read the live NTFS/, "NTFS probe failure must abort");
   const apiTs = await readFile(resolve(root, "../kyth-installer-web/src/api.ts"), "utf8");
-  assert.match(apiTs, /Authorization/, "bootstrap must use a header, not the URL");
+  assert.match(apiTs, /withCredentials/, "bootstrap must use HttpOnly cookie, not URL token");
+  assert.doesNotMatch(apiTs, /session_token/, "session token must not appear in JS");
   assert.doesNotMatch(apiTs, /bootstrap_token=\$/, "token must not be interpolated into the URL");
   assert.match(apiTs, /connectionPromise = null/, "failed bootstrap must be retryable");
   assert.match(rust, /atomic_write_text\(&path/, "exe config must write atomically");
@@ -734,4 +819,16 @@ test("bug-hunt round 2 closes races and verifier gaps", async () => {
   assert.match(rust, /\/\.kyth-cloud-backup\/\*\*/, "backup dir must be excluded from the transfer");
   assert.match(rust, /nearest existing ancestor/, "HOME check must resolve parent symlinks");
   assert.match(rust, /reap_stale_focus_inhibits/, "focus must reap orphaned inhibitors");
+});
+
+test("bug-hunt round 3: destructive privileged ops require modal confirmation", async () => {
+  // kernel_switch, secureboot_enroll, firmware_update, nvidia_install go
+  // through runPrivilegedAction (prompt + confirmUserAction modal);
+  // kali_remove has its own confirmUserAction in removeKaliBox.
+  for (const op of ["kernel_switch", "secureboot_enroll", "firmware_update", "nvidia_install"]) {
+    assert.match(service, new RegExp(`case "${op}":`), `${op} must have a dedicated confirmation prompt`);
+  }
+  assert.match(service, /DESTRUCTIVE_PRIVILEGED_OPS/, "destructive ops must be enumerated in one place");
+  assert.match(service, /confirmUserAction\(privilegedActionPrompt\(operation, payload\)\)/, "privileged actions must confirm via modal before invoking");
+  assert.match(service, /removeKaliBox[\s\S]*?confirmUserAction\("Remove the Kali/, "kali_remove must confirm via modal before invoking");
 });

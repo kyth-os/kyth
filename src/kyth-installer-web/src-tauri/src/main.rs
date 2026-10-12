@@ -27,6 +27,7 @@ mod installer_transaction;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
+use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -47,6 +48,19 @@ struct InstallerConnection {
     base_url: String,
     bootstrap_token: String,
     session_token: String,
+    transport: String,
+    socket_path: Option<String>,
+}
+
+/// The connection description handed to the webview. This deliberately
+/// carries NO tokens: the session and bootstrap tokens stay in Rust state
+/// only (the `installer_request` proxy attaches the session token from
+/// Rust state on every call). Returning tokens to JavaScript would let any
+/// XSS in the webview bypass the Tauri route allowlist and speak to the
+/// privileged daemon directly.
+#[derive(Clone, Serialize)]
+struct InstallerConnectionInfo {
+    base_url: String,
     transport: String,
     socket_path: Option<String>,
 }
@@ -123,13 +137,20 @@ fn load_tokens_file(path: &str) -> (String, String) {
 #[tauri::command]
 fn installer_connection(
     state: tauri::State<InstallerTokens>,
-) -> Result<InstallerConnection, String> {
-    state
+) -> Result<InstallerConnectionInfo, String> {
+    let value = state
         .0
         .lock()
         .map_err(|_| "installer connection state unavailable".to_string())?
         .clone()
-        .ok_or_else(|| "installer shell was not given backend tokens".to_string())
+        .ok_or_else(|| "installer shell was not given backend tokens".to_string())?;
+    // Tokens never cross into JavaScript: the proxy below attaches them
+    // from Rust state. See `InstallerConnectionInfo`.
+    Ok(InstallerConnectionInfo {
+        base_url: value.base_url,
+        transport: value.transport,
+        socket_path: value.socket_path,
+    })
 }
 
 #[tauri::command]
@@ -153,6 +174,33 @@ fn installer_execution_plan(
     let input: installer_executor::InstallerExecutionInput = serde_json::from_value(request)
         .map_err(|error| format!("invalid installer execution request: {error}"))?;
     installer_executor::build_plan(input)
+}
+
+fn network_selector_candidates() -> [(&'static str, &'static [&'static str]); 2] {
+    // M4: absolute paths, never PATH lookup — a hijacked PATH in the live
+    // session must not redirect the installer's GUI into attacker code.
+    [
+        (
+            "/usr/bin/plasmawindowed",
+            &["org.kde.plasma.networkmanagement"],
+        ),
+        ("/usr/bin/kcmshell6", &["kcm_networkmanagement"]),
+    ]
+}
+
+#[tauri::command]
+fn installer_open_network_selector() -> Result<(), String> {
+    let mut errors = Vec::new();
+    for (program, args) in network_selector_candidates() {
+        match Command::new(program).args(args).spawn() {
+            Ok(_) => return Ok(()),
+            Err(error) => errors.push(format!("{program}: {error}")),
+        }
+    }
+    Err(format!(
+        "Could not open the Wi-Fi network selector ({})",
+        errors.join("; ")
+    ))
 }
 
 fn connection(state: &tauri::State<InstallerTokens>) -> Result<InstallerConnection, String> {
@@ -434,14 +482,13 @@ fn main() {
         .unwrap_or_default();
     let tokens = InstallerConnection {
         base_url: BACKEND_URL.to_string(),
-        bootstrap_token: arg_value(&argv, "--bootstrap-token")
-            .filter(|value| !value.is_empty())
-            .unwrap_or(file_tokens.0),
-        session_token: arg_value(&argv, "--session-token")
-            .filter(|value| !value.is_empty())
-            .or_else(|| std::env::var("KYTH_INSTALLER_SESSION_TOKEN").ok())
-            .filter(|value| !value.is_empty())
-            .unwrap_or(file_tokens.1),
+        // SECURITY: Tokens are only loaded from --tokens-file (0600).
+        // Passing tokens via argv (--bootstrap-token/--session-token) or env
+        // (KYTH_INSTALLER_SESSION_TOKEN) is not supported: they would be
+        // visible to other local users via /proc/<pid>/cmdline and
+        // /proc/<pid>/environ.
+        bootstrap_token: file_tokens.0,
+        session_token: file_tokens.1,
         socket_path: arg_value(&argv, "--socket-path"),
         transport: if argv.iter().any(|arg| arg == "--socket-path") {
             "unix".to_string()
@@ -466,7 +513,8 @@ fn main() {
             installer_execution_plan,
             installer_request,
             installer_stream,
-            installer_stream_stop
+            installer_stream_stop,
+            installer_open_network_selector
         ])
         .run(tauri::generate_context!())
         .expect("error while running the KythOS installer shell");
@@ -475,6 +523,20 @@ fn main() {
 #[cfg(test)]
 mod transport_tests {
     use super::*;
+
+    #[test]
+    fn network_selector_uses_only_fixed_kde_candidates() {
+        assert_eq!(
+            network_selector_candidates(),
+            [
+                (
+                    "/usr/bin/plasmawindowed",
+                    &["org.kde.plasma.networkmanagement"][..]
+                ),
+                ("/usr/bin/kcmshell6", &["kcm_networkmanagement"][..]),
+            ]
+        );
+    }
 
     #[test]
     fn long_partition_commits_get_a_matching_client_wait_bound() {

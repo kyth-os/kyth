@@ -6,20 +6,6 @@ use std::time::Duration;
 use kyth_shared::system::process::run_bounded;
 use kyth_shared::system::smoke_check::{command_available, path_check, Report};
 
-fn command_ok(program: &str, args: &[&str]) -> bool {
-    if !std::env::var_os("PATH")
-        .into_iter()
-        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
-        .any(|p| p.join(program).is_file())
-    {
-        return false;
-    }
-    let mut argv = vec![program.to_string()];
-    argv.extend(args.iter().map(|arg| (*arg).to_string()));
-    run_bounded(&argv, Duration::from_secs(10))
-        .map(|out| out.status.success())
-        .unwrap_or(false)
-}
 fn collect() -> Report {
     let mut report = Report::default();
     let section = "Identity And Update Safety";
@@ -39,12 +25,43 @@ fn collect() -> Report {
     }
     let bootc = command_available("bootc", "/usr/bin", "bootc", false, section);
     report.record(bootc.level, bootc.name, bootc.detail, bootc.section);
-    for (unit, label) in [
+    // P15: one `systemctl is-active` spawn for the three units instead of
+    // three sequential spawns; output is one state line per unit in order.
+    let unit_states: Vec<String> = {
+        let argv: Vec<String> = ["systemctl", "is-active"]
+            .into_iter()
+            .map(String::from)
+            .chain(
+                [
+                    "display-manager.service",
+                    "NetworkManager.service",
+                    "bluetooth.service",
+                ]
+                .into_iter()
+                .map(String::from),
+            )
+            .collect();
+        run_bounded(&argv, Duration::from_secs(10))
+            .map(|output| {
+                String::from_utf8_lossy(&output.stdout)
+                    .lines()
+                    .map(|line| line.trim().to_string())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    for (index, (_unit, label)) in [
         ("display-manager.service", "Login manager"),
         ("NetworkManager.service", "Network manager"),
         ("bluetooth.service", "Bluetooth"),
-    ] {
-        let row = if command_ok("systemctl", &["is-active", "--quiet", unit]) {
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let row = if unit_states
+            .get(index)
+            .is_some_and(|state| state == "active")
+        {
             ("PASS", "active")
         } else if Path::new("/run/systemd/system").exists() {
             ("WARN", "not active or unavailable")

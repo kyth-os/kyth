@@ -1,0 +1,12 @@
+[Desktop Entry]
+Version=1.0
+Name=Kyth Hub
+GenericName=System Hub
+Comment=Kyth Hub Wayland application identity
+Exec=/usr/bin/kyth-welcome-launch
+Icon=kyth
+Terminal=false
+Type=Application
+NoDisplay=true
+StartupNotify=true
+StartupWMClass=com.kythos.hub

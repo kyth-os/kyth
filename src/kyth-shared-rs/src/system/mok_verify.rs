@@ -26,7 +26,18 @@ fn run_with_timeout(cmd: &str, args: &[&str], timeout: Duration) -> Option<(i32,
 }
 
 pub fn mok_status() -> MokStatus {
-    let sb_result = run_with_timeout("mokutil", &["--sb-state"], Duration::from_secs(5));
+    // P17: the two mokutil probes are independent — run them concurrently so
+    // the worst case is one 5s timeout instead of two sequential ones.
+    let (sb_result, enrolled_result) = std::thread::scope(|scope| {
+        let sb_handle =
+            scope.spawn(|| run_with_timeout("mokutil", &["--sb-state"], Duration::from_secs(5)));
+        let enrolled_handle = scope
+            .spawn(|| run_with_timeout("mokutil", &["--list-enrolled"], Duration::from_secs(5)));
+        (
+            sb_handle.join().unwrap_or(None),
+            enrolled_handle.join().unwrap_or(None),
+        )
+    });
     let (sb_state, enrolled) = match sb_result {
         None => {
             let exists = super::process::find_executable("mokutil").is_some();
@@ -39,22 +50,13 @@ pub fn mok_status() -> MokStatus {
             ("unknown".to_string(), "unknown".to_string())
         }
         Some((code, stdout, _)) => {
-            let lower = stdout.to_lowercase();
-            let sb = if code == 0 && lower.contains("secureboot enabled") {
-                "enabled"
-            } else if lower.contains("disabled") {
-                "disabled"
-            } else {
-                "unknown"
-            };
-            // second call
-            let r2 = run_with_timeout("mokutil", &["--list-enrolled"], Duration::from_secs(5));
-            let enrolled = match r2 {
+            let sb = parse_sb(&stdout, code).to_string();
+            let enrolled = match enrolled_result {
                 Some((c2, out2, _)) if c2 == 0 && out2.contains("KythOS Secure Boot") => "enrolled",
                 Some((c2, _, _)) if c2 == 0 => "not enrolled",
                 _ => "not enrolled",
             };
-            (sb.to_string(), enrolled.to_string())
+            (sb, enrolled.to_string())
         }
     };
     MokStatus { sb_state, enrolled }

@@ -144,6 +144,37 @@ else
   PYTHONPATH=build_files/kyth_shared:build_files/kyth-installer timeout --foreground 600 python3 -m unittest discover -s tests -b
 fi
 
+# Rust unit tests — added 2026-10-10 after a missing test import in
+# rclone_update_bin.rs broke `cargo test` in CI (failing Validation on three
+# consecutive pushes) while local `just test`/`just validate` stayed green.
+# CI's Validation workflow runs these; local validate must too.
+echo "==> Rust unit tests"
+if [[ ${validate_fast} -eq 1 ]]; then
+	echo "==> Rust unit tests SKIPPED (--fast) — CI validation.yml gates the full suite"
+else
+	for manifest in src/kyth-shared-rs/Cargo.toml src/kyth-hub-web/src-tauri/Cargo.toml src/kyth-installer-web/src-tauri/Cargo.toml; do
+		echo "--- cargo test --manifest-path ${manifest}"
+		# --no-run first to catch compile errors in test code without running
+		cargo test --quiet --manifest-path "${manifest}" --no-run || {
+			echo "Rust test compilation failed for ${manifest}" >&2
+			exit 1
+		}
+	done
+	# Actually run the tests (shared-rs is the one with unit tests; the Tauri
+	# crates' tests are exercised via their build checks in CI, but compiling
+	# their test targets catches the same class of bug).
+	# KYTH_TEST_MODE_FORCE=1: this VM runs as root, and test_mode_active()
+	# refuses KYTH_TEST_MODE for euid 0. The FORCE override is the sanctioned
+	# test-harness path (never set in production). CI runners aren't root so
+	# they don't need it, but setting it unconditionally is harmless there.
+	# umask 022: this VM has umask 0007; session_config tests assert 0o644
+	# restored modes, which needs the standard 022.
+	(umask 022 && KYTH_TEST_MODE_FORCE=1 cargo test --quiet --manifest-path src/kyth-shared-rs/Cargo.toml) || {
+		echo "Rust unit tests failed" >&2
+		exit 1
+	}
+fi
+
 echo "==> Structured configuration"
 while IFS= read -r -d '' file; do
 	[[ -f "${file}" ]] || continue
@@ -241,7 +272,6 @@ unexpected="$(printf '%s\n' "${output}" |
 		-e '^Failed to turn off SO_PASSRIGHTS on user lookup socket, ignoring: Operation not permitted$' \
 		-e '^Failed to enable SO_PASSCRED on handoff timestamp socket(, ignoring)?: Operation not permitted$' \
 		-e '^ERROR: ld\.so: object .* cannot be preloaded .* ignored\.$' \
-		-e '^Configuration file .* is marked world-writable\. Please remove world writability permission bits\. Proceeding anyway\.$' \
 		-e "${stale_host_cycle_filter}" \
 		-e '^(motd-news|apt-daily|apt-daily-upgrade)\.timer: Timer unit lacks value setting\. Refusing\.$' \
 		-e '^multi-user\.target: Wants dependency dropin .*syslog\.service target .*rsyslog\.service has different name$' ||

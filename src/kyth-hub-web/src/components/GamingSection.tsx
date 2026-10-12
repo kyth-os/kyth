@@ -33,6 +33,7 @@ import {
   type ScxStatus,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
+import { ExternalLink } from "./ExternalLink";
 import { ActionStatus, ProgressRing, RecipeButton, useSectionAction } from "./SectionActions";
 
 type SectionRun = (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
@@ -103,8 +104,8 @@ function FirstFailurePlaybook({ busy, run }: { busy: string | null; run: Section
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
         <RecipeButton recipe="health-check" label="Run gaming health check" busy={busy} run={run} />
-        <a className="action-button" href="https://www.protondb.com" target="_blank" rel="noreferrer">Open ProtonDB</a>
-        <a className="action-button" href="https://areweanticheatyet.com" target="_blank" rel="noreferrer">Open Anti-Cheat Status</a>
+        <ExternalLink className="action-button" href="https://www.protondb.com">Open ProtonDB</ExternalLink>
+        <ExternalLink className="action-button" href="https://areweanticheatyet.com">Open Anti-Cheat Status</ExternalLink>
         <button disabled={busy !== null} onClick={() => run("fix-discord", "Applying Discord screen share repair…", fixDiscordScreenshare)} style={gamingBtnStyle}>Fix Discord screen share</button>
         <button disabled={busy !== null} onClick={() => run("gt-install-dev.vencord.Vesktop", "Installing Vesktop…", () => installGamingTool("dev.vencord.Vesktop"))} style={gamingBtnStyle}>Install Vesktop (Discord voice)</button>
         <button disabled={busy !== null} onClick={() => run("fix-obs", "Applying OBS capture repair…", fixObsPipewire)} style={gamingBtnStyle}>Fix OBS capture</button>
@@ -320,7 +321,7 @@ export function GamingSection({ section }: { section: HubSection }) {
   const [proton, setProton] = useState<ProtonDbResult[]>([]);
   const [antiCheat, setAntiCheat] = useState<AntiCheatEntry[] | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("gaming");
+  const { status, busy, run } = useSectionAction(["hub-action", "gaming"]);
   useEffect(() => {
     let c = false;
     Promise.all([
@@ -402,7 +403,7 @@ export function GamingSection({ section }: { section: HubSection }) {
             <input value={gameId} onChange={(event) => setGameId(event.target.value)} placeholder="Steam IDs, e.g. 730, 570" inputMode="numeric" style={{ flex: 1, maxWidth: 220, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 13 }} />
             <button disabled={!gameId.trim()} onClick={lookupProtonDb} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600 }}>Look up</button>
           </div>
-          {proton.length > 0 ? proton.map((result) => <p key={result.app_id} className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>{result.app_id}: {result.detail}</p>) : gameId && <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Enter one or more Steam app IDs and look up current ProtonDB reports. Know the name but not the ID? <a href={`https://www.protondb.com/search?q=${encodeURIComponent(gameId)}`} target="_blank" rel="noreferrer">Search ProtonDB by name</a>, then paste the app ID here.</p>}
+          {proton.length > 0 ? proton.map((result) => <p key={result.app_id} className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>{result.app_id}: {result.detail}</p>) : gameId && <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Enter one or more Steam app IDs and look up current ProtonDB reports. Know the name but not the ID? <ExternalLink href={`https://www.protondb.com/search?q=${encodeURIComponent(gameId)}`}>Search ProtonDB by name</ExternalLink>, then paste the app ID here.</p>}
         </div>
         {antiCheat && <div style={{ marginTop: 20 }}>
           <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Anti-cheat compatibility</p>

@@ -12,6 +12,21 @@ pub(crate) struct ProbeResponse {
 /// optional probe service has not populated its cache yet.
 #[tauri::command]
 pub(crate) async fn probe_backend(section: String) -> ProbeResponse {
+    // The section name used to be echoed back verbatim in `key` and the
+    // error message. Probe sections are `[a-z0-9_-]` names; anything else
+    // fails closed without reflecting the input.
+    if section.is_empty()
+        || section.len() > 128
+        || !section
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
+    {
+        return ProbeResponse {
+            key: String::new(),
+            data: None,
+            error: Some("Invalid probe section.".to_string()),
+        };
+    }
     let key = section.clone();
     tauri::async_runtime::spawn_blocking(move || {
         let data = match section.as_str() {

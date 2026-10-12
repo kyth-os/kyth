@@ -9,7 +9,7 @@
 [Download stable](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-latest.iso) · [Try testing](https://pub-9a3cc72972ea44c4ae7504ee7cda1fa6.r2.dev/kyth-live-testing.iso) · [Get help](https://github.com/kyth-os/kyth/discussions) · [Report a bug](https://github.com/kyth-os/kyth/issues)
 
 [![Build](https://github.com/kyth-os/kyth/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/kyth-os/kyth/actions/workflows/build.yml)
-[![Live ISO](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml/badge.svg)](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml)
+[![Live ISO](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml/badge.svg?branch=testing)](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml)
 [![CVE Scan](https://github.com/kyth-os/kyth/actions/workflows/cve-scan.yml/badge.svg)](https://github.com/kyth-os/kyth/actions/workflows/cve-scan.yml)
 
 </div>
@@ -25,8 +25,10 @@ KythOS is not a promise that every Windows program, anti-cheat system, driver, o
 ## Start with Kyth Hub
 
 <div align="center">
-<img src="docs/system-hub-home.png" alt="The Kyth Hub home screen" width="100%">
+<img src="docs/system-hub-apps.png" alt="Kyth Hub Apps screen with the App Store, app search, and popular apps" width="100%">
 </div>
+
+<sub>Current Apps layout from a local preview; per-device install and update status is not live.</sub>
 
 Kyth Hub is the guided control center for KythOS. Instead of sending you through settings panels, terminal commands, and web searches, it gives you one clear next step and keeps the useful controls close by.
 

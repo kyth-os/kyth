@@ -271,7 +271,7 @@ fn appstream_search_argv(query: &str) -> Option<Vec<String>> {
     Some(vec![
         "flatpak".to_string(),
         "search".to_string(),
-        "--columns=application,name,summary".to_string(),
+        "--columns=application,name,description".to_string(),
         "--".to_string(),
         query.to_string(),
     ])
@@ -579,6 +579,10 @@ mod tests {
         let dash = argv.iter().position(|arg| arg == "--").expect("needs --");
         assert_eq!(argv[dash + 1], "-foo");
         assert_eq!(argv.last().map(String::as_str), Some("-foo"));
+        assert!(argv
+            .iter()
+            .any(|arg| arg == "--columns=application,name,description"));
+        assert!(!argv.iter().any(|arg| arg.contains("summary")));
         // Whitespace is trimmed; bounds still enforced.
         assert_eq!(
             appstream_search_argv("  steam ").unwrap().last().unwrap(),

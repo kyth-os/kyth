@@ -112,7 +112,7 @@ if [ -n "${cosign_registry_ref}" ]; then
 	curl -sfL "https://github.com/sigstore/cosign/releases/download/v${cosign_version}/cosign-linux-amd64" -o "${cosign_bin}"
 	echo "${cosign_sha256}  ${cosign_bin}" | sha256sum -c -
 	chmod 0755 "${cosign_bin}"
-	cosign_identity="${KYTH_COSIGN_IDENTITY:-^https://github.com/.+/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$}"
+	cosign_identity="${KYTH_COSIGN_IDENTITY:-^https://github.com/kyth-os/kyth/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$}"
 	cosign_issuer="https://token.actions.githubusercontent.com"
 	# cosign's TUF client bootstraps its cache with a plain mkdir of the
 	# cache root: with HOME=/root (which already exists in bootc payload
@@ -235,6 +235,24 @@ Type=oneshot
 TimeoutStartSec=120
 RemainAfterExit=yes
 ExecStart=/usr/libexec/kyth-live-owe-wifi-setup
+# Hardened: this root unit parses attacker-controlled SSIDs from beacon
+# frames (nmcli output). No network access needed beyond AF_UNIX (talks to
+# NetworkManager over D-Bus system bus).
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+UMask=0077
 
 [Install]
 WantedBy=network.target

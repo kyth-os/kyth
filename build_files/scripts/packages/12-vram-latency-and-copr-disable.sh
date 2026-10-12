@@ -24,7 +24,14 @@ source "../lib/gaming-coprs.sh"
 # file is rendered directly by kyth-build-support repo-render (no release RPM
 # is installed), and the repo is disabled afterwards so it does not persist
 # as an active package source in the final image.
-mkdir -p /etc/yum.repos.d
+#
+# Terra signs its repodata and packages (key vendored in
+# build_files/RPM-GPG-KEY-terra, fingerprint Terra 45 <security@fyralabs.com>).
+# Install the key before the repo is rendered so repo_gpgcheck/gpgcheck verify
+# instead of trusting TLS alone.
+mkdir -p /etc/yum.repos.d /etc/pki/rpm-gpg
+install -m 0644 /ctx/RPM-GPG-KEY-terra /etc/pki/rpm-gpg/RPM-GPG-KEY-terra
+rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-terra
 /usr/bin/kyth-build-support repo-render \
 	--config /ctx/config/repos.json \
 	--name terra \

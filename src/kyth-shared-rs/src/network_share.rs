@@ -13,7 +13,7 @@ use std::time::Duration;
 pub const CREDENTIALS_DIR: &str = "/etc/kyth/smb-credentials";
 pub const UNIT_DIR: &str = "/etc/systemd/system";
 const MAX_PAYLOAD: usize = 64 * 1024;
-const SAFE_MOUNT_PREFIXES: &[&str] = &["/mnt/", "/media/", "/run/media/", "/home/"];
+const SAFE_MOUNT_PREFIXES: &[&str] = &["/mnt/", "/media/", "/run/media/"];
 
 fn plain<'a>(
     value: Option<&'a Value>,
@@ -33,25 +33,30 @@ fn plain<'a>(
     Ok(value)
 }
 
-fn normalized_mount_point(value: &str) -> String {
+/// Normalize a mount-point path. `..` components are REJECTED, not
+/// popped: popping silently rewrites the caller's path, which let
+/// `/mnt/../home/user/share` normalize into a prefix the Hub frontend
+/// refuses but the daemon/helper accepted. Callers must send the real
+/// path; anything with a parent-dir component fails closed.
+fn normalized_mount_point(value: &str) -> Result<String, String> {
     let mut output = PathBuf::new();
     for component in Path::new(value).components() {
         match component {
             Component::RootDir => output.push("/"),
             Component::CurDir => {}
             Component::ParentDir => {
-                output.pop();
+                return Err("mount_point must not contain '..'".into());
             }
             Component::Normal(part) => output.push(part),
             Component::Prefix(_) => {}
         }
     }
-    output.to_string_lossy().into_owned()
+    Ok(output.to_string_lossy().into_owned())
 }
 
 pub fn validate_mount_point(value: Option<&Value>) -> Result<String, String> {
     let raw = plain(value, "mount_point", false, 4096)?;
-    let path = normalized_mount_point(raw);
+    let path = normalized_mount_point(raw)?;
     if path.is_empty()
         || !path.bytes().all(|byte| {
             byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b' ' | b'-')
@@ -62,16 +67,14 @@ pub fn validate_mount_point(value: Option<&Value>) -> Result<String, String> {
     {
         return Err("mount_point is outside an approved prefix".into());
     }
-    // Depth floor: mounting directly on a prefix root (or a bare home dir
-    // like /home/alice, which would hide the user's whole home and collide
-    // with fstab-generated units) is refused. Shares live at least one
-    // level below the prefix root; under /home/ that means /home/<user>/<dir>.
+    // Depth floor: mounting directly on a prefix root (which would hide
+    // live mounts and collide with fstab-generated units) is refused.
+    // Shares live at least one level below the prefix root. /home/ is not
+    // an approved prefix at all (the Hub frontend rejects it; the daemon
+    // and this helper now agree).
     let depth = path.split('/').filter(|part| !part.is_empty()).count();
-    let min_depth = if path.starts_with("/home/") { 3 } else { 2 };
-    if depth < min_depth {
-        return Err(
-            "mount_point must be a subdirectory, not a prefix root or home directory".into(),
-        );
+    if depth < 2 {
+        return Err("mount_point must be a subdirectory, not a prefix root".into());
     }
     Ok(path)
 }
@@ -112,10 +115,15 @@ fn validate_server(value: Option<&Value>) -> Result<String, String> {
 
 fn validate_share_path(value: Option<&Value>) -> Result<String, String> {
     let share_path = plain(value, "share_path", false, 4096)?.trim_start_matches('/');
+    // `\` is a systemd line-continuation in unit files and `"` would break
+    // out of quoted unit values: both are rejected outright rather than
+    // escaped, since legitimate SMB share paths never need them.
     if share_path.is_empty()
         || share_path.starts_with('.')
         || share_path.contains("//")
         || share_path.contains('%')
+        || share_path.contains('\\')
+        || share_path.contains('"')
         || share_path.split('/').any(|part| part == "..")
     {
         return Err("share_path is invalid".into());
@@ -226,6 +234,110 @@ fn ensure_no_symlink_in_path(path: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// Resolve `mount_point` through the kernel with no symlink following and
+/// return the verified absolute path.
+///
+/// The classic TOCTOU here: the mount point lives under user-writable
+/// prefixes, so a symlink swapped in between the check and `systemctl
+/// start` would let root mount attacker storage over an arbitrary path.
+/// `openat2(RESOLVE_BENEATH | RESOLVE_NO_SYMLINKS)` on the leaf's parent,
+/// plus `O_NOFOLLOW` on the leaf itself, makes the kernel do the check
+/// atomically at open time; `/proc/self/fd/N` then yields the path the
+/// kernel actually resolved. Callers must use the returned string as the
+/// unit's `Where=` instead of the caller-supplied input.
+///
+/// Fails closed if the kernel lacks openat2 (KythOS ships 6.x; this is a
+/// canary for exotic kernels, not a supported downgrade path).
+fn verified_mount_path(mount_point: &str) -> Result<String, String> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::io::{FromRawFd, OwnedFd};
+
+    let path = Path::new(mount_point);
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .ok_or_else(|| "mount_point has no parent directory".to_string())?;
+    let leaf = path
+        .file_name()
+        .ok_or_else(|| "mount_point has no final component".to_string())?;
+    let parent_c = CString::new(parent.as_os_str().as_bytes())
+        .map_err(|_| "mount_point parent is not a valid path".to_string())?;
+    let leaf_c = CString::new(leaf.as_bytes())
+        .map_err(|_| "mount_point leaf is not a valid path".to_string())?;
+
+    // SAFETY: openat2 via raw syscall — libc 0.2.189 exposes open_how and
+    // the RESOLVE_* constants but no safe wrapper. Arguments are
+    // NUL-terminated CStrings built above; the how struct is fully
+    // zero-initialized with only flags/mode/resolve set.
+    unsafe fn openat2(
+        dirfd: libc::c_int,
+        pathname: *const libc::c_char,
+        resolve: u64,
+        directory_only: bool,
+    ) -> Result<OwnedFd, String> {
+        let mut how: libc::open_how = std::mem::zeroed();
+        how.flags = (libc::O_PATH | libc::O_CLOEXEC) as u64
+            | if directory_only {
+                libc::O_DIRECTORY as u64
+            } else {
+                0
+            }
+            | libc::O_NOFOLLOW as u64;
+        how.resolve = resolve;
+        let fd = libc::syscall(
+            libc::SYS_openat2,
+            dirfd,
+            pathname,
+            &how as *const libc::open_how,
+            std::mem::size_of::<libc::open_how>(),
+        );
+        if fd < 0 {
+            let errno = *libc::__errno_location();
+            if errno == libc::ENOSYS {
+                return Err("kernel lacks openat2; refusing to verify mount path".into());
+            }
+            return Err(format!(
+                "mount path verification failed: {}",
+                std::io::Error::from_raw_os_error(errno)
+            ));
+        }
+        Ok(OwnedFd::from_raw_fd(fd as libc::c_int))
+    }
+
+    // SAFETY: see openat2 above.
+    let parent_fd = unsafe {
+        openat2(
+            libc::AT_FDCWD,
+            parent_c.as_ptr(),
+            (libc::RESOLVE_NO_SYMLINKS) as u64,
+            true,
+        )?
+    };
+    let leaf_fd = unsafe {
+        use std::os::unix::io::AsRawFd;
+        openat2(
+            parent_fd.as_raw_fd(),
+            leaf_c.as_ptr(),
+            (libc::RESOLVE_BENEATH | libc::RESOLVE_NO_SYMLINKS) as u64,
+            true,
+        )?
+    };
+    let verified = {
+        use std::os::unix::io::AsRawFd;
+        let link = format!("/proc/self/fd/{}", leaf_fd.as_raw_fd());
+        fs::read_link(&link)
+            .map_err(|error| format!("could not resolve verified mount path: {error}"))?
+    };
+    let verified = verified.to_string_lossy().into_owned();
+    if verified != mount_point {
+        return Err(format!(
+            "mount path resolved unexpectedly: {verified} != {mount_point}"
+        ));
+    }
+    Ok(verified)
+}
+
 fn mount_unit(mount_point: &str) -> Result<String, String> {
     let argv = vec![
         "systemd-escape".into(),
@@ -284,8 +396,16 @@ pub fn add_share(request: &ShareRequest) -> Result<String, String> {
         .ok_or_else(|| "username is required".to_string())?;
     let password = request.password.as_deref().unwrap_or("");
     let domain = request.domain.as_deref().unwrap_or("");
-    let unit = mount_unit(&request.mount_point)?;
     let credential_path = safe_artifact_path(Path::new(CREDENTIALS_DIR), &request.name);
+    // Defense in depth before the atomic kernel check below: reject
+    // obviously-symlinked paths early, then create the mount point.
+    ensure_no_symlink_in_path(Path::new(&request.mount_point))?;
+    fs::create_dir_all(&request.mount_point).map_err(|error| error.to_string())?;
+    // Kernel-verified path (openat2, no symlink followed anywhere in the
+    // chain). Everything downstream - the unit name, the unit's Where=,
+    // and the mount itself - uses this string, never the raw input.
+    let verified = verified_mount_path(&request.mount_point)?;
+    let unit = mount_unit(&verified)?;
     let unit_path = safe_artifact_path(Path::new(UNIT_DIR), &unit);
     // Never overwrite an admin-configured unit that happens to map to the
     // same path: only Hub-owned (marker-bearing) units may be replaced.
@@ -294,8 +414,11 @@ pub fn add_share(request: &ShareRequest) -> Result<String, String> {
             "refusing to overwrite {unit}: not a KythOS-managed share unit"
         ));
     }
-    ensure_no_symlink_in_path(Path::new(&request.mount_point))?;
-    fs::create_dir_all(&request.mount_point).map_err(|error| error.to_string())?;
+    // If we are replacing an existing unit, the mount must be restarted
+    // after daemon-reload: `systemctl start` on an already-active mount is
+    // a no-op, so new server/path/credentials would silently not take
+    // effect until reboot.
+    let replacing_existing = unit_path.is_file() && !unit_path.is_symlink();
 
     let mut credentials = format!("username={username}\npassword={password}\n");
     if !domain.is_empty() {
@@ -310,8 +433,8 @@ pub fn add_share(request: &ShareRequest) -> Result<String, String> {
         request.gid
     );
     let unit_text = format!(
-        "[Unit]\nDescription=KythOS SMB Share {}\nAfter=network-online.target\nWants=network-online.target\n\n[Mount]\nWhat={unc}\nWhere={}\nType=cifs\nOptions={options}\nTimeoutSec=30\n\n[Install]\nWantedBy=multi-user.target\n\n",
-        request.name, request.mount_point
+        "[Unit]\nDescription=KythOS SMB Share {}\nAfter=network-online.target\nWants=network-online.target\n\n[Mount]\nWhat={unc}\nWhere={verified}\nType=cifs\nOptions={options}\nTimeoutSec=30\n\n[Install]\nWantedBy=multi-user.target\n\n",
+        request.name
     );
     atomic_write(&unit_path, &unit_text, 0o644)?;
     run_systemctl(&["daemon-reload"], 30)?;
@@ -321,14 +444,19 @@ pub fn add_share(request: &ShareRequest) -> Result<String, String> {
         let _ = run_systemctl(&["disable", &unit], 30);
     }
     if request.mount_now {
-        // Re-validate immediately before mounting: the mount point lives
+        // Re-verify immediately before mounting: the mount point lives
         // under user-writable prefixes, so a symlink swapped in after the
         // initial check (during credential/unit writes and daemon-reload)
         // would otherwise let root mount attacker-controlled storage over
         // an arbitrary path. No slow operations may go between this check
         // and the mount.
-        ensure_no_symlink_in_path(Path::new(&request.mount_point))?;
-        run_systemctl(&["start", &unit], 45)?;
+        let verified = verified_mount_path(&verified)?;
+        ensure_no_symlink_in_path(Path::new(&verified))?;
+        if replacing_existing {
+            run_systemctl(&["restart", &unit], 45)?;
+        } else {
+            run_systemctl(&["start", &unit], 45)?;
+        }
     }
     Ok(format!("Configured SMB share {}.", request.name))
 }
@@ -425,10 +553,13 @@ mod tests {
         value["name"] = json!("media");
         value["mount_point"] = json!("/etc/kyth");
         assert!(validate_request(&value, true).is_err());
+        // '..' is rejected outright now (fail closed), not popped: the
+        // old pop-normalization silently rewrote paths into prefixes the
+        // Hub frontend refuses.
         value["mount_point"] = json!("/mnt/../home/user/share");
-        assert_eq!(
-            validate_request(&value, true).unwrap().mount_point,
-            "/home/user/share"
+        assert!(
+            validate_request(&value, true).is_err(),
+            "'..' must be rejected"
         );
     }
 
@@ -442,25 +573,55 @@ mod tests {
 
     #[test]
     fn mount_point_depth_floor_rejects_roots_and_home_dirs() {
-        // Prefix roots and bare home dirs would hide live mounts/homes and
-        // collide with fstab-generated units.
-        for bad in ["/mnt", "/mnt/", "/media", "/home/alice", "/home/alice/"] {
+        // Prefix roots would hide live mounts and collide with
+        // fstab-generated units. /home/ is not an approved prefix at all:
+        // the Hub frontend already refuses it, and the daemon/helper now
+        // agree (previously they allowed /home/<user>/<dir> mounts).
+        for bad in [
+            "/mnt",
+            "/mnt/",
+            "/media",
+            "/home/alice",
+            "/home/alice/",
+            "/home/alice/share",
+        ] {
             let value = json!({"name":"s", "mount_point":bad});
             assert!(
                 validate_mount_point(value.get("mount_point")).is_err(),
                 "{bad} must be rejected"
             );
         }
-        for good in [
-            "/mnt/media",
-            "/media/usb",
-            "/home/alice/share",
-            "/run/media/alice/usb",
-        ] {
+        for good in ["/mnt/media", "/media/usb", "/run/media/alice/usb"] {
             let value = json!({"name":"s", "mount_point":good});
             assert!(
                 validate_mount_point(value.get("mount_point")).is_ok(),
                 "{good} must be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn share_path_rejects_backslash_and_quote() {
+        // Backslash is a systemd line-continuation; a quote would break
+        // out of quoted unit values. Legitimate SMB paths need neither.
+        for bad in ["share\\name", "share\"name", "a/b\\c"] {
+            let value = json!({"share_path": bad});
+            assert!(
+                validate_share_path(value.get("share_path")).is_err(),
+                "{bad} must be rejected"
+            );
+        }
+        let value = json!({"share_path": "media/movies 2024"});
+        assert!(validate_share_path(value.get("share_path")).is_ok());
+    }
+
+    #[test]
+    fn mount_point_rejects_parent_dir_components() {
+        for bad in ["/mnt/../etc", "/mnt/media/../../root", "/media/./../x"] {
+            let value = json!({"name":"s", "mount_point":bad});
+            assert!(
+                validate_mount_point(value.get("mount_point")).is_err(),
+                "{bad} must be rejected"
             );
         }
     }

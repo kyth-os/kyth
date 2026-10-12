@@ -1716,15 +1716,9 @@
       "current_implementation": "data",
       "cutover": "replace installed kyth-default-flatpaks entry point after parity gates",
       "exec_start": [
-        "/usr/bin/kyth-runtime flathub-setup",
         "/usr/bin/kyth-runtime default-flatpaks"
       ],
       "function_inventory": [
-        {
-          "name": "ExecStart:/usr/bin/kyth-runtime flathub-setup",
-          "owner": "native::kyth-runtime",
-          "ownership": "native"
-        },
         {
           "name": "ExecStart:/usr/bin/kyth-runtime default-flatpaks",
           "owner": "native::kyth-runtime",
@@ -3706,6 +3700,39 @@
       "runtime_scope": "user-session",
       "status": "done-native",
       "surface": "launcher"
+    },
+    {
+      "current_implementation": "data",
+      "cutover": "replace installed kyth-nvidia-akmods entry point after parity gates",
+      "exec_start": [
+        "/usr/bin/kyth-hardware-policy build-nvidia-akmods"
+      ],
+      "function_inventory": [
+        {
+          "name": "ExecStart:/usr/bin/kyth-hardware-policy build-nvidia-akmods",
+          "owner": "native::kyth-hardware-policy",
+          "ownership": "native"
+        }
+      ],
+      "installed_implementation": "rust",
+      "migration_priority": 1,
+      "name": "kyth-nvidia-akmods",
+      "owner": "native::kyth-hardware-policy",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/kyth-nvidia-akmods.service",
+      "priority": 0,
+      "reason": "unit delegates to an installed Rust owner",
+      "resolved_target": "build_files/kyth-nvidia-akmods.service",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed kyth-nvidia-akmods entry point",
+      "runtime_active": true,
+      "runtime_authority": "rust-service",
+      "runtime_scope": "system-service",
+      "status": "done-native",
+      "surface": "systemd-unit"
     },
     {
       "current_implementation": "shell",
@@ -10392,7 +10419,7 @@
       "cutover": "replace installed curl-common.sh entry point after parity gates",
       "function_inventory": [
         {
-          "name": "__main__",
+          "name": "github_api_curl",
           "owner": "fixture::build_files/scripts/lib/curl-common.sh",
           "ownership": "build-only"
         }
@@ -12372,7 +12399,7 @@
       "cutover": "replace installed kyth-kwallet-pam-ensure entry point after parity gates",
       "function_inventory": [
         {
-          "name": "__main__",
+          "name": "END",
           "owner": "fixture::build_files/scripts/sysconfig/desktop/kyth-kwallet-pam-ensure",
           "ownership": "shell"
         }
@@ -13349,6 +13376,36 @@
     },
     {
       "current_implementation": "shell",
+      "cutover": "replace installed kyth-selinux-var-home-alias entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/sysconfig/kyth-selinux-var-home-alias",
+          "ownership": "shell"
+        }
+      ],
+      "installed_implementation": "shell",
+      "migration_priority": 2,
+      "name": "kyth-selinux-var-home-alias",
+      "owner": "fixture::build_files/scripts/sysconfig/kyth-selinux-var-home-alias",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/sysconfig/kyth-selinux-var-home-alias",
+      "priority": 1,
+      "reason": "installed shell script owns runtime behavior; no native owner yet",
+      "resolved_target": "build_files/scripts/sysconfig/kyth-selinux-var-home-alias",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "privileged-writer",
+      "rollback": "restore previous installed kyth-selinux-var-home-alias entry point",
+      "runtime_active": true,
+      "runtime_authority": "shell-orchestration",
+      "runtime_scope": "system-service",
+      "status": "queued",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
       "cutover": "replace installed 16-wifi-disable-power-management.sh entry point after parity gates",
       "function_inventory": [
         {
@@ -14031,6 +14088,36 @@
       "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
       "risk_tier": "build-time",
       "rollback": "restore previous installed 36-disable-rpm-ostree-automatic.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
+      "cutover": "replace installed 37-containers-signature-policy.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/sysconfig/systemd/37-containers-signature-policy.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "37-containers-signature-policy.sh",
+      "owner": "fixture::build_files/scripts/sysconfig/systemd/37-containers-signature-policy.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/sysconfig/systemd/37-containers-signature-policy.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/sysconfig/systemd/37-containers-signature-policy.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed 37-containers-signature-policy.sh entry point",
       "runtime_active": false,
       "runtime_authority": "build-only",
       "runtime_scope": "build",

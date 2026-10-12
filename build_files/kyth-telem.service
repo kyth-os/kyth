@@ -18,6 +18,23 @@ SyslogIdentifier=kyth-telem
 KillSignal=SIGTERM
 TimeoutStopSec=5
 
+# Sandboxing: user-context frame-time collector. No network, no privilege
+# escalation, no writes outside its own runtime dirs.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+UMask=0077
+
 # Runs alongside whatever the user is doing, often a game — a frame-time
 # collector must never compete with the thing it's measuring for cycles.
 Nice=15

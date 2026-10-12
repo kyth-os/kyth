@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: '05 10 * * 0' # 10:05am UTC weekly on Sundays — rebuilds both :latest and :testing with fresh upstream packages
   workflow_dispatch:
+    inputs:
+      skip_validation:
+        description: 'Skip the Validation gate (use only for emergency rebuilds)'
+        required: false
+        default: 'false'
+        type: choice
+        options:
+          - 'false'
+          - 'true'
   # `workflow_run` always executes the DEFAULT branch's copy of this file, so a
   # testing push was built by main's (F44) workflow no matter what testing's
   # copy said. A push trigger runs the pushed branch's own copy, which is the
@@ -47,9 +56,59 @@ jobs:
         with:
           script: |
             const eventName = context.eventName;
-            // schedule / manual dispatch bypass the gate
-            if (eventName === 'schedule' || eventName === 'workflow_dispatch') {
-              core.setOutput('ok', 'true');
+            // H2: schedule and workflow_dispatch no longer blanket-bypass the
+            // Validation gate. Schedule checks for a successful Validation run
+            // on the branch tip; manual dispatch requires an explicit opt-out.
+            if (eventName === 'schedule') {
+              // Schedule builds BOTH main and testing (see plan job), but
+              // context.sha/context.ref resolve to the default branch (main)
+              // only. A testing-only push with no Validation would sail
+              // through the gate and get built, signed, and published.
+              // Resolve both branch tips and require a completed successful
+              // Validation run for EACH before proceeding.
+              const branches = ['main', 'testing'];
+              let allOk = true;
+              for (const branch of branches) {
+                const { data: branchData } = await github.rest.repos.getBranch({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  branch,
+                });
+                const sha = branchData.commit.sha;
+                const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  head_sha: sha,
+                  per_page: 50,
+                });
+                const validation = data.workflow_runs.find((r) => r.name === 'Validation' && r.status === 'completed');
+                const ok = validation && validation.conclusion === 'success';
+                core.info(`Schedule: Validation ${validation ? validation.conclusion : 'not found'} for ${branch}@${sha} — ${ok ? 'ok' : 'GATING'}`);
+                if (!ok) allOk = false;
+              }
+              // head_sha/head_branch outputs are unused on the schedule path
+              // (plan job checks out each leg's real branch tip); keep them
+              // set to main's tip for log clarity.
+              const { data: mainBranch } = await github.rest.repos.getBranch({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                branch: 'main',
+              });
+              core.setOutput('head_sha', mainBranch.commit.sha);
+              core.setOutput('head_branch', 'main');
+              core.setOutput('ok', allOk ? 'true' : 'false');
+              return;
+            }
+            if (eventName === 'workflow_dispatch') {
+              // Manual dispatch requires explicit skip_validation=true to
+              // bypass; defaults to requiring Validation.
+              const skip = context.payload.inputs && context.payload.inputs.skip_validation === 'true';
+              if (skip) {
+                core.warning('Validation gate explicitly skipped via skip_validation input');
+                core.setOutput('ok', 'true');
+              } else {
+                core.setOutput('ok', 'false');
+              }
               core.setOutput('head_sha', context.sha);
               core.setOutput('head_branch', context.ref.replace('refs/heads/', ''));
               return;
@@ -194,6 +253,8 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
+      attestations: write
 
     steps:
       - name: Prepare environment
@@ -293,8 +354,11 @@ jobs:
         with:
           # This generates all the tags for your image, you can add custom tags here too!
           # Default tags are "$DEFAULT_TAG" and "$DEFAULT_TAG.$date".
+          # NOTE: the floating tag (testing/latest) is intentionally NOT pushed
+          # here. It is promoted by the supply-chain publish job only after the
+          # image is signed and its changelog release exists — otherwise the
+          # Hub can discover an update before its release notes exist.
           tags: |
-            type=raw,value=${{ steps.resolve_tag.outputs.tag }}
             type=raw,value=${{ steps.checkout_sha.outputs.image_version }}
             type=raw,value=${{ steps.prep.outputs.date_short }}.${{ github.run_number }}.${{ github.run_attempt }}.${{ steps.checkout_sha.outputs.short_sha }},enable=${{ matrix.branch == 'main' && matrix.kernel_flavor == 'fedora' }}
           labels: |
@@ -426,6 +490,18 @@ jobs:
           CACHYOS_KERNEL_VERSION: ${{ steps.cachyos_kernel.outputs.version || 'unused' }}
           STEPS_PREP_OUTPUTS_DEFAULT_TAG: ${{ steps.resolve_tag.outputs.tag }}
           STEPS_UPSTREAM_BASE_OUTPUTS_PINNED: ${{ steps.upstream_base.outputs.pinned }}
+
+      # The base image is a published artifact users' final images are built
+      # FROM — attest its provenance too, so the supply chain is verifiable
+      # end to end (the final image's SLSA attestation lists the base digest
+      # as a material via the org.opencontainers.image.base.digest label).
+      - name: Attest base image provenance
+        if: steps.build_base.outputs.reused != 'true'
+        uses: ./.github/actions/attest-artifact
+        with:
+          subject-name: ${{ steps.build_base.outputs.image }}
+          subject-digest: ${{ steps.build_base.outputs.digest }}
+          push-to-registry: "true"
 
       # Single source of truth for the org.kyth.build.* / base.* provenance
       # labels — both the buildx build below and the rechunk step further
@@ -829,14 +905,15 @@ jobs:
           subject-digest: ${{ steps.image.outputs.digest }}
           push-to-registry: "true"
 
-      # Supply-chain metadata (SBOM attach, image release, CVE scan dispatch)
-      # runs only against the Fedora-flavor image and needs the immutable
+      # Supply-chain metadata (SBOM attach, signing, image release, CVE scan
+      # dispatch) runs against every flavor's image and needs the immutable
       # digest, so it is dispatched explicitly instead of using a workflow_run
       # trigger — workflow_run events carry no inputs and cannot pin the digest.
       # ISO dispatch is deliberately owned by supply-chain.yml after its signed
       # image verification; starting both here races its serialized publish job.
+      # The live ISO is built from the fedora flavor only, so dispatch_iso is
+      # false for cachy legs.
       - name: Dispatch supply chain metadata
-        if: matrix.kernel_flavor == 'fedora'
         uses: ./.github/actions/dispatch-workflow
         with:
           workflow: supply-chain.yml
@@ -848,7 +925,7 @@ jobs:
               "source_digest": ${{ toJSON(steps.image.outputs.digest) }},
               "source_sha": ${{ toJSON(steps.image.outputs.source_sha) }},
               "source_github_sha": ${{ toJSON(steps.image.outputs.github_sha) }},
-              "dispatch_iso": "true",
+              "dispatch_iso": ${{ matrix.kernel_flavor == 'fedora' && '"true"' || '"false"' }},
               "original_event": ${{ toJSON(github.event_name) }},
               "original_actor": ${{ toJSON(github.actor) }}
             }

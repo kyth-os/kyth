@@ -320,11 +320,14 @@ const TERMINAL_CANDIDATES: [(&str, &str); 3] = [
     ("/usr/bin/xterm", "xterm"),
 ];
 
+/// Returns the verified absolute path of the preferred terminal.
+/// The path (not the bare name) is returned so callers spawn it without a
+/// PATH lookup: the existence check above already verified this exact file.
 pub fn detect_terminal_with(exists: impl Fn(&str) -> bool) -> Option<&'static str> {
     TERMINAL_CANDIDATES
         .iter()
         .find(|(path, _)| exists(path))
-        .map(|(_, name)| *name)
+        .map(|(path, _)| *path)
 }
 
 pub fn detect_terminal() -> Option<&'static str> {
@@ -337,7 +340,8 @@ pub fn detect_terminal() -> Option<&'static str> {
 pub fn kali_enter_argv(terminal: &str, box_name: &str) -> Vec<String> {
     let inner = ["distrobox", "enter", "--root", box_name];
     let mut argv = vec![terminal.to_string()];
-    argv.push(if terminal == "konsole" {
+    let is_konsole = terminal.rsplit('/').next() == Some("konsole");
+    argv.push(if is_konsole {
         "-e".to_string()
     } else {
         "--".to_string()
@@ -521,11 +525,11 @@ mod tests {
         assert_eq!(detect_terminal_with(|_| false), None);
         assert_eq!(
             detect_terminal_with(|p| p == "/usr/bin/xterm"),
-            Some("xterm")
+            Some("/usr/bin/xterm")
         );
         assert_eq!(
             detect_terminal_with(|p| p == "/usr/bin/konsole" || p == "/usr/bin/xterm"),
-            Some("konsole"),
+            Some("/usr/bin/konsole"),
             "konsole must win when multiple terminals are present"
         );
     }
@@ -533,8 +537,15 @@ mod tests {
     #[test]
     fn konsole_uses_dash_e_other_terminals_use_dash_dash() {
         assert_eq!(
-            kali_enter_argv("konsole", "kali"),
-            vec!["konsole", "-e", "distrobox", "enter", "--root", "kali"],
+            kali_enter_argv("/usr/bin/konsole", "kali"),
+            vec![
+                "/usr/bin/konsole",
+                "-e",
+                "distrobox",
+                "enter",
+                "--root",
+                "kali"
+            ],
         );
         assert_eq!(
             kali_enter_argv("xterm", "kali"),

@@ -63,6 +63,10 @@ struct InstallState {
     confirm_erase: bool,
     confirm_current: bool,
     manual_committed: bool,
+    /// M7: job id from the last successful /api/start, sent back on
+    /// /api/cancel so the daemon can refuse a stale cancel for a
+    /// different job.
+    active_job_id: Option<u64>,
 }
 
 impl Default for InstallState {
@@ -89,6 +93,7 @@ impl Default for InstallState {
             confirm_erase: false,
             confirm_current: false,
             manual_committed: false,
+            active_job_id: None,
         }
     }
 }
@@ -266,21 +271,38 @@ fn connection_args() -> ConnectionArgs {
     let args = std::env::args().collect::<Vec<_>>();
     ConnectionArgs {
         socket_path: arg_value(&args, "--socket-path"),
-        session_token: arg_value(&args, "--session-token")
-            .filter(|value| !value.is_empty())
-            .or_else(|| std::env::var("KYTH_INSTALLER_SESSION_TOKEN").ok())
-            .filter(|value| !value.is_empty())
-            .or_else(|| {
-                arg_value(&args, "--tokens-file").and_then(|path| {
-                    let (_, session) = load_tokens_file(&path);
-                    (!session.is_empty()).then_some(session)
-                })
+        // SECURITY: Token only from --tokens-file (0600). Argv/env tokens
+        // would be visible via /proc/<pid>/cmdline and /proc/<pid>/environ.
+        session_token: arg_value(&args, "--tokens-file")
+            .and_then(|path| {
+                let (_, session) = load_tokens_file(&path);
+                (!session.is_empty()).then_some(session)
             })
             .unwrap_or_default(),
     }
 }
 
 fn get_json(config: &ConnectionArgs, path: &str) -> Result<(u16, serde_json::Value), String> {
+    // Same allowlist discipline as `post_json`: the Slint shell must not
+    // become a generic GET bridge to the privileged daemon.
+    const ALLOWED: &[&str] = &[
+        "/api/config",
+        "/api/disks",
+        "/api/partitions",
+        "/api/free-space",
+        "/api/timezones",
+        "/api/locales",
+        "/api/keymaps",
+        "/api/disk/pending",
+        "/api/disk/filesystems",
+        "/api/report",
+        "/api/rescue/probe",
+        "/api/log",
+    ];
+    let route = path.split('?').next().unwrap_or(path);
+    if !ALLOWED.contains(&route) {
+        return Err("Installer route is not allowlisted".to_string());
+    }
     let Some(socket_path) = config.socket_path.as_deref() else {
         return Err("Waiting for the installer service socket".to_string());
     };
@@ -1235,9 +1257,39 @@ fn manual_action(
     });
 }
 
-fn start_install(weak: Weak<InstallerWindow>, config: ConnectionArgs, request: Value) {
+/// Clear the retained install secrets once they have been consumed by the
+/// install-start request. Mirrors the React frontend, which blanks
+/// `password`/`mok_password` in its request state once `start()` returns,
+/// instead of holding them for the shell's lifetime.
+fn scrub_install_secrets(state: &Arc<Mutex<InstallState>>) {
+    if let Ok(mut state) = state.lock() {
+        state.password.clear();
+        state.mok_password.clear();
+    }
+}
+
+fn start_install(
+    weak: Weak<InstallerWindow>,
+    config: ConnectionArgs,
+    state: Arc<Mutex<InstallState>>,
+    request: Value,
+) {
     std::thread::spawn(move || {
         let result = post_json(&config, "/api/start", request);
+        // The passwords were consumed by the start POST above: scrub them
+        // from the shell's retained state (and the window's password fields)
+        // now, on success and on failure alike, instead of keeping them for
+        // the shell's lifetime.
+        scrub_install_secrets(&state);
+        let _ = slint::invoke_from_event_loop({
+            let weak = weak.clone();
+            move || {
+                if let Some(window) = weak.upgrade() {
+                    window.set_password(SharedString::from(""));
+                    window.set_mok_password(SharedString::from(""));
+                }
+            }
+        });
         match result {
             Ok((status, value))
                 if (200..300).contains(&status)
@@ -1246,6 +1298,12 @@ fn start_install(weak: Weak<InstallerWindow>, config: ConnectionArgs, request: V
                         .and_then(Value::as_bool)
                         .unwrap_or(false) =>
             {
+                // M7: remember the job id so the cancel button can name
+                // the job it cancels.
+                let job_id = value.get("job_id").and_then(Value::as_u64);
+                if let Ok(mut state) = state.lock() {
+                    state.active_job_id = job_id;
+                }
                 let _ = slint::invoke_from_event_loop({
                     let weak = weak.clone();
                     move || {
@@ -1605,17 +1663,31 @@ fn main() -> Result<(), slint::PlatformError> {
             window.set_busy(true);
             window.set_error_text(SharedString::from(""));
             window.set_event_log(SharedString::from(install_plan_summary(&plan)));
-            start_install(start_weak.clone(), start_config.clone(), request);
+            start_install(
+                start_weak.clone(),
+                start_config.clone(),
+                start_state.clone(),
+                request,
+            );
         }
     });
     let cancel_weak = window.as_weak();
     let cancel_config = config.clone();
+    let cancel_state = state.clone();
     window.on_cancel_install(move || {
+        // M7: name the job being cancelled; the daemon 409s a stale id so
+        // a replayed cancel cannot kill a newer install.
+        let body = cancel_state
+            .lock()
+            .ok()
+            .and_then(|state| state.active_job_id)
+            .map(|job_id| json!({ "job_id": job_id }))
+            .unwrap_or_else(|| json!({}));
         post_action(
             cancel_weak.clone(),
             cancel_config.clone(),
             "/api/cancel",
-            json!({}),
+            body,
         );
     });
     let reboot_weak = window.as_weak();
@@ -1625,7 +1697,7 @@ fn main() -> Result<(), slint::PlatformError> {
             reboot_weak.clone(),
             reboot_config.clone(),
             "/api/reboot",
-            json!({}),
+            json!({"confirm": true}),
         );
     });
     let rescue_weak = window.as_weak();
@@ -1687,6 +1759,26 @@ mod tests {
         state.tpm_recovery_ack = true;
         assert!(state.can_start());
         assert_eq!(state.as_request()["tpm_recovery_ack"], true);
+    }
+
+    #[test]
+    fn install_start_scrubs_retained_passwords() {
+        // Mirrors the React frontend clearing password/mok_password from its
+        // request state after start(): the native shell must not retain the
+        // secrets in InstallState for its whole lifetime.
+        let state = Arc::new(Mutex::new(InstallState::default()));
+        {
+            let mut guard = state.lock().expect("installer state lock poisoned");
+            guard.password = "secret".into();
+            guard.mok_password = "mok-secret".into();
+            guard.username = "alice".into();
+        }
+        scrub_install_secrets(&state);
+        let guard = state.lock().expect("installer state lock poisoned");
+        assert!(guard.password.is_empty());
+        assert!(guard.mok_password.is_empty());
+        // Non-secret fields are untouched.
+        assert_eq!(guard.username, "alice");
     }
 
     #[test]

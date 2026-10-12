@@ -44,9 +44,26 @@ fn systemd_booted() -> bool {
     Path::new("/run/systemd/system").is_dir()
 }
 
-fn unit_active(unit: &str) -> bool {
-    run_text(&["systemctl", "is-active", unit], Duration::from_secs(10))
-        .is_some_and(|(ok, output)| ok && output.trim() == "active")
+/// One `systemctl is-active` spawn for N units instead of N spawns: the boot
+/// wait polls the display-manager units every interval, so per-unit spawns
+/// multiplied the process cost for the whole deadline window. `is-active`
+/// prints one state line per unit in argument order; a short or failed
+/// output degrades to `false` per unit rather than shifting the mapping.
+fn units_active(units: &[&str]) -> Vec<bool> {
+    let mut argv = vec!["systemctl".to_string(), "is-active".to_string()];
+    argv.extend(units.iter().map(|unit| (*unit).to_string()));
+    let Ok(output) = super::process::run_bounded(&argv, Duration::from_secs(10)) else {
+        return vec![false; units.len()];
+    };
+    let lines: Vec<String> = String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .map(|line| line.trim().to_string())
+        .collect();
+    units
+        .iter()
+        .enumerate()
+        .map(|(index, _)| lines.get(index).is_some_and(|line| line.trim() == "active"))
+        .collect()
 }
 
 fn default_target() -> String {
@@ -103,9 +120,9 @@ fn software_compose_rescue() -> bool {
 
 fn display_manager_active<F>(active: &F) -> bool
 where
-    F: Fn(&str) -> bool,
+    F: Fn(&[&str]) -> Vec<bool>,
 {
-    DISPLAY_MANAGER_UNITS.iter().any(|unit| active(unit))
+    active(&DISPLAY_MANAGER_UNITS).into_iter().any(|up| up)
 }
 
 fn wait_until<F>(mut predicate: F, deadline: Duration, interval: Duration) -> bool
@@ -129,7 +146,7 @@ where
 /// waiting five minutes on a CI host.
 pub fn runtime_checks_with<Booted, Active, Target, Failed, Devices, Rescue>(
     systemd_is_booted: Booted,
-    unit_is_active: Active,
+    units_are_active: Active,
     default_target: Target,
     failed_units: Failed,
     drm_devices: Devices,
@@ -139,7 +156,7 @@ pub fn runtime_checks_with<Booted, Active, Target, Failed, Devices, Rescue>(
 ) -> Vec<RuntimeCheck>
 where
     Booted: Fn() -> bool,
-    Active: Fn(&str) -> bool,
+    Active: Fn(&[&str]) -> Vec<bool>,
     Target: Fn() -> String,
     Failed: Fn() -> Vec<String>,
     Devices: Fn() -> Vec<String>,
@@ -157,14 +174,14 @@ where
     let expects_graphical = target == GRAPHICAL_TARGET;
     let rescue = software_rescue();
     let ready = || {
-        (!expects_graphical || display_manager_active(&unit_is_active))
+        (!expects_graphical || display_manager_active(&units_are_active))
             && (!expects_graphical || rescue || !drm_devices().is_empty())
     };
     let _ = wait_until(ready, deadline, interval);
 
     let mut checks = Vec::new();
     if expects_graphical {
-        let reached = display_manager_active(&unit_is_active);
+        let reached = display_manager_active(&units_are_active);
         checks.push(RuntimeCheck {
             name: "Graphical session".to_string(),
             passed: reached,
@@ -195,7 +212,7 @@ where
     let devices = drm_devices();
     if expects_graphical {
         if rescue && devices.is_empty() {
-            let dm_active = display_manager_active(&unit_is_active);
+            let dm_active = display_manager_active(&units_are_active);
             checks.push(RuntimeCheck {
                 name: "Display device".to_string(),
                 passed: dm_active,
@@ -260,7 +277,7 @@ pub fn boot_runtime_checks_with_deadline(
 ) -> Vec<RuntimeCheck> {
     runtime_checks_with(
         systemd_booted,
-        unit_active,
+        units_active,
         default_target,
         failed_units,
         drm_devices,
@@ -275,10 +292,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn batched_unit_check_returns_one_result_per_unit() {
+        // P15: a single `systemctl is-active` spawn covers N units; the
+        // result mapping is positional and never shifts, even when the
+        // command itself is unavailable.
+        let states = units_active(&["a.service", "b.service", "c.service"]);
+        assert_eq!(states.len(), 3);
+    }
+
+    #[test]
     fn non_systemd_is_skipped() {
         let checks = runtime_checks_with(
             || false,
-            |_| false,
+            |units| units.iter().map(|_| false).collect(),
             || "graphical.target".to_string(),
             Vec::new,
             Vec::new,
@@ -294,7 +320,7 @@ mod tests {
     fn headless_boot_does_not_require_display() {
         let checks = runtime_checks_with(
             || true,
-            |_| false,
+            |units| units.iter().map(|_| false).collect(),
             || "multi-user.target".to_string(),
             Vec::new,
             Vec::new,
@@ -309,7 +335,12 @@ mod tests {
     fn failed_critical_unit_is_reported() {
         let checks = runtime_checks_with(
             || true,
-            |unit| unit == "plasmalogin.service",
+            |units| {
+                units
+                    .iter()
+                    .map(|unit| *unit == "plasmalogin.service")
+                    .collect()
+            },
             || "graphical.target".to_string(),
             || {
                 vec![

@@ -7,7 +7,7 @@ install_umu() {
 	TMPDIR_UMU=$(mktemp -d)
 	local release_json="${TMPDIR_UMU}/release.json"
 
-	if curl -fsSL "${CURL_COMMON_ARGS[@]}" "${CURL_AUTH_ARGS[@]}" "${UMU_REPO_API}" -o "${release_json}" 2>/dev/null; then
+	if github_api_curl -fsSL "${CURL_COMMON_ARGS[@]}" "${UMU_REPO_API}" -o "${release_json}" 2>/dev/null; then
 		local UMU_URL
 		UMU_URL=$(
 			grep -oP 'https://[^"]+/releases/download/[^"]+umu-launcher-[^"]+-zipapp\.tar' "${release_json}" |
@@ -15,8 +15,7 @@ install_umu() {
 		) || true
 		if [[ -z "${UMU_URL}" ]]; then
 			UMU_URL=$(
-				grep -oP 'https://[^"]+/releases/download/[^"]+\.tar(\.(gz|zst))?' "${release_json}" |
-					grep -iv 'source\|src' |
+				grep -oP 'https://[^"]+/releases/download/[^"]*umu-launcher-[^"]*x86_64[^"]*\.tar(\.(gz|zst))?' "${release_json}" |
 					head -n1
 			) || true
 		fi

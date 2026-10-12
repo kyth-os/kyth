@@ -18,6 +18,11 @@ log() {
 	echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >>"${LOG_FILE}"
 }
 
+# mktemp instead of a fixed /tmp path: a predictable name is a symlink-attack
+# surface for a file that captures nmcli stderr.
+ERROR_LOG="$(mktemp)"
+trap 'rm -f "${ERROR_LOG}"' EXIT
+
 log "Starting OWE Wi-Fi profile setup"
 
 # Wait for NetworkManager to be fully operational
@@ -42,12 +47,14 @@ sleep 1
 declare -A owe_ssids=()
 for _try in 1 2 3 4 5 6; do
 	log "Scan attempt $_try/6"
-	while IFS=: read -r ssid security; do
+	# nmcli escapes literal colons in SSIDs; Bash read must consume those escapes before field splitting.
+	# shellcheck disable=SC2162
+	while IFS=: read ssid security; do
 		[[ -n "${ssid}" && "${ssid}" != "--" ]] || continue
 		[[ "${security}" == *OWE* ]] || continue
 		owe_ssids["${ssid}"]=1
 		log "Found OWE network: ${ssid}"
-	done < <(nmcli --escape no -t -f SSID,SECURITY device wifi list --rescan yes 2>/dev/null || true)
+	done < <(nmcli --escape yes -t -f SSID,SECURITY device wifi list --rescan yes 2>/dev/null || true)
 
 	if [[ "${#owe_ssids[@]}" -gt 0 ]]; then
 		log "Found OWE networks on attempt $_try/6, proceeding"
@@ -84,7 +91,7 @@ for ssid in "${!owe_ssids[@]}"; do
 		ipv4.ignore-auto-dns no \
 		connection.autoconnect no \
 		connection.permissions "" \
-		2>/tmp/kyth-owe-error.log; then
+		2>"${ERROR_LOG}"; then
 
 		# Validate the profile was created with correct settings
 		key_mgmt=$(nmcli -g 802-11-wireless-security.key-mgmt connection show "${con_name}" 2>/dev/null || echo "ERROR")
@@ -99,7 +106,7 @@ for ssid in "${!owe_ssids[@]}"; do
 		fi
 	else
 		log "ERROR: Failed to create connection ${con_name}"
-		cat /tmp/kyth-owe-error.log >>"${LOG_FILE}" 2>/dev/null || true
+		cat "${ERROR_LOG}" >>"${LOG_FILE}" 2>/dev/null || true
 	fi
 done
 
@@ -114,11 +121,11 @@ if [[ "${#owe_ssids[@]}" -eq 1 && "${wifi_connected}" -eq 0 ]]; then
 	for ssid in "${!owe_ssids[@]}"; do
 		con_name="Kyth OWE ${ssid}"
 		log "Single OWE network with no WiFi connected, attempting auto-connect: ${con_name}"
-		if nmcli connection up "${con_name}" 2>/tmp/kyth-owe-error.log; then
+		if nmcli connection up "${con_name}" 2>"${ERROR_LOG}"; then
 			log "✓ Successfully brought up connection: ${con_name}"
 		else
 			log "ERROR: Failed to bring up ${con_name}"
-			cat /tmp/kyth-owe-error.log >>"${LOG_FILE}" 2>/dev/null || true
+			cat "${ERROR_LOG}" >>"${LOG_FILE}" 2>/dev/null || true
 		fi
 	done
 else

@@ -2,6 +2,9 @@
 Description=KythOS unattended VM acceptance guest
 After=network-online.target
 Wants=network-online.target
+# QEMU fw_cfg acceptance flag; the guest binary also checks this itself.
+ConditionPathExists=/sys/firmware/qemu_fw_cfg/by_name/kyth/acceptance/raw
+
 [Service]
 Type=oneshot
 # The guest executable owns the fw_cfg enablement check. Keeping it out of an
@@ -15,6 +18,12 @@ Nice=10
 IOSchedulingClass=idle
 StandardOutput=journal+console
 StandardError=journal+console
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+SystemCallFilter=@system-service
 
 [Install]
 WantedBy=multi-user.target

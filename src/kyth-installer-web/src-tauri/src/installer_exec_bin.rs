@@ -87,20 +87,8 @@ fn operation_args_valid(args: &[String]) -> bool {
         )
 }
 
-fn parent_death_signal() -> io::Result<()> {
-    let parent_pid = unsafe { libc::getppid() };
-    if unsafe { libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGTERM) } != 0 {
-        return Err(io::Error::last_os_error());
-    }
-    if unsafe { libc::getppid() } != parent_pid {
-        return Err(io::Error::new(
-            io::ErrorKind::Interrupted,
-            "installer parent exited during child setup",
-        ));
-    }
-    Ok(())
-}
-
+// parent_death_signal lives in installer_stream (shared): the exec binary's
+// own spawns and the daemon's run_command_with_input both install it.
 fn exit_code(status: ExitStatus) -> ExitCode {
     ExitCode::from(
         status
@@ -117,7 +105,7 @@ fn run_timed_command(
 ) -> Result<ExitStatus, String> {
     command.process_group(0);
     unsafe {
-        command.pre_exec(parent_death_signal);
+        command.pre_exec(installer_stream::parent_death_signal);
     }
     let mut child = command
         .spawn()
@@ -167,10 +155,16 @@ fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
     let executable = argv
         .first()
         .ok_or_else(|| format!("{description} plan was empty"))?;
+    // Pin well-known binaries to absolute paths: never resolve a root command
+    // through an inherited PATH.
+    let executable = match executable.as_str() {
+        "bootc" => "/usr/bin/bootc".to_string(),
+        other => other.to_string(),
+    };
     let mut command = Command::new(executable);
     command.args(&argv[1..]).stdin(Stdio::inherit());
     unsafe {
-        command.pre_exec(parent_death_signal);
+        command.pre_exec(installer_stream::parent_death_signal);
     }
     let status = installer_stream::run_command_timeout(
         &mut command,
@@ -372,6 +366,10 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
     let executable = argv
         .first()
         .ok_or_else(|| format!("{operation} plan was empty"))?;
+    let executable = match executable.as_str() {
+        "bootc" => "/usr/bin/bootc".to_string(),
+        other => other.to_string(),
+    };
     // All executable paths come from the fixed Rust operation plan.
     let mut command = Command::new(executable);
     command.args(&argv[1..]);
@@ -380,8 +378,12 @@ fn run(args: &[String]) -> Result<ExitCode, String> {
         command.process_group(0);
         // Ensure a helper cancellation cannot leave an interactive child
         // running after the parent process has gone away.
-        let mut child = unsafe { command.pre_exec(parent_death_signal).spawn() }
-            .map_err(|error| format!("could not spawn {operation}: {error}"))?;
+        let mut child = unsafe {
+            command
+                .pre_exec(installer_stream::parent_death_signal)
+                .spawn()
+        }
+        .map_err(|error| format!("could not spawn {operation}: {error}"))?;
         if let Some(mut stdin) = child.stdin.take() {
             if let Err(error) = stdin.write_all(b"Yes\n") {
                 installer_stream::kill_process_group(&mut child);
@@ -524,7 +526,8 @@ mod tests {
                 "operation": "format_filesystem",
                 "device": "/dev/sda3",
                 "fs": "btrfs",
-                "label": "KythOS"
+                "label": "KythOS",
+                "expected_disk": "/dev/sda"
             }
         });
         let input = serde_json::to_vec(&request).expect("stream request should serialize");

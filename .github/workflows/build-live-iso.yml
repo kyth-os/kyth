@@ -316,7 +316,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}/installer/iso.yaml:/kyth/iso.yaml:ro" \
             --mount type=image,source=localhost/payload:latest,dst=/rootfs \
             -v "${OUT}:/output" \
-            quay.io/fedora/fedora:45@sha256:dbb22055c0c19f4eba2afbbb717667b0c76aa956c4283700041980ad3710bb73 /src/build_iso.sh
+            registry.fedoraproject.org/fedora:45@sha256:cc55518dc3593184519ae4184a814a26d6405b42713762d57353659fd7105445 /src/build_iso.sh
           sudo chown "$(id -u):$(id -g)" "${OUT}/"*.iso
           mv "${OUT}/"*.iso "${RUNNER_TEMP}/kyth-live-${SOURCE_TAG}.iso"
           test -s "${RUNNER_TEMP}/kyth-live-${SOURCE_TAG}.iso"
@@ -566,6 +566,14 @@ jobs:
           version: 0.88.0
           sha256: 7a7e1bf0caf88350eeb7433f41ce6e7b69d1eed57ce67abf24eae62562f38948
 
+      - name: Setup Syft
+        id: setup_syft
+        uses: ./.github/actions/setup-anchore-tool
+        with:
+          tool: syft
+          version: 1.39.0
+          sha256: bb8f1ba8201d1ce0d99ab4f5243142629c1afba4da97a7c4ca2df97327f97190
+
       - name: Wait for source image SBOM
         env:
           IMAGE_REF: ${{ needs.build.outputs.source_image }}@${{ needs.build.outputs.source_digest }}
@@ -665,34 +673,6 @@ jobs:
             echo "::warning::Grype scan of previous SBOM failed"
           [[ -f "${OUT}" ]] && echo "path=${OUT}" >> "$GITHUB_OUTPUT"
 
-      - name: Generate ISO release changelog
-        id: iso_changelog
-        env:
-          GH_REPO: ${{ github.repository }}
-          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
-          SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
-          SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
-          SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
-          GRYPE_CURRENT: ${{ steps.grype_current.outputs.path }}
-          GRYPE_PREVIOUS: ${{ steps.grype_previous.outputs.path }}
-        run: |
-          NOTES="$(mktemp --suffix=.md)"
-          IMAGE_VERSION="$(skopeo inspect --no-creds \
-            "docker://${SOURCE_IMAGE}@${SOURCE_DIGEST}" 2>/dev/null \
-            | jq -r '.Labels["org.opencontainers.image.version"] // empty' || true)"
-          python3 .github/scripts/kyth_changelog.py \
-            --mode iso \
-            --repo "${GH_REPO}" \
-            --branch "${SOURCE_TAG}" \
-            --current-sha "${SOURCE_SHA}" \
-            --image "${SOURCE_IMAGE}" \
-            --current-digest "${SOURCE_DIGEST}" \
-            --image-version "${IMAGE_VERSION}" \
-            --grype-current "${GRYPE_CURRENT:-}" \
-            --grype-previous "${GRYPE_PREVIOUS:-}" \
-            --output "${NOTES}"
-          echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
-
       - name: Free disk space
         uses: ./.github/actions/free-disk-space
         with:
@@ -711,6 +691,97 @@ jobs:
           (cd output/live-iso && sha256sum --check --strict "${NEEDS_BUILD_OUTPUTS_ISO_BASENAME}-CHECKSUM")
         env:
           NEEDS_BUILD_OUTPUTS_ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
+
+      # The container SBOM is RPM-only (rpm-db-cataloger). The live ISO
+      # installs additional RPMs and ships first-party Rust binaries, npm
+      # trees, and Python code that never appear in it. Generate a second
+      # SBOM from the ISO payload with default catalogers so Grype sees the
+      # full ISO surface.
+      - name: Generate ISO payload SBOM
+        id: iso_sbom
+        env:
+          SYFT_CMD: ${{ steps.setup_syft.outputs.cmd }}
+          ISO_BASENAME: ${{ needs.build.outputs.iso_basename }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
+          SYFT_CHECK_FOR_APP_UPDATE: "false"
+          XDG_CACHE_HOME: ${{ runner.temp }}/syft-cache
+        run: |
+          set -euo pipefail
+          ISO="output/live-iso/${ISO_BASENAME}"
+          EXTRACT_DIR="${RUNNER_TEMP}/iso-payload"
+          mkdir -p "${EXTRACT_DIR}"
+          # Extract the ISO payload (7z handles ISO9660 + embedded squashfs
+          # listings without root mounts on the runner).
+          7z x -o"${EXTRACT_DIR}" "${ISO}" >/dev/null
+          SBOM_BASENAME="kyth-iso-${SOURCE_TAG}-payload.syft.json"
+          sudo "${SYFT_CMD}" "dir:${EXTRACT_DIR}" \
+            --parallelism 1 \
+            --source-name "${ISO_BASENAME}" \
+            -o "syft-json=output/live-iso/${SBOM_BASENAME}"
+          sudo chown "${USER}:${USER}" "output/live-iso/${SBOM_BASENAME}"
+          jq -e '.artifacts | length > 0' "output/live-iso/${SBOM_BASENAME}" >/dev/null
+          echo "path=output/live-iso/${SBOM_BASENAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Scan ISO payload SBOM with Grype
+        id: grype_iso
+        env:
+          GRYPE_CMD: ${{ steps.setup_grype.outputs.cmd }}
+          SBOM_PATH: ${{ steps.iso_sbom.outputs.path }}
+        run: |
+          OUT="${RUNNER_TEMP}/grype-iso-payload.json"
+          "${GRYPE_CMD}" "sbom:${SBOM_PATH}" -o json --file "${OUT}" || \
+            echo "::warning::Grype scan of ISO payload SBOM failed; ISO CVE data will be incomplete"
+          [[ -f "${OUT}" ]] && echo "path=${OUT}" >> "$GITHUB_OUTPUT"
+
+
+      - name: Generate ISO release changelog
+        id: iso_changelog
+        env:
+          GH_REPO: ${{ github.repository }}
+          SOURCE_TAG: ${{ inputs.source_tag || needs.build.outputs.effective_tag }}
+          SOURCE_SHA: ${{ needs.build.outputs.source_sha }}
+          SOURCE_IMAGE: ${{ needs.build.outputs.source_image }}
+          SOURCE_DIGEST: ${{ needs.build.outputs.source_digest }}
+          GRYPE_CURRENT: ${{ steps.grype_current.outputs.path }}
+          GRYPE_PREVIOUS: ${{ steps.grype_previous.outputs.path }}
+          GRYPE_ISO: ${{ steps.grype_iso.outputs.path }}
+        run: |
+          NOTES="$(mktemp --suffix=.md)"
+          IMAGE_VERSION="$(skopeo inspect --no-creds \
+            "docker://${SOURCE_IMAGE}@${SOURCE_DIGEST}" 2>/dev/null \
+            | jq -r '.Labels["org.opencontainers.image.version"] // empty' || true)"
+          # Merge the container-image and ISO-payload Grype results so the
+          # changelog security section covers the full ISO surface.
+          GRYPE_MERGED="${RUNNER_TEMP}/grype-merged.json"
+          python3 - "$GRYPE_MERGED" "${GRYPE_CURRENT:-}" "${GRYPE_ISO:-}" <<'PY'
+          import json, sys
+          out, paths = sys.argv[1], sys.argv[2:]
+          matches, seen = [], set()
+          for p in paths:
+              if not p: continue
+              try:
+                  data = json.load(open(p))
+              except Exception:
+                  continue
+              for m in data.get("matches", []):
+                  key = (m.get("vulnerability", {}).get("id"), m.get("artifact", {}).get("name"), m.get("artifact", {}).get("version"))
+                  if key not in seen:
+                      seen.add(key)
+                      matches.append(m)
+          json.dump({"matches": matches}, open(out, "w"))
+          PY
+          python3 .github/scripts/kyth_changelog.py \
+            --mode iso \
+            --repo "${GH_REPO}" \
+            --branch "${SOURCE_TAG}" \
+            --current-sha "${SOURCE_SHA}" \
+            --image "${SOURCE_IMAGE}" \
+            --current-digest "${SOURCE_DIGEST}" \
+            --image-version "${IMAGE_VERSION}" \
+            --grype-current "${GRYPE_MERGED}" \
+            --grype-previous "${GRYPE_PREVIOUS:-}" \
+            --output "${NOTES}"
+          echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Cosign
         uses: ./.github/actions/setup-cosign

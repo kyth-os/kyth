@@ -1,0 +1,52 @@
+[Unit]
+Description=KythOS deferred NVIDIA akmods kernel-module build
+Documentation=https://github.com/kyth-os/kyth
+# P11: the slow `akmods --force` module build (5-15 min) was blocking the
+# boot-time hardware-policy run. The fast policy (kernel args, service
+# enables) now applies in kyth-hw-setup.service, which leaves
+# /var/lib/kyth/nvidia-akmods-pending when the module still needs building;
+# this oneshot unit picks it up right after, off the boot-critical path.
+# ConditionPathExists also retries a build interrupted by a previous boot.
+After=kyth-hw-setup.service
+ConditionPathExists=/var/lib/kyth/nvidia-akmods-pending
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/kyth-hardware-policy build-nvidia-akmods
+RemainAfterExit=yes
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=kyth-nvidia-akmods
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Same write surface as kyth-hw-setup.service: atomic state/marker writes
+# under /var/lib/kyth plus the akmods build dirs.
+StateDirectory=kyth
+StateDirectoryMode=0700
+ProtectSystem=strict
+ReadWritePaths=/var/lib/akmods -/var/cache/akmods
+CacheDirectory=kyth
+CacheDirectoryMode=0700
+# akmods can take 5-15 min to build the NVIDIA module on a fresh kernel.
+TimeoutStartSec=1200
+Nice=10
+IOSchedulingClass=idle
+CPUQuota=50%
+MemoryHigh=768M
+MemoryMax=1024M
+
+[Install]
+WantedBy=multi-user.target

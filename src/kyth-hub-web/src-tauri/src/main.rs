@@ -266,7 +266,7 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
 /// probes; a sync command pinned a Tauri worker (and the UI's await) for
 /// the whole run. The shared single-flight slot in `execute_recipe` makes
 /// a double-click return "already running" instead of a second repair.
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 async fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let state = kyth_shared::guardian::load_state();
@@ -287,7 +287,7 @@ async fn guardian_execute_recipe(recipe_id: String) -> Result<String, String> {
     .map_err(|error| format!("Guardian repair task failed: {error}"))?
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn guardian_dismiss(recipe_id: String) -> Result<String, String> {
     kyth_shared::guardian::dismiss_recommendation(&recipe_id)
 }
@@ -336,9 +336,17 @@ struct MesaOverlayResponse {
     detail: String,
 }
 #[tauri::command]
-fn mesa_overlay_dry_run() -> MesaOverlayResponse {
-    let (ok, detail) = kyth_shared::system::mesa_version::mesa_overlay_dry_run();
-    MesaOverlayResponse { ok, detail }
+async fn mesa_overlay_dry_run() -> MesaOverlayResponse {
+    // P6: the dnf5 probe is bounded at 10 s; keep it off the async workers.
+    tauri::async_runtime::spawn_blocking(|| {
+        let (ok, detail) = kyth_shared::system::mesa_version::mesa_overlay_dry_run();
+        MesaOverlayResponse { ok, detail }
+    })
+    .await
+    .unwrap_or(MesaOverlayResponse {
+        ok: false,
+        detail: "Mesa overlay dry-run did not complete.".to_string(),
+    })
 }
 
 #[derive(serde::Serialize)]
@@ -347,7 +355,7 @@ struct SmbBrowseResponse {
     detail: String,
 }
 #[tauri::command]
-fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
+async fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
     if let Some(host) = host.as_deref() {
         if !kyth_shared::system::smb::is_valid_smb_host(host) {
             return SmbBrowseResponse {
@@ -356,8 +364,17 @@ fn smb_browse(host: Option<String>) -> SmbBrowseResponse {
             };
         }
     }
-    let (ok, detail) = kyth_shared::system::smb::smb_browse_dry_run(host.as_deref());
-    SmbBrowseResponse { ok, detail }
+    // P6: the network browse is bounded at 10 s; keep it off the async
+    // runtime workers.
+    tauri::async_runtime::spawn_blocking(move || {
+        let (ok, detail) = kyth_shared::system::smb::smb_browse_dry_run(host.as_deref());
+        SmbBrowseResponse { ok, detail }
+    })
+    .await
+    .unwrap_or(SmbBrowseResponse {
+        ok: false,
+        detail: "SMB browse did not complete.".to_string(),
+    })
 }
 #[tauri::command]
 fn smb_mount(share: String) -> Result<String, String> {
@@ -499,10 +516,17 @@ fn smb_save_configured_share(share: SmbConfiguredShare) -> Result<SmbActionResul
     if !valid_smb_configured_share(&share) {
         return Err("invalid SMB share configuration".to_string());
     }
-    let mut shares = load_smb_configured_shares();
-    shares.retain(|existing| existing.name != share.name);
-    shares.push(share);
-    save_smb_configured_shares(&shares)?;
+    // Serialize the load-modify-save against concurrent invocations: without
+    // the lock, two rapid saves interleave (both read, both modify, last
+    // writer silently wins) and one share definition is lost.
+    let path = smb_config_path()?;
+    kyth_shared::atomic_io::with_file_lock(&path, || {
+        let mut shares = load_smb_configured_shares();
+        shares.retain(|existing| existing.name != share.name);
+        shares.push(share);
+        save_smb_configured_shares(&shares)
+    })
+    .map_err(|error| format!("could not lock SMB configuration: {error}"))??;
     Ok(SmbActionResult {
         state: "complete".into(),
         detail: "Network share configuration saved.".into(),
@@ -519,9 +543,16 @@ fn smb_remove_configured_share(name: String) -> Result<SmbActionResult, String> 
     {
         return Err("invalid SMB share name".to_string());
     }
-    let mut shares = load_smb_configured_shares();
-    shares.retain(|existing| existing.name != name);
-    save_smb_configured_shares(&shares)?;
+    // Same read-modify-write lock as smb_save_configured_share: the load,
+    // retain, and save must all happen under the lock, or a concurrent save
+    // racing this removal would resurrect the deleted share.
+    let path = smb_config_path()?;
+    kyth_shared::atomic_io::with_file_lock(&path, || {
+        let mut shares = load_smb_configured_shares();
+        shares.retain(|existing| existing.name != name);
+        save_smb_configured_shares(&shares)
+    })
+    .map_err(|error| format!("could not lock SMB configuration: {error}"))??;
     Ok(SmbActionResult {
         state: "complete".into(),
         detail: "Network share configuration removed.".into(),
@@ -799,6 +830,27 @@ fn open_m365_app(name: String) -> Result<String, String> {
     Ok(format!("Opened {name}."))
 }
 
+/// Open an http(s) URL in the system browser. Bare `target="_blank"`
+/// anchors render inside the trusted Hub webview; the frontend routes
+/// external links through here instead. Fixed `/usr/bin/xdg-open` argv
+/// (no shell, no PATH lookup), https-only, bounded length, no control
+/// characters or whitespace.
+#[tauri::command]
+fn open_external_url(url: String) -> Result<String, String> {
+    if url.is_empty()
+        || url.len() > 2048
+        || !url.starts_with("https://")
+        || url.chars().any(|c| c.is_control() || c.is_whitespace())
+    {
+        return Err("invalid external URL".to_string());
+    }
+    kyth_shared::system::process::spawn_detached(
+        std::process::Command::new("/usr/bin/xdg-open").arg(&url),
+    )
+    .map_err(|error| format!("could not open URL: {error}"))?;
+    Ok("Opened in browser.".to_string())
+}
+
 #[tauri::command]
 fn create_m365_shortcuts() -> Result<String, String> {
     let home = std::env::var_os("HOME").ok_or_else(|| "HOME is not set".to_string())?;
@@ -993,20 +1045,16 @@ fn focus_start(minutes: u32) -> Result<String, String> {
             true
         }
     });
-    // Kill inhibitors orphaned by a previous Hub process (crash/restart
-    // reparents the `sleep` child, which then holds idle:sleep with no UI
-    // to cancel it). Live sessions in this process are spared.
-    let live_pids: Vec<u32> = sessions
-        .values()
-        .map(|session| session.child.id())
-        .collect();
-    drop(sessions);
-    let orphans = kyth_shared::system::process::reap_stale_focus_inhibits(&live_pids);
-    if orphans > 0 {
-        eprintln!(
-            "focus: reaped {orphans} orphaned sleep inhibitor(s) from a previous Hub process"
+    // One live focus session at a time: a second start while one is running
+    // would fork a duplicate inhibitor the UI cannot track or stop.
+    if !sessions.is_empty() {
+        return Err(
+            "A focus session is already running; stop it before starting another.".to_string(),
         );
     }
+    // M1: hold the lock across reap + spawn + insert. The previous code
+    // dropped the lock before reaping, allowing a concurrent focus_start
+    // to reap the just-spawned child before it was inserted into the map.
     let child = std::process::Command::new("systemd-inhibit")
         .args([
             "--what=idle:sleep",
@@ -1017,18 +1065,43 @@ fn focus_start(minutes: u32) -> Result<String, String> {
         ])
         .spawn()
         .map_err(|error| format!("could not keep the PC awake: {error}"))?;
-    let id = format!(
-        "focus-{}",
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos()
-    );
-    let mut sessions = focus_sessions()
-        .lock()
-        .map_err(|_| "focus session store is unavailable".to_string())?;
+    let child_pid = child.id();
+    // Same-tick double starts share a nanos id: suffix until free so the
+    // second session never silently replaces the first (same generation
+    // discipline as the VPN job store's vpn_collision_id).
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_nanos();
+    let mut id = format!("focus-{nanos}");
+    let mut round = 1u32;
+    while sessions.contains_key(&id) {
+        round += 1;
+        id = format!("focus-{nanos}-{round}");
+    }
     let ends_at = std::time::Instant::now() + std::time::Duration::from_secs(minutes as u64 * 60);
     sessions.insert(id.clone(), FocusSession { child, ends_at });
+    // Kill inhibitors orphaned by a previous Hub process (crash/restart
+    // reparents the `sleep` child, which then holds idle:sleep with no UI
+    // to cancel it). Live sessions in this process are spared, including
+    // the child we just spawned.
+    let live_pids: Vec<u32> = sessions
+        .values()
+        .map(|session| session.child.id())
+        .collect();
+    // The new child is in the map, so its PID is in live_pids. Drop the
+    // lock before the (potentially slow) reaper to avoid blocking other
+    // focus operations.
+    drop(sessions);
+    let orphans = kyth_shared::system::process::reap_stale_focus_inhibits(&live_pids);
+    if orphans > 0 {
+        eprintln!(
+            "focus: reaped {orphans} orphaned sleep inhibitor(s) from a previous Hub process"
+        );
+    }
+    // Sanity: our child should still be alive (we hold no lock now, but
+    // the reaper was given our PID in the keep list).
+    debug_assert!(live_pids.contains(&child_pid));
     Ok(id)
 }
 
@@ -1239,7 +1312,7 @@ struct PipewireApplyResponse {
     ok: bool,
     detail: String,
 }
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn apply_pipewire_quantum(preset: String, dry_run: bool) -> PipewireApplyResponse {
     let (ok, detail) = kyth_shared::system::pipewire::apply_pipewire_quantum(&preset, dry_run);
     PipewireApplyResponse { ok, detail }
@@ -1276,8 +1349,12 @@ struct DeploymentInfoResponse {
 }
 
 #[tauri::command]
-fn gaming_library() -> Vec<kyth_shared::system::gaming_library::LauncherEntry> {
-    kyth_shared::system::gaming_library::gaming_library_scan()
+async fn gaming_library() -> Vec<kyth_shared::system::gaming_library::LauncherEntry> {
+    // P6: the library scan walks Steam/Heroic/Lutris/Bottles directories and
+    // must not sit on an async runtime worker while it does.
+    tauri::async_runtime::spawn_blocking(kyth_shared::system::gaming_library::gaming_library_scan)
+        .await
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1291,8 +1368,16 @@ fn familiar_apps() -> Vec<kyth_shared::system::software_catalog::FamiliarApp> {
 }
 
 #[tauri::command]
-fn appstream_search(query: String) -> Vec<kyth_shared::system::software_catalog::AppStreamApp> {
-    kyth_shared::system::software_catalog::appstream_search(&query)
+async fn appstream_search(
+    query: String,
+) -> Vec<kyth_shared::system::software_catalog::AppStreamApp> {
+    // P6: `flatpak search` is bounded at 10 s; keep that wait off the async
+    // runtime workers.
+    tauri::async_runtime::spawn_blocking(move || {
+        kyth_shared::system::software_catalog::appstream_search(&query)
+    })
+    .await
+    .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -1307,7 +1392,7 @@ async fn installed_flatpaks() -> Vec<kyth_shared::system::software_catalog::Inst
         .unwrap_or_default()
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     let job = format!(
@@ -1487,7 +1572,7 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
     })
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     let job = format!(
@@ -1563,7 +1648,7 @@ fn anti_cheat_table() -> Vec<kyth_shared::system::gaming_compat::AntiCheatEntry>
     kyth_shared::system::gaming_compat::anti_cheat_table()
 }
 
-#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(serde::Serialize, serde::Deserialize, Clone)]
 struct CompatibilityGameResponse {
     name: String,
     anticheat: String,
@@ -1585,10 +1670,17 @@ struct CompatibilityBundle {
 /// the frontend only owns filtering and presentation.
 #[tauri::command]
 fn compatibility_games() -> Vec<CompatibilityGameResponse> {
-    const BUNDLED: &str = include_str!("../../src/data/compat_games.json");
-    serde_json::from_str::<CompatibilityBundle>(BUNDLED)
-        .map(|bundle| bundle.games)
-        .unwrap_or_default()
+    // Cheap P6 cleanup: parse the bundled JSON once per process instead of
+    // on every invoke.
+    static PARSED: std::sync::OnceLock<Vec<CompatibilityGameResponse>> = std::sync::OnceLock::new();
+    PARSED
+        .get_or_init(|| {
+            const BUNDLED: &str = include_str!("../../src/data/compat_games.json");
+            serde_json::from_str::<CompatibilityBundle>(BUNDLED)
+                .map(|bundle| bundle.games)
+                .unwrap_or_default()
+        })
+        .clone()
 }
 
 #[tauri::command]
@@ -1629,7 +1721,7 @@ struct PlasmaApplyResponse {
     ok: bool,
     detail: String,
 }
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn apply_plasma_preset(preset: String, dry_run: bool) -> PlasmaApplyResponse {
     let (ok, detail) = kyth_shared::system::plasma_hdr::apply_preset(&preset, dry_run);
     PlasmaApplyResponse { ok, detail }
@@ -1877,7 +1969,30 @@ fn exe_handler_untrust(sha256: String) -> Result<(), String> {
 #[tauri::command]
 fn exe_handler_launch_umu(path: String) -> Result<(), String> {
     let path = regular_handler_path(&path)?;
-    kyth_shared::system::windows_installer::launch_in_umu(&path)
+    // Gate on the trust store: only exes explicitly trusted for the umu
+    // runner may launch directly. Anything else must go through the dialog.
+    let file = open_nofollow_umu(&path).ok_or("could not open file")?;
+    let digest =
+        kyth_shared::system::exe_trust::full_sha256_file(&file).ok_or("could not hash file")?;
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .ok_or("no home")?;
+    match kyth_shared::system::exe_trust::trusted_runner(&home, &digest).as_deref() {
+        Some(kyth_shared::system::exe_trust::RUNNER_UMU) => {
+            kyth_shared::system::windows_installer::launch_in_umu(&path)
+        }
+        _ => Err("not trusted for direct launch; use the dialog".into()),
+    }
+}
+
+/// Open a file with O_NOFOLLOW for the umu launch path: a symlink swapped in
+/// after `regular_handler_path`'s checks fails the open instead of redirecting it.
+fn open_nofollow_umu(path: &Path) -> Option<std::fs::File> {
+    OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .ok()
 }
 
 /// First-boot app status for the Play checklist: whether the background
@@ -1942,40 +2057,45 @@ fn exe_handler_set_auto_bottles(enabled: bool) -> Result<(), String> {
     // Parse-modify-write, preserving every other key/section: a bare
     // fs::write of the two known lines would discard anything else a user
     // or a future version stores here. Atomic temp + fsync + rename so a
-    // crash mid-write never leaves a truncated file.
-    let desired = format!("auto_bottles={}", if enabled { "true" } else { "false" });
-    let mut lines: Vec<String> = match fs::read_to_string(&path) {
-        Ok(text) => text.lines().map(str::to_string).collect(),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
-        Err(error) => return Err(format!("Could not save preference: {error}")),
-    };
-    let mut in_section = false;
-    let mut section_seen = false;
-    let mut key_written = false;
-    for line in &mut lines {
-        let trimmed = line.trim();
-        if trimmed.starts_with('[') && trimmed.ends_with(']') {
-            in_section = trimmed == "[exe-handler]";
-            section_seen = section_seen || in_section;
-        } else if in_section
-            && trimmed
-                .split_once('=')
-                .is_some_and(|(key, _)| key.trim() == "auto_bottles")
-        {
-            *line = desired.clone();
-            key_written = true;
+    // crash mid-write never leaves a truncated file. The whole
+    // read-modify-write runs under an exclusive file lock so two rapid
+    // toggles cannot interleave (both read, both modify, last writer wins).
+    kyth_shared::atomic_io::with_file_lock(&path, || {
+        let desired = format!("auto_bottles={}", if enabled { "true" } else { "false" });
+        let mut lines: Vec<String> = match fs::read_to_string(&path) {
+            Ok(text) => text.lines().map(str::to_string).collect(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => return Err(format!("Could not save preference: {error}")),
+        };
+        let mut in_section = false;
+        let mut section_seen = false;
+        let mut key_written = false;
+        for line in &mut lines {
+            let trimmed = line.trim();
+            if trimmed.starts_with('[') && trimmed.ends_with(']') {
+                in_section = trimmed == "[exe-handler]";
+                section_seen = section_seen || in_section;
+            } else if in_section
+                && trimmed
+                    .split_once('=')
+                    .is_some_and(|(key, _)| key.trim() == "auto_bottles")
+            {
+                *line = desired.clone();
+                key_written = true;
+            }
         }
-    }
-    if !key_written {
-        if !section_seen {
-            lines.push("[exe-handler]".to_string());
+        if !key_written {
+            if !section_seen {
+                lines.push("[exe-handler]".to_string());
+            }
+            lines.push(desired);
         }
-        lines.push(desired);
-    }
-    let mut rendered = lines.join("\n");
-    rendered.push('\n');
-    kyth_shared::atomic_io::atomic_write_text(&path, &rendered, Some(0o600))
-        .map_err(|error| format!("Could not save preference: {error}"))
+        let mut rendered = lines.join("\n");
+        rendered.push('\n');
+        kyth_shared::atomic_io::atomic_write_text(&path, &rendered, Some(0o600))
+            .map_err(|error| format!("Could not save preference: {error}"))
+    })
+    .map_err(|error| format!("Could not lock preference file: {error}"))?
 }
 
 #[tauri::command]
@@ -1991,7 +2111,7 @@ fn exe_handler_open_flathub(search_term: String) -> Result<(), String> {
         .map_err(|error| format!("Could not open Flathub: {error}"))
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     // Bounded lookup: a bare `status()` blocks this command for as long
@@ -2012,7 +2132,7 @@ fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
     }
 }
 
-#[tauri::command]
+#[tauri::command(rename_all = "snake_case")]
 fn exe_handler_launch_flatpak(app_id: String) -> Result<(), String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
     if !kyth_shared::system::software_catalog::is_flatpak_installed(&app_id) {
@@ -2309,6 +2429,7 @@ fn main() {
             commands::job::job_status,
             commands::job::cancel_job,
             open_m365_app,
+            open_external_url,
             create_m365_shortcuts,
             pst_files,
             convert_pst,

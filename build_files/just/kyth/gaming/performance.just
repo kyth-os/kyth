@@ -33,24 +33,48 @@ enable-obs-capture:
 install-lsfg-vk:
     #!/usr/bin/env bash
     set -euo pipefail
-    LSFG_REPO="https://api.github.com/repos/Juniorkl/lsfg-vk/releases/latest"
+    # SECURITY: installs a Vulkan *implicit layer* .so (auto-loaded into every
+    # Vulkan process, incl. Steam). Mirrors install-umu: the release asset digest
+    # is verified before extraction, the tarball is extracted with a traversal
+    # filter, and the install is refused when no checksum is available.
+    # Upstream moved from the dead Juniorkl/lsfg-vk fork to PancakeTAS/lsfg-vk;
+    # the tag is pinned (bump deliberately, not via `latest`).
+    LSFG_REPO="PancakeTAS/lsfg-vk"
+    LSFG_TAG="v1.0.0"  # pinned; bump deliberately after reviewing the release
+    LSFG_API="https://api.github.com/repos/${LSFG_REPO}/releases/tags/${LSFG_TAG}"
     INSTALL_DIR="${HOME}/.local/lib"
     LAYER_JSON_DIR="${HOME}/.local/share/vulkan/implicit_layer.d"
-    echo "Fetching latest lsfg-vk release..."
-    release_json=$(curl -fsSL "${LSFG_REPO}")
-    tarball_url=$(printf '%s' "${release_json}" | jq -r '[.assets[]? | select(.name | endswith(".tar.gz")) | .browser_download_url][0] // empty')
+    echo "Fetching lsfg-vk ${LSFG_TAG} release info..."
+    tmpdir=$(mktemp -d); trap 'rm -rf "${tmpdir}"' EXIT
+    release_json="${tmpdir}/release.json"
+    curl -fsSL "${LSFG_API}" -o "${release_json}"
+    tarball_url=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next((a["browser_download_url"] for a in d.get("assets",[]) if a.get("name","").endswith(".tar.zst")), ""))' "${release_json}")
     if [[ -z "${tarball_url}" ]]; then
-        echo "ERROR: no LSFG-VK tarball was published in the latest release." >&2
+        echo "ERROR: no .tar.zst asset in ${LSFG_REPO} ${LSFG_TAG}." >&2
         exit 1
     fi
     tarball_name="${tarball_url##*/}"
-    tmpdir=$(mktemp -d); trap 'rm -rf "${tmpdir}"' EXIT
     echo "Downloading ${tarball_name}..."
     curl -fsSL -o "${tmpdir}/${tarball_name}" "${tarball_url}"
-    mkdir -p "${INSTALL_DIR}" "${LAYER_JSON_DIR}"
-    tar -xzf "${tmpdir}/${tarball_name}" -C "${tmpdir}"
-    so_file=$(find "${tmpdir}" -name 'liblsfg-vk.so' | head -n1)
-    json_file=$(find "${tmpdir}" -name '*.json' | head -n1)
+    # Checksum: prefer the GitHub release asset digest, refuse unverified.
+    LSFG_DIGEST=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next((a.get("digest","") for a in d.get("assets",[]) if a.get("name")==sys.argv[2]),""))' "${release_json}" "${tarball_name}") || true
+    if [[ "${LSFG_DIGEST}" =~ ^sha256:[0-9a-fA-F]{64}$ ]]; then
+        echo "${LSFG_DIGEST#sha256:}  ${tmpdir}/${tarball_name}" | sha256sum -c - \
+            || { echo "SHA256 mismatch for ${tarball_name}; refusing to install." >&2; exit 1; }
+        echo "${tarball_name}: SHA256 verified OK (release asset digest)"
+    else
+        echo "No checksum available for ${tarball_name} (no release asset digest); refusing to install." >&2
+        exit 1
+    fi
+    mkdir -p "${INSTALL_DIR}" "${LAYER_JSON_DIR}" "${tmpdir}/extracted"
+    # Traversal filter: reject absolute paths and `..` members before extract.
+    if tar --list -f "${tmpdir}/${tarball_name}" 2>/dev/null | grep -Eq '(^|/)\.\.(/|$)|^/'; then
+        echo "ERROR: tarball contains absolute paths or parent-directory traversal; refusing." >&2
+        exit 1
+    fi
+    tar -xf "${tmpdir}/${tarball_name}" -C "${tmpdir}/extracted"
+    so_file=$(find "${tmpdir}/extracted" -name 'liblsfg-vk.so' | head -n1)
+    json_file=$(find "${tmpdir}/extracted" -name '*.json' | head -n1)
     if [[ -z "${so_file}" ]]; then echo "ERROR: liblsfg-vk.so not found." >&2; exit 1; fi
     install -Dm 0755 "${so_file}" "${INSTALL_DIR}/liblsfg-vk.so"
     if [[ -n "${json_file}" ]]; then
@@ -82,7 +106,24 @@ deploy-opticscaler gamedir="":
         OS_ZIP=$(basename "${OS_URL}")
         echo "  Downloading ${OS_ZIP}…"
         curl -fsSL "${OS_URL}" -o "${TMPDIR_OS}/${OS_ZIP}"
-        mkdir -p "${TMPDIR_OS}/extracted"; unzip -q "${TMPDIR_OS}/${OS_ZIP}" -d "${TMPDIR_OS}/extracted/"
+        # Checksum: verify the release asset digest before unzip; refuse
+        # unverified DLLs — they are loaded by Proton into the game process.
+        OS_DIGEST=$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next((a.get("digest","") for a in d.get("assets",[]) if a.get("name")==sys.argv[2]),""))' "${release_json}" "${OS_ZIP}") || true
+        if [[ "${OS_DIGEST}" =~ ^sha256:[0-9a-fA-F]{64}$ ]]; then
+            echo "${OS_DIGEST#sha256:}  ${TMPDIR_OS}/${OS_ZIP}" | sha256sum -c - \
+                || { echo "  SHA256 mismatch for ${OS_ZIP}; refusing to deploy." >&2; exit 1; }
+            echo "  ${OS_ZIP}: SHA256 verified OK (release asset digest)"
+        else
+            echo "  No checksum available for ${OS_ZIP} (no release asset digest); refusing to deploy." >&2
+            exit 1
+        fi
+        mkdir -p "${TMPDIR_OS}/extracted"
+        # Zip traversal guard: reject absolute paths and `..` entries.
+        if unzip -l "${TMPDIR_OS}/${OS_ZIP}" | awk '{print $4}' | grep -Eq '(^|/)\.\.(/|$)|^/'; then
+            echo "  ERROR: zip contains absolute paths or parent-directory traversal; refusing." >&2
+            exit 1
+        fi
+        unzip -q "${TMPDIR_OS}/${OS_ZIP}" -d "${TMPDIR_OS}/extracted/"
         SRC_DIR="${TMPDIR_OS}/extracted"
     else
         echo "  Using baked OptiScaler from ${BAKED_DIR}"

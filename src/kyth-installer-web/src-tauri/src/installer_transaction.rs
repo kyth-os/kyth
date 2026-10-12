@@ -86,13 +86,20 @@ fn safe_transaction_path(raw: &str) -> Result<PathBuf, String> {
         return Err("transaction path must be an absolute safe path".to_string());
     }
     // `starts_with` is component-wise, so `/run/kyth-installer-evil/x`
-    // does not match the base. The base directory itself is not a file.
-    if !accepted_transaction_base(path)
-        || path.as_os_str() == TRANSACTION_BASE
-        || path.file_name().is_none()
-    {
+    // does not match the base.
+    let Some(base) = accepted_transaction_base_dir(path) else {
         return Err(format!(
-            "transaction path must be a file under {TRANSACTION_BASE}"
+            "transaction path must be a file under {TRANSACTION_BASE}/{TRANSACTION_SUBDIR}"
+        ));
+    };
+    // Transaction files live in a dedicated subdirectory of the runtime
+    // dir — never directly in `/run/kyth-installer` itself. The shared
+    // parent also holds the daemon socket; hardening that directory's
+    // permissions mid-install would sever the UI's IPC (including cancel).
+    let subdir = base.join(TRANSACTION_SUBDIR);
+    if path.parent() != Some(subdir.as_path()) || path.file_name().is_none() {
+        return Err(format!(
+            "transaction path must be a file directly under {TRANSACTION_BASE}/{TRANSACTION_SUBDIR}"
         ));
     }
     Ok(path.to_path_buf())
@@ -104,7 +111,17 @@ fn safe_transaction_path(raw: &str) -> Result<PathBuf, String> {
 /// `transaction_path` all funnel through `safe_transaction_path`, so
 /// pinning the prefix here keeps a malicious or mistaken caller from
 /// redirecting transaction writes anywhere else on the filesystem.
+///
+/// Transaction files themselves live one level down, in
+/// [`TRANSACTION_SUBDIR`]: the writer hardens only directories it created,
+/// and must never chmod the shared `/run/kyth-installer` parent (the
+/// daemon socket lives there; tightening it mid-install would cut off the
+/// UI, including cancellation).
 pub(crate) const TRANSACTION_BASE: &str = "/run/kyth-installer";
+
+/// Dedicated subdirectory of [`TRANSACTION_BASE`] holding transaction
+/// state files. Created mode 0700 by the writer when absent.
+pub(crate) const TRANSACTION_SUBDIR: &str = "txn";
 
 /// Unit tests exercise the writer against scratch directories; production
 /// rule stays identical, with explicitly registered test bases appended.
@@ -127,19 +144,22 @@ pub(crate) fn allow_test_transaction_base(directory: &Path) {
 }
 
 #[cfg(test)]
-fn accepted_transaction_base(path: &Path) -> bool {
+fn accepted_transaction_base_dir(path: &Path) -> Option<PathBuf> {
     if path.starts_with(TRANSACTION_BASE) {
-        return true;
+        return Some(PathBuf::from(TRANSACTION_BASE));
     }
     TEST_TRANSACTION_BASES
         .lock()
-        .map(|bases| bases.iter().any(|base| path.starts_with(base)))
-        .unwrap_or(false)
+        .ok()?
+        .iter()
+        .find(|base| path.starts_with(base))
+        .cloned()
 }
 
 #[cfg(not(test))]
-fn accepted_transaction_base(path: &Path) -> bool {
+fn accepted_transaction_base_dir(path: &Path) -> Option<PathBuf> {
     path.starts_with(TRANSACTION_BASE)
+        .then(|| PathBuf::from(TRANSACTION_BASE))
 }
 
 fn sync_directory(path: &Path) -> Result<(), String> {
@@ -153,15 +173,37 @@ fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| "transaction path has no parent directory".to_string())?;
-    fs::create_dir_all(parent)
-        .map_err(|error| format!("could not create transaction directory: {error}"))?;
-    let metadata = fs::symlink_metadata(parent)
-        .map_err(|error| format!("could not inspect transaction directory: {error}"))?;
-    if !metadata.is_dir() || metadata.file_type().is_symlink() {
-        return Err("transaction directory must be a real directory".to_string());
+    // `safe_transaction_path` already pinned `parent` to the dedicated
+    // transaction subdirectory. Harden only directories this writer
+    // creates: the shared runtime parent (daemon socket, token files)
+    // must never have its permissions touched mid-install — tightening
+    // it would sever the UI's IPC, including cancellation.
+    match fs::create_dir(parent) {
+        Ok(()) => {
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+                .map_err(|error| format!("could not secure transaction directory: {error}"))?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            // The runtime base itself is missing (never in a normal
+            // launch — the launcher owns it). Recreate the chain, but
+            // harden only the transaction subdirectory this writer owns;
+            // the shared parent keeps whatever permissions it has.
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("could not create transaction directory: {error}"))?;
+            fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
+                .map_err(|error| format!("could not secure transaction directory: {error}"))?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+            let metadata = fs::symlink_metadata(parent)
+                .map_err(|error| format!("could not inspect transaction directory: {error}"))?;
+            if !metadata.is_dir() || metadata.file_type().is_symlink() {
+                return Err("transaction directory must be a real directory".to_string());
+            }
+        }
+        Err(error) => {
+            return Err(format!("could not create transaction directory: {error}"));
+        }
     }
-    fs::set_permissions(parent, fs::Permissions::from_mode(0o700))
-        .map_err(|error| format!("could not secure transaction directory: {error}"))?;
     if let Ok(metadata) = fs::symlink_metadata(path) {
         if metadata.file_type().is_symlink() || !metadata.is_file() {
             return Err("transaction path must be a regular file".to_string());
@@ -297,7 +339,7 @@ mod tests {
     fn writes_transaction_state_atomically_and_durably() {
         let directory = tempfile::tempdir().expect("temporary directory");
         allow_test_transaction_base(directory.path());
-        let path = directory.path().join("transaction.json");
+        let path = directory.path().join("txn").join("transaction.json");
         let state: TransactionState = serde_json::from_value(serde_json::json!({
             "status": "partitioning",
             "phase": "storage",
@@ -320,7 +362,7 @@ mod tests {
     fn writes_failure_summary_with_recovery_marker_and_history() {
         let directory = tempfile::tempdir().expect("temporary directory");
         allow_test_transaction_base(directory.path());
-        let path = directory.path().join("failure.json");
+        let path = directory.path().join("txn").join("failure.json");
         let state: TransactionState = serde_json::from_value(serde_json::json!({
             "transaction_id": "native-test",
             "job_id": 7,
@@ -372,7 +414,16 @@ mod tests {
                 "{raw}: unexpected error: {error}"
             );
         }
-        // The production base itself stays accepted.
-        assert!(safe_transaction_path("/run/kyth-installer/transaction.json").is_ok());
+        // Files directly under the shared runtime dir are rejected too:
+        // the writer must never touch that directory's permissions, so
+        // transaction state lives in the dedicated `txn` subdirectory.
+        let shared_parent = safe_transaction_path("/run/kyth-installer/transaction.json")
+            .expect_err("shared runtime dir must not hold transaction files");
+        assert!(
+            shared_parent.contains("txn"),
+            "unexpected error: {shared_parent}"
+        );
+        // The production subdirectory stays accepted.
+        assert!(safe_transaction_path("/run/kyth-installer/txn/transaction.json").is_ok());
     }
 }

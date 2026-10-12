@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 const api = await readFile(new URL("../src/api.ts", import.meta.url), "utf8");
 const app = await readFile(new URL("../src/InstallerApp.tsx", import.meta.url), "utf8");
 const native = await readFile(new URL("../src-tauri/src/native_main.rs", import.meta.url), "utf8");
+const tauriShell = await readFile(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
 const slint = await readFile(new URL("../src-tauri/ui/installer.slint", import.meta.url), "utf8");
 
 test("API adapter decodes JSON responses", () => {
@@ -75,10 +76,14 @@ test("offline warning matches the selected image source requirement", () => {
 });
 
 test("installer auth, navigation, and progress stream fail safely", () => {
-  assert.match(api, /Authorization: "Bearer " \+ value\.bootstrap_token/);
+  // M2: session tokens never reach JS — all Tauri-shell requests go through
+  // the Rust `installer_request` proxy, which attaches the token from Rust state.
+  assert.match(api, /invoke.*\"installer_request\"/);
+  assert.doesNotMatch(api, /bootstrap_token/);
+  assert.doesNotMatch(api, /session_token/);
   assert.match(api, /EventSource reconnects automatically/);
   assert.match(api, /readyState === EventSource\.CLOSED/);
-  assert.match(app, /name === "install" \|\| step === "install"/);
+  assert.match(app, /const canNavigate = step !== "install" && name !== "install"/);
   assert.match(app, /name !== "install"/);
 });
 test("React account and hostname rules match the shared installer contract", async () => {
@@ -91,4 +96,15 @@ test("React account and hostname rules match the shared installer contract", asy
   assert.ok(app.includes(`/^${rules.USERNAME_REGEX}$/.test(request.username)`), "username regex drifted from validation_rules.json");
   assert.ok(app.includes("/^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$/.test(request.hostname)"), "hostname regex drifted from validation_rules.json");
   assert.ok(!app.includes("[A-Za-z0-9][A-Za-z0-9_-]{0,31}"), "the old permissive username regex is back");
+});
+
+test("installer prompts for network setup first and exposes only fixed Wi-Fi picker commands", () => {
+  assert.match(app, /const steps = \["network", "welcome"/);
+  assert.match(app, /step === "network"/);
+  assert.match(app, /installerApi\.openNetworkSelector/);
+  assert.match(api, /installer_open_network_selector/);
+  assert.match(tauriShell, /fn network_selector_candidates/);
+  assert.match(tauriShell, /plasmawindowed/);
+  assert.match(tauriShell, /kcmshell6/);
+  assert.match(tauriShell, /installer_open_network_selector/);
 });

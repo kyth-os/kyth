@@ -148,3 +148,35 @@ fn systemd_activation_failure_is_returned_to_the_caller() {
         "failed activation should preserve safe systemctl diagnostics"
     );
 }
+
+#[test]
+fn flatpak_trim_applies_timer_lifecycle_on_on_apply_and_off() {
+    // Regression: the old dispatcher reported success without enabling the generated timer.
+    let directory = tempdir().unwrap();
+
+    for action in ["on", "apply", "off", "apply"] {
+        let output = run_tunable(directory.path(), "flatpak-trim", action, None);
+        assert!(
+            output.status.success(),
+            "flatpak-trim {action} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let log = fs::read_to_string(directory.path().join("systemctl.log")).unwrap_or_default();
+    assert_eq!(
+        log.lines().collect::<Vec<_>>(),
+        vec![
+            "daemon-reload",
+            "enable kyth-flatpak-trim.timer",
+            "restart kyth-flatpak-trim.timer",
+            "daemon-reload",
+            "enable kyth-flatpak-trim.timer",
+            "restart kyth-flatpak-trim.timer",
+            "disable --now kyth-flatpak-trim.timer",
+            "stop kyth-flatpak-trim.service",
+            "daemon-reload",
+        ],
+        "flatpak-trim must activate regenerated timers and deactivate before removal"
+    );
+}

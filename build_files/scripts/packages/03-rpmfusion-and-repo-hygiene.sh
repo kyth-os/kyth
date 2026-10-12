@@ -2,21 +2,48 @@
 # shellcheck shell=bash
 set -euo pipefail
 
-# Add rpmfusion free and nonfree repositories for Fedora 44.
+# Add rpmfusion free and nonfree repositories for Fedora 45.
 # The release RPMs ship and install the GPG key themselves — this is the
 # standard RPM Fusion bootstrap pattern; there is no separately hosted key
 # URL to pre-import (unlike Brave/Negativo17).
+#
+# SECURITY: the bootstrap RPMs are fetched over TLS and then verified against
+# pinned SHA256 hashes before install. A compromised bootstrap could otherwise
+# point `gpgkey` at an attacker key, subverting all later "verified" installs.
+# These hashes are byte-stable per Fedora release; bump them on releasever
+# change (verify against https://rpmfusion.org/Configuration).
+#   rpmfusion-free-release-45.noarch.rpm
+RPMFUSION_FREE_SHA256="a120c2a2c70ec2c8ad461908aacf316998b03f6b2156c143b772052972e80a95"
+#   rpmfusion-nonfree-release-45.noarch.rpm
+RPMFUSION_NONFREE_SHA256="0cb381899827136c92be41a068e6177982bda36ce594729c0bf6f4fa485a15a9"
 # Fail loudly: later codec installs must not silently drop freeworld packages
 # when RPM Fusion is missing.
 fedora_release="$(rpm -E %fedora)"
+tmp_rpmfusion="$(mktemp -d)"
+# shellcheck disable=SC2064
+trap "rm -rf '${tmp_rpmfusion}'" EXIT
+curl -fsSL --retry 3 \
+	"https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_release}.noarch.rpm" \
+	-o "${tmp_rpmfusion}/rpmfusion-free-release.rpm"
+curl -fsSL --retry 3 \
+	"https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_release}.noarch.rpm" \
+	-o "${tmp_rpmfusion}/rpmfusion-nonfree-release.rpm"
+if [[ "${fedora_release}" == "45" ]]; then
+	echo "${RPMFUSION_FREE_SHA256}  ${tmp_rpmfusion}/rpmfusion-free-release.rpm" | sha256sum -c - \
+		|| { echo "ERROR: rpmfusion-free-release checksum mismatch; refusing to install." >&2; exit 1; }
+	echo "${RPMFUSION_NONFREE_SHA256}  ${tmp_rpmfusion}/rpmfusion-nonfree-release.rpm" | sha256sum -c - \
+		|| { echo "ERROR: rpmfusion-nonfree-release checksum mismatch; refusing to install." >&2; exit 1; }
+else
+	echo "WARNING: no pinned checksum for Fedora ${fedora_release}; installing RPM Fusion bootstrap on TLS trust only." >&2
+fi
 dnf5 install -y \
 	--setopt=retries=10 \
 	--setopt=timeout=120 \
-	"https://download1.rpmfusion.org/free/fedora/rpmfusion-free-release-${fedora_release}.noarch.rpm" \
-	"https://download1.rpmfusion.org/nonfree/fedora/rpmfusion-nonfree-release-${fedora_release}.noarch.rpm"
+	"${tmp_rpmfusion}/rpmfusion-free-release.rpm" \
+	"${tmp_rpmfusion}/rpmfusion-nonfree-release.rpm"
 rpm -q rpmfusion-free-release rpmfusion-nonfree-release
 
-# Fedora 44 transitions can leave debug/source repo metalinks unpublished or
+# Fedora 45 transitions can leave debug/source repo metalinks unpublished or
 # intermittently unavailable. We never install from those repos in image builds,
 # so disable them up front to avoid noisy 404s and brittle solver behavior.
 #

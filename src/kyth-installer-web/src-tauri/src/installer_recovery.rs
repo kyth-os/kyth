@@ -319,8 +319,8 @@ mod tests {
         assert!(export_logs(RecoveryExportInput {
             usb_mount: "/tmp/../etc".to_string(),
             log_path: "/run/kyth-installer/log".to_string(),
-            transaction_path: "/run/kyth-installer/transaction.json".to_string(),
-            failure_summary_path: "/run/kyth-installer/failure.json".to_string(),
+            transaction_path: "/run/kyth-installer/txn/transaction.json".to_string(),
+            failure_summary_path: "/run/kyth-installer/txn/failure.json".to_string(),
         })
         .is_err());
     }

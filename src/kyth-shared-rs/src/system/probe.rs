@@ -87,6 +87,14 @@ pub fn has_default_route() -> bool {
     has_default_route_in(&v4, &v6)
 }
 
+/// Sections the boot-time system probe (`kyth-probe --system`) defers: the
+/// network-backed collectors stay off the boot-critical path (P1). The user
+/// timer refreshes them within 10 minutes of login, and readers fall back
+/// to a live query for a missing section.
+pub fn deferred_system_sections() -> &'static [&'static str] {
+    &["flatpak-updates"]
+}
+
 /// Fresh-enough system-cache sections for the user timer: the user run merges
 /// these into its own cache instead of re-collecting expensive/system-owned
 /// data (bootc status, flatpak listings, hardware). TTL-honored — stale or
@@ -297,25 +305,38 @@ fn collect_flatpak_apps() -> Value {
     Value::Array(apps.into_iter().map(Value::String).collect())
 }
 
+fn flatpak_updates_for_scope(scope: &'static str) -> Option<i64> {
+    command_output(
+        "flatpak",
+        &["remote-ls", "--updates", scope, "--columns=application"],
+        30,
+    )
+    .map(|output| {
+        output
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .count() as i64
+    })
+}
+
 fn collect_flatpak_updates() -> Value {
-    let mut total = 0i64;
-    let mut succeeded = false;
-    for scope in ["--system", "--user"] {
-        if let Some(output) = command_output(
-            "flatpak",
-            &["remote-ls", "--updates", scope, "--columns=application"],
-            30,
-        ) {
-            succeeded = true;
-            total += output
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .count() as i64;
+    // P1/P9: the two network-backed scope queries run concurrently instead
+    // of sequentially (30s timeout each); the boot-time system probe skips
+    // this section entirely (see probe_bin --system).
+    let (system, user) = std::thread::scope(|scope| {
+        let system_handle = scope.spawn(|| flatpak_updates_for_scope("--system"));
+        let user_handle = scope.spawn(|| flatpak_updates_for_scope("--user"));
+        (
+            system_handle.join().unwrap_or(None),
+            user_handle.join().unwrap_or(None),
+        )
+    });
+    match (system, user) {
+        (None, None) => Value::Null,
+        (system_count, user_count) => {
+            Value::from(system_count.unwrap_or(0) + user_count.unwrap_or(0))
         }
     }
-    succeeded
-        .then_some(Value::from(total))
-        .unwrap_or(Value::Null)
 }
 
 fn collect_hardware() -> Option<(Value, Value)> {
@@ -362,99 +383,154 @@ pub fn collect_snapshot() -> serde_json::Map<String, Value> {
 /// [`collect_snapshot`], skipping `skip`: the user timer passes the keys it
 /// already has fresh from the system cache so expensive sections (bootc,
 /// flatpak, hardware) are not collected twice per cycle.
+///
+/// Independent sections are collected on worker threads (`std::thread::scope`
+/// borrows the caller's stack, so no `'static` bounds leak into the
+/// collectors): the cycle's wall time is the slowest section, not the sum.
+/// A panicking section only drops its own keys — consistent with the
+/// collector's "failure is JSON null" contract.
 pub fn collect_snapshot_skipping(skip: &[&str]) -> serde_json::Map<String, Value> {
-    let mut sections = serde_json::Map::new();
     let skipped = |key: &str| skip.contains(&key);
-    if !["bootc-status-data", "bootc-status-text", "bootc-branch"]
+    // One active-operation (`ps`) scan shared by both bootc fetches, and one
+    // default-route check shared by the networked sections (P2).
+    let bootc_needed = !["bootc-status-data", "bootc-status-text", "bootc-branch"]
         .iter()
-        .all(|key| skipped(key))
-    {
-        let status_data = crate::system::bootc_query::fetch_status_data();
-        let status_text = crate::system::bootc_query::fetch_status_text();
-        let reference = status_data
-            .as_ref()
-            .and_then(crate::system::bootc_query::image_reference_from_status)
-            .or_else(|| {
-                crate::system::bootc_query::image_reference_from_status_with_output(
-                    &status_data.clone().unwrap_or(Value::Null),
-                    &status_text,
-                )
-            });
-        if !skipped("bootc-status-data") {
-            sections.insert(
-                "bootc-status-data".into(),
-                status_data.unwrap_or(Value::Null),
-            );
-        }
-        if !skipped("bootc-status-text") {
-            sections.insert("bootc-status-text".into(), Value::String(status_text));
-        }
-        if !skipped("bootc-branch") {
-            sections.insert(
-                "bootc-branch".into(),
-                crate::system::bootc_policy::branch_from_ref(reference.as_deref())
-                    .map(Value::String)
-                    .unwrap_or(Value::Null),
-            );
-        }
-    }
-    if !skipped("kernel-flavor") {
-        sections.insert(
-            "kernel-flavor".into(),
-            Value::String(crate::system::bootc::current_kernel_flavor()),
-        );
-    }
-    if !skipped("flatpak-apps") {
-        sections.insert("flatpak-apps".into(), collect_flatpak_apps());
-    }
-    if !(skipped("flatpak-updates") && skipped("network-summary")) && has_default_route() {
-        if !skipped("flatpak-updates") {
-            sections.insert("flatpak-updates".into(), collect_flatpak_updates());
-        }
-        if !skipped("network-summary") {
-            sections.insert(
-                "network-summary".into(),
-                serde_json::to_value(crate::system::network_identity::get_network_identity())
-                    .unwrap_or(Value::Null),
-            );
-        }
-    }
-    if !["nvidia-detect", "hardware-summary", "display-detect"]
-        .iter()
-        .all(|key| skipped(key))
-    {
-        if let Some((nvidia, hardware)) = collect_hardware() {
-            if !skipped("nvidia-detect") {
-                sections.insert("nvidia-detect".into(), nvidia);
-            }
-            if !skipped("hardware-summary") {
-                sections.insert("hardware-summary".into(), hardware.clone());
-            }
-            if !skipped("display-detect") {
-                sections.insert("display-detect".into(), hardware);
-            }
-        } else {
-            for key in ["nvidia-detect", "hardware-summary", "display-detect"] {
-                if !skipped(key) {
-                    sections.insert(key.into(), Value::Null);
+        .all(|key| skipped(key));
+    let active = bootc_needed && crate::system::bootc_query::active_operation().is_some();
+    let online = !(skipped("flatpak-updates") && skipped("network-summary")) && has_default_route();
+
+    let mut sections = serde_json::Map::new();
+    std::thread::scope(|scope| {
+        let mut handles = Vec::new();
+
+        if bootc_needed {
+            handles.push(scope.spawn(|| {
+                let mut out: Vec<(String, Value)> = Vec::new();
+                let status_data = crate::system::bootc_query::fetch_status_data_with_active(active);
+                // P2: the text form is only a fallback for bootc versions
+                // whose JSON cannot resolve the image reference — the common
+                // case runs one `bootc status`, not two.
+                let reference = status_data
+                    .as_ref()
+                    .and_then(crate::system::bootc_query::image_reference_from_status);
+                let status_text = if status_data.is_none() || reference.is_none() {
+                    crate::system::bootc_query::fetch_status_text_with_active(active)
+                } else {
+                    String::new()
+                };
+                let reference = reference.or_else(|| {
+                    crate::system::bootc_query::image_reference_from_status_with_output(
+                        &status_data.clone().unwrap_or(Value::Null),
+                        &status_text,
+                    )
+                });
+                if !skipped("bootc-status-data") {
+                    out.push((
+                        "bootc-status-data".into(),
+                        status_data.unwrap_or(Value::Null),
+                    ));
                 }
+                if !skipped("bootc-status-text") && !status_text.is_empty() {
+                    out.push(("bootc-status-text".into(), Value::String(status_text)));
+                }
+                if !skipped("bootc-branch") {
+                    out.push((
+                        "bootc-branch".into(),
+                        crate::system::bootc_policy::branch_from_ref(reference.as_deref())
+                            .map(Value::String)
+                            .unwrap_or(Value::Null),
+                    ));
+                }
+                out
+            }));
+        }
+
+        if !skipped("kernel-flavor") {
+            handles.push(scope.spawn(|| {
+                vec![(
+                    "kernel-flavor".to_string(),
+                    Value::String(crate::system::bootc::current_kernel_flavor()),
+                )]
+            }));
+        }
+
+        if !skipped("flatpak-apps") {
+            handles
+                .push(scope.spawn(|| vec![("flatpak-apps".to_string(), collect_flatpak_apps())]));
+        }
+
+        if online {
+            handles.push(scope.spawn(|| {
+                let mut out: Vec<(String, Value)> = Vec::new();
+                if !skipped("flatpak-updates") {
+                    out.push(("flatpak-updates".to_string(), collect_flatpak_updates()));
+                }
+                if !skipped("network-summary") {
+                    out.push((
+                        "network-summary".to_string(),
+                        serde_json::to_value(
+                            crate::system::network_identity::get_network_identity(),
+                        )
+                        .unwrap_or(Value::Null),
+                    ));
+                }
+                out
+            }));
+        }
+
+        if !["nvidia-detect", "hardware-summary", "display-detect"]
+            .iter()
+            .all(|key| skipped(key))
+        {
+            handles.push(scope.spawn(|| {
+                let mut out: Vec<(String, Value)> = Vec::new();
+                if let Some((nvidia, hardware)) = collect_hardware() {
+                    if !skipped("nvidia-detect") {
+                        out.push(("nvidia-detect".to_string(), nvidia));
+                    }
+                    if !skipped("hardware-summary") {
+                        out.push(("hardware-summary".to_string(), hardware.clone()));
+                    }
+                    if !skipped("display-detect") {
+                        out.push(("display-detect".to_string(), hardware));
+                    }
+                } else {
+                    for key in ["nvidia-detect", "hardware-summary", "display-detect"] {
+                        if !skipped(key) {
+                            out.push((key.to_string(), Value::Null));
+                        }
+                    }
+                }
+                out
+            }));
+        }
+
+        if !skipped("controllers-detect") {
+            handles.push(scope.spawn(|| {
+                vec![(
+                    "controllers-detect".to_string(),
+                    serde_json::to_value(crate::system::controllers::detect_controllers())
+                        .unwrap_or(Value::Null),
+                )]
+            }));
+        }
+
+        if !skipped("hardware-snapshot") {
+            handles.push(scope.spawn(|| {
+                vec![(
+                    "hardware-snapshot".to_string(),
+                    serde_json::to_value(crate::system::gpu::hardware_snapshot_section())
+                        .unwrap_or(Value::Null),
+                )]
+            }));
+        }
+
+        for handle in handles {
+            for (key, value) in handle.join().unwrap_or_default() {
+                sections.insert(key, value);
             }
         }
-    }
-    if !skipped("controllers-detect") {
-        sections.insert(
-            "controllers-detect".into(),
-            serde_json::to_value(crate::system::controllers::detect_controllers())
-                .unwrap_or(Value::Null),
-        );
-    }
-    if !skipped("hardware-snapshot") {
-        sections.insert(
-            "hardware-snapshot".into(),
-            serde_json::to_value(crate::system::gpu::hardware_snapshot_section())
-                .unwrap_or(Value::Null),
-        );
-    }
+    });
     sections
 }
 
@@ -613,6 +689,27 @@ mod tests {
     fn a_fully_fresh_cache_skips_all_expensive_snapshot_sections() {
         let sections = collect_snapshot_skipping(CACHEABLE_SECTIONS);
         assert!(sections.is_empty());
+    }
+
+    #[test]
+    fn deferred_system_sections_are_all_skippable_cache_keys() {
+        // P1: every deferred section must be a known cacheable key, or the
+        // boot probe could not actually skip it.
+        for section in deferred_system_sections() {
+            assert!(
+                CACHEABLE_SECTIONS.contains(section),
+                "{section} is deferred but not a cacheable section"
+            );
+        }
+        assert!(deferred_system_sections().contains(&"flatpak-updates"));
+    }
+
+    #[test]
+    fn skipped_sections_never_appear_in_the_parallel_snapshot() {
+        // Exercises the threaded collector: skipped keys must be absent even
+        // when every other section is collected live.
+        let sections = collect_snapshot_skipping(deferred_system_sections());
+        assert!(!sections.contains_key("flatpak-updates"));
     }
 
     #[test]

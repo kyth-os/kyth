@@ -183,3 +183,29 @@ pub mod windows_installer;
 pub mod windows_verify;
 pub mod work_cache;
 pub mod zswap;
+
+/// Returns true if test-mode path redirection is active.
+/// M2: KYTH_TEST_MODE redirects privileged config paths to user-controlled
+/// locations. Refuse test mode when running as root (euid 0) — a privileged
+/// process must never honor an environment variable that redirects its
+/// config file resolution. The KYTH_TEST_MODE_FORCE=1 override exists for
+/// the test harness only; it must never be set in production.
+pub fn test_mode_active() -> bool {
+    if std::env::var("KYTH_TEST_MODE").ok().as_deref() != Some("1") {
+        return false;
+    }
+    // Explicit test-harness override (never set in production).
+    if std::env::var("KYTH_TEST_MODE_FORCE").ok().as_deref() == Some("1") {
+        return true;
+    }
+    // euid 0 = privileged; test mode is for unprivileged testing only.
+    #[cfg(unix)]
+    {
+        // Use libc directly to avoid pulling in extra dependencies.
+        let euid = unsafe { libc::geteuid() };
+        if euid == 0 {
+            return false;
+        }
+    }
+    true
+}

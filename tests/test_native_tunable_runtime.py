@@ -45,14 +45,26 @@ class NativeTunableRuntimeTest(unittest.TestCase):
         runtime.mkdir(parents=True)
         home.mkdir(parents=True)
 
+        fake_bin = root / "empty-path"
+        fake_bin.mkdir()
+        # Generated tunables may manage systemd units; keep that boundary
+        # harmless while preserving the isolated command environment.
+        systemctl = fake_bin / "systemctl"
+        systemctl.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        systemctl.chmod(0o755)
+
         environment = os.environ.copy()
         environment.update(
             {
                 "HOME": str(home),
-                "PATH": str(root / "empty-path"),
+                "PATH": str(fake_bin),
                 "XDG_CONFIG_HOME": str(config),
                 "XDG_RUNTIME_DIR": str(runtime),
                 "KYTH_TEST_MODE": "1",
+                # Test harness runs as root; the FORCE override permits
+                # test-mode path redirection in the isolated test env.
+                # Never set in production.
+                "KYTH_TEST_MODE_FORCE": "1",
             }
         )
         return environment

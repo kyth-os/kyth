@@ -6,7 +6,7 @@
 
 export image_name := env("IMAGE_NAME", "kyth")
 export default_tag := env("DEFAULT_TAG", "latest")
-export bib_image := env("BIB_IMAGE", "quay.io/centos-bootc/bootc-image-builder:latest")
-# Default fetches the current tag; build_base/Dockerfile pins an exact digest
-# for reproducible builds and is intentionally not derived from this value.
-export default_base_image := env("BASE_IMAGE", "quay.io/fedora/fedora-kinoite:45")
+export bib_image := env("BIB_IMAGE", "quay.io/centos-bootc/bootc-image-builder@sha256:2b52843ea2bfda73b0a08d97e76b734393b1d3a804681b9fabb26723bd3a2f0b")
+# Default is digest-pinned to match build_base/Dockerfile for reproducible
+# builds. Override via BASE_IMAGE env (must be digest-qualified).
+export default_base_image := env("BASE_IMAGE", "quay.io/fedora/fedora-kinoite:45@sha256:2f5376ed2e2d3ac879092fb9d9df5d96ce03bb64c6c508064db5bf61565e30a3")

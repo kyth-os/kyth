@@ -76,7 +76,10 @@ jobs:
               exit 1
             fi
           done
-          sudo apt-get install -y --no-install-recommends file systemd
+          # validate.sh also compiles both Tauri crates' test targets.
+          # Match the shell jobs' prerequisites (GTK pulls in GLib/GObject dev files).
+          sudo apt-get install -y --no-install-recommends \
+            file systemd libwebkit2gtk-4.1-dev libgtk-3-dev libdbus-1-dev pkg-config build-essential
         shell: bash --noprofile --norc -euo pipefail {0}
 
       # The validation runner image provides rustup but does not guarantee a
@@ -98,6 +101,24 @@ jobs:
           else
             echo "::notice::Docker not available, skipping Dockerfile build check"
           fi
+        shell: bash --noprofile --norc -euo pipefail {0}
+
+      - name: Install Node for embedded frontend assets
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: |
+            src/kyth-hub-web/package-lock.json
+            src/kyth-installer-web/package-lock.json
+
+      # cargo test compiles generate_context!() too: both Tauri clients
+      # embed frontendDist and require real assets, not an empty placeholder.
+      - name: Build frontends for Rust test compilation
+        run: |
+          for frontend in src/kyth-hub-web src/kyth-installer-web; do
+            (cd "$frontend" && npm ci && npm run build)
+          done
         shell: bash --noprofile --norc -euo pipefail {0}
 
       - name: Run repository validation suite

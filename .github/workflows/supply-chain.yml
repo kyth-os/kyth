@@ -15,6 +15,8 @@ on:
         options:
           - latest
           - testing
+          - latest-cachy
+          - testing-cachy
       source_digest:
         description: Immutable image digest to process (required for manual runs)
         required: true
@@ -33,7 +35,7 @@ on:
         required: false
         type: string
       original_event:
-        description: Event that triggered the build workflow. Schedule-triggered stable publishes keep the manual approval gate.
+        description: Event that triggered the build workflow. Schedule-triggered stable publishes use the reviewer-free stable-release-auto environment; manual dispatches use stable-release (manual approval).
         required: false
         type: string
       original_actor:
@@ -135,7 +137,14 @@ jobs:
           build_files/scripts/validate-digest.sh "${BASE_DIGEST}"
           [[ "${UPSTREAM_BASE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)@sha256:[0-9a-f]{64}$ ]]
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
-          test "${KERNEL_FLAVOR}" = fedora
+          # Kernel flavor must match the tag: plain tags are fedora, -cachy
+          # tags are cachy. Both flavors get full supply-chain treatment
+          # (signing, SBOM, CVE scan); the ISO is only built from fedora.
+          if [[ "${TAG}" == *-cachy ]]; then
+            test "${KERNEL_FLAVOR}" = cachy
+          else
+            test "${KERNEL_FLAVOR}" = fedora
+          fi
 
           PREVIOUS_TAG="$(oras repo tags "${IMAGE}" \
             | grep -E "^${TAG}\.[0-9]{8}\.[0-9]+\.[0-9]+\.[0-9a-f]{8}$" \
@@ -302,7 +311,7 @@ jobs:
         run: |
           NOTES="image-changelog-${CURRENT_TAG}.md"
           BRANCH=main
-          if [[ "${SOURCE_TAG}" == "testing" ]]; then
+          if [[ "${SOURCE_TAG}" == "testing" || "${SOURCE_TAG}" == "testing-cachy" ]]; then
             BRANCH=testing
           fi
           GRYPE_ARGS=()
@@ -319,35 +328,6 @@ jobs:
             "${GRYPE_ARGS[@]}" \
             --output "${NOTES}"
           echo "path=${NOTES}" >> "$GITHUB_OUTPUT"
-
-      # The channel tag becomes available before the signature/attestation
-      # approval gate. Publish its digest-bound notes during preparation so
-      # users checking for that image never race the later gated publish job.
-      - name: Publish image changelog release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GH_REPO: ${{ github.repository }}
-          VERSION: ${{ steps.image.outputs.current_version }}
-          SOURCE_SHA: ${{ steps.image.outputs.source_sha }}
-          NOTES: ${{ steps.changelog.outputs.path }}
-          SOURCE_TAG: ${{ inputs.source_tag }}
-        run: |
-          RELEASE_TAG="image-${VERSION//./-}"
-          TITLE="Kyth Image - ${VERSION}"
-          PRERELEASE=""
-          if [[ "${SOURCE_TAG}" != "latest" ]]; then
-            PRERELEASE="--prerelease"
-          fi
-
-          if gh release view "${RELEASE_TAG}" &>/dev/null; then
-            gh release edit "${RELEASE_TAG}" --title "${TITLE}" --notes-file "${NOTES}" ${PRERELEASE}
-          else
-            gh release create "${RELEASE_TAG}" \
-              --target "${SOURCE_SHA}" \
-              --title "${TITLE}" \
-              --notes-file "${NOTES}" \
-              ${PRERELEASE}
-          fi
 
       - name: Package publish inputs
         env:
@@ -402,12 +382,12 @@ jobs:
     needs: prepare
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Stable publishes from scheduled rebuilds or the repository owner (push
-    # or manual dispatch) go through the reviewer-free stable-release-auto
-    # environment; only builds triggered by anyone else keep the manual
-    # approval gate on stable-release. Manual dispatches carry no original_*
-    # inputs, so fall back to the actor who dispatched this run.
-    environment: ${{ inputs.source_tag == 'testing' && 'testing-release' || (inputs.original_event == 'schedule' || (inputs.original_actor || github.actor) == github.repository_owner) && 'stable-release-auto' || 'stable-release' }}
+    # Stable publishes go through the manual approval gate on stable-release.
+    # The previous expression trusted `inputs.original_actor` (free-text on
+    # manual dispatch, forgeable by any write-collaborator) and compared a
+    # user login against the org name (never matches). Schedule-triggered
+    # rebuilds use the reviewer-free stable-release-auto environment.
+    environment: ${{ (inputs.source_tag == 'testing' || inputs.source_tag == 'testing-cachy') && 'testing-release' || (inputs.original_event == 'schedule' && 'stable-release-auto' || 'stable-release') }}
     permissions:
       actions: write
       contents: write
@@ -450,7 +430,7 @@ jobs:
           NOTES="$(jq -r .notes "${METADATA}")"
 
           [[ "${IMAGE}" =~ ^ghcr\.io/[a-z0-9._/-]+$ ]]
-          [[ "${TAG}" == "latest" || "${TAG}" == "testing" ]]
+          [[ "${TAG}" == "latest" || "${TAG}" == "testing" || "${TAG}" == "latest-cachy" || "${TAG}" == "testing-cachy" ]]
           [[ "${TAG}" == "${MATRIX_SOURCE_TAG}" ]]
           [[ "${SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
           [[ "${GITHUB_SHA_META}" =~ ^[0-9a-f]{40}$ ]]
@@ -459,7 +439,11 @@ jobs:
           [[ "${BUILD_BASE}" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-z0-9._-]+@sha256:[0-9a-f]{64}$ ]]
           [[ "${UPSTREAM_BASE}" =~ ^(ghcr\.io/ublue-os/kinoite-main:44|quay\.io/fedora/fedora-kinoite:45)@sha256:[0-9a-f]{64}$ ]]
           [[ "${THIRDPARTY_HASH}" =~ ^[0-9a-f]{16}$ ]]
-          test "${KERNEL_FLAVOR}" = fedora
+          if [[ "${TAG}" == *-cachy ]]; then
+            test "${KERNEL_FLAVOR}" = cachy
+          else
+            test "${KERNEL_FLAVOR}" = fedora
+          fi
           [[ "${SBOM}" == "$(basename "${SBOM}")" && -s "output/supply-chain/${SBOM}" ]]
           [[ "${NOTES}" == "$(basename "${NOTES}")" && -s "output/supply-chain/${NOTES}" ]]
 
@@ -481,6 +465,31 @@ jobs:
 
       - name: Setup Cosign
         uses: ./.github/actions/setup-cosign
+
+      # H1: verify build provenance BEFORE minting signatures. The old order
+      # signed first, then "verified" — the cosign verify trivially passed
+      # on signatures this job just created, making this a signing oracle
+      # for any digest a write-collaborator supplies via workflow_dispatch.
+      - name: Verify build provenance before signing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.meta.outputs.digest }}
+          GITHUB_SHA_META: ${{ steps.meta.outputs.github_sha }}
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if gh attestation verify "oci://${IMAGE}@${DIGEST}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/build.yml" \
+              --source-digest "${GITHUB_SHA_META}" \
+              --deny-self-hosted-runners; then
+              exit 0
+            fi
+            echo "Provenance not visible yet (attempt ${attempt}/5); retrying..."
+            sleep 10
+          done
+          echo "::error::Build provenance could not be verified for ${IMAGE}@${DIGEST} — refusing to sign"
+          exit 1
 
       - name: Sign container image
         env:
@@ -509,14 +518,12 @@ jobs:
           echo "digest=${SBOM_DIGEST}" >> "$GITHUB_OUTPUT"
           cosign sign -y "${IMAGE}@${SBOM_DIGEST}"
 
-      - name: Verify published signatures and build provenance
+      - name: Verify published signatures
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE: ${{ steps.meta.outputs.image }}
           DIGEST: ${{ steps.meta.outputs.digest }}
           SBOM_DIGEST: ${{ steps.attach_sbom.outputs.digest }}
-          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
-          GITHUB_SHA_META: ${{ steps.meta.outputs.github_sha }}
         run: |
           IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/supply-chain\\.yml@refs/heads/(main|testing)$"
           ISSUER="https://token.actions.githubusercontent.com"
@@ -529,20 +536,61 @@ jobs:
             --certificate-identity-regexp "${IDENTITY}" \
             --certificate-oidc-issuer "${ISSUER}" \
             "${IMAGE}@${SBOM_DIGEST}"
+          # Build provenance was verified BEFORE signing (see
+          # "Verify build provenance before signing" above).
 
-          for attempt in 1 2 3 4 5; do
-            if gh attestation verify "oci://${IMAGE}@${DIGEST}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/build.yml" \
-              --source-digest "${GITHUB_SHA_META}" \
-              --deny-self-hosted-runners; then
-              exit 0
-            fi
-            echo "Provenance not visible yet (attempt ${attempt}/5); retrying..."
-            sleep 10
-          done
-          echo "::error::Build provenance could not be verified for ${IMAGE}@${DIGEST}"
-          exit 1
+      # The changelog release now publishes here, inside the gated publish job
+      # AFTER signature verification — never from the ungated prepare job. A
+      # denied publish leaves no public release for an unverified image.
+      - name: Publish image changelog release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          SOURCE_SHA: ${{ steps.meta.outputs.source_sha }}
+          NOTES_FILE: output/supply-chain/${{ steps.meta.outputs.notes }}
+          SOURCE_TAG: ${{ inputs.source_tag }}
+        run: |
+          RELEASE_TAG="image-${VERSION//./-}"
+          TITLE="Kyth Image - ${VERSION}"
+          PRERELEASE=""
+          if [[ "${SOURCE_TAG}" != "latest" ]]; then
+            PRERELEASE="--prerelease"
+          fi
+
+          if gh release view "${RELEASE_TAG}" &>/dev/null; then
+            gh release edit "${RELEASE_TAG}" --title "${TITLE}" --notes-file "${NOTES_FILE}" ${PRERELEASE}
+          else
+            gh release create "${RELEASE_TAG}" \
+              --target "${SOURCE_SHA}" \
+              --title "${TITLE}" \
+              --notes-file "${NOTES_FILE}" \
+              ${PRERELEASE}
+          fi
+
+      # Promote the floating tag (testing/latest) to the verified digest ONLY
+      # after the changelog release exists. The build job pushes immutable
+      # tags only, so the Hub can never discover an update before its release
+      # notes are published. This also guarantees the floating tag never
+      # points at an unsigned/unscanned image.
+      #
+      # oras tag, NOT imagetools create: imagetools wraps a bare manifest in
+      # a freshly synthesized index, so the floating tag would resolve to a
+      # NEW digest that matches nothing — not the cosign signature, not the
+      # SBOM referrer's subject, and not the digest printed in the release
+      # body. That broke the CVE scan's SBOM lookup and the Hub's
+      # release-notes matching (both keyed by digest). oras tag points the
+      # tag at the exact verified digest, manifest or index alike.
+      - name: Promote floating tag to verified digest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.meta.outputs.image }}
+          DIGEST: ${{ steps.meta.outputs.digest }}
+          FLOATING_TAG: ${{ inputs.source_tag }}
+        run: |
+          set -euo pipefail
+          oras tag "${IMAGE}@${DIGEST}" "${FLOATING_TAG}"
+          echo "Promoted ${IMAGE}:${FLOATING_TAG} to ${DIGEST}"
 
       - name: Dispatch Live ISO after image verification
         if: inputs.dispatch_iso == 'true' || inputs.dispatch_iso == true
@@ -556,7 +604,7 @@ jobs:
               "source_tag": ${{ toJSON(inputs.source_tag) }},
               "source_digest": ${{ toJSON(inputs.source_digest) }},
               "source_sha": ${{ toJSON(inputs.source_sha) }},
-              "run_acceptance": "${{ inputs.source_tag == 'latest' && 'true' || 'false' }}"
+              "run_acceptance": "false"
             }
 
       - name: Trigger CVE scan

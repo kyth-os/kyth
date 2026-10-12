@@ -111,6 +111,55 @@ class ShippedCommandContracts(unittest.TestCase):
         self.assertIn("hub", keywords)
         self.assertNotIn("pulse", keywords)
 
+    def test_hub_runtime_window_icons_use_the_launcher_branding(self):
+        import hashlib
+        import json
+
+        tauri_dir = ROOT / "src/kyth-hub-web/src-tauri"
+        config = json.loads((tauri_dir / "tauri.conf.json").read_text(encoding="utf-8"))
+        expected_icons = {
+            "icons/32x32.png": "da17e2678a1be6e0c73ef2b2df83374d5361a94a2d8ac17668265edf19b1292d",
+            "icons/128x128.png": "f928da798928fc24282f6ee9f7e03d6551706093da05963e7c699c1f5c574cc9",
+            "icons/128x128@2x.png": "3799230a74b60a309ab7a75a7099a09214c915a8c1b352836bd3a3fdd47a182e",
+            "icons/icon.png": "ab0db7b8974e9d4f0b4dc2f867ed877ff5e4d805dc149870787161e630b6ff02",
+        }
+        self.assertEqual(set(config["bundle"]["icon"]), set(expected_icons))
+        for relative_path, expected_digest in expected_icons.items():
+            with self.subTest(icon=relative_path):
+                actual = hashlib.sha256((tauri_dir / relative_path).read_bytes()).hexdigest()
+                self.assertEqual(
+                    actual,
+                    expected_digest,
+                    "Hub's runtime window icon must match the Kyth launcher art",
+                )
+
+    def test_hub_wayland_app_id_resolves_to_hidden_desktop_entry(self):
+        import json
+
+        tauri_conf = ROOT / "src/kyth-hub-web/src-tauri/tauri.conf.json"
+        app_id = json.loads(tauri_conf.read_text(encoding="utf-8"))["identifier"]
+        alias = ROOT / "src/kyth-hub-web/src/data" / f"{app_id}.desktop"
+        self.assertTrue(alias.is_file(), "ship a desktop entry named for the Wayland app-id")
+
+        parser = configparser.ConfigParser(interpolation=None, strict=False)
+        parser.read(alias, encoding="utf-8")
+        entry = parser["Desktop Entry"]
+        self.assertEqual(entry.get("nodisplay", "").lower(), "true")
+        main = configparser.ConfigParser(interpolation=None, strict=False)
+        main.read(ROOT / "src/kyth-hub-web/src/data/kyth-welcome.desktop", encoding="utf-8")
+        self.assertEqual(entry["exec"], main["Desktop Entry"]["exec"])
+        self.assertEqual(entry["icon"], main["Desktop Entry"]["icon"])
+        self.assertEqual(entry["startupwmclass"], app_id)
+
+        installer = (
+            BUILD_FILES / "scripts/branding/23-kyth-helper-ctx-installs.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn(
+            f'${{_hub_data_src}}/{app_id}.desktop', installer,
+            "install the Wayland app-id alias beside the visible launcher",
+        )
+        self.assertIn(f"/usr/share/applications/{app_id}.desktop", installer)
+
     def test_hub_desktop_entries_match_tauri_app_id(self):
         # Regression pin: Tauri defaults enableGTKAppId to false, which leaves
         # the Hub without its own GTK/Wayland app-id. Enable it and keep every
@@ -208,7 +257,10 @@ class BuildAssemblyContracts(unittest.TestCase):
         dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
         builder = dockerfile[:dockerfile.index("# Base Image")]
         self.assertIn("COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json", builder)
-        self.assertIn("COPY src/kyth-hub-web /build/kyth-hub-web", builder)
+        # Manifests are copied first for the npm-ci cache layer, then the
+        # full tree — both must be present so the embedded assets exist.
+        self.assertIn("COPY src/kyth-hub-web/package.json src/kyth-hub-web/package-lock.json ./", builder)
+        self.assertIn("COPY src/kyth-hub-web ./", builder)
         self.assertNotIn("COPY src/kyth-welcome", builder)
         self.assertNotIn("source=src/kyth-welcome", builder)
         self.assertIn("src/data/compat_games.json", builder)
@@ -640,6 +692,112 @@ class BuildAssemblyContracts(unittest.TestCase):
         self.assertIn("KYTH_SOURCE_DIGEST=%s", build)
         self.assertIn("Gate ISO size (8.5 GiB max)", iso_workflow)
         self.assertIn('"${cosign_bin}" verify', build)
+
+    def test_builder_cargo_targets_use_cache_mounts(self):
+        """Rust rebuilds must be incremental: every cargo target dir in the
+        container builds rides on a cache mount, not a throwaway layer dir."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        builder = dockerfile.split("# Base Image", 1)[0]
+        self.assertIn("id=kyth-shared-rs-target,target=/build/kyth-shared-rs/target", builder)
+        self.assertIn("id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target", builder)
+        installer = (ROOT / "installer" / "Containerfile").read_text(encoding="utf-8")
+        self.assertIn("target=/build/kyth-installer-web/src-tauri/target", installer)
+
+    def test_npm_ci_is_its_own_manifest_gated_layer(self):
+        """`npm ci` must re-run only when the JS manifests change, never as
+        part of a combined install+build step invalidated by source edits."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        builder = dockerfile.split("# Base Image", 1)[0]
+        self.assertIn(
+            "COPY src/kyth-hub-web/package.json src/kyth-hub-web/package-lock.json ./",
+            builder,
+        )
+        # The `npm ci` RUN must be a standalone layer: no line may combine
+        # it with `npm run build` (the old `npm ci && npm run build` form).
+        ci_lines = [
+            line for line in builder.splitlines()
+            if "npm ci" in line and not line.strip().startswith("#")
+        ]
+        self.assertTrue(ci_lines, "no npm ci layer in hub-web-builder")
+        for line in ci_lines:
+            self.assertNotIn("npm run build", line)
+
+    def test_rust_binaries_copy_after_package_install_layers(self):
+        """A Rust-only change must not invalidate the expensive package
+        install/upgrade layers: every COPY --from=hub-web-builder except the
+        three build-time dependencies must sit below the upgrade layer.
+        kyth-build-support is invoked by package fragments during
+        packages-static.sh; /ctx/kyth-vscode-wallet is executed by a
+        sysconfig-static fragment — both stay copied early by necessity.
+        kyth-tunable-rs stays early per the packaging contract (it must be
+        installed before sysconfig-static.sh runs).
+        The support-binary block must additionally precede the sysconfig.sh
+        layer, which executes kyth-fix-system-accounts at build time."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        main = dockerfile.split("FROM ${BASE_IMAGE}", 1)[1]
+        lines = main.splitlines()
+        upgrade_idx = next(
+            i for i, line in enumerate(lines) if "mesa-git.sh" in line and line.strip().startswith("RUN")
+        )
+        sysconfig_idx = next(
+            i for i, line in enumerate(lines) if "bash /ctx/sysconfig.sh" in line
+        )
+        copies = [
+            (i, line) for i, line in enumerate(lines)
+            if line.startswith("COPY --from=hub-web-builder")
+            and "kyth-build-support" not in line
+            and "/ctx/kyth-vscode-wallet" not in line
+            and "kyth-tunable-rs" not in line
+        ]
+        self.assertTrue(copies, "no COPY --from=hub-web-builder lines found")
+        for i, line in copies:
+            self.assertGreater(
+                i, upgrade_idx,
+                f"binary COPY at/above the upgrade layer reintroduces Rust invalidation: {line[:70]}",
+            )
+        # The support binaries sysconfig.sh needs at build time.
+        self.assertIn(
+            "COPY --from=hub-web-builder --chmod=0755 /build/kyth-fix-system-accounts",
+            "\n".join(lines[:sysconfig_idx]),
+        )
+
+    def test_build_time_executed_binaries_are_copied_first(self):
+        """Binaries executed during the build must be COPY'd before the RUN
+        that needs them: /ctx/kyth-vscode-wallet is executed by a
+        sysconfig-static fragment, kyth-fix-system-accounts by sysconfig.sh."""
+        dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+        main = dockerfile.split("FROM ${BASE_IMAGE}", 1)[1]
+        lines = main.splitlines()
+        wallet_copy = next(
+            i for i, line in enumerate(lines)
+            if line.startswith("COPY --from=hub-web-builder") and "/ctx/kyth-vscode-wallet" in line
+        )
+        static_idx = next(
+            i for i, line in enumerate(lines) if "bash /ctx/sysconfig-static.sh" in line
+        )
+        self.assertLess(
+            wallet_copy, static_idx,
+            "sysconfig-static.sh executes /ctx/kyth-vscode-wallet via its fragments; the COPY must precede it",
+        )
+        support_copy = next(
+            i for i, line in enumerate(lines)
+            if line.startswith("COPY --from=hub-web-builder") and "kyth-build-support" in line
+        )
+        packages_idx = next(
+            i for i, line in enumerate(lines) if "bash /ctx/packages-static.sh" in line
+        )
+        self.assertLess(
+            support_copy, packages_idx,
+            "package fragments invoke kyth-build-support; the COPY must precede packages-static.sh",
+        )
+
+    def test_build_context_excludes_rust_and_node_artifacts(self):
+        """target/ and node_modules/ must never enter the build context:
+        they are huge and the builder stages compile fresh."""
+        for ignore in (ROOT / ".dockerignore", ROOT / ".containerignore"):
+            text = ignore.read_text(encoding="utf-8")
+            self.assertIn("**/target/", text, f"{ignore.name} must exclude Rust target dirs")
+            self.assertIn("**/node_modules/", text, f"{ignore.name} must exclude node_modules")
 
 
 if __name__ == "__main__":

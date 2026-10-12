@@ -30,6 +30,22 @@ ExecStart=/usr/bin/kyth-backup
 Nice=10
 IOSchedulingClass=best-effort
 IOSchedulingPriority=7
+# Sandboxing: user-context backup (restic + btrfs). Needs full /home read and
+# USB write targets; ProtectHome is intentionally not applied.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallFilter=@system-service
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
 BACKUP_SERVICE
 cat >/usr/lib/systemd/user/kyth-backup.timer <<'BACKUP_TIMER'
 [Unit]

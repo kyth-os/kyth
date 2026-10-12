@@ -18,6 +18,13 @@ RestartSec=5
 # subsystem's own control process. Memory ceiling only, as a leak safety net.
 MemoryHigh=384M
 MemoryMax=512M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+SystemCallFilter=@system-service
+RestrictAddressFamilies=AF_UNIX
 
 [Install]
 WantedBy=multi-user.target

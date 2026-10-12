@@ -22,15 +22,31 @@ ARG BASE_IMAGE=localhost/kyth-base:stable
 # *dev* context that ignores frontendDist and points the webview at devUrl,
 # and the plain `cargo build --release` below has no way to opt in the way
 # `tauri build` does. See that Cargo.toml's [features] comment.
-FROM registry.fedoraproject.org/fedora:44@sha256:48628b48e6d033c1c5ed5adc7ce440b1d9906e349560ad9f57ef0b0beae78c84 AS hub-web-builder
+FROM registry.fedoraproject.org/fedora:45@sha256:cc55518dc3593184519ae4184a814a26d6405b42713762d57353659fd7105445 AS hub-web-builder
 RUN dnf5 install -y --setopt=install_weak_deps=False --skip-unavailable \
         cargo rust nodejs npm gcc gcc-c++ pkgconf-pkg-config \
         webkit2gtk4.1-devel javascriptcoregtk4.1-devel libsoup3-devel gtk3-devel dbus-devel && \
     dnf5 clean all
+# ── Build invalidation domains: frontend vs Rust ──────────────────────────
+# Dependency manifests are copied before any source so `npm ci` re-runs only
+# when the JS manifests change — a frontend source edit skips straight to the
+# `npm run build` layer. Rust sources enter the stage only after the frontend
+# build completes, so a Rust-only change leaves `npm ci` and `npm run build`
+# cache-hit and re-runs just the cargo build below (incremental via the
+# kyth-shared-rs-target cache mount). The cargo build is the single join
+# point: the Tauri binary embeds the frontend dist/ via frontendDist.
+WORKDIR /build/kyth-hub-web
+COPY src/kyth-hub-web/package.json src/kyth-hub-web/package-lock.json ./
+RUN --mount=type=cache,id=kyth-hub-web-npm,target=/root/.npm \
+    npm ci
+# The Hub embeds `src/data/compat_games.json` from its own source tree. The
+# retired Python service tree is not copied into the builder or final image.
+COPY src/kyth-hub-web ./
+RUN npm run build
 # kyth-shared-rs is a sibling of kyth-hub-web (src/kyth-shared-rs, not
 # under src/kyth-hub-web) — src-tauri's Cargo.toml depends on it via a
 # `../../kyth-shared-rs` path dependency, so it needs copying to the same
-# relative position here, not folded into the kyth-hub-web COPY below.
+# relative position here, not folded into the kyth-hub-web COPY above.
 # Release size policy lives in src/kyth-shared-rs/Cargo.toml
 # ([profile.release]: strip + LTO + opt-z); the `--release` builds below
 # inherit it automatically — do not add per-invocation RUSTFLAGS that would
@@ -47,9 +63,6 @@ COPY src/kyth-shared-rs /build/kyth-shared-rs
 # real-repo checkout `cargo test`/check-hub-web-shell.sh build against
 # directly).
 COPY build_files/exe-handler-apps.json /build_files/exe-handler-apps.json
-# The Hub embeds `src/data/compat_games.json` from its own source tree. The
-# retired Python service tree is not copied into the builder or final image.
-COPY src/kyth-hub-web /build/kyth-hub-web
 # glib is a path dependency on the vendored third_party/gtk-glib-0.18.5
 # backport (see src/kyth-hub-web/src-tauri/Cargo.toml). The builder layout is
 # one level shallower than the repo (/build/kyth-hub-web instead of
@@ -58,12 +71,10 @@ COPY src/kyth-hub-web /build/kyth-hub-web
 # build_files/exe-handler-apps.json above, rather than editing the crate
 # (whose path must stay correct for real-repo checkouts).
 COPY third_party/gtk-glib-0.18.5 /third_party/gtk-glib-0.18.5
-WORKDIR /build/kyth-hub-web
-RUN --mount=type=cache,id=kyth-hub-web-npm,target=/root/.npm \
-    npm ci && npm run build
 WORKDIR /build/kyth-hub-web/src-tauri
 RUN --mount=type=cache,id=kyth-hub-shell-cargo-registry,target=/root/.cargo/registry \
     --mount=type=cache,id=kyth-hub-shell-target,target=/build/kyth-hub-web/src-tauri/target \
+    --mount=type=cache,id=kyth-shared-rs-target,target=/build/kyth-shared-rs/target \
     cargo build --release --locked && \
     cp target/release/kyth-hub-shell /build/kyth-hub-shell && \
     (cd /build/kyth-shared-rs && cargo build --release --locked --features telemetry-writer --bin kyth-runtime --bin kyth-build-support --bin kyth-ai-dev --bin kyth-probe --bin kyth-guardian --bin kyth-update-watcher --bin kyth-network-share --bin kyth-telem --bin kyth-privileged --bin kyth-post-update-check --bin kyth-firstboot-app-status --bin kyth-steam-game-export --bin kyth-hub-desktop-entries --bin kyth-welcome-launch --bin kyth-safe-upgrade --bin kyth-bootc-guard --bin kyth-finalize-staged --bin kyth-btrfs-maint --bin kyth-ai-perfd --bin kyth-perf-gate-rs --bin kyth-doctor --bin kyth-health-check --bin kyth-smoke-check --bin kyth-resume-check --bin kyth-nvidia-status --bin kyth-controller-check --bin kyth-creator-check --bin kyth-exe-compat --bin kyth-snapshot-timeline --bin kyth-print-check --bin kyth-vm-acceptance-guest --bin kyth-tunable-rs --bin kyth-game-boost --bin kyth-configure-session --bin kyth-set-resolution --bin kyth-set-kickoff-icon --bin kyth-greeter-compositor --bin kyth-config-apply --bin kyth-apply-scx-preset --bin kyth-apply-explorer --bin kyth-apply-desktop-layout --bin kyth-apply-display-hdr --bin kyth-apply-input --bin kyth-apply-network --bin kyth-apply-pipewire-latency --bin kyth-apply-plasma --bin kyth-apply-quicksettings --bin kyth-apply-rgb --bin kyth-apply-role-preset --bin kyth-apply-scaling --bin kyth-apply-tailscale --bin kyth-apply-vrr --bin kyth-apply-window-snap --bin kyth-driver-switch --bin kyth-kali-desktop-fixup --bin kyth-ntfs-repair --bin kyth-performance-mode --bin kyth-refresh-boot-splash-initramfs --bin kyth-refresh-taskbar-pins --bin kyth-report-issue --bin kyth-session-snapshot --bin kyth-setup-devcontainer --bin kyth-setup-transfer --bin kyth-vscode-wallet --bin kyth-web-app-categorize --bin kyth-storage-sense --bin kyth-duperemove --bin kyth-batteryd --bin kyth-cloud-mount --bin kyth-save-sync --bin kyth-backup --bin kyth-game-launch --bin kyth-dynamic-lock --bin kyth-proton-cachyos-update --bin kyth-rclone-update --bin kyth-sched --bin kyth-user-polish --bin kyth-exe-handler --bin kyth-migrate-display-manager --bin kyth-nxm-handler --bin kyth-enable-bluetooth --bin kyth-fix-system-accounts --bin kyth-network-fallback --bin kyth-selinux-relabel-home --bin kyth-selinux-relabel-home-full) && \
@@ -209,6 +220,7 @@ RUN --mount=type=bind,source=build_files/kyth_shared,target=/ctx/kyth_shared \
     --mount=type=bind,source=build_files/scripts/packages,target=/ctx/packages \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/RPM-GPG-KEY-microsoft,target=/ctx/RPM-GPG-KEY-microsoft \
+    --mount=type=bind,source=build_files/RPM-GPG-KEY-terra,target=/ctx/RPM-GPG-KEY-terra \
     --mount=type=cache,id=kyth-var-cache,target=/var/cache \
     --mount=type=cache,id=kyth-var-log,target=/var/log \
     --mount=type=tmpfs,dst=/tmp \
@@ -285,6 +297,14 @@ RUN : "cache-bust:plymouth=${PLYMOUTH_HASH}" && \
 # redundant bind-mount. sysconfig.sh removes these from /ctx once installed
 # (see its tail) so they don't linger as duplicate content in the final image.
 COPY build_files/game-performance build_files/kyth-shader-preheat build_files/kyth-sched-arbiter build_files/kyth-power-arbiter build_files/kyth-power-arbiter.service build_files/kyth-storage-gate build_files/kyth-readahead-hint build_files/kyth-shader-prune /ctx/
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-vscode-wallet /ctx/kyth-vscode-wallet
+# kyth-tunable-rs is needed while sysconfig-static executes. The sysctl
+# composer and kyth-finalize-staged are mounted from the builder stage only
+# for that RUN, so Rust-only changes invalidate the static config layer
+# without busting earlier packages. kyth-finalize-staged is mounted (not
+# only COPYed later) because fragment 58 asserts the binary exists while
+# sysconfig-static runs; its permanent COPY stays in the post-upgrade block.
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable-rs /usr/bin/kyth-tunable-rs
 
 # The shared Python package is used only by build-time renderers and the
 # repository's compatibility tests. All supported installed Kyth entry points
@@ -296,50 +316,14 @@ COPY build_files/game-performance build_files/kyth-shader-preheat build_files/ky
 # Hash-gated — only re-runs when sysconfig-static.sh or sysconfig/ or data/
 # change. Keeps the post-upgrade layer chain short and avoids users pulling
 # a new sysconfig layer when only packages changed.
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-finalize-staged /usr/libexec/kyth-finalize-staged
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-migrate-display-manager /usr/libexec/kyth-migrate-display-manager
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-enable-bluetooth /usr/libexec/kyth-enable-bluetooth
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-fix-system-accounts /usr/libexec/kyth-fix-system-accounts
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-network-fallback /usr/libexec/kyth-network-fallback
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-selinux-relabel-home /usr/libexec/kyth-selinux-relabel-home
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-selinux-relabel-home-full /usr/libexec/kyth-selinux-relabel-home-full
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-nxm-handler /usr/bin/kyth-nxm-handler
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-refresh-boot-splash-initramfs /usr/libexec/kyth-refresh-boot-splash-initramfs
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-refresh-taskbar-pins /usr/bin/kyth-refresh-taskbar-pins
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-report-issue /usr/bin/kyth-report-issue
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-session-snapshot /usr/bin/kyth-session-snapshot
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-setup-devcontainer /usr/bin/kyth-setup-devcontainer
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-setup-transfer /usr/bin/kyth-setup-transfer
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-vscode-wallet /ctx/kyth-vscode-wallet
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-vscode-wallet /usr/bin/kyth-vscode-wallet
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-web-app-categorize /usr/bin/kyth-web-app-categorize
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-storage-sense /usr/bin/kyth-storage-sense
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-duperemove /usr/bin/kyth-duperemove
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-batteryd /usr/bin/kyth-batteryd
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-cloud-mount /usr/bin/kyth-cloud-mount
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-save-sync /usr/bin/kyth-save-sync
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-backup /usr/bin/kyth-backup
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-game-launch /usr/bin/kyth-game-launch
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-dynamic-lock /usr/bin/kyth-dynamic-lock
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-proton-cachyos-update /usr/bin/kyth-proton-cachyos-update
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-rclone-update /usr/bin/kyth-rclone-update
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-sched /usr/bin/kyth-sched
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-user-polish /usr/bin/kyth-user-polish
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-exe-handler /usr/bin/kyth-exe-handler
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-ai-dev /usr/bin/kyth-ai-dev
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-boot-health /usr/bin/kyth-boot-health
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-hardware-policy /usr/bin/kyth-hardware-policy
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-qualify /usr/bin/kyth-qualify
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-memory-tune /usr/bin/kyth-memory-tune
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-sysctl-compose /usr/bin/kyth-sysctl-compose
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-tunable-rs /usr/bin/kyth-tunable-rs
-COPY --from=hub-web-builder --chmod=0755 /build/kyth-game-boost /usr/bin/kyth-game-boost
 ARG SYSCONFIG_HASH=unset
 RUN --mount=type=bind,source=build_files/scripts/sysconfig-static.sh,target=/ctx/sysconfig-static.sh \
     --mount=type=bind,source=build_files/scripts/sysconfig,target=/ctx/sysconfig \
     --mount=type=bind,source=build_files/scripts/lib,target=/ctx/lib \
     --mount=type=bind,source=build_files/data,target=/ctx/data \
     --mount=type=bind,source=build_files/config,target=/ctx/config \
+    --mount=type=bind,from=hub-web-builder,source=/build/kyth-sysctl-compose,target=/usr/bin/kyth-sysctl-compose \
+    --mount=type=bind,from=hub-web-builder,source=/build/kyth-finalize-staged,target=/usr/libexec/kyth-finalize-staged \
     --mount=type=tmpfs,dst=/tmp \
     : "cache-bust:sysconfig=${SYSCONFIG_HASH}" && \
     bash /ctx/sysconfig-static.sh
@@ -378,6 +362,52 @@ RUN --mount=type=bind,source=build_files/scripts/mesa-git.sh,target=/ctx/mesa-gi
     check_multilib_pairs "${KYTH_MULTILIB_PAIRS[@]}" && \
     scan_multilib_orphans
 
+
+# Native Rust support binaries. Copied here — after the package-install and
+# upgrade layers, before sysconfig.sh — so a Rust-only change invalidates
+# just these COPYs and the layers below, not the expensive dnf/package
+# layers above. sysconfig.sh (next) executes kyth-fix-system-accounts at
+# build time, so these must precede it; nothing above this point invokes
+# them. Two deliberate exceptions stay copied earlier: kyth-build-support
+# (package fragments invoke it during packages-static.sh) and
+# /ctx/kyth-vscode-wallet (the sysconfig-static fragment
+# 24-vs-code-avoid-kwallet-password-prompts.sh executes it at build time).
+
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-finalize-staged /usr/libexec/kyth-finalize-staged
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-migrate-display-manager /usr/libexec/kyth-migrate-display-manager
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-enable-bluetooth /usr/libexec/kyth-enable-bluetooth
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-fix-system-accounts /usr/libexec/kyth-fix-system-accounts
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-network-fallback /usr/libexec/kyth-network-fallback
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-selinux-relabel-home /usr/libexec/kyth-selinux-relabel-home
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-selinux-relabel-home-full /usr/libexec/kyth-selinux-relabel-home-full
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-nxm-handler /usr/bin/kyth-nxm-handler
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-refresh-boot-splash-initramfs /usr/libexec/kyth-refresh-boot-splash-initramfs
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-refresh-taskbar-pins /usr/bin/kyth-refresh-taskbar-pins
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-report-issue /usr/bin/kyth-report-issue
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-session-snapshot /usr/bin/kyth-session-snapshot
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-setup-devcontainer /usr/bin/kyth-setup-devcontainer
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-setup-transfer /usr/bin/kyth-setup-transfer
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-vscode-wallet /usr/bin/kyth-vscode-wallet
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-web-app-categorize /usr/bin/kyth-web-app-categorize
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-storage-sense /usr/bin/kyth-storage-sense
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-duperemove /usr/bin/kyth-duperemove
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-batteryd /usr/bin/kyth-batteryd
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-cloud-mount /usr/bin/kyth-cloud-mount
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-save-sync /usr/bin/kyth-save-sync
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-backup /usr/bin/kyth-backup
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-game-launch /usr/bin/kyth-game-launch
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-dynamic-lock /usr/bin/kyth-dynamic-lock
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-proton-cachyos-update /usr/bin/kyth-proton-cachyos-update
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-rclone-update /usr/bin/kyth-rclone-update
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-sched /usr/bin/kyth-sched
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-user-polish /usr/bin/kyth-user-polish
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-exe-handler /usr/bin/kyth-exe-handler
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-ai-dev /usr/bin/kyth-ai-dev
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-boot-health /usr/bin/kyth-boot-health
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-hardware-policy /usr/bin/kyth-hardware-policy
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-qualify /usr/bin/kyth-qualify
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-memory-tune /usr/bin/kyth-memory-tune
+COPY --from=hub-web-builder --chmod=0755 /build/kyth-game-boost /usr/bin/kyth-game-boost
 # Build cache boundary: post-upgrade service wiring and account repair.
 # Re-enforces display-manager symlinks that dnf5 upgrade can reset, and enables/
 # disables runtime services after the upgrade has settled the unit file set.

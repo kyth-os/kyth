@@ -13,7 +13,8 @@
     "description": "Terra Fyra Labs",
     "baseurl": "https://repos.fyralabs.com/terra$releasever",
     "enabled": false,
-    "repo_gpgcheck": false,
-    "gpgcheck": false
+    "repo_gpgcheck": true,
+    "gpgcheck": true,
+    "gpgkey": "file:///etc/pki/rpm-gpg/RPM-GPG-KEY-terra"
   }
 ]

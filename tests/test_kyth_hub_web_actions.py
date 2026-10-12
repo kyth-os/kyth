@@ -164,6 +164,34 @@ class HubWebCoverageTests(unittest.TestCase):
     the same way.
     """
 
+    def test_slow_commands_stay_off_the_async_runtime(self):
+        """P6: the ~10 s bounded subprocess commands must not block Tauri's
+        async workers. A sync `fn` command runs on the async runtime, so
+        five concurrent slow ones starve it and freeze all Hub
+        communication; `async fn` + `spawn_blocking` keeps them on the
+        blocking pool instead."""
+        for name in (
+            "gaming_library",
+            "appstream_search",
+            "smb_browse",
+            "mesa_overlay_dry_run",
+            "just_list",
+        ):
+            with self.subTest(command=name):
+                match = re.search(
+                    rf"#\[tauri::command[^\]]*\]\n(?:pub\(\w+\) )?async fn {name}\(",
+                    MAIN_RS,
+                )
+                self.assertIsNotNone(
+                    match, f"{name} must be an async Tauri command"
+                )
+                body = MAIN_RS[match.end() :].split("#[tauri::command", 1)[0]
+                self.assertIn(
+                    "spawn_blocking",
+                    body,
+                    f"{name} must delegate its blocking work to spawn_blocking",
+                )
+
     def test_no_live_data_export_is_orphaned(self):
         exports = re.findall(r"^export (?:async function|function|const) (\w+)", LIVE_DATA, re.M)
         self.assertGreater(len(exports), 40, "liveData.ts exports not parsed — did the file format change?")
@@ -178,6 +206,9 @@ class HubWebCoverageTests(unittest.TestCase):
                 "fetchUpdateStatus",
                 "fetchPendingUpdatesSummary",
                 "fetchUpdateHealth",
+                # Module-internal constant (not a backend-wired read); used
+                # by the confirmUserAction wrapper inside liveData.ts itself.
+                "DESTRUCTIVE_PRIVILEGED_OPS",
             }
         ]
         self.assertEqual(

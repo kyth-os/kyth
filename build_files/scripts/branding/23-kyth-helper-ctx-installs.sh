@@ -5,6 +5,11 @@
 _hub_data_src="/src/kyth-hub-web/src/data"
 install -m 0644 "${_hub_data_src}/kyth-welcome.desktop" \
 	/usr/share/applications/kyth-welcome.desktop
+# Plasma on Wayland resolves xdg_toplevel.app_id against the desktop-file ID.
+# Keep a hidden matching entry for Tauri's com.kythos.hub app-id; the visible
+# kyth-welcome.desktop remains the user's launcher and pinned-taskbar target.
+install -m 0644 "${_hub_data_src}/com.kythos.hub.desktop" \
+	/usr/share/applications/com.kythos.hub.desktop
 
 # Hub search in KRunner — generated from the same route manifest imported by
 # the React frontend. The generator is a build-time Rust binary and has no
