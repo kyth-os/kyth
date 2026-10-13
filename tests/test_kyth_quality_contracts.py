@@ -87,6 +87,21 @@ class QualityContractsTests(unittest.TestCase):
         self.assertIn('SHELLCHECK_VERSION="${SHELLCHECK_VERSION:-', installer)
         self.assertIn('download_and_verify "shellcheck"', installer)
 
+    def test_actionlint_release_supports_workflow_permission_scopes(self):
+        installer = (ROOT / "build_files/scripts/install-validation-tools.sh").read_text()
+        self.assertIn('ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-1.7.12}"', installer)
+        self.assertIn(
+            'ACTIONLINT_SHA256="${ACTIONLINT_SHA256:-8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8}"',
+            installer,
+        )
+        validation = (ROOT / ".github/workflows/validation.yml").read_text()
+        self.assertIn("ACTIONLINT_VERSION: 1.7.12", validation)
+
+    def test_validation_tool_cache_rejects_a_different_release(self):
+        installer = (ROOT / "build_files/scripts/install-validation-tools.sh").read_text()
+        self.assertIn('local source_record="${checksum_dir}/${name}.source"', installer)
+        self.assertIn("source_url", installer)
+
     def test_critical_modules_have_explicit_thresholds(self):
         gate = (ROOT / "build_files/config/coverage-floors.json").read_text()
         for module in (

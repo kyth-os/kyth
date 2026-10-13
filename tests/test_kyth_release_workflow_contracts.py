@@ -236,6 +236,22 @@ class ReleaseChainingContracts(unittest.TestCase):
         self.assertIn("subject-name: ${{ steps.build_base.outputs.repository }}", attest)
         self.assertNotIn("subject-name: ${{ steps.build_base.outputs.image }}", attest)
 
+    def test_registry_attestations_receive_docker_credentials(self):
+        """Attestation uploads must see the GHCR auth file and registry write permission."""
+        action = (ROOT / ".github/actions/attest-artifact/action.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('AUTH_FILE="${DOCKER_CONFIG:?}/config.json"', action)
+        self.assertIn(
+            'install -m 0600 "${AUTH_FILE}" "${HOME}/.docker/config.json"', action
+        )
+
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        build_push = build.split("  build_push:", 1)[1].split("\n  finalize:", 1)[0]
+        finalize = build.split("  finalize:", 1)[1]
+        self.assertIn("artifact-metadata: write", build_push)
+        self.assertIn("artifact-metadata: write", finalize)
+
     def test_floating_tag_promotion_preserves_the_verified_digest(self):
         """Promotion must tag the exact verified digest, never re-wrap it.
 

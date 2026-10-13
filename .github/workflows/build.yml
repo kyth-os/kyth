@@ -255,6 +255,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      artifact-metadata: write
 
     steps:
       - name: Prepare environment
@@ -851,6 +852,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      artifact-metadata: write
 
     steps:
       # This job previously needed no repo files (its one step was a pure
