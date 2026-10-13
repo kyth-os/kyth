@@ -3,6 +3,7 @@ import { ExternalLink } from "./ExternalLink";
 import {
   cancelUpdateJob,
   checkForUpdates,
+  fetchUpdateReleaseHistory,
   fetchUpdateReleaseSummary,
   fetchStageProgress,
   fetchUpdatesSnapshot,
@@ -12,6 +13,7 @@ import {
   invokeBootcRollback,
   invokeBootcUpgrade,
   type StageProgress,
+  type UpdateHistoryEntry,
   type UpdateReleaseSummary,
   type UpdatesSnapshot,
 } from "../services/liveData";
@@ -31,6 +33,12 @@ const updatePhases: { id: UpdatePhase; label: string }[] = [
 
 const RELEASE_SUMMARY_RETRY_DELAY_MS = 30_000;
 const RELEASE_SUMMARY_MAX_ATTEMPTS = 20;
+
+function historyDateLabel(iso: string): string {
+  const parsed = new Date(iso);
+  if (Number.isNaN(parsed.getTime())) return "";
+  return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
 
 function updatePhaseIndex(phase: string | undefined): number {
   const index = updatePhases.findIndex((item) => item.id === phase);
@@ -102,6 +110,8 @@ export function UpdatesOverview() {
   const [releaseSummary, setReleaseSummary] = useState<UpdateReleaseSummary | null>(null);
   const [releaseSummaryLoading, setReleaseSummaryLoading] = useState(false);
   const [releaseSummaryUnavailable, setReleaseSummaryUnavailable] = useState(false);
+  const [updateHistory, setUpdateHistory] = useState<UpdateHistoryEntry[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(true);
   const releaseSummaryRequest = useRef(0);
   const [lastAvailableDigest, setLastAvailableDigest] = useState<string | null>(null);
 
@@ -318,6 +328,15 @@ export function UpdatesOverview() {
   useEffect(() => {
     if (systemUpdateAvailable && updateDigest) setLastAvailableDigest(updateDigest);
   }, [systemUpdateAvailable, updateDigest]);
+  useEffect(() => {
+    let cancelled = false;
+    void fetchUpdateReleaseHistory().then((entries) => {
+      if (cancelled) return;
+      setUpdateHistory(entries);
+      setHistoryLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, []);
   useEffect(() => {
     const updateInProgress = stagedEffective || busy === "stage" || updateTracked || updateStatus?.check_state === "busy";
     const shouldResolveReleaseSummary = Boolean(releaseDigest) && (systemUpdateAvailable || updateInProgress);
@@ -751,6 +770,47 @@ export function UpdatesOverview() {
         </div>
         <ActionStatus status={cancelNote ?? status} />
       </div>
+
+      <section className="updates-history-card" aria-labelledby="updates-history-heading">
+        <div className="updates-release-header">
+          <div>
+            <span className="updates-eyebrow">Release history</span>
+            <h2 id="updates-history-heading">Update history</h2>
+          </div>
+        </div>
+        {historyLoading
+          ? <p className="updates-release-empty">Loading update history…</p>
+          : updateHistory.length === 0
+            ? <p className="updates-release-empty">No published updates to show yet.</p>
+            : <div className="updates-history-list">
+              {updateHistory.map((entry) => {
+                const isInstalled = Boolean(entry.digest) && entry.digest === bootedDigest;
+                const isAvailable = Boolean(entry.digest) && entry.digest === availableDigest;
+                const dateLabel = historyDateLabel(entry.published_at);
+                return (
+                  <details className="updates-history-entry" key={entry.release_url}>
+                    <summary className="updates-history-summary">
+                      <span className="updates-history-version">{entry.version}</span>
+                      <span className="updates-history-meta">
+                        {entry.flavor === "cachy" && <span className="updates-history-flavor">CachyOS kernel</span>}
+                        {dateLabel && <span>{dateLabel}</span>}
+                        {isInstalled && <span className="updates-history-badge">Installed</span>}
+                        {isAvailable && <span className="updates-history-badge updates-history-badge-available">Available</span>}
+                      </span>
+                    </summary>
+                    <div className="updates-history-notes">
+                      {entry.notes_intro && <p>{entry.notes_intro}</p>}
+                      <h3>{entry.highlights_title}</h3>
+                      {entry.highlights.length > 0
+                        ? <ul>{entry.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
+                        : <p className="updates-release-empty">A package comparison was not published for this image. Open the full release notes for available build details.</p>}
+                      <ExternalLink href={entry.release_url}>Read full release notes <span aria-hidden="true">↗</span></ExternalLink>
+                    </div>
+                  </details>
+                );
+              })}
+            </div>}
+      </section>
 
       <details className="updates-details">
         <summary>System details and recovery</summary>

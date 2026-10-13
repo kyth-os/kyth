@@ -313,6 +313,25 @@ test("release summary is tied to the checked image and explains unavailable note
   assert.match(updatesRust, /body\.lines\(\)\.any\(\|line\| line\.trim\(\) == expected_digest_line\)/);
 });
 
+test("update history lists past releases with expandable notes", () => {
+  assert.match(service, /update-release-history/);
+  assert.match(service, /"update_release_history"/);
+  assert.match(service, /fetchUpdateReleaseHistory/);
+  assert.match(updatesRust, /pub\(crate\) async fn update_release_history/);
+  assert.match(updatesRust, /update_release_history_from_api/);
+  assert.match(rust, /commands::updates::update_release_history/);
+  assert.match(updatesOverview, /fetchUpdateReleaseHistory\(\)/);
+  assert.match(updatesOverview, /Update history/);
+  assert.match(updatesOverview, /updates-history-entry/);
+  assert.match(updatesOverview, /entry\.notes_intro/);
+  assert.match(updatesOverview, /entry\.highlights/);
+  assert.match(updatesOverview, /entry\.digest === bootedDigest/);
+  assert.match(updatesOverview, /entry\.digest === availableDigest/);
+  assert.match(updatesOverview, /No published updates to show yet/);
+  assert.match(hubTheme, /\.updates-history-entry/);
+  assert.match(hubTheme, /\.updates-history-notes/);
+});
+
 test("container build provenance has the required GitHub token permissions", async () => {
   const build = await readFile(resolve(root, "../../.github/workflows/build.yml"), "utf8");
   const attestAction = await readFile(resolve(root, "../../.github/actions/attest-artifact/action.yml"), "utf8");
