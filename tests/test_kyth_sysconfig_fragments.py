@@ -328,33 +328,46 @@ class ConfigHelperTests(unittest.TestCase):
             # should no longer hand-roll a bare `cat >` redirect for their drop.
             self.assertNotIn("cat >/", body, f"{rel} still hand-rolls cat >")
 
-    def test_containers_signature_policy(self):
-        # M7: the update path must verify cosign signatures. The policy files
-        # ship in the image and the sysconfig fragment installs them.
+    def test_containers_signature_policy_uses_a_static_cosign_key(self):
+        # The previous keyless policy used unsupported subjectUri, so bootc
+        # rejected the host policy before it could stage an update.
         import json
 
         policy_path = ROOT / "build_files" / "config" / "containers" / "policy.json"
+        key_path = ROOT / "build_files" / "config" / "containers" / "kyth-cosign.pub"
         registries_path = ROOT / "build_files" / "config" / "containers" / "registries.d" / "kyth.yaml"
         fragment = FRAG_DIR / "systemd" / "37-containers-signature-policy.sh"
 
         self.assertTrue(policy_path.is_file(), "containers policy.json missing")
+        self.assertTrue(key_path.is_file(), "Cosign public key missing")
+        self.assertTrue(
+            key_path.read_text(encoding="utf-8").startswith("-----BEGIN PUBLIC KEY-----"),
+            "Cosign public key must be a PEM public key",
+        )
         self.assertTrue(registries_path.is_file(), "containers kyth.yaml missing")
         self.assertTrue(fragment.is_file(), "signature policy sysconfig fragment missing")
 
         policy = json.loads(policy_path.read_text(encoding="utf-8"))
         reqs = policy["transports"]["docker"]["ghcr.io/kyth-os/kyth"]
         self.assertEqual(reqs[0]["type"], "sigstoreSigned")
-        # Pinned to the supply-chain workflow OIDC identity, not just any signature.
-        self.assertIn("supply-chain", reqs[0]["fulcio"]["subjectUri"])
-        self.assertIn("kyth-os/kyth", reqs[0]["fulcio"]["subjectUri"])
-        self.assertEqual(
-            reqs[0]["fulcio"]["oidcIssuer"],
-            "https://token.actions.githubusercontent.com",
-        )
+        self.assertEqual(reqs[0].get("keyPath"), "/etc/containers/kyth-cosign.pub")
+        self.assertNotIn("fulcio", reqs[0], "native policy must not use unsupported Fulcio URI fields")
+        self.assertEqual(reqs[0]["signedIdentity"]["type"], "matchRepository")
 
         body = fragment.read_text(encoding="utf-8")
         self.assertIn("/etc/containers/policy.json", body)
         self.assertIn("/etc/containers/registries.d/kyth.yaml", body)
+        self.assertIn("kyth-cosign.pub", body)
+
+    def test_supply_chain_signs_and_verifies_with_the_native_policy_key(self):
+        workflow = (ROOT / ".github/workflows/supply-chain.yml").read_text(encoding="utf-8")
+        self.assertIn("KYTH_COSIGN_PRIVATE_KEY", workflow)
+        self.assertIn("KYTH_COSIGN_PASSWORD", workflow)
+        self.assertIn('cosign sign -y --key "${COSIGN_KEY}"', workflow)
+        self.assertIn('cosign verify --key build_files/config/containers/kyth-cosign.pub', workflow)
+        self.assertIn('cosign sign -y "${IMAGE}@${DIGEST}"', workflow)
+        self.assertIn('cosign verify --certificate-identity-regexp', workflow)
+        self.assertIn('id-token: write', workflow)
 
 
 if __name__ == "__main__":
