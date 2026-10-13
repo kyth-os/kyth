@@ -841,6 +841,8 @@ jobs:
     if: ${{ always() && !cancelled() && needs.build_push.result != 'skipped' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      DOCKER_CONFIG: /tmp/kyth-docker-config
     strategy:
       fail-fast: false
       matrix:

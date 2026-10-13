@@ -251,6 +251,8 @@ class ReleaseChainingContracts(unittest.TestCase):
         finalize = build.split("  finalize:", 1)[1]
         self.assertIn("artifact-metadata: write", build_push)
         self.assertIn("artifact-metadata: write", finalize)
+        finalize_header = finalize.split("    steps:", 1)[0]
+        self.assertIn("DOCKER_CONFIG: /tmp/kyth-docker-config", finalize_header)
 
     def test_floating_tag_promotion_preserves_the_verified_digest(self):
         """Promotion must tag the exact verified digest, never re-wrap it.
