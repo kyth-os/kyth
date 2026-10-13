@@ -475,9 +475,9 @@ jobs:
           test -n "${KYTH_COSIGN_PRIVATE_KEY}"
           test -n "${COSIGN_PASSWORD}"
           umask 077
-          COSIGN_KEY="${RUNNER_TEMP}/kyth-cosign.key"
-          printf '%s' "${KYTH_COSIGN_PRIVATE_KEY}" > "${COSIGN_KEY}"
-          echo "COSIGN_KEY=${COSIGN_KEY}" >> "$GITHUB_ENV"
+          KYTH_SIGNING_KEY_FILE="${RUNNER_TEMP}/kyth-cosign.key"
+          printf '%s' "${KYTH_COSIGN_PRIVATE_KEY}" > "${KYTH_SIGNING_KEY_FILE}"
+          echo "KYTH_SIGNING_KEY_FILE=${KYTH_SIGNING_KEY_FILE}" >> "$GITHUB_ENV"
 
       # H1: verify build provenance BEFORE minting signatures. The old order
       # signed first, then "verified" — the cosign verify trivially passed
@@ -511,7 +511,7 @@ jobs:
           COSIGN_PASSWORD: ${{ secrets.KYTH_COSIGN_PASSWORD }}
         run: |
           # Static signature satisfies the native containers/image policy.
-          cosign sign -y --key "${COSIGN_KEY}" "${IMAGE}@${DIGEST}"
+          cosign sign -y --key "${KYTH_SIGNING_KEY_FILE}" "${IMAGE}@${DIGEST}"
           # Keep the keyless signature for installer ISO verification and
           # existing consumers that pin the GitHub Actions workflow identity.
           cosign sign -y "${IMAGE}@${DIGEST}"
@@ -535,7 +535,7 @@ jobs:
           SBOM_DIGEST="$(jq -r '.digest' <<< "${ATTACH_OUTPUT}")"
           build_files/scripts/validate-digest.sh "${SBOM_DIGEST}"
           echo "digest=${SBOM_DIGEST}" >> "$GITHUB_OUTPUT"
-          cosign sign -y --key "${COSIGN_KEY}" "${IMAGE}@${SBOM_DIGEST}"
+          cosign sign -y --key "${KYTH_SIGNING_KEY_FILE}" "${IMAGE}@${SBOM_DIGEST}"
           cosign sign -y "${IMAGE}@${SBOM_DIGEST}"
 
       - name: Verify published signatures
