@@ -224,6 +224,18 @@ class ReleaseChainingContracts(unittest.TestCase):
         self.assertRegex(build, r"dispatch_iso.*fedora.*'\"true\"'")
         self.assertIn("inputs.dispatch_iso", publish)
 
+    def test_base_image_attestation_uses_the_bare_repository_name(self):
+        """actions/attest rejects a tagged subject name ("Invalid image
+        name: ...:base-latest"); the base image must be attested by bare
+        repository + digest, exactly like the final image. This only fires
+        when the base is rebuilt rather than reused, which is why it hid
+        until the first post-promotion main build (2026-10-12)."""
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        self.assertIn('echo "repository=${IMAGE_FULL}" >&3', build)
+        attest = build.split("- name: Attest base image provenance", 1)[1]
+        self.assertIn("subject-name: ${{ steps.build_base.outputs.repository }}", attest)
+        self.assertNotIn("subject-name: ${{ steps.build_base.outputs.image }}", attest)
+
     def test_floating_tag_promotion_preserves_the_verified_digest(self):
         """Promotion must tag the exact verified digest, never re-wrap it.
 

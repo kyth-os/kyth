@@ -481,6 +481,7 @@ jobs:
           BASE_DIGEST="$(jq -r '."containerimage.digest"' "${RUNNER_TEMP}/base-build-metadata.json")"
           build_files/scripts/validate-digest.sh "${BASE_DIGEST}"
           echo "image=${BASE_IMAGE_REF}" >&3
+          echo "repository=${IMAGE_FULL}" >&3
           echo "digest=${BASE_DIGEST}" >&3
           echo "pinned=${BASE_IMAGE_REF}@${BASE_DIGEST}" >&3
           echo "reused=false" >&3
@@ -495,11 +496,17 @@ jobs:
       # FROM — attest its provenance too, so the supply chain is verifiable
       # end to end (the final image's SLSA attestation lists the base digest
       # as a material via the org.opencontainers.image.base.digest label).
+      # Subject name is the BARE repository, exactly like the final image's
+      # attestation: actions/attest rejects a tagged name ("Invalid image
+      # name: ...:base-latest") — the digest input carries the identity.
+      # That rejection is what killed the first main build after the
+      # 2026-10-12 promotion, the first time a base rebuild (not reuse)
+      # reached this step.
       - name: Attest base image provenance
         if: steps.build_base.outputs.reused != 'true'
         uses: ./.github/actions/attest-artifact
         with:
-          subject-name: ${{ steps.build_base.outputs.image }}
+          subject-name: ${{ steps.build_base.outputs.repository }}
           subject-digest: ${{ steps.build_base.outputs.digest }}
           push-to-registry: "true"
 
