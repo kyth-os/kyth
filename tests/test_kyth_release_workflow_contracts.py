@@ -39,6 +39,19 @@ class ReleaseIdentityTests(unittest.TestCase):
 
 
 class WorkflowArtifactContracts(unittest.TestCase):
+    def test_previous_sbom_baseline_comes_from_an_older_published_release(self):
+        workflow = (
+            ROOT / ".github/workflows/supply-chain.yml"
+        ).read_text(encoding="utf-8")
+        resolve = workflow.split(
+            "- name: Validate immutable image identity and resolve previous digest", 1
+        )[1].split("- name: Setup Syft", 1)[0]
+        self.assertIn("gh api", resolve)
+        self.assertIn("resolve-previous-image-release.py", resolve)
+        self.assertNotIn("oras repo tags", resolve)
+        self.assertIn("CURRENT_VERSION", resolve)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", resolve)
+
     def test_iso_artifact_has_one_producer_and_matching_consumers(self):
         """One upload in build; every download resolves it from build's output.
 

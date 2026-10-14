@@ -325,6 +325,15 @@ test("update history lists past releases with expandable notes", () => {
   assert.match(updatesOverview, /updates-history-entry/);
   assert.match(updatesOverview, /entry\.notes_intro/);
   assert.match(updatesOverview, /entry\.highlights/);
+  assert.ok(
+    !updatesOverview.includes("A package comparison was not published for this image"),
+    "empty package baselines should not be shown as update-history content",
+  );
+  assert.ok(
+    updatesOverview.includes("releaseSummary.highlights.length > 0") &&
+      updatesOverview.includes("entry.highlights.length > 0"),
+    "only render package-change headings when there are actual changes",
+  );
   assert.match(updatesOverview, /entry\.digest === bootedDigest/);
   assert.match(updatesOverview, /entry\.digest === availableDigest/);
   assert.match(updatesOverview, /No published updates to show yet/);

@@ -138,6 +138,98 @@ def package_changes(previous: dict[str, str], current: dict[str, str]) -> tuple[
     return added, changed, removed
 
 
+def package_changes_section(current: dict[str, str], previous: dict[str, str]) -> str:
+    """Render only package changes; never substitute a repeated inventory."""
+    if not current or not previous:
+        return ""
+
+    added, changed, removed = package_changes(previous, current)
+    if not (added or changed or removed):
+        return "### All RPM Changes\n\nNo RPM package changes detected."
+
+    lines: list[str] = []
+    important = [name for name in IMPORTANT_PACKAGES if name in set(added + changed + removed)]
+    if important:
+        lines += [
+            "### Major Package Changes",
+            "| | Name | Previous | New |",
+            "| --- | --- | --- | --- |",
+        ]
+        for name in important:
+            marker = "+" if name in added else "-" if name in removed else "~"
+            lines.append(
+                f"| {marker} | `{name}` | {previous.get(name, '')} | {current.get(name, '')} |"
+            )
+        lines.append("")
+
+    lines += [
+        "### All RPM Changes",
+        "| | Name | Previous | New |",
+        "| --- | --- | --- | --- |",
+    ]
+    rendered: list[str] = []
+    rendered += table_for(added, previous, current, "+").splitlines()
+    rendered += table_for(changed, previous, current, "~").splitlines()
+    rendered += table_for(removed, previous, current, "-").splitlines()
+    lines += rendered
+    return "\n".join(lines)
+
+
+def _image_version_key(version: str, channel_tag: str) -> tuple[str, int, int, str] | None:
+    match = re.fullmatch(
+        rf"{re.escape(channel_tag)}\.(\d{{8}})\.(\d+)\.(\d+)\.([0-9a-f]{{8}})",
+        version,
+    )
+    if not match:
+        return None
+    date, build, attempt, revision = match.groups()
+    return date, int(build), int(attempt), revision
+
+
+def previous_image_release_digest(
+    releases: list[dict], channel_tag: str, current_version: str
+) -> str:
+    """Return the newest *published older* same-flavor release digest.
+
+    Image tags can appear before their SBOM/release is published. Restricting
+    the baseline to an older GitHub release avoids racing a newer in-flight
+    image tag and guarantees the chosen release passed metadata publication.
+    """
+    # The OCI version label is shared by both kernel flavors; only release
+    # tags carry the `-cachy` discriminator.
+    version_channel = channel_tag.removesuffix("-cachy")
+    current_key = _image_version_key(current_version, version_channel)
+    if current_key is None or channel_tag not in {"latest", "testing", "latest-cachy", "testing-cachy"}:
+        return ""
+
+    expected_prerelease = channel_tag.startswith("testing")
+    release_pattern = re.compile(
+        rf"^image-{re.escape(channel_tag)}-(\d{{8}})-(\d+)-(\d+)-([0-9a-f]{{8}})$"
+    )
+    digest_pattern = re.compile(
+        r"^Image: `ghcr\.io/kyth-os/kyth@(sha256:[0-9a-f]{64})`$", re.MULTILINE
+    )
+    candidates: list[tuple[tuple[str, int, int, str], str]] = []
+    for release in releases:
+        if release.get("draft") is not False or release.get("prerelease") is not expected_prerelease:
+            continue
+        tag = release.get("tag_name")
+        body = release.get("body")
+        if not isinstance(tag, str) or not isinstance(body, str):
+            continue
+        match = release_pattern.fullmatch(tag)
+        if not match:
+            continue
+        date, build, attempt, revision = match.groups()
+        key = date, int(build), int(attempt), revision
+        if key >= current_key:
+            continue
+        digest_match = digest_pattern.search(body)
+        if digest_match:
+            candidates.append((key, digest_match.group(1)))
+    return max(candidates, default=((), ""), key=lambda item: item[0])[1]
+
+
 def table_for(names: list[str], previous: dict[str, str], current: dict[str, str], marker: str) -> str:
     rows = []
     for name in names:
@@ -288,54 +380,13 @@ def main() -> int:
         "",
     ]
 
-    if not current_packages:
-        lines += [
-            "No current SBOM package data was available for this build.",
-            "",
-        ]
-    elif not previous_packages:
-        lines += [
-            "No previous SBOM was available to compare against. Future releases will include package-level diffs.",
-            "",
-            "### Major Packages",
-            "| Name | Version |",
-            "| --- | --- |",
-        ]
-        for name in IMPORTANT_PACKAGES:
-            if name in current_packages:
-                lines.append(f"| `{name}` | {current_packages[name]} |")
-        lines.append("")
-    else:
-        added, changed, removed = package_changes(previous_packages, current_packages)
-        important = [name for name in IMPORTANT_PACKAGES if name in set(added + changed + removed)]
-        if important:
-            lines += [
-                "### Major Package Changes",
-                "| | Name | Previous | New |",
-                "| --- | --- | --- | --- |",
-            ]
-            for name in important:
-                marker = "+" if name in added else "-" if name in removed else "~"
-                lines.append(
-                    f"| {marker} | `{name}` | {previous_packages.get(name, '')} | {current_packages.get(name, '')} |"
-                )
-            lines.append("")
+    package_section = package_changes_section(current_packages, previous_packages)
+    if package_section:
+        lines += [package_section, ""]
 
-        lines.append(commit_section(previous_labels, args.current_sha).rstrip())
-        if lines[-1]:
-            lines.append("")
-
-        lines += [
-            "### All RPM Changes",
-            "| | Name | Previous | New |",
-            "| --- | --- | --- | --- |",
-        ]
-        rendered = []
-        rendered += table_for(added, previous_packages, current_packages, "+").splitlines()
-        rendered += table_for(changed, previous_packages, current_packages, "~").splitlines()
-        rendered += table_for(removed, previous_packages, current_packages, "-").splitlines()
-        lines += rendered or ["| | No RPM package changes detected | | |"]
-        lines.append("")
+    commit_notes = commit_section(previous_labels, args.current_sha).rstrip()
+    if commit_notes:
+        lines += [commit_notes, ""]
 
     sec = security_section(args.grype_current or None, args.grype_previous or None)
     if sec:

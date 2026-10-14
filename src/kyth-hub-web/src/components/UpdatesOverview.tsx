@@ -719,10 +719,10 @@ export function UpdatesOverview() {
           </div>
           {releaseSummary
             ? <>
-              <h3>{releaseSummary.highlights_title}</h3>
-              {releaseSummary.highlights.length > 0
-            ? <ul>{releaseSummary.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
-            : <p className="updates-release-empty">A package comparison was not published for this image. Open the full release notes for available build details.</p>}
+              {releaseSummary.highlights.length > 0 && <>
+                <h3>{releaseSummary.highlights_title}</h3>
+                <ul>{releaseSummary.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
+              </>}
               <ExternalLink href={releaseSummary.release_url}>Read full release notes <span aria-hidden="true">↗</span></ExternalLink>
             </>
             : <p className="updates-release-empty">
@@ -800,10 +800,10 @@ export function UpdatesOverview() {
                     </summary>
                     <div className="updates-history-notes">
                       {entry.notes_intro && <p>{entry.notes_intro}</p>}
-                      <h3>{entry.highlights_title}</h3>
-                      {entry.highlights.length > 0
-                        ? <ul>{entry.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
-                        : <p className="updates-release-empty">A package comparison was not published for this image. Open the full release notes for available build details.</p>}
+                      {entry.highlights.length > 0 && <>
+                        <h3>{entry.highlights_title}</h3>
+                        <ul>{entry.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
+                      </>}
                       <ExternalLink href={entry.release_url}>Read full release notes <span aria-hidden="true">↗</span></ExternalLink>
                     </div>
                   </details>

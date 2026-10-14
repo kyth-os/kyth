@@ -141,22 +141,10 @@ fn release_cell(value: &str) -> Option<String> {
     Some(value.to_string())
 }
 
-fn is_markdown_table_divider(cells: &[&str]) -> bool {
-    let divider_cells: Vec<&str> = cells
-        .iter()
-        .map(|cell| cell.trim().trim_matches(':'))
-        .filter(|cell| !cell.is_empty())
-        .collect();
-    !divider_cells.is_empty()
-        && divider_cells
-            .iter()
-            .all(|cell| !cell.is_empty() && cell.bytes().all(|byte| byte == b'-'))
-}
-
 fn release_highlights(body: &str) -> (String, Vec<String>) {
     let mut section = "";
-    let mut package_changes = Vec::new();
-    let mut key_packages = Vec::new();
+    let mut major_package_changes = Vec::new();
+    let mut all_package_changes = Vec::new();
     let mut security_fixes = Vec::new();
     for line in body.lines() {
         if let Some(heading) = line.strip_prefix("### ") {
@@ -164,7 +152,7 @@ fn release_highlights(body: &str) -> (String, Vec<String>) {
             continue;
         }
         let cells: Vec<&str> = line.split('|').map(str::trim).collect();
-        if section == "Major Package Changes" && cells.len() >= 6 {
+        if matches!(section, "Major Package Changes" | "All RPM Changes") && cells.len() >= 6 {
             let (Some(marker), Some(name)) = (release_cell(cells[1]), release_cell(cells[2]))
             else {
                 continue;
@@ -179,18 +167,11 @@ fn release_highlights(body: &str) -> (String, Vec<String>) {
                 }
                 _ => continue,
             };
-            package_changes.push(change);
-        } else if section == "Major Packages" && cells.len() >= 4 {
-            if (cells[1].eq_ignore_ascii_case("name") && cells[2].eq_ignore_ascii_case("version"))
-                || is_markdown_table_divider(&cells)
-            {
-                continue;
+            if section == "Major Package Changes" {
+                major_package_changes.push(change);
+            } else {
+                all_package_changes.push(change);
             }
-            let (Some(name), Some(version)) = (release_cell(cells[1]), release_cell(cells[2]))
-            else {
-                continue;
-            };
-            key_packages.push(format!("{name} {version}"));
         } else if section == "Security fixes" {
             for word in
                 line.split(|character: char| !character.is_ascii_alphanumeric() && character != '-')
@@ -206,17 +187,18 @@ fn release_highlights(body: &str) -> (String, Vec<String>) {
             }
         }
     }
+    let mut package_changes = if all_package_changes.is_empty() {
+        major_package_changes
+    } else {
+        all_package_changes
+    };
     package_changes.truncate(5);
-    key_packages.truncate(5);
     security_fixes.sort();
     security_fixes.dedup();
     security_fixes.truncate(3);
     if !package_changes.is_empty() {
         package_changes.extend(security_fixes);
-        ("Major package changes".to_string(), package_changes)
-    } else if !key_packages.is_empty() {
-        key_packages.extend(security_fixes);
-        ("Key packages in this build".to_string(), key_packages)
+        ("Package changes".to_string(), package_changes)
     } else if !security_fixes.is_empty() {
         ("Security fixes".to_string(), security_fixes)
     } else {
@@ -340,28 +322,10 @@ fn release_body_digest(body: &str) -> String {
     String::new()
 }
 
-/// Prose between the digest line and the first `###` section — the
-/// changelog's own summary text (a package-diff summary, or the note
-/// that no previous SBOM baseline existed).
-fn release_notes_intro(body: &str) -> String {
-    let mut past_digest_line = false;
-    let mut intro: Vec<&str> = Vec::new();
-    for line in body.lines() {
-        let line = line.trim();
-        if !past_digest_line {
-            if line.starts_with("Image: `ghcr.io/kyth-os/kyth@") {
-                past_digest_line = true;
-            }
-            continue;
-        }
-        if line.starts_with("### ") || line.starts_with("## ") {
-            break;
-        }
-        if !line.is_empty() {
-            intro.push(line);
-        }
-    }
-    intro.join("\n")
+/// Free-form prose is omitted from update history; the generated package
+/// change table is the actionable summary, and inventories are not diffs.
+fn release_notes_intro(_body: &str) -> String {
+    String::new()
 }
 
 fn update_release_history_from_api(payload: &str, channel: &str) -> Vec<UpdateHistoryEntry> {
@@ -1572,7 +1536,7 @@ mod tests {
             summary.release_url,
             "https://github.com/kyth-os/kyth/releases/tag/image-testing-20260925-2481-1-8b81dca7"
         );
-        assert_eq!(summary.highlights_title, "Major package changes");
+        assert_eq!(summary.highlights_title, "Package changes");
         assert!(summary
             .highlights
             .contains(&"Updated gamescope from 3.16.28-1 to 3.16.29-1".to_string()));
@@ -1631,24 +1595,33 @@ mod tests {
         let digest_a = format!("sha256:{}", "a".repeat(64));
         let digest_b = format!("sha256:{}", "b".repeat(64));
         let body_a = format!(
-            "# Kyth image\n\nBuilt from branch `testing` at commit `aaaaaaaaaaaa`.\n\nImage: `ghcr.io/kyth-os/kyth@{digest_a}`\n\n2 packages changed.\n\n### Major Packages\n| Name | Version |\n| --- | --- |\n| `mesa-dri-drivers` | 26.2.4-1 |\n"
+            "# Kyth image\n\nBuilt from branch `testing` at commit `aaaaaaaaaaaa`.\n\nImage: `ghcr.io/kyth-os/kyth@{digest_a}`\n\n### Major Package Changes\n| | Name | Previous | New |\n| --- | --- | --- | --- |\n| ~ | `mesa-dri-drivers` | 26.2.3-1 | 26.2.4-1 |\n"
         );
         let body_b = format!(
             "# Kyth image\n\nImage: `ghcr.io/kyth-os/kyth@{digest_b}`\n\nNo previous SBOM was available to compare against.\n\n### Major Packages\n| Name | Version |\n| --- | --- |\n| `gamescope` | 3.16.29-1 |\n"
         );
+        let body_c = format!(
+            "# Kyth image\n\nImage: `ghcr.io/kyth-os/kyth@{digest_a}`\n\n### Major Packages\n| Name | Version |\n| --- | --- |\n| `gamescope` | 3.16.28-1 |\n"
+        );
         let payload = serde_json::json!([
             {"tag_name": "image-testing-20261012-2736-1-aaaaaaaa", "draft": false, "prerelease": true, "published_at": "2026-10-12T22:00:00Z", "body": body_a},
-            {"tag_name": "image-testing-cachy-20261012-2735-1-bbbbbbbb", "draft": false, "prerelease": true, "published_at": "2026-10-12T21:00:00Z", "body": body_b},
+            {"tag_name": "image-testing-cachy-20261013-2735-1-bbbbbbbb", "draft": false, "prerelease": true, "published_at": "2026-10-13T21:00:00Z", "body": body_b},
+            {"tag_name": "image-testing-cachy-20261012-2735-1-cccccccc", "draft": false, "prerelease": true, "published_at": "2026-10-12T21:00:00Z", "body": body_c},
             {"tag_name": "image-testing-20261011-2700-1-cccccccc", "draft": true, "prerelease": true, "published_at": "2026-10-11T21:00:00Z", "body": body_a},
             {"tag_name": "iso-testing-20261012-aaaaaaaa-948-1", "draft": false, "prerelease": true, "published_at": "2026-10-12T23:00:00Z", "body": body_a},
             {"tag_name": "image-latest-20261012-2736-1-dddddddd", "draft": false, "prerelease": false, "published_at": "2026-10-12T20:00:00Z", "body": body_a},
         ]);
         let history = super::update_release_history_from_api(&payload.to_string(), "testing");
-        assert_eq!(history.len(), 2);
+        assert_eq!(history.len(), 3);
         assert_eq!(history[0].version, "testing.20261012.2736.1.aaaaaaaa");
         assert_eq!(history[0].flavor, "fedora");
         assert_eq!(history[0].digest, digest_a);
-        assert_eq!(history[0].notes_intro, "2 packages changed.");
+        assert_eq!(history[0].notes_intro, "");
+        assert_eq!(history[0].highlights_title, "Package changes");
+        assert_eq!(
+            history[0].highlights,
+            ["Updated mesa-dri-drivers from 26.2.3-1 to 26.2.4-1"]
+        );
         assert_eq!(history[0].published_at, "2026-10-12T22:00:00Z");
         assert_eq!(
             history[0].release_url,
@@ -1656,21 +1629,30 @@ mod tests {
         );
         assert_eq!(history[1].flavor, "cachy");
         assert_eq!(history[1].digest, digest_b);
-        assert_eq!(
-            history[1].notes_intro,
-            "No previous SBOM was available to compare against."
-        );
-        assert!(history[1]
-            .highlights
-            .contains(&"gamescope 3.16.29-1".to_string()));
+        assert_eq!(history[1].highlights_title, "Release highlights");
+        assert!(history[1].highlights.is_empty());
+        assert!(history[1].notes_intro.is_empty());
+        assert_eq!(history[2].flavor, "cachy");
+        assert!(history[2].highlights.is_empty());
     }
 
     #[test]
-    fn release_highlights_label_baseline_packages_without_claiming_a_diff() {
+    fn release_highlights_hide_baseline_inventories() {
         let body = "### Major Packages\n| Name | Version |\n| --- | --- |\n| `mesa-dri-drivers` | 26.2.3-1 |\n";
         let (title, highlights) = super::release_highlights(body);
-        assert_eq!(title, "Key packages in this build");
-        assert_eq!(highlights, ["mesa-dri-drivers 26.2.3-1"]);
+        assert_eq!(title, "Release highlights");
+        assert!(highlights.is_empty());
+    }
+
+    #[test]
+    fn release_highlights_use_complete_changes_instead_of_duplicate_major_rows() {
+        let body = "### Major Package Changes\n| | Name | Previous | New |\n| --- | --- | --- | --- |\n| ~ | `mesa` | 1.0 | 2.0 |\n\n### All RPM Changes\n| | Name | Previous | New |\n| --- | --- | --- | --- |\n| ~ | `mesa` | 1.0 | 2.0 |\n| + | `new-tool` |  | 1.0 |\n";
+        let (title, highlights) = super::release_highlights(body);
+        assert_eq!(title, "Package changes");
+        assert_eq!(
+            highlights,
+            ["Updated mesa from 1.0 to 2.0", "Added new-tool 1.0"]
+        );
     }
 
     #[test]
