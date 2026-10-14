@@ -159,6 +159,31 @@ class ReleaseChainingContracts(unittest.TestCase):
         for label in ('image.version="45"', 'osbuild.version="45"', 'KythOS 45"'):
             self.assertIn(label, (ROOT / "Dockerfile").read_text(encoding="utf-8"))
 
+    def test_base_digest_pin_is_identical_in_dockerfile_and_vars(self):
+        """The kinoite pin lives in two files; they must carry one digest.
+
+        build_base/Dockerfile's ARG BASE_IMAGE and _vars.just's
+        default_base_image fallback are the same pin. When they drift, CI's
+        Dockerfile build-rules check fails — and during the F45 beta, quay
+        garbage-collects superseded digests within about a day, so a stale
+        or split pin also makes the base unresolvable ("not found" loading
+        metadata). One digest, both places, checked before push.
+        """
+        dockerfile = (ROOT / "build_base/Dockerfile").read_text(encoding="utf-8")
+        docker_digest = next(
+            line.split("@", 1)[1].strip()
+            for line in dockerfile.splitlines()
+            if line.startswith("ARG BASE_IMAGE=")
+        )
+        vars_just = (ROOT / "_vars.just").read_text(encoding="utf-8")
+        vars_digest = next(
+            line.split("@", 1)[1].split('"', 1)[0]
+            for line in vars_just.splitlines()
+            if "default_base_image" in line and "fedora-kinoite" in line
+        )
+        self.assertRegex(docker_digest, r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(docker_digest, vars_digest)
+
     def test_r2_public_base_url_is_single_sourced(self):
         """The R2 download host lives in release_identity.py exactly once.
 
