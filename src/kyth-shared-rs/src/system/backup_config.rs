@@ -146,6 +146,34 @@ pub fn repo_is_external(repo: &str, external_mounts: &[&str]) -> bool {
     })
 }
 
+/// Decode the octal escapes used by `/proc/mounts` for mountpoint fields.
+pub(super) fn decode_proc_mount_field(field: &str) -> String {
+    let bytes = field.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        let replacement = if bytes[index] == b'\\' && index + 3 < bytes.len() {
+            match &bytes[index + 1..index + 4] {
+                b"040" => Some(b' '),
+                b"011" => Some(b'\t'),
+                b"012" => Some(b'\n'),
+                b"134" => Some(b'\\'),
+                _ => None,
+            }
+        } else {
+            None
+        };
+        if let Some(byte) = replacement {
+            decoded.push(byte);
+            index += 4;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
+}
+
 /// External mount points from `/proc/mounts`: removable-media and explicit
 /// admin mounts only. The root filesystem is deliberately excluded — a repo
 /// under `/var`, `/home`, or any same-disk path is NOT external.
@@ -153,15 +181,16 @@ pub fn external_mounts_from_proc_mounts(text: &str) -> Vec<String> {
     let mut mounts = Vec::new();
     for line in text.lines() {
         let fields: Vec<&str> = line.split_whitespace().collect();
-        let Some(target) = fields.get(1).copied() else {
+        let Some(encoded_target) = fields.get(1).copied() else {
             continue;
         };
+        let target = decode_proc_mount_field(encoded_target);
         if target == "/" {
             continue;
         }
         if target.starts_with("/run/media/") || target.starts_with("/mnt/") {
-            if !mounts.iter().any(|seen| seen == target) {
-                mounts.push(target.to_string());
+            if !mounts.iter().any(|seen| seen == &target) {
+                mounts.push(target);
             }
         }
     }
@@ -392,6 +421,45 @@ mod tests {
         );
         assert_eq!(mounts, vec!["/run/media/alice/BACKUP", "/mnt/nas"]);
         assert!(!mounts.iter().any(|mount| mount == "/"));
+    }
+
+    #[test]
+    fn parses_proc_mount_escaped_spaces() {
+        let mounts = "/dev/sdb1 /run/media/alice/Backup\\040Drive ext4 rw 0 0\\n";
+        assert_eq!(
+            external_mounts_from_proc_mounts(mounts),
+            vec!["/run/media/alice/Backup Drive"]
+        );
+    }
+
+    #[test]
+    fn decodes_proc_mount_octal_fields_and_preserves_literals() {
+        let slash = char::from(92);
+        assert_eq!(
+            decode_proc_mount_field(&format!("/mnt/Backup{slash}040Drive")),
+            "/mnt/Backup Drive"
+        );
+        assert_eq!(
+            decode_proc_mount_field(&format!("/mnt/Backup{slash}011Drive")),
+            format!("/mnt/Backup{}Drive", char::from(9))
+        );
+        assert_eq!(
+            decode_proc_mount_field(&format!("/mnt/Backup{slash}012Drive")),
+            format!("/mnt/Backup{}Drive", char::from(10))
+        );
+        assert_eq!(
+            decode_proc_mount_field(&format!("/mnt/Backup{slash}134Drive")),
+            format!("/mnt/Backup{slash}Drive")
+        );
+        assert_eq!(
+            decode_proc_mount_field(&format!("/mnt/Backup{slash}777Drive")),
+            format!("/mnt/Backup{slash}777Drive")
+        );
+        assert_eq!(decode_proc_mount_field("/mnt/Plain"), "/mnt/Plain");
+        assert_eq!(
+            decode_proc_mount_field(&format!("/mnt/Trailing{slash}")),
+            format!("/mnt/Trailing{slash}")
+        );
     }
 
     #[test]

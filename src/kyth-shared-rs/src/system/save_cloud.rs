@@ -168,7 +168,8 @@ pub fn repo_mount_ready(repo: &str, proc_mounts_text: &str) -> bool {
     }
     let repo = repo.trim_end_matches('/');
     for line in proc_mounts_text.lines() {
-        let target = line.split_whitespace().nth(1).unwrap_or_default();
+        let encoded_target = line.split_whitespace().nth(1).unwrap_or_default();
+        let target = super::backup_config::decode_proc_mount_field(encoded_target);
         let target = target.trim_end_matches('/');
         if !target.is_empty() && (repo == target || repo.starts_with(&format!("{target}/"))) {
             return true;
@@ -294,6 +295,16 @@ mod tests {
         assert!(!repo_mount_ready("/mnt/nas/saves", mounts));
         // Same-disk default never trips the external gate.
         assert!(repo_mount_ready(DEFAULT_REPO, ""));
+    }
+
+    #[test]
+    fn repo_mount_ready_decodes_proc_mount_escaped_spaces() {
+        let slash = char::from(92);
+        let mounts = format!("/dev/sdb1 /run/media/alice/Backup{slash}040Drive ext4 rw 0 0");
+        assert!(repo_mount_ready(
+            "/run/media/alice/Backup Drive/restic",
+            &mounts
+        ));
     }
 
     #[test]

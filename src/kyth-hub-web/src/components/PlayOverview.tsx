@@ -148,7 +148,7 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
     { key: "controller", label: "Pair a controller (optional)", hint: "Xbox, DualSense, and Switch pads work out of the box, wired or Bluetooth.", done: controllerCount === null ? null : controllerCount > 0, optional: true, section: "Controllers", action: "Pair a controller" },
     { key: "perf", label: "Enable the gaming profile", hint: "Performance CPU scheduling, reduced latency, and overlay support.", done: readings.audit || readings.performance ? gamingProfile : null, section: "Performance", action: "Enable gaming profile" },
   ];
-  const setupComplete = setupSteps.every((step) => step.done !== false);
+  const setupComplete = setupSteps.every((step) => step.optional || step.done === true);
 
   const launchersValue = installedLaunchers === null
     ? "Checking…"

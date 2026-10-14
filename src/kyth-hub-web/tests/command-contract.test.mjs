@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -734,6 +735,27 @@ test("phase-2 onboarding is state-driven, not copy", async () => {
   assert.match(gaming, /Steam Play defaults/, "Gaming must surface the Steam Play default state");
   assert.match(gaming, /Install Vesktop/, "Gaming must offer one-click voice chat");
   assert.match(controllersSection, /GamepadTester/, "Controllers must include a live input tester");
+});
+
+test("Play setup waits for required state and ignores optional unknowns", () => {
+  const playOverviewPath = resolve(root, "src/components/PlayOverview.tsx");
+  const sourcePromise = readFile(playOverviewPath, "utf8");
+  return sourcePromise.then((playOverview) => {
+    const expression = playOverview.match(/const setupComplete = (.+);/)?.[1];
+    assert.ok(expression, "Play setup completion predicate must exist");
+    const unknownRequired = [{ done: null }, { done: null }];
+    assert.equal(
+      runInNewContext(expression, { setupSteps: unknownRequired }),
+      false,
+      "unknown required checks must keep the setup checklist visible",
+    );
+    const optionalControllerUnknown = [{ done: true }, { done: null, optional: true }];
+    assert.equal(
+      runInNewContext(expression, { setupSteps: optionalControllerUnknown }),
+      true,
+      "an unknown optional controller check must not block setup completion",
+    );
+  });
 });
 
 test("phase-3 graphics truth is wired, not implied", () => {
