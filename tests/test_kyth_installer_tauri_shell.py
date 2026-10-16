@@ -199,6 +199,16 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn("withCredentials", api)
         self.assertIn("127.0.0.1:7777", vite)
 
+    def test_frontend_403_message_names_the_remedy(self):
+        # Oct 9 leftover observation: a bare "Request failed (403)" left
+        # users with no hint that the window's session token no longer
+        # matches the daemon's, or what to do about it. The 403 branch of
+        # the error mapping must name the state and the remedy.
+        api = (INSTALLER_WEB / "src/api.ts").read_text()
+        self.assertIn("status === 403", api)
+        self.assertIn("out of sync (403)", api)
+        self.assertIn("Close the installer and launch it again", api)
+
     def test_server_allows_only_tauri_cors_and_stream_auth(self):
         server = SERVER.read_text()
         self.assertIn('"http://tauri.localhost"', server)
