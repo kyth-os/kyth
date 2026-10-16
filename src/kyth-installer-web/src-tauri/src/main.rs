@@ -46,14 +46,13 @@ struct InstallerStream(Mutex<Option<Arc<AtomicBool>>>);
 #[derive(Clone, Deserialize, Serialize)]
 struct InstallerConnection {
     base_url: String,
-    bootstrap_token: String,
     session_token: String,
     transport: String,
     socket_path: Option<String>,
 }
 
 /// The connection description handed to the webview. This deliberately
-/// carries NO tokens: the session and bootstrap tokens stay in Rust state
+/// carries NO tokens: the session token stays in Rust state
 /// only (the `installer_request` proxy attaches the session token from
 /// Rust state on every call). Returning tokens to JavaScript would let any
 /// XSS in the webview bypass the Tauri route allowlist and speak to the
@@ -487,7 +486,10 @@ fn main() {
         // (KYTH_INSTALLER_SESSION_TOKEN) is not supported: they would be
         // visible to other local users via /proc/<pid>/cmdline and
         // /proc/<pid>/environ.
-        bootstrap_token: file_tokens.0,
+        // file_tokens.0 (bootstrap) is validated by load_tokens_file as a
+        // tokens-file consistency check but deliberately not retained:
+        // only the Chromium fallback consumes it, via the daemon. This
+        // shell authenticates with the session token alone.
         session_token: file_tokens.1,
         socket_path: arg_value(&argv, "--socket-path"),
         transport: if argv.iter().any(|arg| arg == "--socket-path") {
@@ -571,7 +573,6 @@ mod transport_tests {
     fn http_transport_is_pinned_to_loopback_backend() {
         let value = InstallerConnection {
             base_url: "http://127.0.0.1:7778".to_string(),
-            bootstrap_token: String::new(),
             session_token: String::new(),
             transport: "http".to_string(),
             socket_path: None,
