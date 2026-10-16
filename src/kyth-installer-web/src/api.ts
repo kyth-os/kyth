@@ -118,7 +118,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   }
   if (status < 200 || status >= 300) {
     const record = typeof payload === "object" && payload !== null ? payload as Record<string, unknown> : {};
-    const message = record.message ?? record.error ?? (text || `Request failed (${status})`);
+    // A 403 from the daemon means the session token this window holds no
+    // longer matches the daemon's (the Oct 9 stale-token failure class) —
+    // say so and give the remedy instead of a bare status code.
+    const message = status === 403
+      ? "The installer session is out of sync (403). Close the installer and launch it again."
+      : record.message ?? record.error ?? (text || `Request failed (${status})`);
     throw new InstallerApiError(status, String(message), payload);
   }
   return payload as T;

@@ -61,6 +61,70 @@ class PackageChangesTests(unittest.TestCase):
         added, _, _ = changelog.package_changes(previous, current)
         self.assertEqual(added, ["alpha", "zeta"])
 
+    def test_changelog_omits_repeated_inventory_without_a_baseline(self):
+        current = {"kernel": "7.2", "mesa": "26.2"}
+        section = changelog.package_changes_section(current, {})
+        self.assertEqual(section, "")
+
+    def test_changelog_renders_only_changed_package_rows(self):
+        previous = {"kernel": "7.1", "mesa": "26.2", "old": "1"}
+        current = {"kernel": "7.2", "mesa": "26.2", "new": "2"}
+        section = changelog.package_changes_section(current, previous)
+        self.assertIn("| ~ | `kernel` | 7.1 | 7.2 |", section)
+        self.assertIn("| + | `new` |  | 2 |", section)
+        self.assertIn("| - | `old` | 1 |  |", section)
+        self.assertNotIn("`mesa`", section)
+        self.assertNotIn("No previous SBOM", section)
+
+
+class PreviousImageReleaseTests(unittest.TestCase):
+    def test_selects_latest_published_older_release_of_same_flavor(self):
+        older = "sha256:" + "a" * 64
+        newer = "sha256:" + "b" * 64
+        cachy = "sha256:" + "c" * 64
+        releases = [
+            {"tag_name": "image-testing-20261013-2755-1-9681d007", "draft": False, "prerelease": True,
+             "body": f"Image: `ghcr.io/kyth-os/kyth@{newer}`"},
+            {"tag_name": "image-testing-cachy-20261013-2754-1-9681d007", "draft": False, "prerelease": True,
+             "body": f"Image: `ghcr.io/kyth-os/kyth@{cachy}`"},
+            {"tag_name": "image-testing-20261013-2754-1-9681d007", "draft": False, "prerelease": True,
+             "body": f"Image: `ghcr.io/kyth-os/kyth@{older}`"},
+        ]
+        digest = changelog.previous_image_release_digest(
+            releases, "testing", "testing.20261013.2754.2.9681d007"
+        )
+        self.assertEqual(digest, older)
+
+    def test_selects_cachy_baseline_from_shared_image_version(self):
+        fedora = "sha256:" + "a" * 64
+        cachy = "sha256:" + "b" * 64
+        releases = [
+            {"tag_name": "image-testing-20261013-2755-1-9681d007", "draft": False, "prerelease": True,
+             "body": f"Image: `ghcr.io/kyth-os/kyth@{fedora}`"},
+            {"tag_name": "image-testing-cachy-20261013-2754-1-9681d007", "draft": False, "prerelease": True,
+             "body": f"Image: `ghcr.io/kyth-os/kyth@{cachy}`"},
+        ]
+        digest = changelog.previous_image_release_digest(
+            releases, "testing-cachy", "testing.20261014.10.1.bbbbbbbb"
+        )
+        self.assertEqual(digest, cachy)
+
+    def test_ignores_drafts_wrong_channels_and_invalid_digests(self):
+        releases = [
+            {"tag_name": "image-testing-20261012-2736-1-27a537a0", "draft": True, "prerelease": True,
+             "body": "Image: `ghcr.io/kyth-os/kyth@sha256:" + "a" * 64 + "`"},
+            {"tag_name": "image-testing-20261012-2735-1-27a537a0", "draft": False, "prerelease": False,
+             "body": "Image: `ghcr.io/kyth-os/kyth@sha256:" + "b" * 64 + "`"},
+            {"tag_name": "image-testing-20261012-2734-1-27a537a0", "draft": False, "prerelease": True,
+             "body": "Image: `ghcr.io/kyth-os/kyth@not-a-digest`"},
+        ]
+        self.assertEqual(
+            changelog.previous_image_release_digest(
+                releases, "testing", "testing.20261013.2754.2.9681d007"
+            ),
+            "",
+        )
+
 
 class TableForTests(unittest.TestCase):
     def test_renders_one_row_per_name(self):

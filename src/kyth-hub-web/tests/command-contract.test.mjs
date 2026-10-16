@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readdir, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { test } from "node:test";
+import { runInNewContext } from "node:vm";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -311,6 +312,34 @@ test("release summary is tied to the checked image and explains unavailable note
   assert.match(updatesOverview, /setTimeout/);
   assert.match(updatesOverview, /clearTimeout/);
   assert.match(updatesRust, /body\.lines\(\)\.any\(\|line\| line\.trim\(\) == expected_digest_line\)/);
+});
+
+test("update history lists past releases with expandable notes", () => {
+  assert.match(service, /update-release-history/);
+  assert.match(service, /"update_release_history"/);
+  assert.match(service, /fetchUpdateReleaseHistory/);
+  assert.match(updatesRust, /pub\(crate\) async fn update_release_history/);
+  assert.match(updatesRust, /update_release_history_from_api/);
+  assert.match(rust, /commands::updates::update_release_history/);
+  assert.match(updatesOverview, /fetchUpdateReleaseHistory\(\)/);
+  assert.match(updatesOverview, /Update history/);
+  assert.match(updatesOverview, /updates-history-entry/);
+  assert.match(updatesOverview, /entry\.notes_intro/);
+  assert.match(updatesOverview, /entry\.highlights/);
+  assert.ok(
+    !updatesOverview.includes("A package comparison was not published for this image"),
+    "empty package baselines should not be shown as update-history content",
+  );
+  assert.ok(
+    updatesOverview.includes("releaseSummary.highlights.length > 0") &&
+      updatesOverview.includes("entry.highlights.length > 0"),
+    "only render package-change headings when there are actual changes",
+  );
+  assert.match(updatesOverview, /entry\.digest === bootedDigest/);
+  assert.match(updatesOverview, /entry\.digest === availableDigest/);
+  assert.match(updatesOverview, /No published updates to show yet/);
+  assert.match(hubTheme, /\.updates-history-entry/);
+  assert.match(hubTheme, /\.updates-history-notes/);
 });
 
 test("container build provenance has the required GitHub token permissions", async () => {
@@ -706,6 +735,27 @@ test("phase-2 onboarding is state-driven, not copy", async () => {
   assert.match(gaming, /Steam Play defaults/, "Gaming must surface the Steam Play default state");
   assert.match(gaming, /Install Vesktop/, "Gaming must offer one-click voice chat");
   assert.match(controllersSection, /GamepadTester/, "Controllers must include a live input tester");
+});
+
+test("Play setup waits for required state and ignores optional unknowns", () => {
+  const playOverviewPath = resolve(root, "src/components/PlayOverview.tsx");
+  const sourcePromise = readFile(playOverviewPath, "utf8");
+  return sourcePromise.then((playOverview) => {
+    const expression = playOverview.match(/const setupComplete = (.+);/)?.[1];
+    assert.ok(expression, "Play setup completion predicate must exist");
+    const unknownRequired = [{ done: null }, { done: null }];
+    assert.equal(
+      runInNewContext(expression, { setupSteps: unknownRequired }),
+      false,
+      "unknown required checks must keep the setup checklist visible",
+    );
+    const optionalControllerUnknown = [{ done: true }, { done: null, optional: true }];
+    assert.equal(
+      runInNewContext(expression, { setupSteps: optionalControllerUnknown }),
+      true,
+      "an unknown optional controller check must not block setup completion",
+    );
+  });
 });
 
 test("phase-3 graphics truth is wired, not implied", () => {

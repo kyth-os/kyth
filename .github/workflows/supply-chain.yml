@@ -116,6 +116,7 @@ jobs:
           TAG: ${{ steps.meta.outputs.tag }}
           SOURCE_DIGEST: ${{ inputs.source_digest }}
           SOURCE_SHA: ${{ inputs.source_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           CURRENT_DIGEST="${SOURCE_DIGEST}"
           build_files/scripts/validate-digest.sh "${CURRENT_DIGEST}"
@@ -146,15 +147,8 @@ jobs:
             test "${KERNEL_FLAVOR}" = fedora
           fi
 
-          PREVIOUS_TAG="$(oras repo tags "${IMAGE}" \
-            | grep -E "^${TAG}\.[0-9]{8}\.[0-9]+\.[0-9]+\.[0-9a-f]{8}$" \
-            | grep -vx "${CURRENT_VERSION}" \
-            | sort -V \
-            | tail -n1 || true)"
-          PREVIOUS_DIGEST=""
-          if [[ -n "${PREVIOUS_TAG}" ]]; then
-            PREVIOUS_DIGEST="$(docker buildx imagetools inspect "${IMAGE}:${PREVIOUS_TAG}" --format '{{ .Manifest.Digest }}' 2>/dev/null || true)"
-          fi
+          PREVIOUS_DIGEST="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100" \
+            | python3 .github/scripts/resolve-previous-image-release.py "${TAG}" "${CURRENT_VERSION}")"
 
           echo "current_digest=${CURRENT_DIGEST}" >> "$GITHUB_OUTPUT"
           echo "current_version=${CURRENT_VERSION}" >> "$GITHUB_OUTPUT"
@@ -466,6 +460,19 @@ jobs:
       - name: Setup Cosign
         uses: ./.github/actions/setup-cosign
 
+      - name: Load image signing key
+        env:
+          KYTH_COSIGN_PRIVATE_KEY: ${{ secrets.KYTH_COSIGN_PRIVATE_KEY }}
+          COSIGN_PASSWORD: ${{ secrets.KYTH_COSIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "${KYTH_COSIGN_PRIVATE_KEY}"
+          test -n "${COSIGN_PASSWORD}"
+          umask 077
+          KYTH_SIGNING_KEY_FILE="${RUNNER_TEMP}/kyth-cosign.key"
+          printf '%s' "${KYTH_COSIGN_PRIVATE_KEY}" > "${KYTH_SIGNING_KEY_FILE}"
+          echo "KYTH_SIGNING_KEY_FILE=${KYTH_SIGNING_KEY_FILE}" >> "$GITHUB_ENV"
+
       # H1: verify build provenance BEFORE minting signatures. The old order
       # signed first, then "verified" — the cosign verify trivially passed
       # on signatures this job just created, making this a signing oracle
@@ -495,7 +502,12 @@ jobs:
         env:
           IMAGE: ${{ steps.meta.outputs.image }}
           DIGEST: ${{ steps.meta.outputs.digest }}
+          COSIGN_PASSWORD: ${{ secrets.KYTH_COSIGN_PASSWORD }}
         run: |
+          # Static signature satisfies the native containers/image policy.
+          cosign sign -y --key "${KYTH_SIGNING_KEY_FILE}" "${IMAGE}@${DIGEST}"
+          # Keep the keyless signature for installer ISO verification and
+          # existing consumers that pin the GitHub Actions workflow identity.
           cosign sign -y "${IMAGE}@${DIGEST}"
 
       - name: Attach and sign SBOM
@@ -505,6 +517,7 @@ jobs:
           DIGEST: ${{ steps.meta.outputs.digest }}
           VERSION: ${{ steps.meta.outputs.version }}
           SBOM: output/supply-chain/${{ steps.meta.outputs.sbom }}
+          COSIGN_PASSWORD: ${{ secrets.KYTH_COSIGN_PASSWORD }}
         run: |
           ATTACH_OUTPUT="$(oras attach --format json \
             --artifact-type application/vnd.syft+json \
@@ -516,28 +529,28 @@ jobs:
           SBOM_DIGEST="$(jq -r '.digest' <<< "${ATTACH_OUTPUT}")"
           build_files/scripts/validate-digest.sh "${SBOM_DIGEST}"
           echo "digest=${SBOM_DIGEST}" >> "$GITHUB_OUTPUT"
+          cosign sign -y --key "${KYTH_SIGNING_KEY_FILE}" "${IMAGE}@${SBOM_DIGEST}"
           cosign sign -y "${IMAGE}@${SBOM_DIGEST}"
 
       - name: Verify published signatures
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMAGE: ${{ steps.meta.outputs.image }}
           DIGEST: ${{ steps.meta.outputs.digest }}
           SBOM_DIGEST: ${{ steps.attach_sbom.outputs.digest }}
         run: |
+          set -euo pipefail
+          cosign verify --key build_files/config/containers/kyth-cosign.pub "${IMAGE}@${DIGEST}"
+          cosign verify --key build_files/config/containers/kyth-cosign.pub "${IMAGE}@${SBOM_DIGEST}"
           IDENTITY="^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/supply-chain\\.yml@refs/heads/(main|testing)$"
           ISSUER="https://token.actions.githubusercontent.com"
-
-          cosign verify \
-            --certificate-identity-regexp "${IDENTITY}" \
-            --certificate-oidc-issuer "${ISSUER}" \
-            "${IMAGE}@${DIGEST}"
-          cosign verify \
-            --certificate-identity-regexp "${IDENTITY}" \
-            --certificate-oidc-issuer "${ISSUER}" \
-            "${IMAGE}@${SBOM_DIGEST}"
+          cosign verify --certificate-identity-regexp "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" "${IMAGE}@${DIGEST}"
+          cosign verify --certificate-identity-regexp "${IDENTITY}" --certificate-oidc-issuer "${ISSUER}" "${IMAGE}@${SBOM_DIGEST}"
           # Build provenance was verified BEFORE signing (see
           # "Verify build provenance before signing" above).
+
+      - name: Remove image signing key
+        if: always()
+        run: rm -f "${RUNNER_TEMP}/kyth-cosign.key"
 
       # The changelog release now publishes here, inside the gated publish job
       # AFTER signature verification — never from the ungated prepare job. A

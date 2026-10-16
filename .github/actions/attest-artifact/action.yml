@@ -34,6 +34,16 @@ outputs:
 runs:
   using: composite
   steps:
+    - name: Prepare GHCR auth for OCI attestation
+      if: inputs.subject-name != '' && inputs.push-to-registry == 'true'
+      shell: bash
+      run: |
+        set -euo pipefail
+        AUTH_FILE="${DOCKER_CONFIG:?}/config.json"
+        jq -e '.auths["ghcr.io"].auth | type == "string" and length > 0' "${AUTH_FILE}" >/dev/null
+        install -d -m 0700 "${HOME}/.docker"
+        install -m 0600 "${AUTH_FILE}" "${HOME}/.docker/config.json"
+
     - name: Generate build provenance
       id: attest
       uses: actions/attest-build-provenance@5e9cb68e95676991667494a6a4e59b8a2f13e1d0 # v1.3.3
@@ -42,6 +52,11 @@ runs:
         subject-name: ${{ inputs.subject-name }}
         subject-digest: ${{ inputs.subject-digest }}
         push-to-registry: ${{ inputs.push-to-registry }}
+
+    - name: Remove temporary GHCR auth for OCI attestation
+      if: always() && inputs.subject-name != '' && inputs.push-to-registry == 'true'
+      shell: bash
+      run: rm -f "${HOME}/.docker/config.json"
 
     - name: Sign blob with Cosign (Keyless)
       if: inputs.cosign-sign == 'true'

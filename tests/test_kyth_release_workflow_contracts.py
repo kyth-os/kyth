@@ -39,6 +39,19 @@ class ReleaseIdentityTests(unittest.TestCase):
 
 
 class WorkflowArtifactContracts(unittest.TestCase):
+    def test_previous_sbom_baseline_comes_from_an_older_published_release(self):
+        workflow = (
+            ROOT / ".github/workflows/supply-chain.yml"
+        ).read_text(encoding="utf-8")
+        resolve = workflow.split(
+            "- name: Validate immutable image identity and resolve previous digest", 1
+        )[1].split("- name: Setup Syft", 1)[0]
+        self.assertIn("gh api", resolve)
+        self.assertIn("resolve-previous-image-release.py", resolve)
+        self.assertNotIn("oras repo tags", resolve)
+        self.assertIn("CURRENT_VERSION", resolve)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", resolve)
+
     def test_iso_artifact_has_one_producer_and_matching_consumers(self):
         """One upload in build; every download resolves it from build's output.
 
@@ -146,6 +159,31 @@ class ReleaseChainingContracts(unittest.TestCase):
         for label in ('image.version="45"', 'osbuild.version="45"', 'KythOS 45"'):
             self.assertIn(label, (ROOT / "Dockerfile").read_text(encoding="utf-8"))
 
+    def test_base_digest_pin_is_identical_in_dockerfile_and_vars(self):
+        """The kinoite pin lives in two files; they must carry one digest.
+
+        build_base/Dockerfile's ARG BASE_IMAGE and _vars.just's
+        default_base_image fallback are the same pin. When they drift, CI's
+        Dockerfile build-rules check fails — and during the F45 beta, quay
+        garbage-collects superseded digests within about a day, so a stale
+        or split pin also makes the base unresolvable ("not found" loading
+        metadata). One digest, both places, checked before push.
+        """
+        dockerfile = (ROOT / "build_base/Dockerfile").read_text(encoding="utf-8")
+        docker_digest = next(
+            line.split("@", 1)[1].strip()
+            for line in dockerfile.splitlines()
+            if line.startswith("ARG BASE_IMAGE=")
+        )
+        vars_just = (ROOT / "_vars.just").read_text(encoding="utf-8")
+        vars_digest = next(
+            line.split("@", 1)[1].split('"', 1)[0]
+            for line in vars_just.splitlines()
+            if "default_base_image" in line and "fedora-kinoite" in line
+        )
+        self.assertRegex(docker_digest, r"^sha256:[0-9a-f]{64}$")
+        self.assertEqual(docker_digest, vars_digest)
+
     def test_r2_public_base_url_is_single_sourced(self):
         """The R2 download host lives in release_identity.py exactly once.
 
@@ -223,6 +261,36 @@ class ReleaseChainingContracts(unittest.TestCase):
         self.assertIn("matrix.kernel_flavor", build)
         self.assertRegex(build, r"dispatch_iso.*fedora.*'\"true\"'")
         self.assertIn("inputs.dispatch_iso", publish)
+
+    def test_base_image_attestation_uses_the_bare_repository_name(self):
+        """actions/attest rejects a tagged subject name ("Invalid image
+        name: ...:base-latest"); the base image must be attested by bare
+        repository + digest, exactly like the final image. This only fires
+        when the base is rebuilt rather than reused, which is why it hid
+        until the first post-promotion main build (2026-10-12)."""
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        self.assertIn('echo "repository=${IMAGE_FULL}" >&3', build)
+        attest = build.split("- name: Attest base image provenance", 1)[1]
+        self.assertIn("subject-name: ${{ steps.build_base.outputs.repository }}", attest)
+        self.assertNotIn("subject-name: ${{ steps.build_base.outputs.image }}", attest)
+
+    def test_registry_attestations_receive_docker_credentials(self):
+        """Attestation uploads must see the GHCR auth file and registry write permission."""
+        action = (ROOT / ".github/actions/attest-artifact/action.yml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('AUTH_FILE="${DOCKER_CONFIG:?}/config.json"', action)
+        self.assertIn(
+            'install -m 0600 "${AUTH_FILE}" "${HOME}/.docker/config.json"', action
+        )
+
+        build = (ROOT / ".github/workflows/build.yml").read_text(encoding="utf-8")
+        build_push = build.split("  build_push:", 1)[1].split("\n  finalize:", 1)[0]
+        finalize = build.split("  finalize:", 1)[1]
+        self.assertIn("artifact-metadata: write", build_push)
+        self.assertIn("artifact-metadata: write", finalize)
+        finalize_header = finalize.split("    steps:", 1)[0]
+        self.assertIn("DOCKER_CONFIG: /tmp/kyth-docker-config", finalize_header)
 
     def test_floating_tag_promotion_preserves_the_verified_digest(self):
         """Promotion must tag the exact verified digest, never re-wrap it.

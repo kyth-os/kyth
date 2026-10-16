@@ -1394,6 +1394,26 @@ export async function fetchUpdateReleaseSummary(digest: string): Promise<UpdateR
   });
 }
 
+export interface UpdateHistoryEntry {
+  version: string;
+  flavor: string;
+  release_url: string;
+  published_at: string;
+  digest: string;
+  highlights_title: string;
+  highlights: string[];
+  notes_intro: string;
+}
+
+/** Published image releases for this machine's channel, newest first;
+ * the native side parses each release's notes so the UI never guesses. */
+export async function fetchUpdateReleaseHistory(): Promise<UpdateHistoryEntry[]> {
+  if (!inTauriShell()) return [];
+  return sharedRead("update-release-history", 5 * 60_000, async () => {
+    try { return await invoke<UpdateHistoryEntry[]>("update_release_history"); } catch { return []; }
+  });
+}
+
 export interface UpdateHealthLive { status: string; pending_digest: string; last_healthy_digest: string; failures: number; quarantined: number; detail: string; }
 export async function fetchUpdateHealth(): Promise<UpdateHealthLive | null> {
   if (!inTauriShell()) return null;

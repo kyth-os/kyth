@@ -7,8 +7,8 @@ bin_dir="${cache_dir}/bin"
 checksum_dir="${cache_dir}/checksums"
 mkdir -p "${cache_dir}" "${bin_dir}" "${checksum_dir}"
 
-ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-1.7.7}"
-ACTIONLINT_SHA256="${ACTIONLINT_SHA256:-023070a287cd8cccd71515fedc843f1985bf96c436b7effaecce67290e7e0757}"
+ACTIONLINT_VERSION="${ACTIONLINT_VERSION:-1.7.12}"
+ACTIONLINT_SHA256="${ACTIONLINT_SHA256:-8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8}"
 HADOLINT_VERSION="${HADOLINT_VERSION:-2.14.0}"
 HADOLINT_SHA256="${HADOLINT_SHA256:-6bf226944684f56c84dd014e8b979d27425c0148f61b3bd99bcc6f39e9dc5a47}"
 JUST_VERSION="${JUST_VERSION:-1.52.0}"
@@ -26,21 +26,27 @@ download_and_verify() {
 	local bin_in_archive="$5"
 	local target="${bin_dir}/${name}"
 	local record="${checksum_dir}/${name}.sha256"
+	local source_record="${checksum_dir}/${name}.source"
+	local source_url="${base_url}/${archive}"
 
-	# Cache hit: re-verify the cached binary before trusting it. A corrupt
-	# or tampered cache entry must trigger a fresh download, not a silent
-	# pass (a restore-key can serve a stale entry).
+	# Cache hits must match both the release URL and the verified binary digest;
+	# otherwise a restore-key can silently provide an older tool version.
 	if [[ -x "${target}" ]]; then
-		if [[ -f "${record}" ]] && (cd "${bin_dir}" && sha256sum --check --strict --status "${record}"); then
+		local cached_source=""
+		if [[ -f "${source_record}" ]]; then
+			IFS= read -r cached_source <"${source_record}" || true
+		fi
+		if [[ "${cached_source}" == "${source_url}" && -f "${record}" ]] &&
+			(cd "${bin_dir}" && sha256sum --check --strict --status "${record}"); then
 			return 0
 		fi
-		echo "warning: cached ${name} failed checksum re-verify - re-downloading" >&2
-		rm -f "${target}" "${record}"
+		echo "warning: cached ${name} is stale or failed checksum re-verify - re-downloading" >&2
+		rm -f "${target}" "${record}" "${source_record}"
 	fi
 
 	local work
 	work="$(mktemp -d)"
-	curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 -o "${work}/${archive}" "${base_url}/${archive}"
+	curl -fsSL --retry 5 --retry-delay 2 --retry-all-errors --connect-timeout 15 -o "${work}/${archive}" "${source_url}"
 
 	if [[ -n "${sha256_or_file}" ]]; then
 		if [[ "${#sha256_or_file}" -eq 64 && "${sha256_or_file}" =~ ^[0-9a-fA-F]+$ ]]; then
@@ -69,6 +75,7 @@ download_and_verify() {
 	fi
 
 	(cd "${bin_dir}" && sha256sum "${name}" > "${record}")
+	printf '%s\n' "${source_url}" >"${source_record}"
 
 	rm -rf "${work}"
 }
