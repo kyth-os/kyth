@@ -52,6 +52,24 @@ class WorkflowArtifactContracts(unittest.TestCase):
         self.assertIn("CURRENT_VERSION", resolve)
         self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", resolve)
 
+    def test_changelog_uses_pulled_baseline_and_full_git_history(self):
+        workflow = (
+            ROOT / ".github/workflows/supply-chain.yml"
+        ).read_text(encoding="utf-8")
+        prepare_checkout = workflow.split("- name: Checkout repository", 1)[1].split(
+            "- name: Preflight source image", 1
+        )[0]
+        self.assertIn("fetch-depth: 0", prepare_checkout)
+
+        changelog = workflow.split(
+            "- name: Generate SBOM-powered changelog", 1
+        )[1].split("- name: Package publish inputs", 1)[0]
+        self.assertIn(
+            "PREVIOUS_SBOM: ${{ steps.previous_sbom.outputs.path }}", changelog
+        )
+        self.assertIn('--previous-sbom-file "${PREVIOUS_SBOM}"', changelog)
+        self.assertIn("package comparison will be marked unavailable", workflow)
+
     def test_iso_artifact_has_one_producer_and_matching_consumers(self):
         """One upload in build; every download resolves it from build's output.
 

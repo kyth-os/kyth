@@ -82,6 +82,7 @@ jobs:
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Preflight source image
@@ -275,7 +276,7 @@ jobs:
 
       - name: Warn if previous image has no SBOM
         if: steps.image.outputs.previous_digest != '' && steps.previous_sbom.outputs.path == ''
-        run: echo "No previous SBOM found; CVE diff will be skipped"
+        run: echo "::warning::Previous SBOM unavailable; package comparison will be marked unavailable and CVE diff skipped"
 
       - name: Scan previous SBOM with Grype
         id: grype_previous
@@ -299,6 +300,7 @@ jobs:
           PREVIOUS_DIGEST: ${{ steps.image.outputs.previous_digest }}
           CURRENT_SHA: ${{ steps.image.outputs.source_sha }}
           CURRENT_SBOM: ${{ steps.sbom.outputs.path }}
+          PREVIOUS_SBOM: ${{ steps.previous_sbom.outputs.path }}
           SOURCE_TAG: ${{ inputs.source_tag }}
           GRYPE_CURRENT: ${{ steps.grype_current.outputs.path }}
           GRYPE_PREVIOUS: ${{ steps.grype_previous.outputs.path }}
@@ -319,6 +321,7 @@ jobs:
             --previous-digest "${PREVIOUS_DIGEST}" \
             --current-sha "${CURRENT_SHA}" \
             --current-sbom-file "${CURRENT_SBOM}" \
+            --previous-sbom-file "${PREVIOUS_SBOM}" \
             "${GRYPE_ARGS[@]}" \
             --output "${NOTES}"
           echo "path=${NOTES}" >> "$GITHUB_OUTPUT"

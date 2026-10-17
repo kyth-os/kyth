@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 
 IMPORTANT_PACKAGES = [
@@ -75,11 +76,18 @@ def find_sbom_digest(image: str, digest: str) -> str | None:
         print(f"warning: could not discover SBOM for {image}@{digest}: {exc}", file=sys.stderr)
         return None
 
-    for referrer in discovered.get("referrers", []):
+    referrers = discovered.get("referrers", []) if isinstance(discovered, dict) else []
+    for referrer in referrers:
+        if not isinstance(referrer, dict):
+            continue
         artifact_type = referrer.get("artifactType", "")
-        if "syft+json" in artifact_type or "spdx+json" in artifact_type:
+        if isinstance(artifact_type, str) and "syft+json" in artifact_type:
             return referrer.get("digest")
     return None
+
+
+def is_syft_sbom(sbom: object) -> bool:
+    return isinstance(sbom, dict) and isinstance(sbom.get("artifacts"), list)
 
 
 def load_sbom(image: str, image_digest: str) -> dict | None:
@@ -94,10 +102,27 @@ def load_sbom(image: str, image_digest: str) -> dict | None:
             print(f"warning: could not pull SBOM {sbom_digest}: {exc}", file=sys.stderr)
             return None
 
-        for entry in Path(tmp).iterdir():
-            if entry.suffix == ".json":
-                return json.loads(entry.read_text(encoding="utf-8"))
+        for entry in sorted(Path(tmp).rglob("*.json")):
+            try:
+                sbom = json.loads(entry.read_text(encoding="utf-8"))
+            except Exception as exc:
+                print(f"warning: could not parse pulled SBOM {entry}: {exc}", file=sys.stderr)
+                continue
+            if is_syft_sbom(sbom):
+                return sbom
+            print(f"warning: pulled SBOM {entry} has no Syft artifacts array", file=sys.stderr)
     return None
+
+
+def load_sbom_file(path: str, label: str) -> dict | None:
+    try:
+        sbom = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not is_syft_sbom(sbom):
+            raise ValueError("SBOM must be a Syft JSON object with an artifacts array")
+        return sbom
+    except Exception as exc:
+        print(f"warning: could not read {label}: {exc}", file=sys.stderr)
+        return None
 
 
 def rpm_packages(sbom: dict | None) -> dict[str, str]:
@@ -106,20 +131,32 @@ def rpm_packages(sbom: dict | None) -> dict[str, str]:
 
     packages: dict[str, str] = {}
     for artifact in sbom.get("artifacts", []):
-        if artifact.get("type") != "rpm":
+        if not isinstance(artifact, dict) or artifact.get("type") != "rpm":
             continue
         name = artifact.get("name")
         version = artifact.get("version")
+        metadata = artifact.get("metadata")
+        if not isinstance(metadata, dict):
+            metadata = {}
+        if not version:
+            metadata_version = metadata.get("version")
+            release = metadata.get("release")
+            if metadata_version:
+                version = f"{metadata_version}-{release}" if release else str(metadata_version)
         if not name or not version:
             continue
-        packages[name] = normalize_version(version)
+        epoch = metadata.get("epoch")
+        version = str(version)
+        if epoch is not None and not version.startswith(f"{epoch}:"):
+            version = f"{epoch}:{version}"
+        architecture = metadata.get("architecture")
+        if not architecture:
+            purl = artifact.get("purl")
+            if isinstance(purl, str):
+                architecture = parse_qs(urlsplit(purl).query).get("arch", [None])[0]
+        package_key = f"{name}.{architecture}" if architecture else str(name)
+        packages[package_key] = version
     return packages
-
-
-def normalize_version(version: str) -> str:
-    version = re.sub(r"^\d+:", "", version)
-    version = re.sub(r"\.fc\d+(?=\.|$)", "", version)
-    return version
 
 
 def package_changes(previous: dict[str, str], current: dict[str, str]) -> tuple[list[str], list[str], list[str]]:
@@ -138,17 +175,35 @@ def package_changes(previous: dict[str, str], current: dict[str, str]) -> tuple[
     return added, changed, removed
 
 
-def package_changes_section(current: dict[str, str], previous: dict[str, str]) -> str:
+def package_changes_section(
+    current: dict[str, str] | None, previous: dict[str, str] | None
+) -> str:
     """Render only package changes; never substitute a repeated inventory."""
-    if not current or not previous:
-        return ""
+    if current is None:
+        return (
+            "### All RPM Changes\n\n"
+            "RPM comparison unavailable: current SBOM could not be loaded."
+        )
+    if previous is None:
+        return (
+            "### All RPM Changes\n\n"
+            "RPM comparison unavailable: previous SBOM baseline could not be loaded."
+        )
 
     added, changed, removed = package_changes(previous, current)
     if not (added or changed or removed):
         return "### All RPM Changes\n\nNo RPM package changes detected."
 
     lines: list[str] = []
-    important = [name for name in IMPORTANT_PACKAGES if name in set(added + changed + removed)]
+    changed_packages = set(added + changed + removed)
+    important = sorted(
+        name
+        for name in changed_packages
+        if any(
+            name == package or name.startswith(f"{package}.")
+            for package in IMPORTANT_PACKAGES
+        )
+    )
     if important:
         lines += [
             "### Major Package Changes",
@@ -316,7 +371,8 @@ def main() -> int:
     parser.add_argument("--current-digest", required=True)
     parser.add_argument("--previous-digest", default="")
     parser.add_argument("--current-sha", required=True)
-    parser.add_argument("--current-sbom-file", default="")
+    parser.add_argument("--current-sbom-file", default=None)
+    parser.add_argument("--previous-sbom-file", default=None)
     parser.add_argument("--grype-current", default="")
     parser.add_argument("--grype-previous", default="")
     parser.add_argument("--image-version", default="")
@@ -357,17 +413,22 @@ def main() -> int:
         Path(args.output).write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
         return 0
 
-    if args.current_sbom_file:
-        try:
-            current_sbom = json.loads(Path(args.current_sbom_file).read_text(encoding="utf-8"))
-        except Exception as exc:
-            print(f"warning: could not read --current-sbom-file: {exc}", file=sys.stderr)
-            current_sbom = None
+    if args.current_sbom_file is not None:
+        current_sbom = (
+            load_sbom_file(args.current_sbom_file, "--current-sbom-file")
+            if args.current_sbom_file else None
+        )
     else:
         current_sbom = load_sbom(args.image, args.current_digest)
-    previous_sbom = load_sbom(args.image, args.previous_digest)
-    current_packages = rpm_packages(current_sbom)
-    previous_packages = rpm_packages(previous_sbom)
+    if args.previous_sbom_file is not None:
+        previous_sbom = (
+            load_sbom_file(args.previous_sbom_file, "--previous-sbom-file")
+            if args.previous_sbom_file else None
+        )
+    else:
+        previous_sbom = load_sbom(args.image, args.previous_digest)
+    current_packages = rpm_packages(current_sbom) if current_sbom is not None else None
+    previous_packages = rpm_packages(previous_sbom) if previous_sbom is not None else None
     previous_labels = image_labels(args.image, args.previous_digest)
 
     title = f"Kyth image `{args.current_tag}`"
@@ -381,8 +442,7 @@ def main() -> int:
     ]
 
     package_section = package_changes_section(current_packages, previous_packages)
-    if package_section:
-        lines += [package_section, ""]
+    lines += [package_section, ""]
 
     commit_notes = commit_section(previous_labels, args.current_sha).rstrip()
     if commit_notes:
