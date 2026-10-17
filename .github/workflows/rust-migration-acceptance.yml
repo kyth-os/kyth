@@ -241,17 +241,20 @@ jobs:
           echo "Promoted testing image: ghcr.io/kyth-os/kyth:testing@${digest}"
           printf 'ref=%s\n' "ghcr.io/kyth-os/kyth:testing@${digest}" >>"${GITHUB_OUTPUT}"
 
+      # The ISO itself is published on R2; the GitHub release only keeps sidecars.
       - name: Download promoted testing ISO
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           mkdir -p "${RUNNER_TEMP}/kyth-acceptance/iso" \
             "${RUNNER_TEMP}/kyth-acceptance/evidence"
-          gh release download iso-testing \
-            --pattern 'kyth-live-testing.iso' \
-            --pattern 'kyth-live-testing.iso-CHECKSUM' \
-            --dir "${RUNNER_TEMP}/kyth-acceptance/iso" --clobber
+          iso_url="$(PYTHONPATH=build_files/scripts python3 -c \
+            'from release_identity import r2_download_url; print(r2_download_url("kyth-live-testing.iso"))')"
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output "${RUNNER_TEMP}/kyth-acceptance/iso/kyth-live-testing.iso" \
+            "${iso_url}"
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output "${RUNNER_TEMP}/kyth-acceptance/iso/kyth-live-testing.iso-CHECKSUM" \
+            "${iso_url}-CHECKSUM"
 
       - name: Verify promoted testing ISO
         id: iso
