@@ -312,6 +312,21 @@ test("release summary is tied to the checked image and explains unavailable note
   assert.match(updatesOverview, /setTimeout/);
   assert.match(updatesOverview, /clearTimeout/);
   assert.match(updatesRust, /body\.lines\(\)\.any\(\|line\| line\.trim\(\) == expected_digest_line\)/);
+  assert.match(updatesRust, /fn normalize_image_branch/);
+  assert.match(updatesRust, /"testing-cachy" => Some\(\("testing", "cachy"\)\)/);
+  assert.match(updatesRust, /"latest-cachy" => Some\(\("latest", "cachy"\)\)/);
+  assert.ok(
+    !updatesRust.includes("package_changes.truncate"),
+    "the pending preview must render the complete package list, never a silent sample",
+  );
+  assert.match(updatesRust, /package_total/);
+  assert.match(updatesRust, /flavor: flavor\.to_string\(\),/);
+  assert.match(service, /flavor: string;/);
+  assert.match(service, /package_total: number;/);
+  assert.match(updatesOverview, /packageChangesHeading\(releaseSummary\.highlights_title, releaseSummary\.package_total\)/);
+  assert.match(updatesOverview, /releaseSummary\.flavor === "cachy"/);
+  assert.match(updatesOverview, /updates-package-list/);
+  assert.match(hubTheme, /\.updates-package-list/);
 });
 
 test("update history lists past releases with expandable notes", () => {
@@ -337,6 +352,8 @@ test("update history lists past releases with expandable notes", () => {
   );
   assert.match(updatesOverview, /entry\.digest === bootedDigest/);
   assert.match(updatesOverview, /entry\.digest === availableDigest/);
+  assert.match(updatesRust, /if release_flavor != flavor/);
+  assert.match(updatesOverview, /packageChangesHeading\(entry\.highlights_title, entry\.package_total\)/);
   assert.match(updatesOverview, /No published updates to show yet/);
   assert.match(hubTheme, /\.updates-history-entry/);
   assert.match(hubTheme, /\.updates-history-notes/);

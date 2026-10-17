@@ -1380,9 +1380,11 @@ export async function fetchUpdateStatus(): Promise<UpdateStatusLive | null> {
 
 export interface UpdateReleaseSummary {
   version: string;
+  flavor: string;
   release_url: string;
   highlights_title: string;
   highlights: string[];
+  package_total: number;
 }
 
 /** Optional release detail is matched natively to the checked image digest;
@@ -1403,6 +1405,7 @@ export interface UpdateHistoryEntry {
   highlights_title: string;
   highlights: string[];
   notes_intro: string;
+  package_total: number;
 }
 
 /** Published image releases for this machine's channel, newest first;
