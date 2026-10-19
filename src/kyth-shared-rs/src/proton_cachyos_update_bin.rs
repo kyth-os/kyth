@@ -2,9 +2,14 @@
 //! launcher.
 //!
 //! Fetches the latest GE-Proton release, verifies its checksum,
-//! extracts it, and prunes old versions. Skipped on live ISOs. Exits `1`
-//! with the launcher error lines on failure. `system/updater.py` stays
-//! as the Phase 3 fixture.
+//! extracts it, and prunes old versions. Also gated by the
+//! KythOS-signed updater manifest (docs/updater-signing.md): the
+//! resolved version must be approved by a manifest whose signature
+//! verifies against the signing key baked into the image, and the
+//! tarball must hash to the manifest-pinned digest — in addition to
+//! the upstream checksum sidecar and the downgrade/jump holds below.
+//! Skipped on live ISOs. Exits `1` with the launcher error lines on
+//! failure. `system/updater.py` stays as the Phase 3 fixture.
 //!
 //! NOTE: the binary keeps its historical `proton_cachyos` name (unit files,
 //! ujust recipes, install paths) to avoid churning systemd/CI plumbing;
@@ -20,6 +25,7 @@ use kyth_shared::system::release_fetch::{
     github_headers, prune_installations, read_secret_file, release_assets, validate_version,
     verify_checksum_file, TempWorkdir,
 };
+use kyth_shared::system::update_manifest;
 
 const REPO: &str = "GloriousEggroll/proton-ge-custom";
 const VERSION_PATTERN: &str = r"GE-Proton[0-9]+-[0-9]+";
@@ -219,17 +225,39 @@ fn main() -> std::process::ExitCode {
         println!("GE-Proton {ver} is already up to date.");
         return std::process::ExitCode::SUCCESS;
     }
-    if install_dir.join(&folder).is_dir() {
-        println!("GE-Proton {ver} found incomplete — re-installing...");
-        std::fs::remove_dir_all(install_dir.join(&folder)).unwrap_or_else(|error| {
-            fail(format!("Failed to clear incomplete install: {error}"), None)
-        });
-    }
-    println!("Updating to GE-Proton {ver}...");
     let work = match TempWorkdir::create("kyth-proton") {
         Ok(work) => work,
         Err(error) => fail(format!("Failed to download assets: {error}"), None),
     };
+    // Signed-manifest gate (docs/updater-signing.md): the checksum
+    // sidecar below comes from the same release as the tarball, so it
+    // only proves transport integrity. The release is only trusted
+    // once the KythOS signing key has approved this exact version —
+    // fail closed, keep the installed version, install nothing.
+    println!("Verifying KythOS signed update manifest...");
+    let approved = match update_manifest::approve_update(
+        &run,
+        work.path(),
+        update_manifest::COMPONENT_GE_PROTON,
+        ver,
+        &tarball.name,
+    ) {
+        Ok(entry) => entry,
+        Err(error) => fail(
+            format!("Signed update manifest check failed: {error}"),
+            Some(&work),
+        ),
+    };
+    if install_dir.join(&folder).is_dir() {
+        println!("GE-Proton {ver} found incomplete — re-installing...");
+        std::fs::remove_dir_all(install_dir.join(&folder)).unwrap_or_else(|error| {
+            fail(
+                format!("Failed to clear incomplete install: {error}"),
+                Some(&work),
+            )
+        });
+    }
+    println!("Updating to GE-Proton {ver}...");
     let tarball_dest = work.path().join(&tarball.name);
     let sha512_dest = work.path().join(&checksum.name);
     let downloads = [
@@ -251,6 +279,16 @@ fn main() -> std::process::ExitCode {
     if let Err(error) = verify_checksum_file(&sha512_dest, &tarball_dest, "sha512") {
         fail(
             format!("Checksum verification failed: {error}"),
+            Some(&work),
+        );
+    }
+    // In addition to the upstream checksum: the tarball must hash to
+    // the digest the signed manifest pinned for this version.
+    println!("Verifying tarball against signed update manifest...");
+    if let Err(error) = update_manifest::verify_artifact_matches(&approved, "sha512", &tarball_dest)
+    {
+        fail(
+            format!("Signed update manifest digest verification failed: {error}"),
             Some(&work),
         );
     }
