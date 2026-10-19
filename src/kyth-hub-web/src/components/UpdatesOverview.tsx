@@ -18,7 +18,7 @@ import {
   type UpdatesSnapshot,
 } from "../services/liveData";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
-import { friendlyActionError, friendlyActionNextStep, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityResult } from "./updateMessages";
+import { friendlyActionError, friendlyActionNextStep, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityNextStep, friendlyAvailabilityResult } from "./updateMessages";
 
 type GuidanceTone = "ok" | "warn" | "muted";
 type UpdatePhase = "prepare" | "download" | "install" | "verify" | "finalize";
@@ -586,7 +586,7 @@ export function UpdatesOverview() {
         icon: "!",
         title: "We couldn’t check for updates",
         message: friendlyAvailabilityDetail(updateStatus?.blocked_reason || updateStatus?.detail, "The update service did not respond."),
-        next: "Check your connection, then choose “Try again”.",
+        next: friendlyAvailabilityNextStep(updateStatus?.blocked_reason || updateStatus?.detail, "Check your connection, then choose “Try again”."),
       };
     }
     if (systemUpdateAvailable) {

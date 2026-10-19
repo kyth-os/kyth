@@ -277,6 +277,9 @@ test("Updates page gives plain-language next steps", () => {
   assert.match(hubTheme, /\.updates-guidance-title, \.updates-release-card, \.updates-chip-active > span/);
   assert.match(hubTheme, /\.updates-phase-current \.updates-phase-marker[^\n]*animation:/);
   assert.match(updateMessages, /We couldn't reach the update service/);
+  assert.match(updateMessages, /local rpm-ostree modifications/i, "bootc layered-package blockers must not be presented as a connection failure");
+  assert.match(updateMessages, /rpm-ostree status/, "the user needs a safe diagnostic next step before resetting layered packages");
+  assert.match(updatesOverview, /friendlyAvailabilityNextStep/);
   assert.match(updateMessages, /couldn't reach the update registry/);
   assert.doesNotMatch(updateMessages, /current system has not changed/);
   assert.match(updateMessages, /confirm that the update is staged/);
