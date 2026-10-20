@@ -10,7 +10,6 @@
 
 [![Build](https://github.com/kyth-os/kyth/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/kyth-os/kyth/actions/workflows/build.yml)
 [![Live ISO](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml/badge.svg?branch=testing)](https://github.com/kyth-os/kyth/actions/workflows/build-live-iso.yml)
-[![CVE Scan](https://github.com/kyth-os/kyth/actions/workflows/cve-scan.yml/badge.svg)](https://github.com/kyth-os/kyth/actions/workflows/cve-scan.yml)
 
 </div>
 
