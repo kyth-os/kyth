@@ -21,8 +21,10 @@ ExecStart=/usr/bin/kyth-installerd --socket-path /run/kyth-installer/api.sock --
 EnvironmentFile=-/etc/kyth-installer.env
 User=root
 Group=root
-RuntimeDirectory=kyth-installer
-RuntimeDirectoryMode=0750
+# The launcher creates this shared directory root:liveuser and puts a 0600
+# session-user-owned tokens file below it. Do not use RuntimeDirectory here:
+# systemd would re-own the tree as root:root and make the live user's token
+# unreadable to the shell, producing an immediate authenticated-API 403.
 UMask=0077
 # Filesystem containment
 ProtectSystem=strict

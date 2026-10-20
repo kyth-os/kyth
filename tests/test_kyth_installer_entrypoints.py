@@ -70,6 +70,18 @@ class InstallerEntrypointTests(unittest.TestCase):
         self.assertIn("--socket-group liveuser", unit)
         self.assertNotIn("systemctl enable kyth-installerd.service", build)
 
+    def test_installer_service_does_not_reown_launcher_session_tokens(self):
+        unit = (ROOT / "build_files" / "kyth-installerd.service").read_text()
+        launcher = (ROOT / "build_files" / "kyth-launch-installer").read_text()
+
+        # The launcher places a 0600 tokens.json in a session-user-owned
+        # directory below /run/kyth-installer. RuntimeDirectory on that same
+        # path would recursively chown the tree to User=/Group= (root:root),
+        # making the live user's token unreadable and causing an API 403.
+        self.assertNotIn("RuntimeDirectory=kyth-installer", unit)
+        self.assertIn('install -d -m 0750 -o root -g liveuser "${LAUNCH_DIR}"', launcher)
+        self.assertIn('install -d -m 0700 -o "${session_user}" -g "${session_gid}" "${CLIENT_TOKEN_DIR}"', launcher)
+
     def test_installer_service_sandbox_allows_stdio_and_all_block_device_groups(self):
         unit = (ROOT / "build_files" / "kyth-installerd.service").read_text()
         device_policy = next(
