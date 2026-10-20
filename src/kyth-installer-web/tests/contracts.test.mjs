@@ -6,6 +6,8 @@ const api = await readFile(new URL("../src/api.ts", import.meta.url), "utf8");
 const app = await readFile(new URL("../src/InstallerApp.tsx", import.meta.url), "utf8");
 const native = await readFile(new URL("../src-tauri/src/native_main.rs", import.meta.url), "utf8");
 const tauriShell = await readFile(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
+const tauriBuild = await readFile(new URL("../src-tauri/build.rs", import.meta.url), "utf8");
+const tauriCapabilities = JSON.parse(await readFile(new URL("../src-tauri/capabilities/default.json", import.meta.url), "utf8"));
 const slint = await readFile(new URL("../src-tauri/ui/installer.slint", import.meta.url), "utf8");
 
 test("API adapter decodes JSON responses", () => {
@@ -107,4 +109,9 @@ test("installer prompts for network setup first and exposes only fixed Wi-Fi pic
   assert.match(tauriShell, /plasmawindowed/);
   assert.match(tauriShell, /kcmshell6/);
   assert.match(tauriShell, /installer_open_network_selector/);
+  assert.match(tauriBuild, /"installer_open_network_selector"/);
+  assert.ok(
+    tauriCapabilities.permissions.includes("allow-installer-open-network-selector"),
+    "the main window must be granted the generated network-selector IPC permission",
+  );
 });

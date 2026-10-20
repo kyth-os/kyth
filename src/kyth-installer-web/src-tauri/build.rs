@@ -19,6 +19,7 @@ fn main() {
             "installer_request",
             "installer_stream",
             "installer_stream_stop",
+            "installer_open_network_selector",
         ]),
     ))
     .expect("tauri build failed")
