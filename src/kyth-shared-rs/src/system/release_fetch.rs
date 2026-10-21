@@ -538,6 +538,26 @@ pub fn verify_checksum_file(
     Ok(())
 }
 
+/// Streaming hex digest of a file, for callers (the signed updater
+/// manifest check) that compare a file against a digest from a source
+/// other than a checksum file.
+pub fn digest_file_hex(algorithm: &str, path: &Path) -> Result<String, String> {
+    if digest_bytes(algorithm, &[]).is_none() {
+        return Err(format!("Unsupported checksum algorithm: {algorithm}"));
+    }
+    let target_meta = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("Cannot inspect file to hash: {error}"))?;
+    if !target_meta.is_file() {
+        return Err(format!(
+            "Hash target is not a regular file: {}",
+            path.display()
+        ));
+    }
+    let bytes = digest_file(algorithm, path)
+        .map_err(|error| format!("Cannot read file to hash: {error}"))?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
 fn digest_file(algorithm: &str, path: &Path) -> std::io::Result<Vec<u8>> {
     use sha2::Digest;
     let mut file = std::fs::File::open(path)?;

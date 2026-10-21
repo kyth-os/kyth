@@ -22,12 +22,18 @@ ProtectHome=read-only
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
 ProtectControlGroups=yes
-RestrictAddressFamilies=AF_UNIX
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictSUIDSGID=yes
 SystemCallFilter=@system-service
 SystemCallArchitectures=native
 CapabilityBoundingSet=
-ReadWritePaths=/run/kyth
+# ProtectSystem=strict makes the whole tree read-only and the AF_UNIX-only
+# filter blocks network access. The flatpak_update operation runs
+# `flatpak update --system -y` as root, which (unlike the unprivileged CLI)
+# does not delegate to flatpak-system-helper: without a writable
+# /var/lib/flatpak and inet families it silently exits 0 having updated
+# nothing, so the Hub reports success while system updates stay pending.
+ReadWritePaths=/run/kyth -/var/lib/flatpak
 TimeoutStartSec=10
 Restart=on-failure
 RestartSec=2

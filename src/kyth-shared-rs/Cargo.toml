@@ -375,11 +375,21 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 regex = "1"
 sha2 = "0.10"
+# OpenPGP verification for the KythOS-signed updater manifest (see
+# system/update_manifest.rs). rPGP: pure Rust, so the same code builds
+# on the dev VM, in CI, and in the Fedora image with no system crypto
+# libraries. Verify-only use — nothing here can sign.
+pgp = "0.19"
 tempfile = "3"
 toml = "0.8"
 rusqlite = { version = "0.31", features = ["bundled"], optional = true }
 rustix = { version = "0.38", features = ["fs", "process"] }
 libc = "0.2"
+
+[dev-dependencies]
+# Throwaway test keys for update_manifest tests are generated in-run.
+rand = "0.8"
+smallvec = "1"
 
 [features]
 rusqlite = ["dep:rusqlite"]

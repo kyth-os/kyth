@@ -50,21 +50,17 @@ write_config /usr/lib/systemd/system/kyth-system-accounts.service <<'SYSACCOUNTU
 [Unit]
 Description=Ensure KythOS system accounts are visible in /etc
 DefaultDependencies=no
-# mkdir -p /var/lib/plasmalogin needs /var writable; without this, the unit races
-# ostree-remount.service on every boot and fails with "Read-only file system"
-# (it self-heals via a second, later pull-in, but that transiently fails the
-# Requires= dependent kyth-dbus-runtime-dir.service too).
-After=local-fs.target ostree-remount.service
-# Must run before tmpfiles/sysusers/udev so groups like audio,disk,kvm are
+# mkdir -p /var/lib/plasmalogin needs /var writable, so wait for the OSTree
+# remount. Do not wait for local-fs.target: its ESP mount needs udev device
+# discovery, and udev must wait for this account repair before parsing rules.
+After=ostree-remount.service
+# Must run before tmpfiles/udev so groups like audio,disk,kvm are
 # visible when they parse static-nodes/udev rules — otherwise every boot
 # logs "Failed to resolve group 'audio': Unknown group" (see host journal).
 Before=dbus.socket dbus-broker.service sockets.target plasmalogin.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket
-# NOT Before=systemd-sysusers.service: sysusers runs before tmpfiles-setup-dev,
-# which precedes local-fs-pre.target, which precedes local-fs.target - and this
-# unit is After=local-fs.target (it needs a writable /var). Declaring both makes
-# an ordering cycle that systemd breaks on every boot by deleting a job
-# ("Found ordering cycle ... Job ... deleted"). sysusers does not need the
-# merged /etc databases; tmpfiles-setup (ordered below) does.
+# Do not order before systemd-sysusers.service: keep its early boot ordering
+# independent. sysusers does not need the merged /etc databases;
+# tmpfiles-setup (ordered below) does.
 Before=systemd-tmpfiles-setup.service
 
 [Service]

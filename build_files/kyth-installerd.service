@@ -21,8 +21,10 @@ ExecStart=/usr/bin/kyth-installerd --socket-path /run/kyth-installer/api.sock --
 EnvironmentFile=-/etc/kyth-installer.env
 User=root
 Group=root
-RuntimeDirectory=kyth-installer
-RuntimeDirectoryMode=0750
+# The launcher creates this shared directory root:liveuser and puts a 0600
+# session-user-owned tokens file below it. Do not use RuntimeDirectory here:
+# systemd would re-own the tree as root:root and make the live user's token
+# unreadable to the shell, producing an immediate authenticated-API 403.
 UMask=0077
 # Filesystem containment
 ProtectSystem=strict
@@ -35,17 +37,15 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 NoNewPrivileges=yes
 # Syscall and network containment
-SystemCallFilter=@system-service
-RestrictAddressFamilies=AF_UNIX
-# Device access: installer needs raw disk access for partitioning.
-# Closed by default; allow block devices explicitly.
-DevicePolicy=strict
-DeviceAllow=/dev/sd* rw
-DeviceAllow=/dev/nvme* rw
-DeviceAllow=/dev/vd* rw
-DeviceAllow=/dev/hd* rw
-DeviceAllow=/dev/mapper/* rw
-DeviceAllow=/dev/dm-* rw
+# bootc install must mount the target root in its child process.
+SystemCallFilter=@system-service @mount
+# Registry preflight opens TCP before destructive storage work.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Device access: installer needs raw disk access for partitioning. Closed
+# policy preserves standard pseudo-devices such as /dev/null for systemd stdio;
+# block-* is a supported device-group selector for arbitrary disk hardware.
+DevicePolicy=closed
+DeviceAllow=block-* rw
 Restart=on-failure
 RestartSec=1
 TimeoutStartSec=30

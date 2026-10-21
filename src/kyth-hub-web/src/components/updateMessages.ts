@@ -6,6 +6,9 @@ export function friendlyAvailabilityDetail(detail: string | undefined, fallback:
   if (lower.includes("privileged service")) {
     return "The system update helper isn't running. Update KythOS and restart, then try again.";
   }
+  if (lower.includes("local rpm-ostree modifications")) {
+    return "A local RPM package change is blocking system updates. This is not a connection or service outage.";
+  }
   if (lower.includes("timed out") || lower.includes("timeout") || lower.includes("network") || lower.includes("unavailable")) {
     return "We couldn't reach the update service. Check your internet connection and try again.";
   }
@@ -14,6 +17,13 @@ export function friendlyAvailabilityDetail(detail: string | undefined, fallback:
   }
   if (lower.includes("up to date") || lower.includes("uptodate") || lower.includes("no_change")) {
     return "KythOS is up to date. No restart is needed.";
+  }
+  return fallback;
+}
+
+export function friendlyAvailabilityNextStep(detail: string | undefined, fallback: string): string {
+  if ((detail ?? "").toLowerCase().includes("local rpm-ostree modifications")) {
+    return "Review `rpm-ostree status` before changing anything. Resetting local RPM changes may remove packages such as Tailscale; do not reset unless you intend that.";
   }
   return fallback;
 }

@@ -299,7 +299,60 @@ impl ConfigurationPlan {
     }
 }
 
+pub(crate) const EARLY_ACCOUNTS_UNIT: &str = r#"[Unit]
+Description=Ensure KythOS system accounts are visible in /etc
+DefaultDependencies=no
+After=ostree-remount.service
+Before=dbus.socket dbus-broker.service sockets.target plasmalogin.service systemd-udevd.service systemd-udevd-control.socket systemd-udevd-kernel.socket systemd-tmpfiles-setup.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/libexec/kyth-fix-system-accounts
+RemainAfterExit=yes
+
+[Install]
+WantedBy=sysinit.target
+"#;
+
+/// Also repair pinned source images that predate the vendor-unit fix. /var
+/// must be writable, but waiting for all local filesystems blocks udev from
+/// discovering the very ESP those filesystems depend on.
+fn apply_boot_ordering_fix(target_root: &str) -> Result<(), String> {
+    let root = safe_root(target_root)?;
+    let mut directory = Path::new(&root).join("etc");
+    let etc = fs::symlink_metadata(&directory)
+        .map_err(|error| format!("could not inspect installed etc: {error}"))?;
+    if !etc.is_dir() || etc.file_type().is_symlink() {
+        return Err("installed etc must be a real directory".into());
+    }
+    for component in ["systemd", "system"] {
+        directory.push(component);
+        match fs::symlink_metadata(&directory) {
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            Ok(_) => return Err("boot ordering directory must be a real directory".into()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&directory).map_err(|error| {
+                    format!("could not create boot ordering directory: {error}")
+                })?;
+            }
+            Err(error) => {
+                return Err(format!(
+                    "could not inspect boot ordering directory: {error}"
+                ))
+            }
+        }
+    }
+    // After= dependencies cannot be cleared with an empty drop-in assignment.
+    // A complete /etc unit is required to replace the legacy vendor ordering.
+    write_replacing(
+        &directory.join("kyth-system-accounts.service"),
+        EARLY_ACCOUNTS_UNIT.as_bytes(),
+        0o644,
+    )
+}
+
 pub(crate) fn apply_plan(plan: ConfigurationPlan) -> Result<(), String> {
+    apply_boot_ordering_fix(&plan.target_root)?;
     for write in &plan.writes {
         write_replacing(Path::new(&write.path), write.content.as_bytes(), write.mode)?;
     }
@@ -487,6 +540,60 @@ pub(crate) fn append_fstab(input: FstabAppendInput) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_boot_dependencies_require_a_full_unit_override_not_a_dropin_reset() {
+        let directory = tempfile::tempdir().unwrap();
+        let etc = directory.path().join("etc");
+        fs::create_dir(&etc).unwrap();
+        let plan = build_plan(ConfigurationInput {
+            target_root: directory.path().to_string_lossy().into_owned(),
+            hostname: "kyth".into(),
+            timezone: "UTC".into(),
+            locale: "en_US.UTF-8".into(),
+            keymap: "us".into(),
+        })
+        .unwrap();
+        apply_plan(plan).unwrap();
+        let unit = etc.join("systemd/system/kyth-system-accounts.service");
+        assert!(
+            unit.is_file(),
+            "systemd dependencies cannot be removed by an empty After= drop-in"
+        );
+        let contents = fs::read_to_string(unit).unwrap();
+        let after: Vec<_> = contents
+            .lines()
+            .filter_map(|line| line.strip_prefix("After="))
+            .collect();
+        assert_eq!(after, ["ostree-remount.service"]);
+        assert!(contents.contains("Before=") && contents.contains("systemd-udevd.service"));
+    }
+
+    #[test]
+    fn installed_configuration_breaks_the_udev_local_filesystem_wait_cycle() {
+        let directory = tempfile::tempdir().unwrap();
+        let etc = directory.path().join("etc");
+        fs::create_dir(&etc).unwrap();
+        let plan = build_plan(ConfigurationInput {
+            target_root: directory.path().to_string_lossy().into_owned(),
+            hostname: "kyth".into(),
+            timezone: "UTC".into(),
+            locale: "en_US.UTF-8".into(),
+            keymap: "us".into(),
+        })
+        .unwrap();
+        apply_plan(plan).unwrap();
+        let unit = etc.join("systemd/system/kyth-system-accounts.service");
+        assert_eq!(
+            fs::read_to_string(unit).ok().as_deref(),
+            Some(EARLY_ACCOUNTS_UNIT),
+            "the signed source image may still contain After=local-fs.target"
+        );
+        assert!(
+            !etc.join("plasma-setup-done").exists(),
+            "configuration alone must not claim successful account provisioning"
+        );
+    }
 
     #[test]
     fn plans_non_secret_installed_configuration() {

@@ -44,6 +44,16 @@ class ValidationToolContracts(unittest.TestCase):
         )
 
 
+class LiveInstallerJournalContracts(unittest.TestCase):
+    def test_live_iso_bounds_journal_in_ram_overlay(self):
+        source = (ROOT / "installer/build.sh").read_text()
+        self.assertIn("/etc/systemd/journald.conf.d/zz-kyth-live.conf", source)
+        self.assertIn("SystemMaxUse=128M", source)
+        self.assertIn("RuntimeMaxUse=64M", source)
+        self.assertIn("SystemMaxFileSize=16M", source)
+        self.assertIn("RuntimeMaxFileSize=8M", source)
+
+
 class ShippedCommandContracts(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -683,6 +693,67 @@ class BuildAssemblyContracts(unittest.TestCase):
         gate = build.split("Registry signature gate", 1)[1].split("KYTH_SOURCE_IMAGE=", 1)[0]
         self.assertNotIn("exit 0", gate)
         self.assertIn("exit 1", gate)
+
+    def test_cosign_signature_bundle_is_valid_json(self):
+        import json
+        import os
+
+        build_lines = (ROOT / "installer" / "build.sh").read_text(encoding="utf-8").splitlines()
+        identity_line = next(line for line in build_lines if line.strip().startswith("cosign_identity="))
+        issuer_line = next(line for line in build_lines if line.strip().startswith("cosign_issuer="))
+        signatures_line = next(line for line in build_lines if line.strip().startswith("signatures_json="))
+        jq_builder_line = next(
+            line for line in build_lines
+            if line.lstrip().startswith("jq -cn --arg digest ")
+        )
+        expected_signatures = [
+            {"Base64Signature": "AQID", "Bundle": {}, "Cert": "cert-one", "Chain": [], "Payload": "e30=", "RFC3161Timestamp": ""},
+            {"Base64Signature": "BAUG", "Bundle": {}, "Cert": "cert-two", "Chain": [], "Payload": "e30=", "RFC3161Timestamp": ""},
+        ]
+        signature_streams = [
+            chr(10).join(json.dumps(value) for value in expected_signatures),
+            json.dumps(expected_signatures),
+        ]
+        expected_identity = r"^https://github.com/kyth-os/kyth/\.github/workflows/supply-chain\.yml@refs/heads/(main|testing)$"
+
+        with tempfile.TemporaryDirectory() as directory:
+            bundle_path = Path(directory) / "image.sig.bundle.json"
+            for signature_stream in signature_streams:
+                script = chr(10).join(
+                    [
+                        "unset KYTH_COSIGN_IDENTITY",
+                        identity_line,
+                        issuer_line,
+                        'source_digest="sha256:e6c69c6d45b168569a332400336a61e3fc62e6345f93896e5ab778a21f74364c"',
+                        'release_digest="$source_digest"',
+                        'INSTALL_SOURCE_IMAGE="ghcr.io/kyth-os/kyth@$source_digest"',
+                        'signature_bundle="$1"',
+                        'signatures="${SIGNATURES}"',
+                        signatures_line,
+                        jq_builder_line,
+                    ]
+                )
+                subprocess.run(
+                    ["bash", "-c", script, "test-signature-bundle", str(bundle_path)],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    env={**os.environ, "SIGNATURES": signature_stream},
+                )
+                bundle = json.loads(bundle_path.read_text(encoding="utf-8"))
+
+                self.assertEqual(bundle["schema_version"], 1)
+                self.assertEqual(bundle["digest"], "sha256:e6c69c6d45b168569a332400336a61e3fc62e6345f93896e5ab778a21f74364c")
+                self.assertEqual(bundle["source_image"], "ghcr.io/kyth-os/kyth@sha256:e6c69c6d45b168569a332400336a61e3fc62e6345f93896e5ab778a21f74364c")
+                self.assertEqual(
+                    bundle["signatures"],
+                    [entry["Base64Signature"] for entry in expected_signatures],
+                )
+                self.assertEqual(bundle["identity"], expected_identity)
+                self.assertRegex(
+                    "https://github.com/kyth-os/kyth/.github/workflows/supply-chain.yml@refs/heads/testing",
+                    re.compile(bundle["identity"]),
+                )
 
     def test_live_iso_does_not_embed_the_full_install_image(self):
         build = (ROOT / "installer" / "build.sh").read_text(encoding="utf-8")

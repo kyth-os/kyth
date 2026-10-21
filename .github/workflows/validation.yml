@@ -97,7 +97,16 @@ jobs:
       - name: Check Dockerfile build rules
         run: |
           if command -v docker >/dev/null 2>&1; then
-            just check-dockerfile
+            set -euo pipefail
+            PINNED="$(sed -n 's/^ARG BASE_IMAGE=//p' build_base/Dockerfile | head -n1)"
+            IMAGE="${PINNED%%@*}"
+            if [[ "${IMAGE}" != "ghcr.io/ublue-os/kinoite-main:44" && "${IMAGE}" != "quay.io/fedora/fedora-kinoite:45" ]]; then
+              echo "::error::build_base/Dockerfile pins an unrecognised base image: ${IMAGE}" >&2
+              exit 1
+            fi
+            DIGEST="$(docker buildx imagetools inspect "${IMAGE}" --format '{{ .Manifest.Digest }}')"
+            build_files/scripts/validate-digest.sh "${DIGEST}"
+            just check-dockerfile "${IMAGE}@${DIGEST}"
           else
             echo "::notice::Docker not available, skipping Dockerfile build check"
           fi

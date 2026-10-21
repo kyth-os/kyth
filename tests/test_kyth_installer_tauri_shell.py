@@ -20,6 +20,37 @@ SERVER = ROOT / "src/kyth-installer/kyth_installer/server.py"
 
 
 class InstallerTauriShellTests(unittest.TestCase):
+    def test_wipe_relocates_recovery_journal_before_mount_hides_staging(self):
+        source = (INSTALLER_WEB / "src-tauri/src/installer_job_executor.rs").read_text()
+        image = source.split("    fn execute_image(", 1)[1].split("    fn ", 1)[0]
+        self.assertLess(
+            image.index("self.ensure_esp_journal(phase, cancellation)?;"),
+            image.index("self.mount_wipe_root(phase, cancellation)?;"),
+            "mounting install-root hides the tmpfs journal before relocation can read it",
+        )
+
+    def test_esp_assurance_is_read_only_without_remounting_journal_filesystem(self):
+        source = (INSTALLER_WEB / "src-tauri/src/installer_assurance.rs").read_text()
+        verify = source.split("fn verify_esp_bootloaders(", 1)[1].split("\nfn ", 1)[0]
+        # A filesystem-wide `ro` mount conflicts with the ESP journal's RW
+        # mount. The check must restrict only its own VFS mount to read-only.
+        self.assertIn('.args(["-o", "ro=vfs", device])', verify)
+        self.assertIn('Command::new("/usr/sbin/umount")', verify)
+
+    def test_wipe_writes_esp_fstab_before_install_assurance(self):
+        source = (INSTALLER_WEB / "src-tauri/src/installer_job_executor.rs").read_text()
+        configure = source.split("    fn execute_configuration(", 1)[1].split("    fn ", 1)[0]
+        self.assertIn('"wipe" =>', configure)
+        self.assertIn("wipe_esp_fstab", configure)
+        self.assertLess(configure.index("wipe_esp_fstab"), configure.index("installer_assurance::validate"))
+
+    def test_only_image_phase_uses_udev_compatible_disk_lease(self):
+        source = (INSTALLER_WEB / "src-tauri/src/installer_job_executor.rs").read_text()
+        image = source.split("    fn execute_image(", 1)[1].split("    fn ", 1)[0]
+        self.assertIn("installer_guard::acquire_bootc_disk_lock", image)
+        self.assertEqual(source.count("installer_guard::acquire_bootc_disk_lock"), 1)
+        self.assertIn("installer_guard::acquire_disk_lock", source)
+
     def test_native_shell_owns_the_first_parity_slice(self):
         rust = NATIVE_RS.read_text()
         slint = NATIVE_SLINT.read_text()

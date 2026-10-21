@@ -18,7 +18,7 @@ import {
   type UpdatesSnapshot,
 } from "../services/liveData";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
-import { friendlyActionError, friendlyActionNextStep, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityResult } from "./updateMessages";
+import { friendlyActionError, friendlyActionNextStep, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityNextStep, friendlyAvailabilityResult } from "./updateMessages";
 
 type GuidanceTone = "ok" | "warn" | "muted";
 type UpdatePhase = "prepare" | "download" | "install" | "verify" | "finalize";
@@ -38,6 +38,16 @@ function historyDateLabel(iso: string): string {
   const parsed = new Date(iso);
   if (Number.isNaN(parsed.getTime())) return "";
   return parsed.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+}
+
+// Headings state the honest package total so a long update reads
+// "Package changes (50)" next to the complete scrollable list —
+// never a silent sample. Counts only apply to package rows.
+function packageChangesHeading(title: string, packageTotal: number): string {
+  if (title === "Package changes" && Number.isFinite(packageTotal) && packageTotal > 0) {
+    return `${title} (${packageTotal})`;
+  }
+  return title;
 }
 
 function updatePhaseIndex(phase: string | undefined): number {
@@ -576,7 +586,7 @@ export function UpdatesOverview() {
         icon: "!",
         title: "We couldn’t check for updates",
         message: friendlyAvailabilityDetail(updateStatus?.blocked_reason || updateStatus?.detail, "The update service did not respond."),
-        next: "Check your connection, then choose “Try again”.",
+        next: friendlyAvailabilityNextStep(updateStatus?.blocked_reason || updateStatus?.detail, "Check your connection, then choose “Try again”."),
       };
     }
     if (systemUpdateAvailable) {
@@ -719,9 +729,10 @@ export function UpdatesOverview() {
           </div>
           {releaseSummary
             ? <>
+              {releaseSummary.flavor === "cachy" && <span className="updates-history-flavor">CachyOS kernel</span>}
               {releaseSummary.highlights.length > 0 && <>
-                <h3>{releaseSummary.highlights_title}</h3>
-                <ul>{releaseSummary.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
+                <h3>{packageChangesHeading(releaseSummary.highlights_title, releaseSummary.package_total)}</h3>
+                <ul className="updates-package-list">{releaseSummary.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
               </>}
               <ExternalLink href={releaseSummary.release_url}>Read full release notes <span aria-hidden="true">↗</span></ExternalLink>
             </>
@@ -801,7 +812,7 @@ export function UpdatesOverview() {
                     <div className="updates-history-notes">
                       {entry.notes_intro && <p>{entry.notes_intro}</p>}
                       {entry.highlights.length > 0 && <>
-                        <h3>{entry.highlights_title}</h3>
+                        <h3>{packageChangesHeading(entry.highlights_title, entry.package_total)}</h3>
                         <ul>{entry.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}</ul>
                       </>}
                       <ExternalLink href={entry.release_url}>Read full release notes <span aria-hidden="true">↗</span></ExternalLink>

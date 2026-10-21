@@ -9966,6 +9966,36 @@
     },
     {
       "current_implementation": "shell",
+      "cutover": "replace installed 99-updater-signing-key.sh entry point after parity gates",
+      "function_inventory": [
+        {
+          "name": "__main__",
+          "owner": "fixture::build_files/scripts/branding/99-updater-signing-key.sh",
+          "ownership": "build-only"
+        }
+      ],
+      "installed_implementation": "not-installed",
+      "migration_priority": 3,
+      "name": "99-updater-signing-key.sh",
+      "owner": "fixture::build_files/scripts/branding/99-updater-signing-key.sh",
+      "parity_tests": [
+        "tests/"
+      ],
+      "path": "build_files/scripts/branding/99-updater-signing-key.sh",
+      "priority": 0,
+      "reason": "build/test shell script, not installed runtime authority",
+      "resolved_target": "build_files/scripts/branding/99-updater-signing-key.sh",
+      "retirement": "retain source fixture until exact-image acceptance and rollback qualification",
+      "risk_tier": "build-time",
+      "rollback": "restore previous installed 99-updater-signing-key.sh entry point",
+      "runtime_active": false,
+      "runtime_authority": "build-only",
+      "runtime_scope": "build",
+      "status": "not-applicable",
+      "surface": "shell-script"
+    },
+    {
+      "current_implementation": "shell",
       "cutover": "replace installed check-hub-web-shell.sh entry point after parity gates",
       "function_inventory": [
         {

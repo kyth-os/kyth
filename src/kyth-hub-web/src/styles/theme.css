@@ -1559,6 +1559,7 @@ body {
 .updates-release-version { max-width: 50%; overflow: hidden; padding: 6px 9px; border: 1px solid rgba(255, 255, 255, .12); border-radius: 8px; color: #c9dcff; background: rgba(9, 14, 24, .28); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
 .updates-release-card h3 { margin: 2px 0 0; color: var(--text); font-size: 12px; }
 .updates-release-card ul { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.updates-package-list { max-height: 264px; overflow-y: auto; padding-right: 6px; }
 .updates-release-card li { display: flex; align-items: flex-start; gap: 8px; color: var(--text-muted); font-size: 11px; line-height: 1.45; }
 .updates-release-card li::before { width: 5px; height: 5px; flex: 0 0 5px; margin-top: 5px; border-radius: 50%; background: #8abaff; content: ""; }
 .updates-release-empty { margin: 0; color: var(--text-muted); font-size: 11px; line-height: 1.45; }

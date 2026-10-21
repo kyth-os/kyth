@@ -229,8 +229,11 @@ fn verify_esp_bootloaders(device: &str) -> Result<String, String> {
         .tempdir()
         .map_err(|error| format!("could not create ESP check mountpoint: {error}"))?;
     let target = mountpoint.path();
+    // The durable journal already holds this FAT filesystem read-write.
+    // Restrict only this verification mount, not the shared superblock:
+    // filesystem-wide `ro` would fail with EBUSY while the journal is mounted.
     let mounted = Command::new("/usr/sbin/mount")
-        .args(["-o", "ro", device])
+        .args(["-o", "ro=vfs", device])
         .arg(target)
         .output()
         .map_err(|error| format!("could not mount ESP read-only: {error}"))?;
@@ -436,6 +439,16 @@ pub(crate) fn validate(input: AssuranceInput) -> Result<Vec<AssuranceCheck>, Str
                 input.username.trim()
             ));
         }
+        regular_file(
+            &etc.join("plasma-setup-done"),
+            "Plasma Setup completion marker",
+        )?;
+        for backend in ["plasmalogin.conf.d", "sddm.conf.d"] {
+            match fs::symlink_metadata(etc.join(backend).join("99-plasma-setup.conf")) {
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                _ => return Err("installed Plasma Setup autologin was not removed".into()),
+            }
+        }
     }
 
     let fstab = etc.join("fstab");
@@ -562,6 +575,7 @@ mod tests {
             "alice:x:1000:1000::/home/alice:/bin/bash\n",
         )
         .unwrap();
+        std::fs::write(etc.join("plasma-setup-done"), "").unwrap();
         // A valid data entry plus an ESP entry whose UUID cannot resolve:
         // the ESP stage must fail closed deterministically (mount fails)
         // instead of depending on the machine running the test.
@@ -576,6 +590,33 @@ mod tests {
         std::fs::create_dir_all(&modules).unwrap();
         std::fs::write(modules.join("vmlinuz"), "fake kernel").unwrap();
         directory
+    }
+
+    #[test]
+    fn setup_autologin_is_not_a_successful_login_handoff() {
+        let target = target_fixture();
+        let etc = target.path().join(DEPLOY).join("etc");
+        fs::create_dir(etc.join("plasmalogin.conf.d")).unwrap();
+        fs::write(
+            etc.join("plasmalogin.conf.d/99-plasma-setup.conf"),
+            "[Autologin]\nUser=plasma-setup\n",
+        )
+        .unwrap();
+        assert!(validate(input(target.path()))
+            .unwrap_err()
+            .contains("autologin"));
+    }
+
+    #[test]
+    fn requested_account_must_handoff_to_login_instead_of_plasma_setup() {
+        let target = target_fixture();
+        let etc = target.path().join(DEPLOY).join("etc");
+        fs::remove_file(etc.join("plasma-setup-done")).unwrap();
+        let error = validate(input(target.path())).unwrap_err();
+        assert!(
+            error.contains("Plasma Setup"),
+            "missing handoff was not detected: {error}"
+        );
     }
 
     #[test]

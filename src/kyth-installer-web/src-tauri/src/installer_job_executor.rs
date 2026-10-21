@@ -375,6 +375,15 @@ pub(crate) struct NativePhaseExecutor {
     journal_staging: Option<PathBuf>,
 }
 
+fn planned_source_imgref(plan: &crate::installer_bootc::BootcInstallPlan) -> Result<&str, String> {
+    plan.argv
+        .windows(2)
+        .find(|pair| pair[0] == "--source-imgref")
+        .map(|pair| pair[1].as_str())
+        .filter(|source| !source.is_empty())
+        .ok_or_else(|| "bootc install plan is missing its source image reference".to_string())
+}
+
 /// M1: fail closed before any destructive phase when the image source needs
 /// the network. Resolves the `docker://host/...` registry host and
 /// TCP-connects to its HTTPS port with a short timeout; DNS or connect
@@ -419,7 +428,6 @@ impl NativePhaseExecutor {
         let bootc_request = request.execution.bootc.clone();
         let account = request.execution.account.clone();
         let manual_mounts = request.manual_mounts;
-        let source_imgref = request.execution.bootc.source_imgref.clone();
         let target_imgref = request.execution.bootc.target_imgref.clone();
         let secure_boot_kernel = request.execution.secure_boot.kernel.clone();
         let secure_boot_force_stage = request.execution.secure_boot.force_stage;
@@ -439,6 +447,9 @@ impl NativePhaseExecutor {
             }
         }
         let execution_plan = installer_executor::build_plan(request.execution)?;
+        // Use the transport-normalized argument that the execution plan will
+        // actually pass to bootc for both the safety preflight and journal.
+        let source_imgref = planned_source_imgref(&execution_plan.bootc)?.to_owned();
         // M1: the frontend's network-setup step is advisory, not a gate: a
         // crafted /api/start request could bypass it. The Storage phase is
         // destructive and runs before the Image phase downloads anything, so
@@ -1058,6 +1069,36 @@ impl NativePhaseExecutor {
         self.record_journal(phase, "configure", OpState::Started)?;
         let result = (|| {
             match self.storage_plan.mode.as_str() {
+                "wipe" => {
+                    // bootc can boot from kernel arguments without creating
+                    // fstab. Persist the ESP mount explicitly before assurance
+                    // verifies its actual EFI payload; do not weaken that check.
+                    let snapshot = self.disk_snapshot(phase, &self.storage_plan.disk)?;
+                    let sector_size = self.disk_sector_size(phase)?;
+                    let efi = crate::installer_storage::efi_partition_from_snapshot(
+                        &snapshot,
+                        &self.storage_plan.disk,
+                        sector_size,
+                    )
+                    .map_err(|message| NativePhaseError::Execution { phase, message })?
+                    .ok_or_else(|| NativePhaseError::Execution {
+                        phase,
+                        message: "wipe install has no EFI system partition for fstab".into(),
+                    })?;
+                    let uuid =
+                        crate::installer_probe::lookup_uuid(crate::installer_probe::UuidInput {
+                            device: efi.name,
+                        })
+                        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+                    let wipe_esp_fstab = installer_configuration::FstabAppendInput {
+                        path: deploy_fstab.clone(),
+                        line: format!(
+                            "UUID={uuid} /boot/efi vfat umask=0077,shortname=winnt 0 2\n"
+                        ),
+                    };
+                    installer_configuration::append_fstab(wipe_esp_fstab)
+                        .map_err(|message| NativePhaseError::Execution { phase, message })?;
+                }
                 mode if lays_out_home_subvolume(mode) => {
                     let target_device = target
                         .or_else(|| self.storage_plan.target_partition.clone())
@@ -1412,7 +1453,7 @@ impl NativePhaseExecutor {
         phase: Phase,
         cancellation: &CancellationToken,
     ) -> Result<(), NativePhaseError> {
-        let _disk_lock = crate::installer_guard::acquire_disk_lock(&self.storage_plan.disk)
+        let _disk_lock = crate::installer_guard::acquire_bootc_disk_lock(&self.storage_plan.disk)
             .map_err(|message| NativePhaseError::Execution { phase, message })?;
         // L5: refuse the image phase when the target cannot hold the image
         // or available memory is too low to write it safely.
@@ -1441,13 +1482,11 @@ impl NativePhaseExecutor {
             // M13: image_complete marker after a successful write.
             self.record_journal(phase, "image_write", OpState::Completed)?;
             if self.storage_plan.mode == "wipe" {
-                self.mount_wipe_root(phase, cancellation)?;
-                // M5: wipe is the most destructive mode, and until now the
-                // durable journal lived on tmpfs. bootc just created the
-                // ESP; move the journal onto it so a crash or reboot during
-                // the configure phase leaves a recoverable record instead
-                // of a blind retry.
+                // Relocate before mounting the installed root: the tmpfs
+                // journal is below WIPE_STAGING_MOUNTPOINT and would otherwise
+                // be hidden by that mount. Bootc has now created the ESP.
                 self.ensure_esp_journal(phase, cancellation)?;
+                self.mount_wipe_root(phase, cancellation)?;
             }
             Ok(())
         } else {
@@ -1742,8 +1781,9 @@ impl NativePhaseExecutor {
     /// `PartitionJournal` is a separate, in-daemon structure):
     /// - resize_ntfs (guided NTFS shrink): relocated here, before the
     ///   destructive resize.
-    /// - wipe: relocated in the image phase after `mount_wipe_root`, once
-    ///   bootc has created the ESP; there is no ESP to use before that.
+    /// - wipe: relocated in the image phase before `mount_wipe_root`, once
+    ///   bootc has created the ESP. Mounting the root first would hide the
+    ///   staging journal that relocation must still read.
     /// - alongside / manual / free_space: relocated at the end of
     ///   `prepare_btrfs_target`, after the pre-existing ESP is mounted.
     /// There is no supported path where the journal silently stays on
@@ -3439,6 +3479,19 @@ mod tests {
             manual_mounts: None,
             secure_boot_password: String::new(),
             transaction_path: "/run/kyth-installer/txn/transaction.json".into(),
+        }
+    }
+
+    #[test]
+    fn raw_registry_source_is_normalized_before_network_preflight() {
+        let mut request = request(false);
+        request.execution.bootc.source_imgref = "127.0.0.1/kyth:test".into();
+        match NativePhaseExecutor::from_request(request) {
+            Ok(executor) => assert_eq!(executor.source_imgref, "docker://127.0.0.1/kyth:test"),
+            Err(error) => assert!(
+                error.contains("cannot reach the image registry 127.0.0.1:443"),
+                "network preflight received the raw source instead of the normalized plan source: {error}"
+            ),
         }
     }
 

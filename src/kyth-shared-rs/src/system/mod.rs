@@ -171,6 +171,7 @@ pub mod tunable_registry;
 pub mod tuning_profile;
 pub mod update_availability;
 pub mod update_coordinator;
+pub mod update_manifest;
 pub mod update_status;
 pub mod updater;
 pub mod updates_unified;

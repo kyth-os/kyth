@@ -203,11 +203,12 @@ class RunPhaseCoverageTests(unittest.TestCase):
             phase_run, "LOG_FILE", mock.MagicMock()
         ) as log_file, mock.patch.object(phase_run.os, "open", return_value=fake_fd), mock.patch.object(
             phase_run.os, "close"
+        ), mock.patch.object(
+            phase_run.os, "write", side_effect=OSError("read-only")
         ), mock.patch.object(phase_run, "_record_transaction"), mock.patch.object(
             phase_run, "_run_install_worker", side_effect=worker
         ):
             log_file.parent.mkdir.return_value = None
-            log_file.open.side_effect = OSError("read-only")
             phase_run._run_install(context)
         events = context.events.events
         self.assertTrue(any(e.get("value") == 42 for e in events))

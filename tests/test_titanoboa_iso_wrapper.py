@@ -19,6 +19,19 @@ class TitanoboaIsoWrapperTests(unittest.TestCase):
         self.assertIn('[[ "${IS_LOCAL_IMAGE}" == true ]] && pull_flag=()', live)
         self.assertIn('if [[ "${IS_LOCAL_IMAGE}" == true ]]; then', live)
 
+    def test_live_iso_uses_permissive_selinux_without_disabling_it(self) -> None:
+        live_entries = [
+            line
+            for line in ISO.read_text(encoding="utf-8").splitlines()
+            if line.lstrip().startswith("linux:")
+        ]
+        self.assertEqual(len(live_entries), 2)
+        for entry in live_entries:
+            with self.subTest(entry=entry):
+                self.assertIn("enforcing=0", entry)
+                self.assertNotIn("enforcing=1", entry)
+                self.assertNotIn("selinux=0", entry)
+
     def test_wrapper_falls_back_to_bind_mounted_iso_yaml(self) -> None:
         text = WRAPPER.read_text(encoding="utf-8")
         self.assertIn("/kyth/iso.yaml", text)

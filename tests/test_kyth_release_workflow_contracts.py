@@ -52,6 +52,24 @@ class WorkflowArtifactContracts(unittest.TestCase):
         self.assertIn("CURRENT_VERSION", resolve)
         self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", resolve)
 
+    def test_changelog_uses_pulled_baseline_and_full_git_history(self):
+        workflow = (
+            ROOT / ".github/workflows/supply-chain.yml"
+        ).read_text(encoding="utf-8")
+        prepare_checkout = workflow.split("- name: Checkout repository", 1)[1].split(
+            "- name: Preflight source image", 1
+        )[0]
+        self.assertIn("fetch-depth: 0", prepare_checkout)
+
+        changelog = workflow.split(
+            "- name: Generate SBOM-powered changelog", 1
+        )[1].split("- name: Package publish inputs", 1)[0]
+        self.assertIn(
+            "PREVIOUS_SBOM: ${{ steps.previous_sbom.outputs.path }}", changelog
+        )
+        self.assertIn('--previous-sbom-file "${PREVIOUS_SBOM}"', changelog)
+        self.assertIn("package comparison will be marked unavailable", workflow)
+
     def test_iso_artifact_has_one_producer_and_matching_consumers(self):
         """One upload in build; every download resolves it from build's output.
 
@@ -158,6 +176,22 @@ class ReleaseChainingContracts(unittest.TestCase):
         self.assertIn(pinned.replace(".", "\\."), supply)
         for label in ('image.version="45"', 'osbuild.version="45"', 'KythOS 45"'):
             self.assertIn(label, (ROOT / "Dockerfile").read_text(encoding="utf-8"))
+
+    def test_validation_check_resolves_the_current_digest_for_the_pinned_base(self):
+        """Dockerfile validation must not depend on Quay retaining an old digest."""
+        workflow = (ROOT / ".github/workflows/validation.yml").read_text(
+            encoding="utf-8"
+        )
+        step = workflow.split("- name: Check Dockerfile build rules", 1)[1].split(
+            "- name: Install Node for embedded frontend assets", 1
+        )[0]
+        self.assertIn("build_base/Dockerfile", step)
+        self.assertIn('IMAGE="${PINNED%%@*}"', step)
+        self.assertIn(
+            'docker buildx imagetools inspect "${IMAGE}" --format', step
+        )
+        self.assertIn('validate-digest.sh "${DIGEST}"', step)
+        self.assertIn('just check-dockerfile "${IMAGE}@${DIGEST}"', step)
 
     def test_base_digest_pin_is_identical_in_dockerfile_and_vars(self):
         """The kinoite pin lives in two files; they must carry one digest.

@@ -1,7 +1,12 @@
 //! Native replacement for the Python `kyth-rclone-update` launcher.
 //!
 //! Installs or updates the rclone binary from official releases with
-//! SHA256 verification. `RCLONE_VERSION` overrides the live tag lookup.
+//! SHA256 verification, gated by the KythOS-signed updater manifest
+//! (docs/updater-signing.md): the resolved version must be approved by
+//! a manifest whose signature verifies against the signing key baked
+//! into the image, and the downloaded archive must hash to the
+//! manifest-pinned digest. Fail closed on any manifest problem.
+//! `RCLONE_VERSION` overrides the live tag lookup.
 //! Exits `1` with the launcher error lines on failure.
 //! `system/updater.py` stays as the Phase 3 fixture.
 
@@ -14,6 +19,7 @@ use kyth_shared::system::release_fetch::{
     download_file, extract_archive, fetch_github_latest_release, github_headers, read_secret_file,
     validate_version, verify_checksum_file, TempWorkdir,
 };
+use kyth_shared::system::update_manifest;
 
 const REPO: &str = "rclone/rclone";
 const VERSION_PATTERN: &str = r"v[0-9]+\.[0-9]+\.[0-9]+";
@@ -155,6 +161,25 @@ fn main() -> std::process::ExitCode {
             None,
         ),
     };
+    // Signed-manifest gate (docs/updater-signing.md): upstream's
+    // SHA256SUMS below proves the download matches the release page,
+    // but the release page itself is only trusted once the KythOS
+    // signing key has approved this exact version. Fail closed —
+    // nothing is downloaded or installed without that approval.
+    println!("Verifying KythOS signed update manifest...");
+    let approved = match update_manifest::approve_update(
+        &run,
+        work.path(),
+        update_manifest::COMPONENT_RCLONE,
+        &rclone_ver,
+        &zip_name,
+    ) {
+        Ok(entry) => entry,
+        Err(error) => fail(
+            format!("ERROR: Signed update manifest check failed: {error}"),
+            Some(&work),
+        ),
+    };
     let headers = std::collections::BTreeMap::new();
     let zip_dest = work.path().join(&zip_name);
     let sums_dest = work.path().join("SHA256SUMS");
@@ -184,6 +209,15 @@ fn main() -> std::process::ExitCode {
     if let Err(error) = verify_checksum_file(&sums_dest, &zip_dest, "sha256") {
         fail(
             format!("ERROR: Checksum verification failed: {error}"),
+            Some(&work),
+        );
+    }
+    // In addition to the upstream checksum: the archive must hash to
+    // the digest the signed manifest pinned for this version.
+    println!("Verifying archive against signed update manifest...");
+    if let Err(error) = update_manifest::verify_artifact_matches(&approved, "sha256", &zip_dest) {
+        fail(
+            format!("ERROR: Signed update manifest digest verification failed: {error}"),
             Some(&work),
         );
     }
