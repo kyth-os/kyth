@@ -238,6 +238,16 @@ pub(crate) fn run_command_with_input(
     // mid-mkfs/ntfsresize/bootc helper.
     unsafe {
         command.pre_exec(parent_death_signal);
+        // The helper reports operation failures with eprintln!, while the
+        // daemon's progress reader consumes stdout only. Merge the helper's
+        // stderr into that pipe so a failed phase retains its real diagnostic
+        // instead of collapsing to "No command output was captured.".
+        command.pre_exec(|| {
+            if libc::dup2(libc::STDOUT_FILENO, libc::STDERR_FILENO) == -1 {
+                return Err(io::Error::last_os_error());
+            }
+            Ok(())
+        });
     }
     let mut child = command
         .process_group(0)
@@ -586,6 +596,18 @@ mod tests {
         let error = run_command_with_input(&mut command, &vec![b'x'; 1024 * 1024], || false)
             .expect_err("a helper that closes stdin must fail input delivery");
         assert!(error.contains("could not provide helper operation input"));
+    }
+
+    #[test]
+    fn helper_failure_surfaces_stderr_when_stdout_is_empty() {
+        let mut command = Command::new("/bin/sh");
+        command.args([
+            "-c",
+            "cat >/dev/null; printf 'bootc-diagnostic-from-stderr\\n' >&2; exit 1",
+        ]);
+        let error = run_command_with_input(&mut command, b"{}", || false)
+            .expect_err("stderr-only helper failure should fail");
+        assert!(error.contains("bootc-diagnostic-from-stderr"), "{error}");
     }
 
     #[test]

@@ -30,7 +30,7 @@ mod installer_stream;
 mod installer_transaction;
 
 use std::io::{self, Read, Write};
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::process::{Command, ExitCode, ExitStatus, Stdio};
 
 const MAX_OPERATION_BYTES: usize = 64 * 1024;
@@ -132,6 +132,21 @@ fn run_timed_command(
     }
 }
 
+fn signaled_child_detail(operation: &str, status: &ExitStatus) -> Option<String> {
+    status.signal().map(|signal| {
+        let name = if signal == libc::SIGSYS {
+            "SIGSYS"
+        } else if signal == libc::SIGTERM {
+            "SIGTERM"
+        } else if signal == libc::SIGKILL {
+            "SIGKILL"
+        } else {
+            "signal"
+        };
+        format!("{operation} terminated by {name} (signal {signal})")
+    })
+}
+
 fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
     let operation = serde_json::from_slice::<StreamingOperationInput>(input)
         .map_err(|error| format!("invalid streaming operation JSON: {error}"))?;
@@ -172,6 +187,9 @@ fn run_stream(input: &[u8]) -> Result<ExitCode, String> {
         std::time::Duration::from_secs(timeout_seconds),
     )
     .map_err(|error| format!("{description}: {error}"))?;
+    if let Some(detail) = signaled_child_detail(description, &status) {
+        eprintln!("{detail}");
+    }
     Ok(exit_code(status))
 }
 
@@ -532,5 +550,20 @@ mod tests {
         });
         let input = serde_json::to_vec(&request).expect("stream request should serialize");
         assert!(run_stream(&input).is_err());
+    }
+
+    #[test]
+    fn signaled_bootc_child_is_reported_as_a_signal_not_exit_one() {
+        use std::os::unix::process::ExitStatusExt;
+
+        let status = Command::new("/bin/sh")
+            .args(["-c", "kill -TERM $$"])
+            .status()
+            .expect("signal test child should start");
+        assert_eq!(status.signal(), Some(libc::SIGTERM));
+        assert_eq!(
+            signaled_child_detail("bootc image installation", &status),
+            Some("bootc image installation terminated by SIGTERM (signal 15)".to_string())
+        );
     }
 }

@@ -37,8 +37,10 @@ ProtectKernelModules=yes
 ProtectControlGroups=yes
 NoNewPrivileges=yes
 # Syscall and network containment
-SystemCallFilter=@system-service
-RestrictAddressFamilies=AF_UNIX
+# bootc install must mount the target root in its child process.
+SystemCallFilter=@system-service @mount
+# Registry preflight opens TCP before destructive storage work.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 # Device access: installer needs raw disk access for partitioning. Closed
 # policy preserves standard pseudo-devices such as /dev/null for systemd stdio;
 # block-* is a supported device-group selector for arbitrary disk hardware.

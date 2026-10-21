@@ -34,6 +34,17 @@ mount -o remount,rw /proc/sys
 # helper. No Python installer package is installed into the live image.
 install -Dm755 /src/build_files/kyth-launch-installer /usr/bin/kyth-launch-installer
 install -Dm644 /src/build_files/kyth-installerd.service /usr/lib/systemd/system/kyth-installerd.service
+# The writable live root is RAM-backed. Keep diagnostics bounded so repeated
+# install attempts and permissive SELinux audit records cannot fill the overlay
+# and prevent transaction-state writes. This drop-in is live-payload-only.
+mkdir -p /etc/systemd/journald.conf.d
+cat >/etc/systemd/journald.conf.d/zz-kyth-live.conf <<'JOURNALEOF'
+[Journal]
+SystemMaxUse=128M
+RuntimeMaxUse=64M
+SystemMaxFileSize=16M
+RuntimeMaxFileSize=8M
+JOURNALEOF
 install -Dm755 /src/build_files/scripts/plymouth-branding-guard.sh \
 	/usr/libexec/kyth-plymouth-branding-guard
 
@@ -148,11 +159,8 @@ if [ -n "${cosign_registry_ref}" ]; then
 	done
 	[ -n "${signatures}" ] \
 		|| { echo "ERROR: could not download signature bundle for ${cosign_registry_ref}@${source_digest} after 3 attempts" >&2; exit 1; }
-	signatures_json="$(printf '%s\n' "${signatures}" | sed -e 's/^/"/' -e 's/$/"/' | paste -sd, -)"
-	printf '{"schema_version":1,"digest":"%s","release_digest":"%s","source_image":"%s","identity":"%s","issuer":"%s","signatures":[%s]}\n' \
-		"${source_digest}" "${release_digest}" "${INSTALL_SOURCE_IMAGE}" \
-		"${cosign_identity}" "${cosign_issuer}" "${signatures_json}" \
-		>"${signature_bundle}"
+	signatures_json="$(jq -cs 'if length == 1 and (.[0] | type) == "array" then .[0] else . end | map(if type == "object" then .Base64Signature else . end) | if length > 0 and all(.[]; type == "string" and length > 0 and length <= 131072 and test("^[A-Za-z0-9+/]+={0,2}$")) then . else error("cosign returned invalid signatures") end' <<<"${signatures}")"
+	jq -cn --arg digest "${source_digest}" --arg release_digest "${release_digest}" --arg source_image "${INSTALL_SOURCE_IMAGE}" --arg identity "${cosign_identity}" --arg issuer "${cosign_issuer}" --argjson signatures "${signatures_json}" '{schema_version:1,digest:$digest,release_digest:$release_digest,source_image:$source_image,identity:$identity,issuer:$issuer,signatures:$signatures}' >"${signature_bundle}"
 	chmod 0644 "${signature_bundle}"
 	signature_digest="sha256:$(sha256sum "${signature_bundle}" | awk '{print $1}')"
 	signature_state="verified"

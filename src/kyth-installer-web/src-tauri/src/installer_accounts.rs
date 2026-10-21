@@ -5,7 +5,8 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::Write;
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::fd::AsRawFd;
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -126,6 +127,74 @@ fn run(program: &str, args: &[&str]) -> Result<(), String> {
 const EXPECTED_SHELL: &str = "/bin/bash";
 const EXPECTED_GROUPS: &[&str] = &["wheel", "video", "audio", "render"];
 
+/// Offline useradd requires supplementary groups in /etc/group even when NSS
+/// can see the immutable /usr/lib/group database. Preserve the image's GIDs and
+/// members rather than inventing IDs or running all sysusers offline.
+fn expected_group_overlay(local: &str, base: &str) -> Result<String, String> {
+    fn records(text: &str) -> Result<std::collections::BTreeMap<&str, (u32, &str)>, String> {
+        let mut result = std::collections::BTreeMap::new();
+        for line in text
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        {
+            let fields: Vec<_> = line.split(':').collect();
+            if fields.len() != 4 || fields[0].is_empty() {
+                return Err("installed group database has a malformed record".into());
+            }
+            let gid = fields[2]
+                .parse::<u32>()
+                .map_err(|_| "installed group database has an invalid GID".to_string())?;
+            if let Some(previous) = result.insert(fields[0], (gid, line)) {
+                if previous != (gid, line) {
+                    return Err("installed group database has conflicting duplicate records".into());
+                }
+            }
+        }
+        Ok(result)
+    }
+    let local_records = records(local)?;
+    let base_records = records(base)?;
+    let mut output = local.to_string();
+    for group in EXPECTED_GROUPS {
+        if local_records.contains_key(group) {
+            continue;
+        }
+        let (gid, record) = base_records.get(group).ok_or_else(|| {
+            format!("required group {group} is absent from installed group databases")
+        })?;
+        if local_records
+            .iter()
+            .any(|(name, (existing_gid, _))| *name != *group && existing_gid == gid)
+        {
+            return Err(format!(
+                "required group {group} conflicts with an installed GID"
+            ));
+        }
+        if !output.is_empty() && !output.ends_with('\n') {
+            output.push('\n');
+        }
+        output.push_str(record);
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+fn ensure_expected_groups(deploy: &Path) -> Result<(), String> {
+    let path = deploy.join("etc/group");
+    let local = fs::read_to_string(&path)
+        .map_err(|error| format!("could not read installed group database: {error}"))?;
+    let base = match fs::read_to_string(deploy.join("usr/lib/group")) {
+        Ok(base) => base,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("could not read immutable group database: {error}")),
+    };
+    let overlay = expected_group_overlay(&local, &base)?;
+    if overlay != local {
+        write_replacing(&path, overlay.as_bytes())?;
+    }
+    Ok(())
+}
+
 /// True when `username` already has an entry in the installed system's
 /// passwd database. This checks the *target* root (`--root` semantics), not
 /// the live session: `id <name>` would answer for the wrong system.
@@ -213,12 +282,82 @@ fn replace_shadow_hash(path: &Path, username: &str, hash: &str) -> Result<(), St
 /// carries the original mode, fsync it, rename it over the target, then fsync
 /// the directory. A power loss leaves the old or the new shadow, never the
 /// empty file that truncate-then-write could leave (a locked-out system).
+fn copy_account_xattrs(source: &fs::File, target: &fs::File) -> Result<(), String> {
+    // Linux bounds both xattr lists and values at 64 KiB. Keep the helper's
+    // allocations bounded too; failures must not publish an unlabeled shadow.
+    let size = unsafe { libc::flistxattr(source.as_raw_fd(), std::ptr::null_mut(), 0) };
+    if size < 0 {
+        let error = std::io::Error::last_os_error();
+        return if error.raw_os_error() == Some(libc::ENOTSUP) {
+            Ok(())
+        } else {
+            Err(format!("could not inspect account labels: {error}"))
+        };
+    }
+    if size > 65536 {
+        return Err("account metadata list is too large".into());
+    }
+    let mut names = vec![0u8; size as usize];
+    let size =
+        unsafe { libc::flistxattr(source.as_raw_fd(), names.as_mut_ptr().cast(), names.len()) };
+    if size < 0 || size as usize > names.len() {
+        return Err("could not read a bounded account label list".into());
+    }
+    for bytes in names[..size as usize]
+        .split(|byte| *byte == 0)
+        .filter(|name| !name.is_empty())
+    {
+        // Content signatures and executable capabilities cannot be carried
+        // across a credential-file content change. Preserve SELinux/ACL/user
+        // metadata, not signatures over the old bytes.
+        if bytes == b"security.ima" || bytes == b"security.evm" || bytes == b"security.capability" {
+            continue;
+        }
+        let name = std::ffi::CString::new(bytes).map_err(|_| "invalid account label name")?;
+        let length =
+            unsafe { libc::fgetxattr(source.as_raw_fd(), name.as_ptr(), std::ptr::null_mut(), 0) };
+        if !(0..=65536).contains(&length) {
+            return Err("could not inspect account label value".into());
+        }
+        let mut value = vec![0u8; length as usize];
+        let read = unsafe {
+            libc::fgetxattr(
+                source.as_raw_fd(),
+                name.as_ptr(),
+                value.as_mut_ptr().cast(),
+                value.len(),
+            )
+        };
+        if read != length {
+            return Err("could not read stable account label value".into());
+        }
+        if unsafe {
+            libc::fsetxattr(
+                target.as_raw_fd(),
+                name.as_ptr(),
+                value.as_ptr().cast(),
+                value.len(),
+                0,
+            )
+        } != 0
+        {
+            return Err(format!(
+                "could not preserve account label: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn write_replacing(path: &Path, contents: &[u8]) -> Result<(), String> {
-    let mode = fs::metadata(path)
-        .map_err(|e| format!("could not stat installed shadow: {e}"))?
-        .permissions()
-        .mode()
-        & 0o7777;
+    let source = OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        .open(path)
+        .map_err(|error| format!("could not open installed account database: {error}"))?;
+    let metadata = source.metadata().map_err(|error| error.to_string())?;
+    let mode = metadata.permissions().mode() & 0o7777;
     let parent = path
         .parent()
         .ok_or_else(|| "installed shadow has no parent directory".to_string())?;
@@ -236,8 +375,17 @@ fn write_replacing(path: &Path, contents: &[u8]) -> Result<(), String> {
             .map_err(|e| format!("could not write temporary shadow: {e}"))?;
         file.sync_all()
             .map_err(|e| format!("could not sync temporary shadow: {e}"))?;
+        if unsafe { libc::fchown(file.as_raw_fd(), metadata.uid(), metadata.gid()) } != 0 {
+            return Err(format!(
+                "could not preserve account ownership: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
         fs::set_permissions(&temporary, fs::Permissions::from_mode(mode))
             .map_err(|e| format!("could not set shadow permissions: {e}"))?;
+        copy_account_xattrs(&source, &file)?;
+        file.sync_all()
+            .map_err(|e| format!("could not sync account metadata: {e}"))?;
         fs::rename(&temporary, path).map_err(|e| format!("could not replace shadow: {e}"))?;
         OpenOptions::new()
             .read(true)
@@ -249,6 +397,63 @@ fn write_replacing(path: &Path, contents: &[u8]) -> Result<(), String> {
         let _ = fs::remove_file(&temporary);
     }
     result
+}
+
+/// Hand off to the real login manager only after every account operation
+/// succeeded. Plasma Setup tests this flag, not the presence of human users.
+fn complete_plasma_setup(etc: &Path) -> Result<(), String> {
+    let mut stale = Vec::new();
+    for backend in ["plasmalogin.conf.d", "sddm.conf.d"] {
+        let parent = etc.join(backend);
+        match fs::symlink_metadata(&parent) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Ok(metadata) if metadata.is_dir() && !metadata.file_type().is_symlink() => {}
+            _ => return Err("Plasma Setup configuration parent is not a real directory".into()),
+        }
+        let path = parent.join("99-plasma-setup.conf");
+        match fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+            _ => return Err("Plasma Setup autologin configuration is not a regular file".into()),
+        }
+        let contents = fs::read_to_string(&path)
+            .map_err(|error| format!("could not read Plasma Setup autologin: {error}"))?;
+        if !contents.lines().any(|line| {
+            line.split_once('=')
+                .is_some_and(|(key, value)| key.trim() == "User" && value.trim() == "plasma-setup")
+        }) {
+            return Err("refusing to remove an unmanaged Plasma Setup autologin file".into());
+        }
+        stale.push(path);
+    }
+    for path in stale {
+        fs::remove_file(&path)
+            .map_err(|error| format!("could not remove Plasma Setup autologin: {error}"))?;
+        fs::File::open(path.parent().ok_or("setup configuration has no parent")?)
+            .and_then(|directory| directory.sync_all())
+            .map_err(|error| format!("could not sync Plasma Setup autologin directory: {error}"))?;
+    }
+    let marker = etc.join("plasma-setup-done");
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .mode(0o644)
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(&marker)
+        .map_err(|error| format!("could not complete Plasma Setup: {error}"))?;
+    if !file
+        .metadata()
+        .map_err(|error| error.to_string())?
+        .is_file()
+    {
+        return Err("Plasma Setup completion marker is not a regular file".into());
+    }
+    file.sync_all()
+        .map_err(|error| format!("could not sync Plasma Setup marker: {error}"))?;
+    fs::File::open(etc)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("could not sync Plasma Setup completion: {error}"))
 }
 
 pub fn apply(input: CreateUserInput) -> Result<(), String> {
@@ -266,6 +471,7 @@ pub fn apply(input: CreateUserInput) -> Result<(), String> {
     if target_user_exists(&etc.join("passwd"), &input.username)? {
         verify_matching_properties(&etc, &input.username)?;
     } else {
+        ensure_expected_groups(&deploy)?;
         run(
             "/usr/sbin/useradd",
             &[
@@ -319,7 +525,7 @@ pub fn apply(input: CreateUserInput) -> Result<(), String> {
     let _ = Command::new("/usr/bin/restorecon")
         .args(["-RF", home.to_str().ok_or("home is not UTF-8")?])
         .status();
-    Ok(())
+    complete_plasma_setup(&etc)
 }
 
 #[cfg(test)]
@@ -333,6 +539,178 @@ mod tests {
             username: "kyth_user".into(),
             password_hash: "$6$hash".into(),
         }
+    }
+
+    #[test]
+    fn failed_account_provisioning_does_not_complete_plasma_setup() {
+        let temp = tempfile::tempdir().unwrap();
+        let etc = temp.path().join("etc");
+        fs::create_dir(&etc).unwrap();
+        fs::write(
+            etc.join("passwd"),
+            "kyth_user:x:1000:1000::/home/kyth_user:/bin/bash\n",
+        )
+        .unwrap();
+        fs::write(etc.join("group"), "").unwrap();
+        let request = CreateUserInput {
+            deploy_root: temp.path().to_string_lossy().into_owned(),
+            target_root: temp.path().to_string_lossy().into_owned(),
+            username: "kyth_user".into(),
+            password_hash: "$6$synthetic-fixture".into(),
+        };
+        assert!(apply(request).unwrap_err().contains("wheel"));
+        assert!(!etc.join("plasma-setup-done").exists());
+    }
+
+    #[test]
+    fn plasma_setup_handoff_rejects_symlinked_autologin_without_touching_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let etc = temp.path().join("etc");
+        fs::create_dir_all(etc.join("plasmalogin.conf.d")).unwrap();
+        let outside = temp.path().join("unrelated.conf");
+        fs::write(&outside, "keep this file").unwrap();
+        std::os::unix::fs::symlink(
+            &outside,
+            etc.join("plasmalogin.conf.d/99-plasma-setup.conf"),
+        )
+        .unwrap();
+        assert!(complete_plasma_setup(&etc).is_err());
+        assert!(!etc.join("plasma-setup-done").exists());
+        assert_eq!(fs::read_to_string(outside).unwrap(), "keep this file");
+    }
+
+    #[test]
+    fn atomic_account_replacement_preserves_owner_mode_and_extended_labels() {
+        use std::os::unix::ffi::OsStrExt;
+        use std::os::unix::fs::MetadataExt;
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("shadow");
+        fs::write(&path, "synthetic-original\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        let name = std::ffi::CString::new("user.kyth-account-metadata").unwrap();
+        let cpath = std::ffi::CString::new(path.as_os_str().as_bytes()).unwrap();
+        let label = b"original-label";
+        assert_eq!(
+            unsafe {
+                libc::setxattr(
+                    cpath.as_ptr(),
+                    name.as_ptr(),
+                    label.as_ptr().cast(),
+                    label.len(),
+                    0,
+                )
+            },
+            0
+        );
+        let before = fs::metadata(&path).unwrap();
+        write_replacing(&path, b"synthetic-replacement\n").unwrap();
+        let after = fs::metadata(&path).unwrap();
+        let mut value = [0u8; 64];
+        let length = unsafe {
+            libc::getxattr(
+                cpath.as_ptr(),
+                name.as_ptr(),
+                value.as_mut_ptr().cast(),
+                value.len(),
+            )
+        };
+        assert_eq!(
+            length,
+            label.len() as isize,
+            "account replacement discarded extended metadata"
+        );
+        assert_eq!(&value[..length as usize], label);
+        assert_eq!(
+            (before.uid(), before.gid(), before.mode()),
+            (after.uid(), after.gid(), after.mode())
+        );
+    }
+
+    #[test]
+    fn successful_account_retry_completes_plasma_setup_and_clears_setup_autologin() {
+        let temp = tempfile::tempdir().unwrap();
+        let deploy = temp.path().join("deployment");
+        let etc = deploy.join("etc");
+        fs::create_dir_all(&etc).unwrap();
+        let uid = unsafe { libc::geteuid() }.max(1000);
+        let gid = unsafe { libc::getegid() }.max(1000);
+        fs::write(
+            etc.join("passwd"),
+            format!("kyth_user:x:{uid}:{gid}::/home/kyth_user:/bin/bash\n"),
+        )
+        .unwrap();
+        fs::write(etc.join("shadow"), "kyth_user:!:20000:0:99999:7:::\n").unwrap();
+        fs::write(etc.join("group"), "wheel:x:10:kyth_user\nvideo:x:39:kyth_user\naudio:x:63:kyth_user\nrender:x:105:kyth_user\n").unwrap();
+        for backend in ["plasmalogin.conf.d", "sddm.conf.d"] {
+            fs::create_dir(etc.join(backend)).unwrap();
+            fs::write(
+                etc.join(backend).join("99-plasma-setup.conf"),
+                "[Autologin]\nUser=plasma-setup\nSession=plasma\n",
+            )
+            .unwrap();
+        }
+        let request = CreateUserInput {
+            deploy_root: deploy.to_string_lossy().into_owned(),
+            target_root: temp.path().to_string_lossy().into_owned(),
+            username: "kyth_user".into(),
+            password_hash: "$6$synthetic-fixture".into(),
+        };
+        apply(request.clone()).unwrap();
+        assert!(
+            etc.join("plasma-setup-done").is_file(),
+            "a successfully provisioned login must bypass Plasma Setup"
+        );
+        for backend in ["plasmalogin.conf.d", "sddm.conf.d"] {
+            assert!(!etc.join(backend).join("99-plasma-setup.conf").exists());
+        }
+        apply(request).unwrap();
+    }
+
+    #[test]
+    fn offline_account_materializes_immutable_groups_with_their_original_ids() {
+        let local = "root:x:0:\nwheel:x:10:\n";
+        let base =
+            "wheel:x:10:\nvideo:x:39:camera\naudio:x:63:\nrender:x:105:\nvideo:x:39:camera\n";
+        let result = expected_group_overlay(local, base).unwrap();
+        assert_eq!(
+            result,
+            format!("{local}video:x:39:camera\naudio:x:63:\nrender:x:105:\n")
+        );
+        assert_eq!(expected_group_overlay(&result, base).unwrap(), result);
+    }
+
+    #[test]
+    fn offline_group_overlay_rejects_missing_groups_and_gid_conflicts() {
+        let base = "wheel:x:10:\nvideo:x:39:\naudio:x:63:\nrender:x:105:\n";
+        assert!(expected_group_overlay("wheel:x:10:\nforeign:x:39:\n", base).is_err());
+        assert!(expected_group_overlay("wheel:x:10:\n", "").is_err());
+        assert!(expected_group_overlay("wheel:x:10:\n", &format!("{base}video:x:40:\n")).is_err());
+    }
+
+    #[test]
+    fn materializing_expected_groups_is_atomic_and_preserves_existing_members() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("etc")).unwrap();
+        fs::create_dir_all(temp.path().join("usr/lib")).unwrap();
+        let path = temp.path().join("etc/group");
+        fs::write(&path, "root:x:0:\nwheel:x:10:existing\n").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::write(
+            temp.path().join("usr/lib/group"),
+            "wheel:x:10:\nvideo:x:39:\naudio:x:63:\nrender:x:105:\n",
+        )
+        .unwrap();
+        ensure_expected_groups(temp.path()).unwrap();
+        let result = fs::read_to_string(&path).unwrap();
+        assert!(result.contains("wheel:x:10:existing\n"));
+        assert!(result.contains("video:x:39:\n"));
+        assert_eq!(
+            fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
+        ensure_expected_groups(temp.path()).unwrap();
+        assert_eq!(fs::read_to_string(&path).unwrap(), result);
+        assert!(!path.with_extension("kyth-tmp").exists());
     }
 
     #[test]

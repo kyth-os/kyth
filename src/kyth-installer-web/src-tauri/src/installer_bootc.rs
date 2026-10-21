@@ -65,6 +65,24 @@ fn safe_reference(value: &str, label: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn source_reference(value: &str) -> Result<String, String> {
+    let value = safe_reference(value, "source image reference")?;
+    let has_transport = [
+        "docker://",
+        "containers-storage:",
+        "oci:",
+        "ostree:",
+        "dir:",
+    ]
+    .iter()
+    .any(|prefix| value.starts_with(prefix));
+    if has_transport {
+        Ok(value)
+    } else {
+        Ok(format!("docker://{value}"))
+    }
+}
+
 fn safe_absolute_path(value: &str, label: &str) -> Result<String, String> {
     let value = value.trim();
     if !value.starts_with('/') || value.len() > 4096 || value.contains("..") {
@@ -85,7 +103,7 @@ pub(crate) fn build_plan(input: BootcInstallInput) -> Result<BootcInstallPlan, S
             "unsupported bootc install subcommand: {subcommand}"
         ));
     }
-    let source_imgref = safe_reference(&input.source_imgref, "source image reference")?;
+    let source_imgref = source_reference(&input.source_imgref)?;
     let target_imgref = safe_reference(&input.target_imgref, "target image reference")?;
     let encryption = input.encryption.trim().to_ascii_lowercase();
     if !matches!(encryption.as_str(), "" | "none" | "tpm2") {
@@ -201,6 +219,21 @@ mod tests {
             encryption: "none".to_string(),
             tpm_recovery_ack: false,
         }
+    }
+
+    #[test]
+    fn raw_registry_source_is_normalized_for_bootc_transport() {
+        let source = "ghcr.io/kyth-os/kyth@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let plan = build_plan(BootcInstallInput {
+            source_imgref: source.to_string(),
+            ..input("to-disk")
+        })
+        .expect("pinned registry source should validate");
+
+        assert!(plan.argv.windows(2).any(|pair| {
+            pair[0] == "--source-imgref" && pair[1] == format!("docker://{source}")
+        }));
+        assert!(plan.requires_network);
     }
 
     #[test]

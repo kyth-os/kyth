@@ -505,25 +505,50 @@ class BootStabilityUnitTests(unittest.TestCase):
         self.assertIn("rm -f /usr/lib/udev/rules.d/99-ntsync.rules", body)
 
     def test_system_accounts_unit_cannot_form_an_ordering_cycle(self) -> None:
-        """After=local-fs.target and Before=systemd-sysusers.service are a cycle.
+        """Account repair must not wait for filesystems whose devices need udev.
 
-        sysusers < tmpfiles-setup-dev < local-fs-pre.target < local-fs.target, so a
-        unit After=local-fs.target cannot also be Before=sysusers. systemd resolved
-        it by deleting a job on every boot, and validate.sh used to mask the
-        warning, which is how it shipped.
+        local-fs waits for the ESP mount/device, which needs udev; udev waits
+        for account repair. Waiting only for ostree-remount keeps /var writable
+        without delaying device discovery until the ESP mount times out.
         """
         body = (
             ROOT / "build_files/scripts/sysconfig/desktop/09-autostart-log-noise-guards.sh"
         ).read_text(encoding="utf-8")
         unit = body.split("SYSACCOUNTUNITEOF", 1)[1].split("SYSACCOUNTUNITEOF", 1)[0]
         directives = [line for line in unit.splitlines() if not line.lstrip().startswith("#")]
-        after = " ".join(line for line in directives if line.startswith("After="))
-        before = " ".join(line for line in directives if line.startswith("Before="))
-        self.assertIn("local-fs.target", after)
+        after = {
+            dependency for line in directives if line.startswith("After=")
+            for dependency in line.split("=", 1)[1].split()
+        }
+        before = {
+            dependency for line in directives if line.startswith("Before=")
+            for dependency in line.split("=", 1)[1].split()
+        }
+        self.assertIn("ostree-remount.service", after)
+        self.assertNotIn("local-fs.target", after)
+        self.assertIn("DefaultDependencies=no", directives)
         self.assertNotIn("systemd-sysusers.service", before)
-        # It must still run before the consumers of the merged account databases.
-        self.assertIn("systemd-tmpfiles-setup.service", before)
-        self.assertIn("systemd-udevd.service", before)
+        # Preserve all consumers of the merged account databases, including
+        # udev's sockets: dropping their guards would merely hide the deadlock.
+        for consumer in (
+            "systemd-tmpfiles-setup.service",
+            "systemd-udevd.service",
+            "systemd-udevd-control.socket",
+            "systemd-udevd-kernel.socket",
+            "dbus.socket",
+            "dbus-broker.service",
+            "sockets.target",
+            "plasmalogin.service",
+        ):
+            with self.subTest(consumer=consumer):
+                self.assertIn(consumer, before)
+        # D-Bus can still wait for local-fs: its ordering is downstream of
+        # account repair, never a prerequisite that holds account repair/udev.
+        dbus_unit = body.split("DBUSRUNDIREOF", 1)[1].split("DBUSRUNDIREOF", 1)[0]
+        self.assertIn("After=kyth-system-accounts.service local-fs.target", dbus_unit)
+        self.assertIn("Before=sockets.target dbus.socket", dbus_unit)
+        self.assertIn("Wants=kyth-system-accounts.service", dbus_unit)
+        self.assertNotIn("Requires=kyth-system-accounts.service", dbus_unit)
         validate = (ROOT / "build_files/scripts/validate.sh").read_text(encoding="utf-8")
         # The cycle may only be tolerated while the *installed* host unit still
         # carries the stale edge; never unconditionally.

@@ -118,6 +118,18 @@ class SystemServiceHardeningTests(unittest.TestCase):
         self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", body)
         self.assertIn("/var/lib/flatpak", body)
 
+    def test_installer_preflight_can_open_registry_tcp_connections(self) -> None:
+        # The privileged installer daemon performs a TCP reachability check
+        # against the configured registry before destructive disk work.
+        body = (ROOT / "build_files/kyth-installerd.service").read_text(encoding="utf-8")
+        self.assertIn("RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6", body)
+
+    def test_installer_bootc_child_can_call_mount_syscalls(self) -> None:
+        # The daemon launches bootc in a child process; seccomp restrictions
+        # are inherited across exec, and bootc must mount the target root.
+        body = (ROOT / "build_files/kyth-installerd.service").read_text(encoding="utf-8")
+        self.assertIn("SystemCallFilter=@system-service @mount", body)
+
     def test_device_writing_services_declare_narrow_writable_paths(self) -> None:
         battery = (ROOT / "build_files/kyth-batteryd.service").read_text()
         mok = (ROOT / "build_files/kyth-enroll-mok.service").read_text()
