@@ -151,6 +151,12 @@ class BuildProfileTests(unittest.TestCase):
         self.assertNotIn("const required = ['Validation', 'CodeQL']", workflow)
         self.assertNotIn("workflow_run:", iso.split("jobs:", 1)[0])
 
+    def test_testing_build_gate_allows_slow_validation_jobs_to_finish(self):
+        build = _read(".github/workflows/build.yml")
+        gate = build.split("  plan:", 1)[0]
+        self.assertRegex(gate, r"(?m)^    timeout-minutes: 60$")
+        self.assertIn("const deadline = Date.now() + 55 * 60 * 1000;", gate)
+
     def test_image_build_writes_registry_cache_only(self):
         workflow = _read(".github/workflows/build.yml")
         self.assertNotIn("type=gha", workflow)

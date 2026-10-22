@@ -204,7 +204,7 @@ jobs:
   hub-shell:
     name: Hub web shell (React + Tauri) build check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
@@ -277,7 +277,7 @@ jobs:
   installer-shell:
     name: Installer web shell (React + Tauri) build check
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
 
     steps:
       - name: Checkout repository
