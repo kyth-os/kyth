@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { installerApi, InstallerApiError, subscribeToInstallEvents } from "./api";
+import type { WifiNetwork } from "./api";
 import type { Config, Disk, FreeRegion, InstallMode, InstallRequest, InstallerEvent, Partition, Phase, RescueProbe } from "./types";
 import { SOFTWARE_BUNDLES, INDIVIDUAL_APPS } from "./software";
 
@@ -64,11 +65,60 @@ export function InstallerApp() {
           const currentIndex = steps.indexOf(step as typeof steps[number]);
           const canNavigate = step !== "install" && name !== "install" && (i <= currentIndex + 1) && (i < 2 || request.disk);
           return <button className={step === name ? "active" : ""} key={name} disabled={!canNavigate} onClick={() => canNavigate && setStep(name)}><b>{i + 1}</b>{name}</button>;
-        })}</nav><button className="rescue-link" disabled={step === "install"} onClick={() => { if (step !== "install") { setStep("rescue"); void probe(); } }}>Rescue & diagnostics</button></aside><main><header><span>Installer</span><span className="muted">{selectedDisk?.name ?? "No target selected"}</span></header>{!online && config?.source?.requires_network === true && <div className="error" role="alert">No network connection. Reconnect before starting the install — system images and updates download during setup.</div>}{error && <div className="error" role="alert">{error}</div>}<section className="card">{step === "network" && <NetworkStep online={online} onOpen={() => installerApi.openNetworkSelector().catch((e) => setError(errorText(e)))} onNext={() => setStep("welcome")} />}{step === "welcome" && <Welcome source={config?.source?.message} onNext={() => setStep("disk")} />}{step === "disk" && <DiskStep disk={selectedDisk} disks={disks} partitions={partitions} freeRegions={freeRegions} pending={pending} filesystems={filesystems} busy={busy} selected={request.disk} mode={request.install_mode} onSelect={(v) => update("disk", v)} onMode={(mode) => { update("install_mode", mode); if (mode !== "alongside") update("target_partition", ""); if (mode !== "resize_ntfs") update("resize_partition", ""); if (mode !== "manual") update("mounts", []); if (mode !== "free_space") { update("free_region_start", 0); update("free_region_end", 0); } }} onUpdate={update} onRefresh={loadDisks} onReload={() => reloadStorage().catch((e) => setError(errorText(e)))} onBack={() => setStep("welcome")} onNext={() => setStep("kernel")} />}{step === "kernel" && <ChoiceStep title="Choose kernel" value={request.kernel} options={["fedora", "cachyos"]} hint="CachyOS kernel: tuned for gaming and latency. Fedora: the stock, most conservative kernel." onChange={(v) => update("kernel", v)} onBack={() => setStep("disk")} onNext={() => setStep("software")} />}{step === "software" && <SoftwareStep selected={request.flatpaks} onChange={(v) => update("flatpaks", v)} onBack={() => setStep("kernel")} onNext={() => setStep("config")} />}{step === "config" && <ConfigStep request={request} choices={choices} onUpdate={update} onBack={() => setStep("software")} onNext={() => setStep("review")} />}{step === "review" && <Review request={request} disk={selectedDisk} onUpdate={update} onBack={() => setStep("config")} onStart={start} busy={busy} />}{step === "install" && <InstallStep phase={phase} progress={progress} events={events} onCancel={() => cancelInstall()} />}{step === "done" && <Done mokState={mokState} needsMokConfirm={mokNeedsConfirm} onReboot={() => installerApi.reboot().catch((e) => setError(errorText(e)))} />}{step === "rescue" && <RescueStep probe={rescue} busy={busy} onProbe={probe} onBack={() => setStep("disk")} />}</section></main></div>;
+        })}</nav><button className="rescue-link" disabled={step === "install"} onClick={() => { if (step !== "install") { setStep("rescue"); void probe(); } }}>Rescue & diagnostics</button></aside><main><header><span>Installer</span><span className="muted">{selectedDisk?.name ?? "No target selected"}</span></header>{!online && config?.source?.requires_network === true && <div className="error" role="alert">No network connection. Reconnect before starting the install — system images and updates download during setup.</div>}{error && <div className="error" role="alert">{error}</div>}<section className="card">{step === "network" && <NetworkStep online={online} onNext={() => setStep("welcome")} />}{step === "welcome" && <Welcome source={config?.source?.message} onNext={() => setStep("disk")} />}{step === "disk" && <DiskStep disk={selectedDisk} disks={disks} partitions={partitions} freeRegions={freeRegions} pending={pending} filesystems={filesystems} busy={busy} selected={request.disk} mode={request.install_mode} onSelect={(v) => update("disk", v)} onMode={(mode) => { update("install_mode", mode); if (mode !== "alongside") update("target_partition", ""); if (mode !== "resize_ntfs") update("resize_partition", ""); if (mode !== "manual") update("mounts", []); if (mode !== "free_space") { update("free_region_start", 0); update("free_region_end", 0); } }} onUpdate={update} onRefresh={loadDisks} onReload={() => reloadStorage().catch((e) => setError(errorText(e)))} onBack={() => setStep("welcome")} onNext={() => setStep("kernel")} />}{step === "kernel" && <ChoiceStep title="Choose kernel" value={request.kernel} options={["fedora", "cachyos"]} hint="CachyOS kernel: tuned for gaming and latency. Fedora: the stock, most conservative kernel." onChange={(v) => update("kernel", v)} onBack={() => setStep("disk")} onNext={() => setStep("software")} />}{step === "software" && <SoftwareStep selected={request.flatpaks} onChange={(v) => update("flatpaks", v)} onBack={() => setStep("kernel")} onNext={() => setStep("config")} />}{step === "config" && <ConfigStep request={request} choices={choices} onUpdate={update} onBack={() => setStep("software")} onNext={() => setStep("review")} />}{step === "review" && <Review request={request} disk={selectedDisk} onUpdate={update} onBack={() => setStep("config")} onStart={start} busy={busy} />}{step === "install" && <InstallStep phase={phase} progress={progress} events={events} onCancel={() => cancelInstall()} />}{step === "done" && <Done mokState={mokState} needsMokConfirm={mokNeedsConfirm} onReboot={() => installerApi.reboot().catch((e) => setError(errorText(e)))} />}{step === "rescue" && <RescueStep probe={rescue} busy={busy} onProbe={probe} onBack={() => setStep("disk")} />}</section></main></div>;
 }
 
-function NetworkStep({ online, onOpen, onNext }: { online: boolean; onOpen: () => void; onNext: () => void }) {
-  return <><h1>Connect to Wi-Fi</h1><p>{online ? "Network detected. Confirm or change your connection before continuing." : "Choose a Wi-Fi network before installation. You can also use Ethernet."}</p><p className="muted">The installer downloads the system image during setup. If you are using Ethernet, continue without opening the Wi-Fi picker.</p><button onClick={onOpen}>Open Wi-Fi picker</button><Actions next="Continue" onNext={onNext} /></>;
+function NetworkStep({ online, onNext }: { online: boolean; onNext: () => void }) {
+  const [networks, setNetworks] = useState<WifiNetwork[]>([]);
+  const [scanning, setScanning] = useState(false);
+  const [connecting, setConnecting] = useState("");
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+
+  const scan = async () => {
+    setScanning(true);
+    setError("");
+    setNotice("");
+    try {
+      setNetworks(await installerApi.wifiNetworks());
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const connect = async (network: WifiNetwork) => {
+    setConnecting(network.ssid);
+    setError("");
+    setNotice("");
+    try {
+      await installerApi.connectWifi(network.ssid);
+      setNotice(`A terminal opened for “${network.ssid}”. Enter a password there if prompted; open networks need none. Wait for the success message, then close the terminal.`);
+    } catch (e) {
+      setError(errorText(e));
+    } finally {
+      setConnecting("");
+    }
+  };
+
+  return <>
+    <h1>Connect to Wi-Fi</h1>
+    <p>{online ? "Network detected. Confirm or change your connection before continuing." : "Choose a Wi-Fi network before installation. You can also use Ethernet."}</p>
+    <p className="muted">The installer downloads the system image during setup. If you are using Ethernet, continue without connecting to Wi-Fi.</p>
+    <button disabled={scanning} onClick={() => void scan()}>{scanning ? "Scanning…" : "Scan for Wi-Fi networks"}</button>
+    {error && <p className="error" role="alert">{error}</p>}
+    {notice && <p role="status">{notice}</p>}
+    {networks.length > 0 && <div className="grid" aria-label="Available Wi-Fi networks">
+      {networks.map((network) => <button className="tile" key={`${network.ssid}:${network.security}`} disabled={Boolean(connecting)} onClick={() => void connect(network)}>
+        <strong>{network.ssid}</strong>
+        <span>{network.security === "--" ? "Open network" : network.security}</span>
+        <span>{network.signal}% signal{network.in_use ? " · connected" : ""}</span>
+      </button>)}
+    </div>}
+    {!scanning && networks.length === 0 && <p className="muted">Scan to list nearby Wi-Fi networks.</p>}
+    <Actions next="Continue" onNext={onNext} />
+  </>;
 }
 
 function Welcome({ source, onNext }: { source?: string; onNext: () => void }) { return <><h1>Welcome to KythOS</h1><p>Install the immutable gaming and development desktop. Coming from Windows? Keep it for anti-cheat titles and shrink it below — KythOS plays everything else.</p>{source && <p className="muted">{source}</p>}<Actions next="Get started" onNext={onNext} /></>; }
