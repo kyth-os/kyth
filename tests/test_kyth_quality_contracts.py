@@ -34,6 +34,30 @@ class QualityContractsTests(unittest.TestCase):
         self.assertIn("rustup default stable", validation_job)
         self.assertIn("cargo --version", validation_job)
 
+    def test_full_validation_jobs_have_timeout_headroom(self):
+        workflow = (ROOT / ".github/workflows/validation.yml").read_text()
+        for job_name, minimum_minutes in (
+            ("validation", 30),
+            ("hub-shell", 45),
+            ("installer-shell", 45),
+        ):
+            job = re.search(
+                rf"(?ms)^  {re.escape(job_name)}:\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)",
+                workflow,
+            )
+            if job is None:
+                self.fail(f"missing validation job {job_name}")
+            timeout = re.search(
+                r"^    timeout-minutes:\s*(\d+)\s*$", job.group(1), re.MULTILINE
+            )
+            if timeout is None:
+                self.fail(f"{job_name} must declare its timeout")
+            self.assertGreaterEqual(
+                int(timeout.group(1)),
+                minimum_minutes,
+                f"{job_name} needs room for uncached dependencies and builds",
+            )
+
     def test_validation_preserves_rustup_home_when_isolating_test_home(self):
         validation = (ROOT / "build_files/scripts/validate.sh").read_text()
         self.assertIn('rustup_home="${RUSTUP_HOME:-${HOME}/.rustup}"', validation)

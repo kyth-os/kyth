@@ -142,18 +142,22 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn("installer_request", production)
         self.assertIn("installer_stream", production)
         self.assertIn("allowlisted_path", production)
-        self.assertEqual(production.count("Command::new("), 1)
-        self.assertIn("Command::new(program).args(args).spawn()", production)
-        # Whitespace-tolerant: rustfmt may lay the tuples out over multiple
-        # lines; the contract is absolute paths, never PATH lookup.
-        self.assertRegex(
-            production,
-            r'\(\s*"/usr/bin/plasmawindowed"\s*,\s*&\["org\.kde\.plasma\.networkmanagement"\]\s*,?\s*\)',
-        )
-        self.assertRegex(
-            production,
-            r'\(\s*"/usr/bin/kcmshell6"\s*,\s*&\["kcm_networkmanagement"\]\s*,?\s*\)',
-        )
+        # Network access stays in the unprivileged shell and uses only fixed
+        # absolute executables. The SSID is a single argv item, never shell text;
+        # nmcli handles any Wi-Fi passphrase interactively in Konsole.
+        self.assertIn("fn installer_wifi_networks", production)
+        self.assertIn("fn installer_connect_wifi", production)
+        self.assertIn("Command::new(installer_network::NMCLI_PATH)", production)
+        self.assertIn("Command::new(installer_network::KONSOLE_PATH)", production)
+        self.assertIn(".args(installer_network::SCAN_ARGS)", production)
+        self.assertIn("connection_terminal_args(&ssid)", production)
+        self.assertNotIn("Command::new(program)", production)
+        self.assertNotIn("Command::new(\"/bin/sh\")", production)
+        self.assertNotIn("Command::new(\"/usr/bin/bash\")", production)
+        network = (INSTALLER_WEB / "src-tauri/src/installer_network.rs").read_text()
+        self.assertIn('"--ask"', network)
+        self.assertIn('"/usr/bin/nmcli"', network)
+        self.assertIn('"/usr/bin/konsole"', network)
         # The only filesystem read allowed in the unprivileged shell is the
         # launcher-written 0600 tokens file (--tokens-file): no writes, no
         # directory access, no generic bridge.

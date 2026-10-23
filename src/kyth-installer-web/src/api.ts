@@ -5,6 +5,13 @@ import { inTauriShell } from "./services/tauriEnv";
 
 declare global { interface Window { __KYTH_SESSION_TOKEN__?: string; } }
 
+export interface WifiNetwork {
+  ssid: string;
+  security: string;
+  signal: number;
+  in_use: boolean;
+}
+
 interface InstallerConnection {
   base_url: string;
   transport: "http" | "unix";
@@ -133,9 +140,13 @@ const post = <T>(path: string, body: unknown) => request<T>(path, { method: "POS
 
 export const installerApi = {
   config: () => request<Config>("/api/config"),
-  openNetworkSelector: async (): Promise<void> => {
-    if (!inTauriShell()) throw new Error("The Wi-Fi picker is available only in the installer shell.");
-    await invoke("installer_open_network_selector");
+  wifiNetworks: async (): Promise<WifiNetwork[]> => {
+    if (!inTauriShell()) throw new Error("Wi-Fi scanning is available only in the installer shell.");
+    return invoke("installer_wifi_networks");
+  },
+  connectWifi: async (ssid: string): Promise<void> => {
+    if (!inTauriShell()) throw new Error("Wi-Fi connection is available only in the installer shell.");
+    await invoke("installer_connect_wifi", { ssid });
   },
   disks: () => request<Disk[]>("/api/disks"),
   partitions: (disk: string) => request<Partition[]>(`/api/partitions?disk=${encodeURIComponent(disk)}`),

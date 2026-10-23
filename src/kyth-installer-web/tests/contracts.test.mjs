@@ -6,6 +6,7 @@ const api = await readFile(new URL("../src/api.ts", import.meta.url), "utf8");
 const app = await readFile(new URL("../src/InstallerApp.tsx", import.meta.url), "utf8");
 const native = await readFile(new URL("../src-tauri/src/native_main.rs", import.meta.url), "utf8");
 const tauriShell = await readFile(new URL("../src-tauri/src/main.rs", import.meta.url), "utf8");
+const installerNetwork = await readFile(new URL("../src-tauri/src/installer_network.rs", import.meta.url), "utf8");
 const tauriBuild = await readFile(new URL("../src-tauri/build.rs", import.meta.url), "utf8");
 const tauriCapabilities = JSON.parse(await readFile(new URL("../src-tauri/capabilities/default.json", import.meta.url), "utf8"));
 const slint = await readFile(new URL("../src-tauri/ui/installer.slint", import.meta.url), "utf8");
@@ -100,18 +101,25 @@ test("React account and hostname rules match the shared installer contract", asy
   assert.ok(!app.includes("[A-Za-z0-9][A-Za-z0-9_-]{0,31}"), "the old permissive username regex is back");
 });
 
-test("installer prompts for network setup first and exposes only fixed Wi-Fi picker commands", () => {
+test("installer uses a terminal-backed NetworkManager flow instead of the failing Plasma picker", () => {
   assert.match(app, /const steps = \["network", "welcome"/);
   assert.match(app, /step === "network"/);
-  assert.match(app, /installerApi\.openNetworkSelector/);
-  assert.match(api, /installer_open_network_selector/);
-  assert.match(tauriShell, /fn network_selector_candidates/);
-  assert.match(tauriShell, /plasmawindowed/);
-  assert.match(tauriShell, /kcmshell6/);
-  assert.match(tauriShell, /installer_open_network_selector/);
-  assert.match(tauriBuild, /"installer_open_network_selector"/);
-  assert.ok(
-    tauriCapabilities.permissions.includes("allow-installer-open-network-selector"),
-    "the main window must be granted the generated network-selector IPC permission",
-  );
+  assert.match(app, /installerApi\.wifiNetworks\(\)/);
+  assert.match(app, /installerApi\.connectWifi\(network\.ssid\)/);
+  assert.match(app, /password.*terminal|terminal.*password/i);
+  assert.match(api, /installer_wifi_networks/);
+  assert.match(api, /installer_connect_wifi/);
+  assert.doesNotMatch(api, /installer_open_network_selector/);
+  assert.match(tauriShell, /fn installer_wifi_networks/);
+  assert.match(tauriShell, /fn installer_connect_wifi/);
+  const scanCommand = tauriShell.match(/#\[tauri::command\]\s*async fn installer_wifi_networks[\s\S]*?\n}/);
+  assert.ok(scanCommand, "Wi-Fi scanning must not block Tauri's main thread");
+  assert.match(scanCommand[0], /spawn_blocking/);
+  assert.match(installerNetwork, /NMCLI_PATH/);
+  assert.match(installerNetwork, /KONSOLE_PATH/);
+  assert.match(installerNetwork, /--ask/);
+  assert.match(tauriBuild, /"installer_wifi_networks"/);
+  assert.match(tauriBuild, /"installer_connect_wifi"/);
+  assert.ok(tauriCapabilities.permissions.includes("allow-installer-wifi-networks"));
+  assert.ok(tauriCapabilities.permissions.includes("allow-installer-connect-wifi"));
 });

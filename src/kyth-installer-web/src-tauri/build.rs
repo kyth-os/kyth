@@ -19,7 +19,8 @@ fn main() {
             "installer_request",
             "installer_stream",
             "installer_stream_stop",
-            "installer_open_network_selector",
+            "installer_wifi_networks",
+            "installer_connect_wifi",
         ]),
     ))
     .expect("tauri build failed")

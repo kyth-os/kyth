@@ -41,7 +41,7 @@ jobs:
     name: Gate on Validation
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     permissions:
       actions: read
       contents: read
@@ -114,13 +114,14 @@ jobs:
               return;
             }
             if (eventName === 'push') {
-              // Build the pushed commit once Validation has passed for it. Wait
-              // (Validation takes ~3 min) instead of racing it; a newer push
-              // cancels Validation, which correctly gates this older build.
+              // Build the pushed commit only after its full Validation workflow
+              // passes. The uncached Tauri shell jobs can take up to 45 minutes
+              // while installing GTK/WebKit packages and compiling Rust; allow
+              // a five-minute buffer before gating a genuinely stuck run.
               const sha = context.sha;
               core.setOutput('head_sha', sha);
               core.setOutput('head_branch', context.ref.replace('refs/heads/', ''));
-              const deadline = Date.now() + 25 * 60 * 1000;
+              const deadline = Date.now() + 55 * 60 * 1000;
               for (;;) {
                 const { data } = await github.rest.actions.listWorkflowRunsForRepo({
                   owner: context.repo.owner,

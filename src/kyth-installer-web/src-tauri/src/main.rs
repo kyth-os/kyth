@@ -16,6 +16,7 @@ mod installer_guard;
 mod installer_journal;
 mod installer_manual;
 mod installer_mount;
+mod installer_network;
 mod installer_plan;
 mod installer_probe;
 mod installer_recovery;
@@ -175,31 +176,38 @@ fn installer_execution_plan(
     installer_executor::build_plan(input)
 }
 
-fn network_selector_candidates() -> [(&'static str, &'static [&'static str]); 2] {
-    // M4: absolute paths, never PATH lookup — a hijacked PATH in the live
-    // session must not redirect the installer's GUI into attacker code.
-    [
-        (
-            "/usr/bin/plasmawindowed",
-            &["org.kde.plasma.networkmanagement"],
-        ),
-        ("/usr/bin/kcmshell6", &["kcm_networkmanagement"]),
-    ]
+#[tauri::command]
+async fn installer_wifi_networks() -> Result<Vec<installer_network::WifiNetwork>, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let output = Command::new(installer_network::NMCLI_PATH)
+            .args(installer_network::SCAN_ARGS)
+            .env("LC_ALL", "C")
+            .output()
+            .map_err(|error| format!("Could not scan for Wi-Fi networks: {error}"))?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if detail.is_empty() {
+                format!("Wi-Fi scan failed with {}", output.status)
+            } else {
+                detail
+            });
+        }
+        let output = String::from_utf8(output.stdout)
+            .map_err(|_| "Wi-Fi scan returned invalid text".to_string())?;
+        Ok(installer_network::parse_nmcli_wifi_list(&output))
+    })
+    .await
+    .map_err(|error| format!("Wi-Fi scan task failed: {error}"))?
 }
 
 #[tauri::command]
-fn installer_open_network_selector() -> Result<(), String> {
-    let mut errors = Vec::new();
-    for (program, args) in network_selector_candidates() {
-        match Command::new(program).args(args).spawn() {
-            Ok(_) => return Ok(()),
-            Err(error) => errors.push(format!("{program}: {error}")),
-        }
-    }
-    Err(format!(
-        "Could not open the Wi-Fi network selector ({})",
-        errors.join("; ")
-    ))
+fn installer_connect_wifi(ssid: String) -> Result<(), String> {
+    let args = installer_network::connection_terminal_args(&ssid)?;
+    Command::new(installer_network::KONSOLE_PATH)
+        .args(args)
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| format!("Could not open the Wi-Fi connection terminal: {error}"))
 }
 
 fn connection(state: &tauri::State<InstallerTokens>) -> Result<InstallerConnection, String> {
@@ -516,7 +524,8 @@ fn main() {
             installer_request,
             installer_stream,
             installer_stream_stop,
-            installer_open_network_selector
+            installer_wifi_networks,
+            installer_connect_wifi
         ])
         .run(tauri::generate_context!())
         .expect("error while running the KythOS installer shell");
@@ -525,20 +534,6 @@ fn main() {
 #[cfg(test)]
 mod transport_tests {
     use super::*;
-
-    #[test]
-    fn network_selector_uses_only_fixed_kde_candidates() {
-        assert_eq!(
-            network_selector_candidates(),
-            [
-                (
-                    "/usr/bin/plasmawindowed",
-                    &["org.kde.plasma.networkmanagement"][..]
-                ),
-                ("/usr/bin/kcmshell6", &["kcm_networkmanagement"][..]),
-            ]
-        );
-    }
 
     #[test]
     fn long_partition_commits_get_a_matching_client_wait_bound() {
