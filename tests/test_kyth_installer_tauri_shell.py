@@ -143,18 +143,24 @@ class InstallerTauriShellTests(unittest.TestCase):
         self.assertIn("installer_stream", production)
         self.assertIn("allowlisted_path", production)
         # Network access stays in the unprivileged shell and uses only fixed
-        # absolute executables. The SSID is a single argv item, never shell text;
-        # nmcli handles any Wi-Fi passphrase interactively in Konsole.
+        # absolute executables. The shell handlers only delegate: process
+        # spawning lives in installer_network's SystemExecutor, whose call
+        # sites pass only the pinned NMCLI_PATH/KONSOLE_PATH constants. The
+        # selected network is a single argv item, never shell text; nmcli
+        # handles any Wi-Fi passphrase interactively in Konsole.
         self.assertIn("fn installer_wifi_networks", production)
         self.assertIn("fn installer_connect_wifi", production)
-        self.assertIn("Command::new(installer_network::NMCLI_PATH)", production)
-        self.assertIn("Command::new(installer_network::KONSOLE_PATH)", production)
-        self.assertIn(".args(installer_network::SCAN_ARGS)", production)
-        self.assertIn("connection_terminal_args(&ssid)", production)
-        self.assertNotIn("Command::new(program)", production)
+        self.assertIn("installer_network::scan_wifi", production)
+        self.assertIn("installer_network::connect_wifi", production)
+        self.assertNotIn("Command::new", production)
         self.assertNotIn("Command::new(\"/bin/sh\")", production)
         self.assertNotIn("Command::new(\"/usr/bin/bash\")", production)
         network = (INSTALLER_WEB / "src-tauri/src/installer_network.rs").read_text()
+        network_production = network.split("#[cfg(test)]")[0]
+        self.assertIn("executor.run(NMCLI_PATH, SCAN_ARGS", network_production)
+        self.assertIn("executor.launch(KONSOLE_PATH, &args)", network_production)
+        self.assertIn("connection_terminal_args(selected", network_production)
+        self.assertNotIn('Command::new("/', network_production)
         self.assertIn('"--ask"', network)
         self.assertIn('"/usr/bin/nmcli"', network)
         self.assertIn('"/usr/bin/konsole"', network)
