@@ -10,6 +10,14 @@ export interface WifiNetwork {
   security: string;
   signal: number;
   in_use: boolean;
+  bssid: string;
+  device: string;
+}
+
+export interface WifiScanResult {
+  status: "ready" | "empty" | "no_adapter" | "radio_disabled" | "unavailable";
+  networks: WifiNetwork[];
+  detail: string;
 }
 
 interface InstallerConnection {
@@ -140,13 +148,13 @@ const post = <T>(path: string, body: unknown) => request<T>(path, { method: "POS
 
 export const installerApi = {
   config: () => request<Config>("/api/config"),
-  wifiNetworks: async (): Promise<WifiNetwork[]> => {
+  wifiNetworks: async (): Promise<WifiScanResult> => {
     if (!inTauriShell()) throw new Error("Wi-Fi scanning is available only in the installer shell.");
     return invoke("installer_wifi_networks");
   },
-  connectWifi: async (ssid: string): Promise<void> => {
+  connectWifi: async (selected: WifiNetwork): Promise<void> => {
     if (!inTauriShell()) throw new Error("Wi-Fi connection is available only in the installer shell.");
-    await invoke("installer_connect_wifi", { ssid });
+    await invoke("installer_connect_wifi", { selected });
   },
   disks: () => request<Disk[]>("/api/disks"),
   partitions: (disk: string) => request<Partition[]>(`/api/partitions?disk=${encodeURIComponent(disk)}`),

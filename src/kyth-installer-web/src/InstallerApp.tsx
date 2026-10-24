@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { installerApi, InstallerApiError, subscribeToInstallEvents } from "./api";
-import type { WifiNetwork } from "./api";
+import type { WifiNetwork, WifiScanResult } from "./api";
 import type { Config, Disk, FreeRegion, InstallMode, InstallRequest, InstallerEvent, Partition, Phase, RescueProbe } from "./types";
 import { SOFTWARE_BUNDLES, INDIVIDUAL_APPS } from "./software";
 
@@ -69,54 +69,76 @@ export function InstallerApp() {
 }
 
 function NetworkStep({ online, onNext }: { online: boolean; onNext: () => void }) {
-  const [networks, setNetworks] = useState<WifiNetwork[]>([]);
-  const [scanning, setScanning] = useState(false);
+  const [scanResult, setScanResult] = useState<WifiScanResult | { status: "initial" | "scanning" | "failure"; networks: WifiNetwork[]; detail: string }>({ status: "initial", networks: [], detail: "" });
+  const networks = scanResult.status === "ready" ? scanResult.networks : [];
+  const scanning = scanResult.status === "scanning";
   const [connecting, setConnecting] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // React state disables controls after render; the ref also rejects clicks
+  // arriving in the same render batch before either operation can settle.
+  const operationPending = useRef(false);
+  const busy = scanning || Boolean(connecting);
 
   const scan = async () => {
-    setScanning(true);
+    if (operationPending.current) return;
+    operationPending.current = true;
+    setScanResult({ status: "scanning", networks: [], detail: "" });
     setError("");
     setNotice("");
     try {
-      setNetworks(await installerApi.wifiNetworks());
+      setScanResult(await installerApi.wifiNetworks());
     } catch (e) {
+      setScanResult({ status: "failure", networks: [], detail: "" });
       setError(errorText(e));
     } finally {
-      setScanning(false);
+      operationPending.current = false;
     }
   };
 
   const connect = async (network: WifiNetwork) => {
+    if (operationPending.current) return;
+    operationPending.current = true;
     setConnecting(network.ssid);
     setError("");
     setNotice("");
     try {
-      await installerApi.connectWifi(network.ssid);
-      setNotice(`A terminal opened for “${network.ssid}”. Enter a password there if prompted; open networks need none. Wait for the success message, then close the terminal.`);
+      await installerApi.connectWifi(network);
+      setNotice(`A terminal opened for “${network.ssid}”. Enter a password only there if prompted; open networks need none. Observe the success or failure message locally in that terminal; opening it does not confirm a Wi-Fi connection. If it fails, close the terminal and select the network again to retry. Choose “Refresh connection status” to rescan the connected state afterward.`);
     } catch (e) {
-      setError(errorText(e));
+      setError(`${errorText(e)} Retry by selecting the network again, or rescan before retrying.`);
     } finally {
+      operationPending.current = false;
       setConnecting("");
     }
   };
 
   return <>
     <h1>Connect to Wi-Fi</h1>
-    <p>{online ? "Network detected. Confirm or change your connection before continuing." : "Choose a Wi-Fi network before installation. You can also use Ethernet."}</p>
+    <p>{online ? "A network link is reported. It may be Ethernet; this does not confirm Wi-Fi." : "Choose a Wi-Fi network before installation. You can also use Ethernet."}</p>
     <p className="muted">The installer downloads the system image during setup. If you are using Ethernet, continue without connecting to Wi-Fi.</p>
-    <button disabled={scanning} onClick={() => void scan()}>{scanning ? "Scanning…" : "Scan for Wi-Fi networks"}</button>
+    <button disabled={busy} onClick={() => void scan()}>{scanning ? "Scanning…" : "Scan for Wi-Fi networks"}</button>
+    <button disabled={busy} onClick={() => void scan()}>Refresh connection status</button>
     {error && <p className="error" role="alert">{error}</p>}
     {notice && <p role="status">{notice}</p>}
     {networks.length > 0 && <div className="grid" aria-label="Available Wi-Fi networks">
-      {networks.map((network) => <button className="tile" key={`${network.ssid}:${network.security}`} disabled={Boolean(connecting)} onClick={() => void connect(network)}>
+      {networks.map((network) => <button className="tile" key={`${network.bssid}:${network.device}`} disabled={busy} onClick={() => void connect(network)}>
         <strong>{network.ssid}</strong>
         <span>{network.security === "--" ? "Open network" : network.security}</span>
         <span>{network.signal}% signal{network.in_use ? " · connected" : ""}</span>
       </button>)}
     </div>}
-    {!scanning && networks.length === 0 && <p className="muted">Scan to list nearby Wi-Fi networks.</p>}
+    <p className="muted" role="status">{{
+      initial: "Scan to list nearby Wi-Fi networks.",
+      scanning: "Scanning for nearby Wi-Fi networks…",
+      failure: "Wi-Fi scan failed. Retry the scan, or check the desktop network settings and use Ethernet.",
+      ready: "Scan complete. Select a network, or refresh connection status after connecting.",
+      empty: "No nearby Wi-Fi networks were found. Move closer to an access point and scan again, or use Ethernet.",
+      no_adapter: "No Wi-Fi radio was detected. A physical or virtual Ethernet connection can still be used; continue with Ethernet.",
+      radio_disabled: "Wi-Fi radio is off. Enable it in the desktop network settings, then scan again.",
+      unavailable: "Wi-Fi scanning is unavailable. Check the desktop network settings and retry the scan, or use Ethernet.",
+    }[scanResult.status]}</p>
+    {scanResult.detail && <p className="muted">{scanResult.detail}</p>}
     <Actions next="Continue" onNext={onNext} />
   </>;
 }

@@ -105,7 +105,14 @@ test("installer uses a terminal-backed NetworkManager flow instead of the failin
   assert.match(app, /const steps = \["network", "welcome"/);
   assert.match(app, /step === "network"/);
   assert.match(app, /installerApi\.wifiNetworks\(\)/);
-  assert.match(app, /installerApi\.connectWifi\(network\.ssid\)/);
+  assert.match(app, /installerApi\.connectWifi\(network\)/);
+  assert.match(app, /key=\{`\$\{network\.bssid\}:\$\{network\.device\}`\}/);
+  assert.match(api, /wifiNetworks: async \(\): Promise<WifiScanResult>/);
+  assert.match(api, /connectWifi: async \(selected: WifiNetwork\): Promise<void>/);
+  assert.match(api, /invoke\("installer_connect_wifi", \{ selected \}\)/);
+  for (const status of ["ready", "empty", "no_adapter", "radio_disabled", "unavailable"]) {
+    assert.ok(api.includes(`"${status}"`), `missing scan status ${status}`);
+  }
   assert.match(app, /password.*terminal|terminal.*password/i);
   assert.match(api, /installer_wifi_networks/);
   assert.match(api, /installer_connect_wifi/);

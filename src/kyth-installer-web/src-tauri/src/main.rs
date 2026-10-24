@@ -28,7 +28,6 @@ mod installer_transaction;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
-use std::process::Command;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
@@ -177,37 +176,17 @@ fn installer_execution_plan(
 }
 
 #[tauri::command]
-async fn installer_wifi_networks() -> Result<Vec<installer_network::WifiNetwork>, String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let output = Command::new(installer_network::NMCLI_PATH)
-            .args(installer_network::SCAN_ARGS)
-            .env("LC_ALL", "C")
-            .output()
-            .map_err(|error| format!("Could not scan for Wi-Fi networks: {error}"))?;
-        if !output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            return Err(if detail.is_empty() {
-                format!("Wi-Fi scan failed with {}", output.status)
-            } else {
-                detail
-            });
-        }
-        let output = String::from_utf8(output.stdout)
-            .map_err(|_| "Wi-Fi scan returned invalid text".to_string())?;
-        Ok(installer_network::parse_nmcli_wifi_list(&output))
-    })
-    .await
-    .map_err(|error| format!("Wi-Fi scan task failed: {error}"))?
+async fn installer_wifi_networks() -> Result<installer_network::WifiScanResult, String> {
+    tauri::async_runtime::spawn_blocking(installer_network::scan_wifi)
+        .await
+        .map_err(|error| format!("Wi-Fi scan task failed: {error}"))?
 }
 
 #[tauri::command]
-fn installer_connect_wifi(ssid: String) -> Result<(), String> {
-    let args = installer_network::connection_terminal_args(&ssid)?;
-    Command::new(installer_network::KONSOLE_PATH)
-        .args(args)
-        .spawn()
-        .map(|_| ())
-        .map_err(|error| format!("Could not open the Wi-Fi connection terminal: {error}"))
+async fn installer_connect_wifi(selected: installer_network::WifiNetwork) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || installer_network::connect_wifi(&selected))
+        .await
+        .map_err(|error| format!("Wi-Fi connection task failed: {error}"))?
 }
 
 fn connection(state: &tauri::State<InstallerTokens>) -> Result<InstallerConnection, String> {
