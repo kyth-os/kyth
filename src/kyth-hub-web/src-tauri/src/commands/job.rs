@@ -19,6 +19,77 @@ fn jobs() -> &'static JobStore {
     JOBS.get_or_init(JobStore::default)
 }
 
+/// Process-wide single-flight for flatpak mutations. Flatpak serializes
+/// transactions per installation with its own lock, so two Hub actions
+/// that mutate at once (an install from the Apps page while a host-tool
+/// install runs from the Security grid, a double-started update) make one
+/// of them fail with a lock error that reads as a random failure. The
+/// system-update commands have `take_mutating_slot`; flatpak operations
+/// across main.rs, security, and gaming share this one slot instead —
+/// whichever domain starts first owns it until its job finishes.
+static FLATPAK_MUTATING: AtomicBool = AtomicBool::new(false);
+
+/// RAII handle for the flatpak mutation slot: dropping it frees the slot,
+/// including on panic/early-return paths inside a job worker.
+#[derive(Debug)]
+pub(crate) struct FlatpakSlot;
+
+impl Drop for FlatpakSlot {
+    fn drop(&mut self) {
+        FLATPAK_MUTATING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Claim the flatpak mutation slot, or explain which action must finish
+/// first. Callers claim BEFORE starting their job and move the guard into
+/// the worker so it is held for the job's whole life.
+pub(crate) fn take_flatpak_slot() -> Result<FlatpakSlot, String> {
+    FLATPAK_MUTATING
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .map(|_| FlatpakSlot)
+        .map_err(|_| {
+            "Another app install, update, or removal is already in progress. \
+             Wait for it to finish before starting another."
+                .to_string()
+        })
+}
+
+/// Ensure the per-user Flathub remote exists before an install. Runs
+/// inside the tracked, cancellable workflow (never on a command thread):
+/// `flatpak install flathub …` fails outright when the remote is missing,
+/// which used to make installs from one page fail while pages that did
+/// this step self-healed.
+pub(crate) fn ensure_flathub_user_remote(cancel: &AtomicBool) -> Result<(), String> {
+    let mut command = Command::new("flatpak");
+    command.args([
+        "remote-add",
+        "--user",
+        "--if-not-exists",
+        "flathub",
+        "https://dl.flathub.org/repo/flathub.flatpakrepo",
+    ]);
+    let output = kyth_shared::system::process::run_bounded_command_cancel(
+        command,
+        Duration::from_secs(60),
+        cancel,
+    )
+    .map_err(|error| match error.kind() {
+        std::io::ErrorKind::TimedOut => "Flathub setup took too long and was stopped.".to_string(),
+        std::io::ErrorKind::Interrupted => "Flathub setup was cancelled.".to_string(),
+        _ => format!("Could not start Flathub setup: {error}"),
+    })?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(failure_detail("Flathub setup", &output))
+    }
+}
+
 pub(crate) fn new_job_id(prefix: &str) -> String {
     format!(
         "{prefix}-{}",
@@ -182,6 +253,22 @@ pub(crate) fn spawn_task_job(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn flatpak_slot_is_single_flight_until_dropped() {
+        let first = take_flatpak_slot().expect("first claim succeeds");
+        let second = take_flatpak_slot();
+        assert!(
+            second.is_err(),
+            "a second flatpak mutation must be rejected while one runs"
+        );
+        assert!(second.unwrap_err().contains("already in progress"));
+        drop(first);
+        assert!(
+            take_flatpak_slot().is_ok(),
+            "dropping the guard frees the slot"
+        );
+    }
 
     #[test]
     fn task_job_publishes_phase_and_respects_cancellation() {

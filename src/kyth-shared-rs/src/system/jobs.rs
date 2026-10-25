@@ -274,6 +274,13 @@ pub enum JobTimeoutClass {
     /// Kali image pulls and Outlook archive conversions: large local work
     /// that is neither a recipe nor an OS update.
     ExtendedWork,
+    /// Flatpak installs, uninstalls, and the user phase of app updates from
+    /// the Apps page: multi-GB pulls on a slow mirror legitimately run far
+    /// past the 900s recipe bound (the frontend waits up to ~59 minutes),
+    /// and killing flatpak mid-transaction at 15:00 reported progressing
+    /// installs as failures. These run as the user, not through the
+    /// privileged socket, so the 910s socket bound does not apply.
+    FlatpakTransfer,
     /// Full image download + stage, and rclone cloud syncs: sustained
     /// network transfers. The watcher case must stay longer than its
     /// systemd TimeoutStartSec (2400s).
@@ -290,6 +297,7 @@ pub fn timeout_for(class: JobTimeoutClass) -> Duration {
         JobTimeoutClass::ToolInstall => Duration::from_secs(600),
         JobTimeoutClass::HubAction => Duration::from_secs(900),
         JobTimeoutClass::ExtendedWork => Duration::from_secs(1800),
+        JobTimeoutClass::FlatpakTransfer => Duration::from_secs(3600),
         JobTimeoutClass::LongTransfer => Duration::from_secs(3600),
     }
 }
@@ -480,6 +488,7 @@ mod tests {
             ToolInstall,
             HubAction,
             ExtendedWork,
+            FlatpakTransfer,
             LongTransfer,
         ];
         let durations: Vec<Duration> = ordered.iter().map(|class| timeout_for(*class)).collect();

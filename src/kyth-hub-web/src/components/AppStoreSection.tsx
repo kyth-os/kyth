@@ -4,11 +4,12 @@ import type { HubSection } from "../data/hubSections";
 import {
   fetchAppStoreSnapshot, fetchAppImages, fetchFamiliarApps, searchAppStream,
   installFlatpak, waitInstallJob, launchAppImage, fetchInstalledFlatpaks,
-  cancelInstall, cancelSecurityJob,
+  cancelAppUpdate, cancelInstall, cancelSecurityJob,
   uninstallFlatpak, makeAppImageExecutable, importAppImage, fetchStarterPacks,
   fetchKaliStatus, fetchSecHostTools, createKaliBox, exportKaliApps,
   removeKaliBox, enterKaliTerminal, installSecHostTool, uninstallSecHostTool,
   launchSecHostTool, invalidateSharedReads, fetchPendingUpdatesSummary, updateFlatpaks,
+  onOnlineRefetch,
   type AppStoreSnapshot, type FamiliarApp, type AppImageEntry,
   type AppStreamApp, type StarterPack, type InstalledFlatpak, type SecHostTool,
 } from "../services/liveData";
@@ -61,7 +62,7 @@ function AppCard({ app, installed, busy, onInstall, onUninstall, onCancelInstall
   </article>;
 }
 
-function KaliCard({ busy, run }: { busy: string | null; run: SectionRun }) {
+function KaliCard({ busy, run, runCancel }: { busy: string | null; run: SectionRun; runCancel: SectionRun }) {
   const [installed, setInstalled] = useState<boolean | null>(null);
   const [tier, setTier] = useState<"headless" | "default" | "everything">("headless");
   useEffect(() => { let cancelled = false; fetchKaliStatus().then((value) => { if (!cancelled) setInstalled(value); }); return () => { cancelled = true; }; }, []);
@@ -69,7 +70,7 @@ function KaliCard({ busy, run }: { busy: string | null; run: SectionRun }) {
   return <div className="app-special-card">
     <div className="app-special-heading"><div className="app-special-icon">K</div><div><p className="app-special-title">Kali Linux Toolbox</p><p className="app-special-copy">A ready-to-use security environment managed from Kyth Hub.</p></div>{installed != null && <span className={`pill ${installed ? "pill-ok" : "pill-dim"}`}>{installed ? "Installed" : "Not installed"}</span>}</div>
     {installed === false && <div className="app-special-controls"><div className="app-choice-row">{([ ["headless", "Headless", "~150 CLI tools"], ["default", "Default", "CLI + GUI tools"], ["everything", "Everything", "All available tools"] ] as const).map(([value, label, detail]) => <label key={value} className={`app-choice ${tier === value ? "app-choice-selected" : ""}`}><input type="radio" name="kali-tier" checked={tier === value} onChange={() => setTier(value)} /><span><strong>{label}</strong><small>{detail}</small></span></label>)}</div>{busy === "kali-create" && <ProgressRing size={22} />}<button disabled={busy !== null} onClick={() => run("kali-create", "Creating Kali box…", async () => { const result = await createKaliBox(tier); await refresh(); return result; })} style={secBtnStyle}>{busy === "kali-create" ? "Creating…" : "Create toolbox"}</button></div>}
-    {installed === true && <div className="app-special-actions"><button disabled={busy !== null} onClick={() => run("kali-enter", "Opening terminal…", enterKaliTerminal)} style={secBtnStyle}>{busy === "kali-enter" ? "Opening…" : "Launch terminal"}</button><button disabled={busy !== null} onClick={() => run("kali-export", "Exporting GUI apps…", exportKaliApps)} style={secBtnStyle}>{busy === "kali-export" ? "Exporting…" : "Export apps"}</button><button disabled={busy !== null} onClick={() => run("kali-remove", "Stopping and removing Kali box…", async () => { const result = await removeKaliBox(); await refresh(); return result; })} style={{ ...secBtnStyle, borderColor: "var(--danger, #c0392b)", color: "var(--danger, #c0392b)" }}>{busy === "kali-remove" ? "Removing…" : "Remove toolbox"}</button>{["kali-create", "kali-export", "kali-remove"].includes(busy ?? "") && <span className="hub-progress-inline"><ProgressRing size={22} /><button onClick={() => run("cancel-kali", "Cancelling…", cancelSecurityJob)} style={secBtnStyle}>Cancel</button></span>}</div>}
+    {installed === true && <div className="app-special-actions"><button disabled={busy !== null} onClick={() => run("kali-enter", "Opening terminal…", enterKaliTerminal)} style={secBtnStyle}>{busy === "kali-enter" ? "Opening…" : "Launch terminal"}</button><button disabled={busy !== null} onClick={() => run("kali-export", "Exporting GUI apps…", exportKaliApps)} style={secBtnStyle}>{busy === "kali-export" ? "Exporting…" : "Export apps"}</button><button disabled={busy !== null} onClick={() => run("kali-remove", "Stopping and removing Kali box…", async () => { const result = await removeKaliBox(); await refresh(); return result; })} style={{ ...secBtnStyle, borderColor: "var(--danger, #c0392b)", color: "var(--danger, #c0392b)" }}>{busy === "kali-remove" ? "Removing…" : "Remove toolbox"}</button>{["kali-create", "kali-export", "kali-remove"].includes(busy ?? "") && <span className="hub-progress-inline"><ProgressRing size={22} /><button onClick={() => runCancel("cancel-kali", "Cancelling…", cancelSecurityJob)} style={secBtnStyle}>Cancel</button></span>}</div>}
   </div>;
 }
 
@@ -90,25 +91,34 @@ function numericAppPending(pending: Record<string, string> | null): number {
 // system (bootc) update workflow now. This card owns its own pending count,
 // action, and error messaging using the same shared copy the system update
 // page uses, so the two workflows read consistently without sharing state.
-function AppUpdatesCard({ busy, run, status }: { busy: string | null; run: SectionRun; status: string | null }) {
+function AppUpdatesCard({ busy, run, runCancel, status, onUpdated, recheckNonce }: {
+  busy: string | null; run: SectionRun; runCancel: SectionRun; status: string | null;
+  onUpdated: () => Promise<void>; recheckNonce: number;
+}) {
   const [pending, setPending] = useState<Record<string, string> | null>(null);
   const [loaded, setLoaded] = useState(false);
+  // A failed check is its own state. It used to be indistinguishable from a
+  // successful empty one: the fetch returned null, numericAppPending read
+  // that as 0, and the card rendered "Up to date" for a check that never
+  // actually ran.
+  const [checkFailed, setCheckFailed] = useState(false);
   const [lastFailed, setLastFailed] = useState(false);
 
   async function refresh(): Promise<void> {
     invalidateSharedReads("pending-updates", "probe:flatpak-updates");
     const next = await fetchPendingUpdatesSummary();
     setPending(next);
+    setCheckFailed(next === null);
     setLoaded(true);
   }
 
   useEffect(() => {
     let cancelled = false;
     fetchPendingUpdatesSummary().then((next) => {
-      if (!cancelled) { setPending(next); setLoaded(true); }
+      if (!cancelled) { setPending(next); setCheckFailed(next === null); setLoaded(true); }
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [recheckNonce]);
 
   async function updateApps(): Promise<string> {
     try {
@@ -121,18 +131,24 @@ function AppUpdatesCard({ busy, run, status }: { busy: string | null; run: Secti
     } finally {
       // Even a partially failed multi-scope update may have changed one
       // installation. Always refresh the authoritative count before
-      // offering another action, so the card never keeps a stale badge.
+      // offering another action, so the card never keeps a stale badge —
+      // and refresh the rest of the page too: the stat row and library
+      // used to keep their pre-update state for as long as the page
+      // stayed open.
       await refresh().catch(() => undefined);
+      await onUpdated().catch(() => undefined);
     }
   }
 
   const count = numericAppPending(pending);
   const incomplete = Boolean(pending?.flatpak_detail);
   const available = count > 0;
-  const label = !loaded ? "Checking…" : available ? `${count} update${count === 1 ? "" : "s"} ready` : incomplete ? "Status incomplete" : "Up to date";
-  const detail = pending?.flatpak_detail
-    || (available ? "Ready to install across your Flatpak installations." : loaded ? "No app updates are pending." : "Checking Flatpak app updates…");
-  const tone = available || incomplete ? "warn" : loaded ? "ok" : "muted";
+  const label = !loaded ? "Checking…" : checkFailed ? "Couldn't check" : available ? `${count} update${count === 1 ? "" : "s"} ready` : incomplete ? "Status incomplete" : "Up to date";
+  const detail = checkFailed
+    ? "The update check didn't complete, so this may not be current. Check again in a moment."
+    : pending?.flatpak_detail
+      || (available ? "Ready to install across your Flatpak installations." : loaded ? "No app updates are pending." : "Checking Flatpak app updates…");
+  const tone = available || incomplete || checkFailed ? "warn" : loaded ? "ok" : "muted";
   const actionFailed = lastFailed && (status?.startsWith("Failed:") ?? false);
   const busyHere = busy === "apps-update";
 
@@ -145,18 +161,12 @@ function AppUpdatesCard({ busy, run, status }: { busy: string | null; run: Secti
     {actionFailed && <p className="app-updates-next-step">{friendlyActionNextStep((status ?? "").replace(/^Failed:\s*/, ""), "apps")}</p>}
     <div className="app-updates-actions hub-progress-inline">
       {busyHere && <ProgressRing size={30} />}
-      {(available || incomplete) && (
+      {(available || incomplete) && !checkFailed && (
         <button
           className="app-action-button app-action-primary"
-          // Every other busy-gated button in this file (and the rest of the
-          // Hub) disables on `busy !== null` outright. This one stayed
-          // clickable while its own update was running (`busyHere` made the
-          // `&& !busyHere` short-circuit to false), so a second click here
-          // called updateFlatpaks() again — and update_flatpaks has no
-          // backend-side single-flight guard (unlike the system-update
-          // launchers' take_mutating_slot()), so it really did start a
-          // second concurrent `flatpak update` process, not just resend the
-          // same request.
+          // Disabled while ANY action runs; the backend now also enforces
+          // one flatpak mutation at a time (take_flatpak_slot), so a
+          // second start is rejected instead of racing the first.
           disabled={busy !== null}
           onClick={() => void run("apps-update", "Updating your apps…", updateApps)}
         >
@@ -164,9 +174,9 @@ function AppUpdatesCard({ busy, run, status }: { busy: string | null; run: Secti
         </button>
       )}
       {busyHere && (
-        <button className="app-action-button app-action-secondary" onClick={() => void run("cancel-apps-update", "Cancelling…", cancelInstall)}>Cancel</button>
+        <button className="app-action-button app-action-secondary" onClick={() => void runCancel("cancel-apps-update", "Cancelling…", cancelAppUpdate)}>Cancel</button>
       )}
-      {!available && !incomplete && loaded && (
+      {((!available && !incomplete && loaded) || checkFailed) && (
         <button className="app-action-button app-action-secondary" disabled={busy !== null} onClick={() => void run("apps-refresh", "Checking for app updates…", async () => { await refresh(); return "App update status refreshed."; })}>Check for updates</button>
       )}
     </div>
@@ -181,39 +191,63 @@ export function AppStoreSection({ section }: { section: HubSection }) {
   const [familiar, setFamiliar] = useState<FamiliarApp[] | null>(null);
   const [appImages, setAppImages] = useState<AppImageEntry[] | null>(null);
   const [catalog, setCatalog] = useState<AppStreamApp[] | null>(null);
+  // Why the last search could not run (dead remote, timed-out helper,
+  // unusable query) — kept apart from an empty result list so a failed
+  // search never renders as "No apps found".
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+  const [searchNonce, setSearchNonce] = useState(0);
   const [installed, setInstalled] = useState<InstalledFlatpak[] | null>(null);
+  const [installedFailedScopes, setInstalledFailedScopes] = useState<string[]>([]);
   const [appImagePath, setAppImagePath] = useState("");
   const [catalogQuery, setCatalogQuery] = useState("");
   const [catalogSearching, setCatalogSearching] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  // Bumped on reconnect so the updates card re-runs its mount check.
+  const [recheckNonce, setRecheckNonce] = useState(0);
   // Monotonic id for the debounced catalog search: Tauri invokes cannot
   // be aborted, so a slow earlier query must not overwrite newer results.
   const catalogRequest = useRef(0);
-  const { status, busy, run } = useSectionAction("install");
+  const { status, busy, run, runCancel } = useSectionAction(["install", "app-update"]);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([fetchAppStoreSnapshot(), fetchStarterPacks(), fetchFamiliarApps(), fetchAppImages(), fetchInstalledFlatpaks()]).then(([s, p, f, images, apps]) => { if (!cancelled) { setSnapshot(s); setPacks(p); setFamiliar(f); setAppImages(images); setInstalled(apps); setLoaded(true); } });
+    Promise.all([fetchAppStoreSnapshot(), fetchStarterPacks(), fetchFamiliarApps(), fetchAppImages(), fetchInstalledFlatpaks()]).then(([s, p, f, images, result]) => { if (!cancelled) { setSnapshot(s); setPacks(p); setFamiliar(f); setAppImages(images); if (result) { setInstalled(result.apps); setInstalledFailedScopes(result.failedScopes); } setLoaded(true); } });
     return () => { cancelled = true; };
   }, []);
   useEffect(() => {
     catalogRequest.current += 1;
     const requestId = catalogRequest.current;
     const q = catalogQuery.trim();
-    if (q.length < 2) { setCatalog(null); setCatalogSearching(false); return; }
+    if (q.length < 2) { setCatalog(null); setCatalogError(null); setCatalogSearching(false); return; }
     let cancelled = false;
-    const timer = window.setTimeout(async () => { setCatalogSearching(true); const apps = await searchAppStream(q); if (!cancelled && catalogRequest.current === requestId) { setCatalog(apps ?? []); setCatalogSearching(false); } }, 250);
+    const timer = window.setTimeout(async () => {
+      setCatalogSearching(true);
+      try {
+        const apps = await searchAppStream(q);
+        if (!cancelled && catalogRequest.current === requestId) { setCatalog(apps); setCatalogError(null); setCatalogSearching(false); }
+      } catch (error) {
+        if (!cancelled && catalogRequest.current === requestId) {
+          setCatalog(null);
+          setCatalogError(error instanceof Error ? error.message : String(error));
+          setCatalogSearching(false);
+        }
+      }
+    }, 250);
     return () => { cancelled = true; window.clearTimeout(timer); };
-  }, [catalogQuery]);
+  }, [catalogQuery, searchNonce]);
   async function refreshInstalled(): Promise<void> {
     invalidateSharedReads("installed-flatpaks", "pending-updates", "probe:flatpak-apps", "probe:flatpak-updates");
     const [nextSnapshot, nextInstalled] = await Promise.all([fetchAppStoreSnapshot(), fetchInstalledFlatpaks()]);
     if (nextSnapshot) setSnapshot(nextSnapshot);
-    if (nextInstalled) setInstalled(nextInstalled);
+    if (nextInstalled) { setInstalled(nextInstalled.apps); setInstalledFailedScopes(nextInstalled.failedScopes); }
   }
-  // Flatpak installs over a slow mirror can run many minutes: wait up to
-  // 15 minutes (1800 * 500ms) in the UI. waitInstallJob keeps the job
-  // tracked after this UI wait expires, so Cancel still reaches it.
+  // A reconnect invalidates the shared-read caches, but state already
+  // rendered from a stale/failed read stays on screen without a refetch.
+  useEffect(() => onOnlineRefetch(() => { void refreshInstalled(); setRecheckNonce((n) => n + 1); }), []);
+  // Flatpak installs over a slow mirror can run many minutes: the poll
+  // limit is 1800 probes (500ms cadence backing off to 2s, so up to ~59
+  // minutes), matching the backend's flatpak transfer bound. A UI wait
+  // that expires first leaves the job tracked, so Cancel still reaches it.
   async function install(id: string): Promise<string> { return await waitInstallJob(await installFlatpak(id), 1800); }
   async function installPack(pack: StarterPack): Promise<string> {
     // If one app in the pack fails partway through, the ones already
@@ -237,23 +271,23 @@ export function AppStoreSection({ section }: { section: HubSection }) {
   const live = snapshot !== null || packs !== null || familiar !== null || appImages !== null || installed !== null;
   const onInstall = (app: CardApp) => { void run(`install-${app.id}`, `Installing ${app.name}…`, () => installAndRefresh(app.id)); };
   const onUninstall = (app: CardApp) => { void run(`uninstall-${app.id}`, `Removing ${app.name}…`, async () => { const result = await uninstallFlatpak(app.id); await refreshInstalled(); return result; }); };
-  const onCancelInstall = () => { void run("cancel-install", "Cancelling…", cancelInstall); };
+  const onCancelInstall = () => { void runCancel("cancel-install", "Cancelling…", cancelInstall); };
 
   return <LiveSectionCard section={section} live={live}>
     {live ? <div className="app-store-content">
       <div className="app-store-hero"><div><span className="app-eyebrow">Kyth software center</span><h2>Find your next app</h2><p>Discover trusted Flatpaks, install them in one click, and keep your desktop organized from one place.</p></div><div className="app-store-hero-art"><span>✦</span><i /><i /><i /></div></div>
       <div className="app-store-search-wrap"><label htmlFor="app-store-search" className="app-search-label">Search applications</label><div className="app-store-search"><span aria-hidden="true">⌕</span><input id="app-store-search" value={catalogQuery} onChange={(event) => setCatalogQuery(event.target.value)} placeholder="Search apps, tools, and games…" autoComplete="off" />{catalogQuery && <button className="app-search-clear" onClick={() => setCatalogQuery("")} aria-label="Clear app search">×</button>}</div><p className="app-search-hint">Searches the Flathub catalog through the native Kyth bridge.</p></div>
       <div className="app-stat-row"><div><span>Installed apps</span><strong>{snapshot?.installedCount ?? installed?.length ?? "—"}</strong></div><div><span>Updates ready</span><strong>{snapshot?.updatesAvailable ?? "—"}</strong></div><div><span>App source</span><strong>Flathub</strong></div></div>
-      <AppUpdatesCard busy={busy} run={run} status={status} />
-      {catalogQuery.trim().length >= 2 ? <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Discover</span><h2>Search results</h2></div>{catalog && <span className="app-result-count">{catalog.length} matches</span>}</div>{catalogSearching && <div className="app-loading-state hub-progress-inline"><ProgressRing size={24} /> Searching Flathub…</div>}{!catalogSearching && catalog && <div className="app-card-grid">{catalog.map((app) => <AppCard key={app.id} app={app} installed={installedIds.has(app.id)} busy={busy} onInstall={onInstall} onUninstall={onUninstall} onCancelInstall={onCancelInstall} />)}</div>}{!catalogSearching && catalog?.length === 0 && <div className="app-empty-state"><strong>No apps found</strong><span>Try a broader search, or check the spelling.</span></div>}{familiarMatches.length > 0 && <div className="app-alternative-note"><strong>Looking for {familiarMatches[0].windows_name}?</strong><span>{familiarMatches[0].description}</span><button className="app-link-button" onClick={() => setCatalogQuery(familiarMatches[0].flatpak_id)}>View alternative</button></div>}</section> : <>
+      <AppUpdatesCard busy={busy} run={run} runCancel={runCancel} status={status} onUpdated={refreshInstalled} recheckNonce={recheckNonce} />
+      {catalogQuery.trim().length >= 2 ? <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Discover</span><h2>Search results</h2></div>{catalog && <span className="app-result-count">{catalog.length} matches</span>}</div>{catalogSearching && <div className="app-loading-state hub-progress-inline"><ProgressRing size={24} /> Searching Flathub…</div>}{!catalogSearching && catalogError && <div className="app-empty-state"><strong>Search couldn't run</strong><span>{catalogError}</span><button className="app-action-button app-action-secondary" disabled={busy !== null} onClick={() => setSearchNonce((n) => n + 1)}>Try again</button></div>}{!catalogSearching && catalog && <div className="app-card-grid">{catalog.map((app) => <AppCard key={app.id} app={app} installed={installedIds.has(app.id)} busy={busy} onInstall={onInstall} onUninstall={onUninstall} onCancelInstall={onCancelInstall} />)}</div>}{!catalogSearching && !catalogError && catalog?.length === 0 && <div className="app-empty-state"><strong>No apps found</strong><span>Try a broader search, or check the spelling.</span></div>}{familiarMatches.length > 0 && <div className="app-alternative-note"><strong>Looking for {familiarMatches[0].windows_name}?</strong><span>{familiarMatches[0].description}</span><button className="app-link-button" onClick={() => setCatalogQuery(familiarMatches[0].flatpak_id)}>View alternative</button></div>}</section> : <>
         <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Curated for KythOS</span><h2>Popular apps</h2></div><span className="app-result-count">One-click install</span></div><div className="app-card-grid">{featured.map((app) => <AppCard key={app.id} app={app} installed={installedIds.has(app.id)} busy={busy} onInstall={onInstall} onUninstall={onUninstall} onCancelInstall={onCancelInstall} />)}</div></section>
         {packs && packs.length > 0 && <section className="app-catalog-section app-packs-section"><div className="app-section-heading"><div><span className="app-eyebrow">Get set up faster</span><h2>Starter collections</h2></div></div><div className="app-pack-grid">{packs.map((pack) => <article key={pack.name} className="app-pack-card"><div className="app-pack-art"><span>{pack.name.slice(0, 1)}</span><b /><b /><b /></div><div className="app-pack-body"><h3>{pack.name}</h3><p>{pack.desc}</p><div className="app-pack-apps">{pack.apps.map((app) => <span key={app.id} className={installedIds.has(app.id) ? "app-pack-app-installed" : ""}>{app.label}</span>)}</div><button className="app-action-button app-action-primary" disabled={busy !== null} onClick={() => void run(`pack-${pack.name}`, `Installing ${pack.name}…`, () => installPack(pack))}>{busy === `pack-${pack.name}` ? "Installing…" : "Install collection"}</button></div></article>)}</div></section>}
       </>}
-      {installed && <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Your library</span><h2>Installed on this device</h2></div><span className="app-result-count">{installed.length} apps</span></div>{installed.length > 0 ? <div className="app-card-grid">{installed.map((app) => <AppCard key={`${app.scope}:${app.id}`} app={{ id: app.id, name: app.name || app.id, summary: `${app.scope} install · ${app.version || "current"}`, icon_url: app.icon_url }} installed busy={busy} onInstall={onInstall} onUninstall={onUninstall} onCancelInstall={onCancelInstall} />)}</div> : <div className="app-empty-state"><strong>Your app library is empty</strong><span>Search above to install your first Flatpak.</span></div>}</section>}
+      {installed && <section className="app-catalog-section"><div className="app-section-heading"><div><span className="app-eyebrow">Your library</span><h2>Installed on this device</h2></div><span className="app-result-count">{installed.length} apps</span></div>{installedFailedScopes.length > 0 && <div className="app-alternative-note"><strong>Library may be incomplete</strong><span>Couldn't check the {installedFailedScopes.join(" and ")} installation, so some apps may be missing from this list.</span></div>}{installed.length > 0 ? <div className="app-card-grid">{installed.map((app) => <AppCard key={`${app.scope}:${app.id}`} app={{ id: app.id, name: app.name || app.id, summary: `${app.scope} install · ${app.version || "current"}`, icon_url: app.icon_url }} installed busy={busy} onInstall={onInstall} onUninstall={onUninstall} onCancelInstall={onCancelInstall} />)}</div> : <div className="app-empty-state"><strong>Your app library is empty</strong><span>Search above to install your first Flatpak.</span></div>}</section>}
       {appImages && appImages.length > 0 && <section className="app-secondary-section"><div className="app-section-heading"><div><span className="app-eyebrow">Other apps</span><h2>AppImages</h2></div><span className="app-result-count">{appImages.length} available</span></div><div className="app-image-grid">{appImages.map((app) => <article key={app.path} className="app-image-card"><AppIcon name={app.name} id="" /><div className="app-image-card-body"><strong>{app.name}</strong><span>{app.executable ? "Ready to launch" : "Needs permission before launch"}</span><small>{app.path}</small></div>{app.executable ? <button className="app-action-button app-action-secondary" disabled={busy !== null} onClick={() => void run(`launch-${app.path}`, `Launching ${app.name}…`, () => launchAppImage(app.path))}>Launch</button> : <button className="app-action-button app-action-primary" disabled={busy !== null} onClick={() => void run(`chmod-${app.path}`, `Making ${app.name} executable…`, async () => { const result = await makeAppImageExecutable(app.path); setAppImages((current) => current?.map((item) => item.path === app.path ? { ...item, executable: true } : item) ?? current); return result; })}>Make runnable</button>}</article>)}</div></section>}
       <section className="app-secondary-section"><div className="app-section-heading"><div><span className="app-eyebrow">Bring your own</span><h2>Import an AppImage</h2></div></div><p className="app-subsection-copy">Copy an AppImage from Downloads into your Applications folder and make it ready to run.</p><div className="app-import-row"><input value={appImagePath} onChange={(event) => setAppImagePath(event.target.value)} placeholder="/home/you/Downloads/app.AppImage" /><button className="app-action-button app-action-primary" disabled={busy !== null || !appImagePath.trim()} onClick={() => void run("import-appimage", "Importing AppImage…", async () => { const result = await importAppImage(appImagePath.trim()); setAppImagePath(""); const fresh = await fetchAppImages(); if (fresh) setAppImages(fresh); return result; })}>Import</button></div></section>
-      <section className="app-secondary-section"><div className="app-section-heading"><div><span className="app-eyebrow">Advanced environments</span><h2>Specialized tools</h2></div></div><KaliCard busy={busy} run={run} /><HostToolsGrid busy={busy} run={run} /><div className="app-special-card app-dev-card"><p className="app-special-title">Developer and mobile environments</p><p className="app-special-copy">Set up optional Kyth development, AI, and Android tooling with native Hub actions.</p><div className="app-special-actions"><RecipeButton recipe="setup-kyth-dev-box" label="Kyth developer box" busy={busy} run={run} /><RecipeButton recipe="ai-dev-status" label="AI development status" busy={busy} run={run} /><RecipeButton recipe="ai-dev-setup" label="Set up AI development" busy={busy} run={run} /><RecipeButton recipe="setup-waydroid" label="Set up Waydroid" busy={busy} run={run} /><RecipeButton recipe="remove-waydroid-confirmed" label="Remove Waydroid" busy={busy} run={run} /></div></div></section>
+      <section className="app-secondary-section"><div className="app-section-heading"><div><span className="app-eyebrow">Advanced environments</span><h2>Specialized tools</h2></div></div><KaliCard busy={busy} run={run} runCancel={runCancel} /><HostToolsGrid busy={busy} run={run} /><div className="app-special-card app-dev-card"><p className="app-special-title">Developer and mobile environments</p><p className="app-special-copy">Set up optional Kyth development, AI, and Android tooling with native Hub actions.</p><div className="app-special-actions"><RecipeButton recipe="setup-kyth-dev-box" label="Kyth developer box" busy={busy} run={run} runCancel={runCancel} /><RecipeButton recipe="ai-dev-status" label="AI development status" busy={busy} run={run} runCancel={runCancel} /><RecipeButton recipe="ai-dev-setup" label="Set up AI development" busy={busy} run={run} runCancel={runCancel} /><RecipeButton recipe="setup-waydroid" label="Set up Waydroid" busy={busy} run={run} runCancel={runCancel} /><RecipeButton recipe="remove-waydroid-confirmed" label="Remove Waydroid" busy={busy} run={run} runCancel={runCancel} /></div></div></section>
     </div> : <SectionFallbackNote loaded={loaded} />}
-    <div className="app-footer-actions"><p className="app-subsection-copy">More KythOS applications</p><div className="app-special-actions"><RecipeButton recipe="install-vscode" label="VS Code" busy={busy} run={run} /><RecipeButton recipe="install-boxbuddy" label="BoxBuddy" busy={busy} run={run} /><RecipeButton recipe="install-jetbrains-toolbox" label="JetBrains Toolbox" busy={busy} run={run} /></div><ActionStatus status={status} /></div>
+    <div className="app-footer-actions"><p className="app-subsection-copy">More KythOS applications</p><div className="app-special-actions"><RecipeButton recipe="install-vscode" label="VS Code" busy={busy} run={run} runCancel={runCancel} /><RecipeButton recipe="install-boxbuddy" label="BoxBuddy" busy={busy} run={run} runCancel={runCancel} /><RecipeButton recipe="install-jetbrains-toolbox" label="JetBrains Toolbox" busy={busy} run={run} runCancel={runCancel} /></div><ActionStatus status={status} /></div>
   </LiveSectionCard>;
 }

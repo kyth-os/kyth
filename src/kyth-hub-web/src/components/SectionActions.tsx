@@ -1,6 +1,7 @@
 import { useState } from "react";
 
 import {
+  cancelAppUpdate,
   cancelDevToolsJob,
   cancelGamingJob,
   cancelGuardianCheck,
@@ -70,7 +71,23 @@ export function useSectionAction(trackedDomain?: JobDomain | readonly JobDomain[
     }
   }
 
-  return { status: resumedNote ?? status, busy, run };
+  /** Cancel-path runner: reports through the same status line but never
+   * claims or clears the busy slot. Cancel is deliberately invoked WHILE
+   * a primary action holds `busy` (that's the state that shows the Cancel
+   * button); routing it through run() overwrote busy — the running card's
+   * spinner and Cancel affordance vanished mid-flight — and its finally
+   * then cleared the primary action's busy early. */
+  async function runCancel(id: string, pendingLabel: string, action: () => Promise<string>) {
+    void id;
+    setStatus(pendingLabel);
+    try {
+      setStatus(await action());
+    } catch (err) {
+      setStatus(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  return { status: resumedNote ?? status, busy, run, runCancel };
 }
 
 export function ActionButton({
@@ -145,6 +162,7 @@ export const CANCEL_FOR_DOMAIN: Record<JobDomain, () => Promise<string>> = {
   update: cancelUpdateJob,
   job: cancelJob,
   install: cancelInstall,
+  "app-update": cancelAppUpdate,
   security: cancelSecurityJob,
   gaming: cancelGamingJob,
   vpn: cancelVpnConnection,
@@ -163,12 +181,14 @@ export function RecipeButton({
   label,
   busy,
   run,
+  runCancel,
   domain = "hub-action",
 }: {
   recipe: string;
   label: string;
   busy: string | null;
   run: (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
+  runCancel?: (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
   domain?: JobDomain;
 }) {
   if (busy === recipe) {
@@ -177,7 +197,7 @@ export function RecipeButton({
         <ProgressRing size={22} />
         <ActionButton
           label="Cancel"
-          onClick={() => run(`cancel-${recipe}`, "Cancelling…", CANCEL_FOR_DOMAIN[domain])}
+          onClick={() => (runCancel ?? run)(`cancel-${recipe}`, "Cancelling…", CANCEL_FOR_DOMAIN[domain])}
         />
       </span>
     );

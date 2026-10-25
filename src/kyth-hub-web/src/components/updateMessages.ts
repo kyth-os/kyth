@@ -55,6 +55,22 @@ export function friendlyActionError(action: string, error: unknown): string {
       : "The system update helper isn't running, so this couldn't finish. Update KythOS and restart, then try again.";
     return action === "stage" ? withDetails(message) : message;
   }
+  // The apps branch runs BEFORE the generic timeout/network branch below:
+  // that branch returns copy without the raw detail, and the Apps card's
+  // next-step text keys on the detail ("Stuck apps", "remain pinned") —
+  // timeout-flavored app failures used to lose it entirely.
+  if (action === "apps") {
+    if (lower.includes("already in progress")) {
+      return withDetails("Another app install, update, or removal is already in progress. Wait for it to finish, then try again.");
+    }
+    if (lower.includes("updates remain") || lower.includes("update remains")) {
+      return `Some app updates are still pending. Details: ${detail}`;
+    }
+    if (lower.includes("could not be verified")) {
+      return `The update command finished, but Hub couldn't verify whether all app updates are complete. Details: ${detail}`;
+    }
+    return `We couldn't update every app. Check your connection, then try again. Details: ${detail}`;
+  }
   if (lower.includes("timed out") || lower.includes("timeout") || lower.includes("network") || lower.includes("unavailable")) {
     if (action === "stage") {
       return withDetails("KythOS couldn't reach the update registry. Check your connection and update status before retrying.");
@@ -72,15 +88,6 @@ export function friendlyActionError(action: string, error: unknown): string {
       return withDetails("Another system update is already in progress. Check its status before retrying.");
     }
     return withDetails("KythOS couldn't confirm that the update is staged. Check update status before retrying.");
-  }
-  if (action === "apps") {
-    if (lower.includes("updates remain") || lower.includes("update remains")) {
-      return `Some app updates are still pending. Details: ${detail}`;
-    }
-    if (lower.includes("could not be verified")) {
-      return `The update command finished, but Hub couldn't verify whether all app updates are complete. Details: ${detail}`;
-    }
-    return `We couldn't update every app. Check your connection, then try again. Details: ${detail}`;
   }
   if (action === "apply") {
     return withDetails("The update is ready, but the Hub couldn't request a restart to apply it.");

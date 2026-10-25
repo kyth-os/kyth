@@ -277,20 +277,47 @@ fn appstream_search_argv(query: &str) -> Option<Vec<String>> {
     ])
 }
 
+/// Why a catalog search cannot run, in user-facing terms. Search failures
+/// must never collapse into an empty result list: the Apps page renders an
+/// empty list as "No apps found", which sends users checking their spelling
+/// when the real problem is a dead remote or a wedged helper.
+fn appstream_search_error(query: &str) -> String {
+    let query = query.trim();
+    if query.len() > 80 {
+        "That search is too long — try fewer words.".to_string()
+    } else if !query
+        .chars()
+        .all(|c| c.is_alphanumeric() || c.is_ascii_punctuation() || c.is_whitespace())
+    {
+        "That search contains characters Flathub search can't use — try different words."
+            .to_string()
+    } else {
+        "Flathub search didn't respond. Check your connection and try again.".to_string()
+    }
+}
+
 /// Query the installed Flathub catalog. This is intentionally bounded and
 /// read-only; Flatpak remains the authority for what is currently available.
-pub fn appstream_search(query: &str) -> Vec<AppStreamApp> {
+/// An empty `Ok` means the search ran and matched nothing; every failure to
+/// run the search at all is an `Err` so callers cannot present it as "no
+/// such app".
+pub fn appstream_search(query: &str) -> Result<Vec<AppStreamApp>, String> {
+    if query.trim().is_empty() {
+        return Ok(Vec::new());
+    }
     let Some(argv) = appstream_search_argv(query) else {
-        return Vec::new();
+        return Err(appstream_search_error(query));
     };
     let argv_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
     let Some(output) = command_output(&argv_refs, Duration::from_secs(10)) else {
-        return Vec::new();
+        return Err(appstream_search_error(query));
     };
     if !output.status.success() {
-        return Vec::new();
+        return Err(appstream_search_error(query));
     }
-    parse_appstream_results(&String::from_utf8_lossy(&output.stdout))
+    Ok(parse_appstream_results(&String::from_utf8_lossy(
+        &output.stdout,
+    )))
 }
 
 /// Project one catalog result into the explicit, user-scoped install argv
@@ -347,34 +374,61 @@ pub fn parse_installed_flatpaks(raw: &str, scope: &str) -> Vec<InstalledFlatpak>
         .collect()
 }
 
-/// Return installed applications only.  This is deliberately read-only; the
-/// Hub uses it to make uninstall choices explicit instead of accepting an
-/// arbitrary application id from the webview.
-pub fn installed_flatpaks() -> Vec<InstalledFlatpak> {
+/// Result of the installed-apps scan. A scope whose `flatpak list` fails or
+/// times out is named in `failed_scopes` instead of silently shrinking the
+/// library — the old behavior made a partial scan indistinguishable from
+/// "those apps were uninstalled" and the page offered to reinstall them.
+#[derive(Debug, Clone, Serialize)]
+pub struct InstalledFlatpaks {
+    pub apps: Vec<InstalledFlatpak>,
+    pub failed_scopes: Vec<String>,
+}
+
+fn scan_installed_scope(scope: &str, scope_arg: &str) -> Option<Vec<InstalledFlatpak>> {
+    let output = command_output(
+        &[
+            "flatpak",
+            "list",
+            scope_arg,
+            "--app",
+            "--columns=application,name,version,branch,arch",
+        ],
+        Duration::from_secs(10),
+    )?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(parse_installed_flatpaks(
+        &String::from_utf8_lossy(&output.stdout),
+        scope,
+    ))
+}
+
+/// Scan installed applications in both scopes, reporting which scopes could
+/// not be read. Deliberately read-only; the Hub uses it to make uninstall
+/// choices explicit instead of accepting an arbitrary application id from
+/// the webview.
+pub fn installed_flatpaks_scan() -> InstalledFlatpaks {
     let mut apps = Vec::new();
+    let mut failed_scopes = Vec::new();
     for (scope, scope_arg) in [("user", "--user"), ("system", "--system")] {
-        let Some(output) = command_output(
-            &[
-                "flatpak",
-                "list",
-                scope_arg,
-                "--app",
-                "--columns=application,name,version,branch,arch",
-            ],
-            Duration::from_secs(10),
-        ) else {
-            continue;
-        };
-        if !output.status.success() {
-            continue;
+        match scan_installed_scope(scope, scope_arg) {
+            Some(found) => apps.extend(found),
+            None => failed_scopes.push(scope.to_string()),
         }
-        apps.extend(parse_installed_flatpaks(
-            &String::from_utf8_lossy(&output.stdout),
-            scope,
-        ));
     }
     apps.sort_by_key(|app| app.name.to_lowercase());
-    apps
+    InstalledFlatpaks {
+        apps,
+        failed_scopes,
+    }
+}
+
+/// Return installed applications only (partial results when a scope cannot
+/// be read — callers that present the list to a user should use
+/// `installed_flatpaks_scan` so the gap is visible).
+pub fn installed_flatpaks() -> Vec<InstalledFlatpak> {
+    installed_flatpaks_scan().apps
 }
 
 /// Installed flags for several app ids from ONE scan. `is_flatpak_installed`
@@ -394,27 +448,39 @@ pub fn is_flatpak_installed(app_id: &str) -> bool {
     installed_flatpaks().iter().any(|app| app.id == app_id)
 }
 
+/// The directories AppImage actions may touch: exactly the ones
+/// `appimages()` scans, so the webview cannot chmod/copy arbitrary files.
+fn appimage_allowed_dirs() -> Vec<PathBuf> {
+    let home = std::env::var("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("/root"));
+    vec![
+        home.join("Applications"),
+        home.join(".local/bin"),
+        home.join("Downloads"),
+    ]
+}
+
+/// Pure gate for AppImage paths: a `.AppImage` file (any case) inside one
+/// of the allowed directories. Kept separate from the filesystem calls so
+/// the boundary is unit-testable.
+fn appimage_path_allowed(canonical: &std::path::Path, allowed: &[PathBuf]) -> bool {
+    canonical
+        .extension()
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("appimage"))
+        && allowed.iter().any(|dir| canonical.starts_with(dir))
+}
+
 /// Make a discovered AppImage runnable.  Restrict the path to the three
 /// directories that appimages() scans so the webview cannot chmod an
 /// arbitrary user file.
 pub fn make_appimage_executable(path: &str) -> Result<String, String> {
     let requested = PathBuf::from(path);
-    let home = std::env::var("HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| PathBuf::from("/root"));
-    let allowed = [
-        home.join("Applications"),
-        home.join(".local/bin"),
-        home.join("Downloads"),
-    ];
+    let allowed = appimage_allowed_dirs();
     let canonical = requested
         .canonicalize()
         .map_err(|_| "AppImage does not exist".to_string())?;
-    if !canonical
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("appimage"))
-        || !allowed.iter().any(|dir| canonical.starts_with(dir))
-    {
+    if !appimage_path_allowed(&canonical, &allowed) {
         return Err("AppImage must be inside Applications, .local/bin, or Downloads".to_string());
     }
     let metadata =
@@ -433,16 +499,8 @@ pub fn import_appimage(path: &str) -> Result<String, String> {
     let home = std::env::var("HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| PathBuf::from("/root"));
-    let allowed = [
-        home.join("Applications"),
-        home.join(".local/bin"),
-        home.join("Downloads"),
-    ];
-    if !source
-        .extension()
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("appimage"))
-        || !allowed.iter().any(|dir| source.starts_with(dir))
-    {
+    let allowed = appimage_allowed_dirs();
+    if !appimage_path_allowed(&source, &allowed) {
         return Err("Choose an AppImage from Applications, .local/bin, or Downloads".to_string());
     }
     let target_dir = home.join("Applications");
@@ -642,6 +700,80 @@ mod tests {
         assert_eq!(apps[0].scope, "user");
         assert_eq!(apps[0].version, "1.0");
         assert!(apps[0].icon_url.ends_with("/org.example.App.png"));
+    }
+
+    #[test]
+    fn appstream_search_distinguishes_no_query_from_a_failed_search() {
+        // An empty query is a legitimate "nothing to search for" — not an
+        // error, and it must not spawn flatpak at all.
+        assert!(appstream_search("   ").unwrap().is_empty());
+        // Over-long and unusable queries are errors with guidance, never a
+        // silent empty list the page would render as "No apps found".
+        assert!(appstream_search(&"x".repeat(81))
+            .unwrap_err()
+            .contains("too long"));
+        assert!(appstream_search("app 🚀")
+            .unwrap_err()
+            .contains("can't use"));
+    }
+
+    #[test]
+    fn appimage_gate_requires_the_extension_inside_an_allowed_dir() {
+        let allowed = vec![
+            PathBuf::from("/home/u/Applications"),
+            PathBuf::from("/home/u/.local/bin"),
+            PathBuf::from("/home/u/Downloads"),
+        ];
+        assert!(appimage_path_allowed(
+            std::path::Path::new("/home/u/Downloads/tool.AppImage"),
+            &allowed
+        ));
+        assert!(appimage_path_allowed(
+            std::path::Path::new("/home/u/Applications/tool.appimage"),
+            &allowed
+        ));
+        // Wrong extension, outside the allowed dirs, and a sibling-prefix
+        // directory that merely starts with the same text all stay out.
+        assert!(!appimage_path_allowed(
+            std::path::Path::new("/home/u/Downloads/tool.run"),
+            &allowed
+        ));
+        assert!(!appimage_path_allowed(
+            std::path::Path::new("/home/u/Documents/tool.AppImage"),
+            &allowed
+        ));
+        assert!(!appimage_path_allowed(
+            std::path::Path::new("/home/u/Downloads2/tool.AppImage"),
+            &allowed
+        ));
+    }
+
+    #[test]
+    fn curated_catalog_ids_are_installable_flatpak_ids() {
+        // One-click installs feed these ids straight to flatpak; a typo'd
+        // id would fail every install of that app with no other signal.
+        for pack in starter_packs() {
+            assert!(
+                !pack.apps.is_empty(),
+                "pack {} must not be empty",
+                pack.name
+            );
+            for app in &pack.apps {
+                assert!(
+                    valid_flatpak_id(&app.id),
+                    "pack {} id {}",
+                    pack.name,
+                    app.id
+                );
+            }
+        }
+        for app in familiar_apps() {
+            assert!(
+                app.flatpak_id.is_empty() || valid_flatpak_id(&app.flatpak_id),
+                "familiar id {}",
+                app.flatpak_id
+            );
+        }
     }
 
     #[test]

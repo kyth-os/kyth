@@ -18,7 +18,10 @@ use kyth_shared::system::security_container::{
     self, KaliTier, DEFAULT_KALI_BOX, DEFAULT_KALI_IMAGE,
 };
 
-use super::job::{failure_detail, spawn_argv_job, start_job};
+use super::job::{
+    ensure_flathub_user_remote, failure_detail, spawn_argv_job, spawn_task_job, start_job,
+    take_flatpak_slot, update_job,
+};
 
 #[derive(Serialize)]
 pub(crate) struct SecurityActionLaunch {
@@ -211,58 +214,54 @@ fn validated_sec_tool(
 #[tauri::command(rename_all = "snake_case")]
 pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityActionLaunch, String> {
     let tool = validated_sec_tool(&flatpak_id)?;
+    // Shared flatpak single-flight, claimed before the job exists.
+    let slot = take_flatpak_slot()?;
     let name = tool.name.to_string();
     let launch_detail = format!("Installing {name}…");
     // No shell: the flatpak id is catalog-validated, but argv form removes
     // even the theoretical injection surface that `bash -c` with an
-    // interpolated id had. The remote-add runs synchronously first (fast,
-    // idempotent with --if-not-exists); the install itself stays a tracked
-    // job so the UI can follow and cancel it.
-    let remote_add = kyth_shared::system::process::run_bounded(
-        &[
-            "flatpak".to_string(),
-            "remote-add".to_string(),
-            "--user".to_string(),
-            "--if-not-exists".to_string(),
-            "flathub".to_string(),
-            "https://dl.flathub.org/repo/flathub.flatpakrepo".to_string(),
-        ],
-        std::time::Duration::from_secs(60),
-    )
-    .map_err(|error| format!("Could not ensure the Flathub remote: {error}"))?;
-    if !remote_add.status.success() {
-        return Err(format!(
-            "Could not ensure the Flathub remote: {}",
-            String::from_utf8_lossy(&remote_add.stderr).trim()
-        ));
-    }
-    let argv = vec![
-        "flatpak".to_string(),
-        "install".to_string(),
-        "--user".to_string(),
-        "-y".to_string(),
-        "flathub".to_string(),
-        flatpak_id,
-    ];
-    let job = start_job("sec-install", &format!("Installing {name}…"))?;
-    spawn_argv_job(
-        job.clone(),
-        argv,
-        timeout_for(JobTimeoutClass::ToolInstall),
-        move |result| match result {
+    // interpolated id had. The Flathub remote-add runs INSIDE the tracked
+    // job now: it used to run synchronously on this command thread, so a
+    // stalled remote-add froze the whole Hub window for up to 60 s.
+    let job = start_job("sec-install", &launch_detail)?;
+    let worker_name = name.clone();
+    spawn_task_job(job.clone(), move |worker_job, cancel| {
+        // Held until the task returns so the slot covers the whole job.
+        let _slot = slot;
+        update_job(&worker_job, "Setting up Flathub…");
+        if let Err(error) = ensure_flathub_user_remote(&cancel) {
+            return (
+                "failed".into(),
+                format!("Could not set up Flathub: {error}"),
+            );
+        }
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return ("cancelled".into(), "Cancelled.".into());
+        }
+        update_job(&worker_job, &format!("Installing {worker_name}…"));
+        let mut command = Command::new("flatpak");
+        command.args(["install", "--user", "-y", "flathub", "--", &flatpak_id]);
+        match kyth_shared::system::process::run_bounded_command_cancel(
+            command,
+            timeout_for(JobTimeoutClass::ToolInstall),
+            &cancel,
+        ) {
             Ok(output) if output.status.success() => {
-                ("complete".to_string(), format!("{name} installed."))
+                ("complete".into(), format!("{worker_name} installed."))
             }
-            Ok(output) => (
-                "failed".to_string(),
-                failure_detail("Installation", &output),
-            ),
-            Err(err) => (
-                "failed".to_string(),
-                format!("Could not start installation: {err}"),
-            ),
-        },
-    );
+            Ok(output) => ("failed".into(), failure_detail("Installation", &output)),
+            Err(err) => {
+                let detail = match err.kind() {
+                    std::io::ErrorKind::TimedOut => {
+                        "Installation took too long and was stopped.".to_string()
+                    }
+                    std::io::ErrorKind::Interrupted => "Installation was cancelled.".to_string(),
+                    _ => format!("Could not start installation: {err}"),
+                };
+                ("failed".into(), detail)
+            }
+        }
+    });
     Ok(SecurityActionLaunch {
         job,
         state: "running".into(),
@@ -273,6 +272,7 @@ pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityAction
 #[tauri::command(rename_all = "snake_case")]
 pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActionLaunch, String> {
     let tool = validated_sec_tool(&flatpak_id)?;
+    let slot = take_flatpak_slot()?;
     let name = tool.name.to_string();
     let launch_detail = format!("Uninstalling {name}…");
     // Pin the user scope: an unscoped uninstall can target (or prompt for)
@@ -289,15 +289,20 @@ pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActi
         job.clone(),
         argv,
         timeout_for(JobTimeoutClass::QuickRemove),
-        move |result| match result {
-            Ok(output) if output.status.success() => {
-                ("complete".to_string(), format!("{name} uninstalled."))
+        // The slot guard rides in the completion closure, which
+        // spawn_argv_job owns inside the worker for the whole run.
+        move |result| {
+            let _slot = slot;
+            match result {
+                Ok(output) if output.status.success() => {
+                    ("complete".to_string(), format!("{name} uninstalled."))
+                }
+                Ok(output) => ("failed".to_string(), failure_detail("Uninstall", &output)),
+                Err(err) => (
+                    "failed".to_string(),
+                    format!("Could not start uninstall: {err}"),
+                ),
             }
-            Ok(output) => ("failed".to_string(), failure_detail("Uninstall", &output)),
-            Err(err) => (
-                "failed".to_string(),
-                format!("Could not start uninstall: {err}"),
-            ),
         },
     );
     Ok(SecurityActionLaunch {

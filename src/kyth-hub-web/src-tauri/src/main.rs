@@ -1370,14 +1370,16 @@ fn familiar_apps() -> Vec<kyth_shared::system::software_catalog::FamiliarApp> {
 #[tauri::command]
 async fn appstream_search(
     query: String,
-) -> Vec<kyth_shared::system::software_catalog::AppStreamApp> {
+) -> Result<Vec<kyth_shared::system::software_catalog::AppStreamApp>, String> {
     // P6: `flatpak search` is bounded at 10 s; keep that wait off the async
-    // runtime workers.
+    // runtime workers. Failures stay failures across this boundary: the old
+    // `.unwrap_or_default()` turned a dead remote or a timed-out search
+    // into an empty result list, which the page renders as "No apps found".
     tauri::async_runtime::spawn_blocking(move || {
         kyth_shared::system::software_catalog::appstream_search(&query)
     })
     .await
-    .unwrap_or_default()
+    .map_err(|err| format!("Flathub search didn't respond: {err}"))?
 }
 
 #[tauri::command]
@@ -1386,15 +1388,28 @@ fn appimage_list() -> Vec<kyth_shared::system::software_catalog::AppImageEntry> 
 }
 
 #[tauri::command]
-async fn installed_flatpaks() -> Vec<kyth_shared::system::software_catalog::InstalledFlatpak> {
-    tauri::async_runtime::spawn_blocking(kyth_shared::system::software_catalog::installed_flatpaks)
-        .await
-        .unwrap_or_default()
+async fn installed_flatpaks() -> kyth_shared::system::software_catalog::InstalledFlatpaks {
+    // The payload names any scope that could not be read, so a partial
+    // scan is visible instead of silently shrinking the user's library.
+    tauri::async_runtime::spawn_blocking(
+        kyth_shared::system::software_catalog::installed_flatpaks_scan,
+    )
+    .await
+    .unwrap_or_else(
+        |_| kyth_shared::system::software_catalog::InstalledFlatpaks {
+            apps: Vec::new(),
+            failed_scopes: vec!["user".to_string(), "system".to_string()],
+        },
+    )
 }
 
 #[tauri::command(rename_all = "snake_case")]
 fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
+    // Backend single-flight, claimed before the job exists: the frontend's
+    // disabled buttons were the only barrier, and they cannot see other
+    // pages, other windows, or a click that lands before state paints.
+    let slot = commands::job::take_flatpak_slot()?;
     let job = format!(
         "flatpak-uninstall-{}",
         std::time::SystemTime::now()
@@ -1406,6 +1421,8 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     let (job, cancel) = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
+        // Held until the worker returns so the slot covers the whole job.
+        let _slot = slot;
         // Resolve scope inside the worker: the full `flatpak list` scan
         // blocks, so doing it on the command thread hitches the UI, and a
         // scope read up front can go stale before the worker acts on it.
@@ -1425,12 +1442,12 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
             privileged_flatpak_uninstall(&app_id).map(|detail| (true, detail))
         } else {
             // A stalled mirror must surface as a timeout, not a forever
-            // "running" job: bound like every other Hub recipe action.
+            // "running" job: bounded by the flatpak transfer tier.
             let mut command = std::process::Command::new("flatpak");
             command.args(["uninstall", "--user", "-y", "--", &app_id]);
             kyth_shared::system::process::run_bounded_command_cancel(
                 command,
-                timeout_for(JobTimeoutClass::HubAction),
+                timeout_for(JobTimeoutClass::FlatpakTransfer),
                 &cancel,
             )
             .map(|output| {
@@ -1466,8 +1483,14 @@ fn make_appimage_executable(path: String) -> Result<String, String> {
 }
 
 #[tauri::command]
-fn import_appimage(path: String) -> Result<String, String> {
-    kyth_shared::system::software_catalog::import_appimage(&path)
+async fn import_appimage(path: String) -> Result<String, String> {
+    // The import copies the whole AppImage (potentially hundreds of MB);
+    // doing it inline in a sync command froze the Hub window for the copy.
+    tauri::async_runtime::spawn_blocking(move || {
+        kyth_shared::system::software_catalog::import_appimage(&path)
+    })
+    .await
+    .map_err(|err| format!("Could not import AppImage: {err}"))?
 }
 
 #[tauri::command]
@@ -1501,6 +1524,10 @@ pub(crate) struct InstallActionLaunch {
 
 #[tauri::command]
 fn update_flatpaks() -> Result<InstallActionLaunch, String> {
+    // Backend single-flight (see uninstall_flatpak): a second concurrent
+    // `flatpak update` is rejected here even if a caller bypasses the
+    // frontend's busy state.
+    let slot = commands::job::take_flatpak_slot()?;
     let job = format!(
         "flatpak-update-{}",
         std::time::SystemTime::now()
@@ -1512,14 +1539,18 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
     let (job, cancel) = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
+        // Held until the worker returns so the slot covers both phases
+        // and the verification recount.
+        let _slot = slot;
         let mut user_command = std::process::Command::new("flatpak");
         user_command.args(["update", "--user", "-y"]);
         // A stalled mirror must surface as a timeout, not a forever
-        // "running" job; the tier matches the privileged daemon's own
-        // flatpak bound (kyth-shared-rs/src/privileged.rs OPERATION_TIMEOUT).
+        // "running" job. The user phase runs as the user (not through the
+        // privileged socket), so the flatpak transfer tier applies; the
+        // system phase keeps the daemon's own 900s OPERATION_TIMEOUT.
         let user_result = match kyth_shared::system::process::run_bounded_command_cancel(
             user_command,
-            timeout_for(JobTimeoutClass::HubAction),
+            timeout_for(JobTimeoutClass::FlatpakTransfer),
             &cancel,
         ) {
             Ok(output) if output.status.success() => Ok(()),
@@ -1575,6 +1606,8 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
 #[tauri::command(rename_all = "snake_case")]
 fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     commands::privilege::validate_flatpak_id(&app_id)?;
+    // Backend single-flight (see uninstall_flatpak).
+    let slot = commands::job::take_flatpak_slot()?;
     let job = format!(
         "flatpak-{}",
         std::time::SystemTime::now()
@@ -1586,13 +1619,30 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
     let (job, cancel) = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
+        // Held until the worker returns so the slot covers the whole job.
+        let _slot = slot;
+        // Ensure the per-user Flathub remote exists first (idempotent):
+        // the security/gaming install paths already did this, so a missing
+        // remote failed installs from THIS page only. A setup failure is
+        // the job's failure, with the setup step named.
+        if let Err(error) = commands::job::ensure_flathub_user_remote(&cancel) {
+            app_installs().finish(
+                &job_for_thread,
+                "failed",
+                format!("Could not set up Flathub: {error}"),
+            );
+            return;
+        }
+        if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         // Unbounded `.output()` hangs on a stalled mirror with no way to
         // cancel; run bounded and cancellable like the other install paths.
         let mut command = std::process::Command::new("flatpak");
         command.args(["install", "--user", "-y", "flathub", "--", &app_id]);
         let result = kyth_shared::system::process::run_bounded_command_cancel(
             command,
-            timeout_for(JobTimeoutClass::HubAction),
+            timeout_for(JobTimeoutClass::FlatpakTransfer),
             &cancel,
         );
         let (state, detail) = match result {
@@ -1600,6 +1650,13 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
                 ("complete", "Installation complete.".to_string())
             }
             Ok(output) => ("failed", commands::process::bounded_text(&output.stderr)),
+            // A timeout is not "could not start": the install ran and was
+            // stopped at the transfer bound. Name it honestly (the update
+            // path already special-cased this; install did not).
+            Err(err) if err.kind() == std::io::ErrorKind::TimedOut => (
+                "failed",
+                "Installing took too long and was stopped.".to_string(),
+            ),
             Err(err) => ("failed", format!("Could not start Flatpak: {err}")),
         };
         app_installs().finish(&job_for_thread, state, detail);

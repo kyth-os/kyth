@@ -42,7 +42,7 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
   const [focusMinutes, setFocusMinutes] = useState(25);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [focusRemaining, setFocusRemaining] = useState(0);
-  const { status, busy, run } = useSectionAction("install");
+  const { status, busy, run, runCancel } = useSectionAction("install");
 
   useEffect(() => {
     let c = false;
@@ -52,7 +52,7 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
           setSummary(s);
           setFonts(f);
           setLoaded(true);
-          setInstalled((apps ?? []).map((app) => app.id));
+          setInstalled((apps?.apps ?? []).map((app) => app.id));
           // Reattach to a focus session already running in the background —
           // otherwise returning to this section always showed "Start focus
           // session" again, even mid-session, with no way to end it here.
@@ -105,7 +105,7 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           {[ ["org.libreoffice.LibreOffice", "LibreOffice"], ["eu.betterbird.Betterbird", "Betterbird"] ].map(([id, name]) => installed.includes(id) ? <span key={id} className="pill pill-ok">{name} installed</span> : <ActionButton key={id} label={busy === `install-${id}` ? `Installing ${name}…` : `Install ${name}`} disabled={busy !== null} onClick={() => run(`install-${id}`, `Installing ${name}…`, () => installWorkApp(id, name))} />)}
           {(busy?.startsWith("install-") ?? false) && (
-            <ActionButton label="Cancel" onClick={() => run("cancel-install", "Cancelling…", cancelInstall)} />
+            <ActionButton label="Cancel" onClick={() => runCancel("cancel-install", "Cancelling…", cancelInstall)} />
           )}
           <RecipeButton recipe="install-ms-fonts" label="Install Office fonts" busy={busy} run={run} />
           <RecipeButton recipe="setup-printer" label="Set up a printer" busy={busy} run={run} />

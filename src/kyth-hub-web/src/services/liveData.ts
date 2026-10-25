@@ -237,7 +237,7 @@ function resolveTerminalJob(state: InstallStatus): string {
  * concurrent jobs in one domain is a misuse bug, not a supported state:
  * the second launch is rejected with an already-running error while the
  * first keeps the slot. */
-export type JobDomain = "guardian" | "privileged" | "hub-action" | "update" | "job" | "install" | "security" | "gaming" | "vpn" | "dev-tools";
+export type JobDomain = "guardian" | "privileged" | "hub-action" | "update" | "job" | "install" | "app-update" | "security" | "gaming" | "vpn" | "dev-tools";
 
 const inFlightJobs = new Map<JobDomain, string>();
 
@@ -269,6 +269,7 @@ const JOB_DOMAINS: readonly JobDomain[] = [
   "update",
   "job",
   "install",
+  "app-update",
   "security",
   "gaming",
   "vpn",
@@ -351,6 +352,11 @@ const DOMAIN_STATUS_COMMAND: Record<JobDomain, string> = {
   update: "update_job_status",
   job: "job_status",
   install: "install_status",
+  // App updates live in the same backend store as installs (install_status
+  // / install_cancel) but track in their own domain: sharing the "install"
+  // slot meant the update card's Cancel killed a pack install (and vice
+  // versa) and an update blocked install tracking entirely.
+  "app-update": "install_status",
   security: "security_job_status",
   gaming: "gaming_job_status",
   vpn: "vpn_status",
@@ -519,6 +525,7 @@ export const cancelHubAction = (): Promise<string> => cancelTracked("hub-action"
 export const cancelUpdateJob = (): Promise<string> => cancelTracked("update", "update_job_cancel");
 export const cancelJob = (): Promise<string> => cancelTracked("job", "cancel_job");
 export const cancelInstall = (): Promise<string> => cancelTracked("install", "install_cancel");
+export const cancelAppUpdate = (): Promise<string> => cancelTracked("app-update", "install_cancel");
 export const cancelSecurityJob = (): Promise<string> => cancelTracked("security", "security_job_cancel");
 export const cancelGamingJob = (): Promise<string> => cancelTracked("gaming", "gaming_job_cancel");
 export async function runGuardianControl(action: string): Promise<string> {
@@ -1338,9 +1345,16 @@ export async function fetchVpnSavedProfile(): Promise<VpnSavedProfile | null> {
 // Updates unified — bootc/flatpak/firmware summary
 export async function fetchPendingUpdatesSummary(): Promise<Record<string,string> | null> {
   if (!inTauriShell()) return null;
-  return sharedRead("pending-updates", 15_000, async () => {
-    try { return await invoke<Record<string,string>>("pending_updates_summary"); } catch { return null; }
-  });
+  // The failure must NOT be cached: the old loader caught errors to null
+  // INSIDE sharedRead, so one failed check was served as the answer for
+  // the whole 15s TTL — and the Apps card renders null as "Up to date".
+  // Let the loader throw (sharedRead caches nothing on error) and convert
+  // to null only for the caller.
+  try {
+    return await sharedRead("pending-updates", 15_000, () =>
+      invoke<Record<string, string>>("pending_updates_summary"),
+    );
+  } catch { return null; }
 }
 
 // PipeWire quantum presets (N32)
@@ -1662,9 +1676,14 @@ export async function fetchFamiliarApps(): Promise<FamiliarApp[] | null> {
 export interface AppStreamApp { id: string; name: string; summary: string; icon_url: string }
 export interface AppImageEntry { name: string; path: string; executable: boolean }
 export interface InstallStatus { id: string; state: "running" | "complete" | "failed" | "unknown" | "cancelled"; detail: string }
-export async function searchAppStream(query: string): Promise<AppStreamApp[] | null> {
-  if (!inTauriShell()) return null;
-  try { return await invoke<AppStreamApp[]>("appstream_search", { query }); } catch { return null; }
+/** Search the Flathub catalog. Throws with the backend's message when the
+ * search itself cannot run (dead remote, timed-out helper, unusable
+ * query): callers must be able to show "search didn't run" instead of the
+ * "No apps found" an empty (or null) result produces. Resolves to the
+ * matches — possibly empty — when the search ran. */
+export async function searchAppStream(query: string): Promise<AppStreamApp[]> {
+  if (!inTauriShell()) throw new Error("Search is available from the installed Kyth Hub.");
+  return await invoke<AppStreamApp[]>("appstream_search", { query });
 }
 export async function fetchAppImages(): Promise<AppImageEntry[] | null> {
   if (!inTauriShell()) return null;
@@ -1673,11 +1692,20 @@ export async function fetchAppImages(): Promise<AppImageEntry[] | null> {
 
 export interface InstalledFlatpak { id: string; name: string; version: string; branch: string; arch: string; scope: "user" | "system"; icon_url: string }
 interface InstallActionLaunch { job: string; state: "running"; detail: string; }
-export async function fetchInstalledFlatpaks(): Promise<InstalledFlatpak[] | null> {
+/** Installed apps plus the scopes that could not be read. A failed scope
+ * is reported, never silently folded into a shorter list — the old shape
+ * made a partial scan look like "those apps were uninstalled". A null
+ * result means the read itself failed (and is not cached). */
+export interface InstalledFlatpaksResult { apps: InstalledFlatpak[]; failedScopes: string[] }
+interface InstalledFlatpaksRaw { apps: InstalledFlatpak[]; failed_scopes: string[] }
+export async function fetchInstalledFlatpaks(): Promise<InstalledFlatpaksResult | null> {
   if (!inTauriShell()) return null;
-  return sharedRead("installed-flatpaks", 15_000, async () => {
-    try { return await invoke<InstalledFlatpak[]>("installed_flatpaks"); } catch { return null; }
-  });
+  try {
+    return await sharedRead("installed-flatpaks", 15_000, async () => {
+      const raw = await invoke<InstalledFlatpaksRaw>("installed_flatpaks");
+      return { apps: raw.apps ?? [], failedScopes: raw.failed_scopes ?? [] };
+    });
+  } catch { return null; }
 }
 export async function makeAppImageExecutable(path: string): Promise<string> {
   if (!inTauriShell()) throw new Error("AppImage actions are available from the installed Kyth Hub.");
@@ -1687,6 +1715,7 @@ export async function importAppImage(path: string): Promise<string> {
   if (!inTauriShell()) throw new Error("AppImage actions are available from the installed Kyth Hub.");
   return await invoke<string>("import_appimage", { path });
 }
+const UNINSTALL_TIMEOUT_MESSAGE = "Uninstall is still running; it stays tracked, so Cancel can still reach it.";
 export async function uninstallFlatpak(id: string): Promise<string> {
   if (!inTauriShell()) throw new Error("App installs are available from the installed Kyth Hub.");
   if (!confirmUserAction(`Uninstall ${id}? This removes the application from this system.`)) return "Cancelled.";
@@ -1694,23 +1723,36 @@ export async function uninstallFlatpak(id: string): Promise<string> {
   if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Uninstall did not start.");
   const job = launch.job;
   trackJob("install", job);
+  let settled = false;
   try {
+    // Same wait contract as installs: the backend bound is the flatpak
+    // transfer tier, so a ~150s UI give-up (the old limit) abandoned slow
+    // removals mid-flight and untracked them — Cancel/reattach lost while
+    // the backend kept working for up to its own bound.
     const state = await pollJobUntilSettled("install", job, {
       statusCommand: "install_status",
-      limit: 120,
-      lostContactMessage: "Lost contact with the uninstall; refresh Flatpak in a moment.",
-      timeoutMessage: "Uninstall is still running; refresh Flatpak in a moment.",
+      limit: 1800,
+      lostContactMessage: "Lost contact with the uninstall; refresh Apps in a moment.",
+      timeoutMessage: UNINSTALL_TIMEOUT_MESSAGE,
     });
-    if (state.state === "complete") return state.detail;
-    throw new Error(state.detail);
+    settled = true;
+    // resolveTerminalJob: complete → detail, cancelled → the neutral
+    // CANCELLED_RESULT (cancelling an uninstall used to read "Failed:").
+    return resolveTerminalJob(state);
+  } catch (error) {
+    // UI wait expired but the backend job still runs: leave it tracked.
+    if (error instanceof Error && error.message === UNINSTALL_TIMEOUT_MESSAGE) throw error;
+    settled = true;
+    throw error;
   } finally {
-    untrackJob("install", job);
+    if (settled) untrackJob("install", job);
   }
 }
 export async function launchAppImage(path: string): Promise<string> {
   if (!inTauriShell()) throw new Error("AppImage actions are available from the installed Kyth Hub.");
   return await invoke<string>("launch_appimage", { path });
 }
+const UPDATE_TIMEOUT_MESSAGE = "App updates are still running; they stay tracked, so Cancel can still reach them.";
 export async function updateFlatpaks(): Promise<string> {
   if (!inTauriShell()) throw new Error("App installs are available from the installed Kyth Hub.");
   const launch = await invoke<InstallActionLaunch>("update_flatpaks");
@@ -1718,22 +1760,30 @@ export async function updateFlatpaks(): Promise<string> {
   // Both Flatpak scopes are bounded server-side, but metadata refresh and
   // large app/runtime updates can still take several minutes. Keep this poll
   // limit above the helper timeout rather than turning a slow update into a
-  // false failure.
-  trackJob("install", launch.job);
+  // false failure. Tracked in the app-update domain, not install: the two
+  // actions have separate Cancel buttons and must not evict each other.
+  trackJob("app-update", launch.job);
+  let settled = false;
   try {
-    const state = await pollJobUntilSettled("install", launch.job, {
+    const state = await pollJobUntilSettled("app-update", launch.job, {
       statusCommand: "install_status",
       limit: 7200,
       lostContactMessage: "Lost contact with the app update; refresh status in a moment.",
-      timeoutMessage: "App updates are still running. Refresh status in a moment.",
+      timeoutMessage: UPDATE_TIMEOUT_MESSAGE,
     });
+    settled = true;
     if (state.state === "complete") {
       invalidateSharedReads("updates-snapshot", "installed-flatpaks", "pending-updates", "probe:flatpak-apps", "probe:flatpak-updates");
-      return state.detail;
     }
-    throw new Error(state.detail);
+    // Cancelled resolves to the neutral CANCELLED_RESULT like installs,
+    // not a thrown "Failed:".
+    return resolveTerminalJob(state);
+  } catch (error) {
+    if (error instanceof Error && error.message === UPDATE_TIMEOUT_MESSAGE) throw error;
+    settled = true;
+    throw error;
   } finally {
-    untrackJob("install", launch.job);
+    if (settled) untrackJob("app-update", launch.job);
   }
 }
 export async function installFlatpak(appId: string): Promise<string> {
@@ -1754,12 +1804,15 @@ export async function waitInstallJob(job: string, limit = 120): Promise<string> 
   trackJob("install", job);
   let settled = false;
   try {
-    // Null probes are tolerated to the limit here (same as before): the UI
-    // wait may expire while the backend job still runs.
+    // Null probes are tolerated generously (the job store is in-process,
+    // so a null probe means a transient invoke failure, not a dead
+    // backend) — but not forever: the old unbounded tolerance never
+    // raised lost-contact at all. 90 consecutive failures at the 2s
+    // backoff cadence is ~3 minutes of silence before giving up.
     const state = await pollJobUntilSettled("install", job, {
       statusCommand: "install_status",
       limit,
-      maxNulls: Number.POSITIVE_INFINITY,
+      maxNulls: 90,
       lostContactMessage: "Lost contact with the install; refresh Apps in a moment.",
       timeoutMessage: "Installation is still running; refresh Apps in a moment.",
     });

@@ -402,7 +402,7 @@ class HubWebUpdateActionTests(unittest.TestCase):
         # availability query has cleared; keep the page from claiming success
         # while its authoritative pending count still reports updates.
         update = MAIN_RS.split("fn update_flatpaks()", 1)[1].split(
-            "#[tauri::command]\nfn install_flatpak", 1
+            '#[tauri::command(rename_all = "snake_case")]\nfn install_flatpak', 1
         )[0]
         self.assertIn("flatpak_updates_count(false)", update)
         self.assertIn("flatpak_update_completion", update)
@@ -441,6 +441,75 @@ class HubWebUpdateActionTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         self.assertIn("if errors.is_empty()", source)
         self.assertIn("Flatpak update status could not be checked for every installation.", source)
+
+    def test_flatpak_mutations_take_the_shared_backend_slot(self):
+        # The Apps-page review found update/install/uninstall each spawned
+        # `flatpak` unconditionally; the frontend's disabled buttons were
+        # the only barrier and a second concurrent update really happened.
+        # Every flatpak-mutating command must claim the one shared slot
+        # (commands/job.rs) before its job exists.
+        job_rs = (TAURI_SRC / "commands" / "job.rs").read_text(encoding="utf-8")
+        self.assertIn("fn take_flatpak_slot()", job_rs)
+        for command in ("fn uninstall_flatpak", "fn update_flatpaks", "fn install_flatpak"):
+            body = MAIN_RS.split(command, 1)[1].split("fn ", 1)[0]
+            self.assertIn("take_flatpak_slot()", body, command)
+        for command in (
+            "fn sec_host_tool_install",
+            "fn sec_host_tool_uninstall",
+            "fn gaming_tool_install",
+            "fn gaming_tool_uninstall",
+        ):
+            body = MAIN_RS.split(command, 1)[1].split("pub(crate) fn ", 1)[0]
+            self.assertIn("take_flatpak_slot()", body, command)
+
+    def test_search_and_pending_failures_are_not_rendered_as_empty(self):
+        # Search: the Tauri command returns Result and the page renders a
+        # distinct "couldn't run" state instead of "No apps found".
+        search = MAIN_RS.split("async fn appstream_search", 1)[1].split("#[tauri::command]", 1)[0]
+        self.assertIn("Result<Vec<", search)
+        app_store = (HUB_WEB / "components" / "AppStoreSection.tsx").read_text(encoding="utf-8")
+        self.assertIn("Search couldn't run", app_store)
+        self.assertIn("catalogError", app_store)
+        # Pending updates: a failed read is not cached as the answer, and
+        # the card has an explicit couldn't-check state.
+        live_data = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
+        pending = live_data.split("fetchPendingUpdatesSummary", 1)[1].split("\n}", 1)[0]
+        self.assertIn('return await sharedRead("pending-updates"', pending)
+        self.assertIn("Couldn't check", app_store)
+        self.assertIn("checkFailed", app_store)
+
+    def test_app_updates_track_and_cancel_in_their_own_domain(self):
+        # Updates used to share the install slot, so the card's Cancel
+        # killed whatever install happened to be running instead.
+        live_data = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
+        self.assertIn('trackJob("app-update", launch.job)', live_data)
+        self.assertIn("cancelAppUpdate", live_data)
+        app_store = (HUB_WEB / "components" / "AppStoreSection.tsx").read_text(encoding="utf-8")
+        cancel = app_store.split('runCancel("cancel-apps-update"', 1)[1].split(")", 1)[0]
+        self.assertIn("cancelAppUpdate", cancel)
+
+    def test_flatpak_jobs_use_the_transfer_timeout_and_async_import(self):
+        # 900s HubAction killed progressing multi-GB installs mid-pull;
+        # the three Apps commands use the flatpak transfer tier, and the
+        # AppImage import copy no longer runs on the command thread.
+        for command in ("fn uninstall_flatpak", "fn update_flatpaks", "fn install_flatpak"):
+            body = MAIN_RS.split(command, 1)[1].split("\nfn ", 1)[0]
+            self.assertIn("JobTimeoutClass::FlatpakTransfer", body, command)
+        self.assertIn("async fn import_appimage", MAIN_RS)
+
+    def test_security_install_ensures_remote_inside_the_job(self):
+        # The remote-add used to run synchronously on the command thread
+        # (up to 60s of frozen window); it belongs inside the tracked job,
+        # shared with gaming via commands/job.rs.
+        security = MAIN_RS.split("fn sec_host_tool_install", 1)[1].split("fn sec_host_tool_uninstall", 1)[0]
+        self.assertIn("ensure_flathub_user_remote", security)
+        self.assertIn("spawn_task_job", security)
+        self.assertNotIn("Could not ensure the Flathub remote", security)
+
+    def test_privileged_daemon_drains_child_output_past_its_cap(self):
+        source = (ROOT / "src" / "kyth-shared-rs" / "src" / "privileged.rs").read_text(encoding="utf-8")
+        self.assertIn("drain_capped", source)
+        self.assertNotIn(".take(64 * 1024)", source)
 
     def test_updates_page_is_system_only_with_one_status_card(self):
         # The Updates page was refactored to own only the system (bootc)

@@ -286,8 +286,63 @@ fn display_detail(stdout: &[u8], stderr: &[u8], status: std::process::ExitStatus
     }
 }
 
+/// Serializes flatpak mutations across client threads. The daemon spawns
+/// one thread per connection with no other operation mutex, so a
+/// system-scope app update and a system-scope uninstall from two Hub
+/// actions could run two `flatpak` processes against the same installation
+/// at once; flatpak's own transaction lock then fails one of them
+/// spuriously. Non-flatpak operations are unaffected.
+static FLATPAK_OP_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn is_flatpak_mutation(argv: &[String]) -> bool {
+    argv.first().map(String::as_str) == Some("/usr/bin/flatpak")
+        && argv
+            .get(1)
+            .map(String::as_str)
+            .is_some_and(|verb| matches!(verb, "update" | "uninstall" | "install"))
+}
+
+/// Read a child pipe to EOF, keeping only the first `cap` bytes (plus a
+/// truncation marker). The pipe must be drained *past* the cap: the old
+/// `take(cap)` readers stopped at the cap and dropped the read end, so a
+/// verbose child (a system update touching many refs) blocked on a full
+/// pipe or died on SIGPIPE and the operation burned its whole timeout.
+fn drain_capped<R: Read>(reader: R, cap: usize) -> Vec<u8> {
+    let mut kept = Vec::with_capacity(cap.min(64 * 1024));
+    let mut reader = BufReader::new(reader);
+    let mut chunk = [0u8; 8192];
+    let mut truncated = false;
+    loop {
+        match reader.read(&mut chunk) {
+            Ok(0) => break,
+            Ok(count) => {
+                let room = cap.saturating_sub(kept.len());
+                let take = count.min(room);
+                kept.extend_from_slice(&chunk[..take]);
+                truncated |= take < count;
+            }
+            Err(_) => break,
+        }
+    }
+    if truncated {
+        kept.extend_from_slice(b"\n...[truncated]");
+    }
+    kept
+}
+
 fn run_operation(spec: ExecSpec) -> Result<String, String> {
     use std::os::unix::process::CommandExt;
+    // Held for the whole operation when this is a flatpak mutation; the
+    // guard is intentionally unused-named so it drops at function exit.
+    let _flatpak_guard = if is_flatpak_mutation(&spec.argv) {
+        Some(
+            FLATPAK_OP_LOCK
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
+    } else {
+        None
+    };
     let mut command = Command::new(&spec.argv[0]);
     command
         .args(&spec.argv[1..])
@@ -333,20 +388,8 @@ fn run_operation(spec: ExecSpec) -> Result<String, String> {
         .stderr
         .take()
         .ok_or_else(|| "privileged operation has no piped stderr".to_string())?;
-    let stdout_thread = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = BufReader::new(stdout)
-            .take(64 * 1024)
-            .read_to_end(&mut bytes);
-        bytes
-    });
-    let stderr_thread = thread::spawn(move || {
-        let mut bytes = Vec::new();
-        let _ = BufReader::new(stderr)
-            .take(64 * 1024)
-            .read_to_end(&mut bytes);
-        bytes
-    });
+    let stdout_thread = thread::spawn(move || drain_capped(stdout, 64 * 1024));
+    let stderr_thread = thread::spawn(move || drain_capped(stderr, 64 * 1024));
     let deadline = Instant::now() + OPERATION_TIMEOUT;
     let status = loop {
         match child
@@ -625,8 +668,46 @@ mod tests {
 
     use super::display_detail;
     use super::{
-        parse_wheel_gid, redact_request_detail, run_operation, validate_request, ExecSpec,
+        drain_capped, is_flatpak_mutation, parse_wheel_gid, redact_request_detail, run_operation,
+        validate_request, ExecSpec,
     };
+
+    #[test]
+    fn drain_capped_keeps_draining_past_the_cap() {
+        // 200 KiB through a 64 KiB cap: the reader must consume everything
+        // (a stopped reader deadlocks a verbose child), keep the prefix,
+        // and mark the truncation.
+        let source = vec![b'x'; 200 * 1024];
+        let kept = drain_capped(std::io::Cursor::new(source), 64 * 1024);
+        assert!(kept.starts_with(&[b'x'; 64 * 1024][..]));
+        assert!(kept.ends_with(b"\n...[truncated]"));
+        // Under the cap the bytes pass through untouched.
+        let small = drain_capped(std::io::Cursor::new(b"hello".to_vec()), 64 * 1024);
+        assert_eq!(small, b"hello");
+    }
+
+    #[test]
+    fn flatpak_mutation_detection_covers_only_flatpak_writes() {
+        let argv = |parts: &[&str]| parts.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(is_flatpak_mutation(&argv(&[
+            "/usr/bin/flatpak",
+            "update",
+            "--system",
+            "-y"
+        ])));
+        assert!(is_flatpak_mutation(&argv(&[
+            "/usr/bin/flatpak",
+            "uninstall",
+            "--system",
+            "-y",
+            "org.example.App"
+        ])));
+        assert!(!is_flatpak_mutation(&argv(&[
+            "/usr/bin/fwupdmgr",
+            "update"
+        ])));
+        assert!(!is_flatpak_mutation(&argv(&["/usr/bin/flatpak", "list"])));
+    }
 
     fn exit_status(success: bool) -> std::process::ExitStatus {
         std::process::Command::new(if success { "true" } else { "false" })

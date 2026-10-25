@@ -6,7 +6,7 @@
 //! `kyth_shared::system::gaming_tools`, `gaming_perf`, and `gaming_per_game`.
 
 use std::process::Command;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -16,7 +16,10 @@ use kyth_shared::system::gaming_perf::{self, ProfileGoal};
 use kyth_shared::system::gaming_tools::{self, GAMING_TOOLS};
 use kyth_shared::system::jobs::{timeout_for, JobTimeoutClass};
 
-use super::job::{failure_detail, spawn_argv_job, spawn_task_job, start_job, update_job};
+use super::job::{
+    ensure_flathub_user_remote, failure_detail, spawn_argv_job, spawn_task_job, start_job,
+    take_flatpak_slot, update_job,
+};
 
 #[derive(Serialize)]
 pub(crate) struct GamingToolResponse {
@@ -65,42 +68,19 @@ fn validated_gaming_tool(flatpak_id: &str) -> Result<&'static gaming_tools::Gami
     gaming_tools::find_gaming_tool(flatpak_id).ok_or_else(|| "unknown gaming tool".to_string())
 }
 
-/// Ensure the per-user Flathub remote exists. This runs inside the tracked,
-/// cancellable install workflow, before its separate `flatpak install` argv.
-fn ensure_flathub_user_remote(cancel: &AtomicBool) -> Result<(), String> {
-    let mut command = Command::new("flatpak");
-    command.args([
-        "remote-add",
-        "--user",
-        "--if-not-exists",
-        "flathub",
-        "https://dl.flathub.org/repo/flathub.flatpakrepo",
-    ]);
-    let output = kyth_shared::system::process::run_bounded_command_cancel(
-        command,
-        Duration::from_secs(60),
-        cancel,
-    )
-    .map_err(|error| match error.kind() {
-        std::io::ErrorKind::TimedOut => "Flathub setup took too long and was stopped.".to_string(),
-        std::io::ErrorKind::Interrupted => "Flathub setup was cancelled.".to_string(),
-        _ => format!("Could not start Flathub setup: {error}"),
-    })?;
-    if output.status.success() {
-        Ok(())
-    } else {
-        Err(failure_detail("Flathub setup", &output))
-    }
-}
-
 #[tauri::command(rename_all = "snake_case")]
 pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaunch, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
+    // Shared flatpak single-flight: reject before a job exists when an
+    // install/update/removal from any page is already mutating flatpaks.
+    let slot = take_flatpak_slot()?;
     let name = tool.name.to_string();
     let launch_detail = "Setting up Flathub…".to_string();
     let job = start_job("gaming-install", &launch_detail)?;
     let worker_name = name.clone();
     spawn_task_job(job.clone(), move |worker_job, cancel| {
+        // Held until the task returns so the slot covers the whole job.
+        let _slot = slot;
         update_job(&worker_job, "Setting up Flathub…");
         if let Err(error) = ensure_flathub_user_remote(&cancel) {
             return (
@@ -147,6 +127,7 @@ pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaun
 #[tauri::command(rename_all = "snake_case")]
 pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<GamingActionLaunch, String> {
     let tool = validated_gaming_tool(&flatpak_id)?;
+    let slot = take_flatpak_slot()?;
     let name = tool.name.to_string();
     let launch_detail = format!("Uninstalling {name}…");
     // Pin the user scope: an unscoped uninstall can target (or prompt for)
@@ -163,15 +144,20 @@ pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<GamingActionLa
         job.clone(),
         argv,
         timeout_for(JobTimeoutClass::QuickRemove),
-        move |result| match result {
-            Ok(output) if output.status.success() => {
-                ("complete".to_string(), format!("{name} uninstalled."))
+        // The guard rides in the completion closure: spawn_argv_job owns it
+        // inside the worker for the whole run and drops it at finish.
+        move |result| {
+            let _slot = slot;
+            match result {
+                Ok(output) if output.status.success() => {
+                    ("complete".to_string(), format!("{name} uninstalled."))
+                }
+                Ok(output) => ("failed".to_string(), failure_detail("Uninstall", &output)),
+                Err(err) => (
+                    "failed".to_string(),
+                    format!("Could not start uninstall: {err}"),
+                ),
             }
-            Ok(output) => ("failed".to_string(), failure_detail("Uninstall", &output)),
-            Err(err) => (
-                "failed".to_string(),
-                format!("Could not start uninstall: {err}"),
-            ),
         },
     );
     Ok(GamingActionLaunch {
