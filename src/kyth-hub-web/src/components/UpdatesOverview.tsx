@@ -254,6 +254,18 @@ export function UpdatesOverview() {
     };
   }, []);
 
+  // Idle re-read: while an action runs or a reattached job is tracked,
+  // the flows above own the page state. An idle page used to sit on its
+  // mount-time snapshot forever, so a change made outside this window
+  // (staged from a terminal, applied by the watcher service) never
+  // appeared. Re-read on the shell's usual 60 s cadence while idle; the
+  // reattach watcher owns the tracked case and refreshes as it resolves.
+  useEffect(() => {
+    if (busy !== null || updateTracked) return;
+    const timer = window.setInterval(() => { void refresh().catch(() => undefined); }, 60_000);
+    return () => window.clearInterval(timer);
+  }, [busy, updateTracked]);
+
   async function refresh(): Promise<string> {
     invalidateSharedReads(
       "updates-snapshot",

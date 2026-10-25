@@ -82,7 +82,15 @@ github_api_curl -fsS --noproxy '*' "${CURL_COMMON_ARGS[@]}" "$2/first"
 github_api_curl -fsS --noproxy '*' "${CURL_COMMON_ARGS[@]}" "$2/second"
 for ((i = 0; i < 20; i++)); do source "$1"; done
 github_api_curl -fsS --noproxy '*' "${CURL_COMMON_ARGS[@]}" --max-time 5 "$2/resourced"
+# A leaked fd per source is permanent and can never settle; a transient
+# fd (a curl connection still tearing down) can. Poll briefly for the
+# count to return to the baseline before declaring a leak — the old
+# one-shot comparison flaked intermittently under load.
 after=$(fd_count)
+for ((i = 0; i < 20 && after != before; i++)); do
+  sleep 0.1
+  after=$(fd_count)
+done
 [[ "$before" == "$after" ]]
 '''
             try:

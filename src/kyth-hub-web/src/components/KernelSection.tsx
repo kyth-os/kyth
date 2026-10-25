@@ -48,8 +48,13 @@ export function KernelSection({ section }: { section: HubSection }) {
           deployment and takes effect on reboot. Progress stays in this Hub window, and authentication appears in a
           normal desktop dialog.
         </p>
+        {loaded && flavor === null && (
+          <p className="card-copy" role="alert" style={{ fontSize: 12, margin: "0 0 12px" }}>
+            Couldn’t check the installed kernel flavor — switching is unavailable until that read works.
+          </p>
+        )}
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-          {(["cachy", "fedora"] as const).map((target) => <ActionButton key={target} label={busy === `kernel-${target}` ? "Staging…" : `Switch to ${FLAVOR_LABEL[target]}`} disabled={busy !== null || flavor === target} onClick={() => run(`kernel-${target}`, `Staging ${target} kernel…`, () => runPrivilegedAction("kernel_switch", { flavor: target }))} />)}
+          {(["cachy", "fedora"] as const).map((target) => <ActionButton key={target} label={busy === `kernel-${target}` ? "Staging…" : `Switch to ${FLAVOR_LABEL[target]}`} disabled={busy !== null || flavor === null || flavor === target} onClick={() => run(`kernel-${target}`, `Staging ${target} kernel…`, () => runPrivilegedAction("kernel_switch", { flavor: target }))} />)}
           {(busy?.startsWith("kernel-") ?? false) && (
             <ActionButton label="Cancel" onClick={() => runCancel("cancel-kernel", "Cancelling…", cancelPrivilegedAction)} />
           )}

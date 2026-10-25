@@ -105,7 +105,7 @@ test("every Hub section component constructs without throwing (SSR render)", asy
 
     // Dashboard ("Welcome") takes no props and isn't part of a
     // sectionContent map — render it directly, same as the Qt smoke test's
-    // MainWindow itself, not just its pages. It (via HeroCard) calls
+    // MainWindow itself, not just its pages. It calls
     // useNavigate(), so it needs router context — MemoryRouter, not the
     // HashRouter main.tsx actually mounts it inside, since HashRouter reads
     // `document.location` unconditionally and isn't SSR-safe by design

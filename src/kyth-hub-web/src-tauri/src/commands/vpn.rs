@@ -1043,6 +1043,17 @@ fn open_saml_window(
         }
         return;
     }
+    // SECURITY — load-bearing capability assumption: this window is
+    // covered by the `main-window` capability
+    // (src-tauri/capabilities/default.json) only through its
+    // `vpn-saml-*` label, and that capability deliberately declares NO
+    // `remote` URLs. The IdP page loaded here is third-party content;
+    // with no remote origins in the capability it gets no Hub IPC
+    // access. Never add `remote` URLs or broader permissions to that
+    // capability to make this window work — that would silently arm
+    // whatever IdP page the gateway redirects to with the Hub's
+    // command surface. The page needs no IPC: the ACS callback is
+    // intercepted natively in on_navigation below.
     let result = WebviewWindowBuilder::new(app, &label, WebviewUrl::External(initial_url))
         .title("VPN — Secure sign-in")
         .inner_size(960.0, 720.0)

@@ -209,6 +209,44 @@ pub fn spawn_detached(command: &mut Command) -> io::Result<()> {
     Ok(())
 }
 
+/// Decide whether an argv can reach `sudo` at any point in its execution,
+/// so the spawning job runner knows it must not hand the job the caller's
+/// full environment.
+///
+/// The direct case is argv[0] itself (`sudo`, `/usr/bin/sudo`). The case
+/// that motivated this helper is one level of indirection: the Kali
+/// container jobs are `bash -c` scripts whose text invokes `sudo -A
+/// podman …` and `sudo -E apt-get …` — argv[0] is `bash`, so a check of
+/// argv[0] alone sanitised nothing while the script (and its `sudo -E`
+/// children) inherited the complete Hub environment.
+///
+/// Detection is deliberately fail-closed and purely textual: every argv
+/// element is split into shell words (on whitespace and the shell's
+/// metacharacters/quotes), and any word that is exactly `sudo` or a path
+/// ending in `/sudo` counts. A script that merely mentions the word in a
+/// string therefore also counts — sanitising an environment that did not
+/// need it is the safe direction for a job runner. Words that merely
+/// contain the letters (`sudoers`, `sudoedit`, `--sudo`) do not match.
+/// Choosing WHICH environment a flagged job gets stays with the caller.
+pub fn argv_may_invoke_sudo(argv: &[String]) -> bool {
+    argv.iter()
+        .any(|element| shell_words(element).any(|word| word == "sudo" || word.ends_with("/sudo")))
+}
+
+/// Split one argv element into shell-ish words: whitespace plus the shell
+/// metacharacters and quote characters that can separate one command word
+/// from the next inside a `-c` script.
+fn shell_words(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|c: char| {
+        c.is_whitespace()
+            || matches!(
+                c,
+                ';' | '|' | '&' | '(' | ')' | '<' | '>' | '`' | '\'' | '"' | '$' | '{' | '}'
+            )
+    })
+    .filter(|word| !word.is_empty())
+}
+
 /// Run an already-validated argv with captured output and a hard wall-clock
 /// limit. It never invokes a shell and kills a child that outlives its bound.
 /// `Instant + Duration` panics on overflow, so a huge caller-supplied timeout
@@ -972,6 +1010,57 @@ mod tests {
             "took {:?}, the writer thread must not stall the reap",
             started.elapsed()
         );
+    }
+
+    #[test]
+    fn sudo_detection_covers_direct_and_pathed_invocations() {
+        assert!(argv_may_invoke_sudo(&[
+            "sudo".into(),
+            "-A".into(),
+            "podman".into()
+        ]));
+        assert!(argv_may_invoke_sudo(&["/usr/bin/sudo".into(), "ls".into()]));
+        assert!(argv_may_invoke_sudo(&[
+            "env".into(),
+            "sudo".into(),
+            "true".into()
+        ]));
+    }
+
+    #[test]
+    fn sudo_detection_sees_through_shell_scripts() {
+        // The Kali create shape: argv[0] is bash, sudo lives in the script.
+        let script = "sudo -A podman inspect kali >/dev/null 2>&1 && \
+                      distrobox enter --root kali -- bash -c 'sudo -E apt-get update'";
+        assert!(argv_may_invoke_sudo(&[
+            "bash".into(),
+            "-c".into(),
+            script.into()
+        ]));
+        // Command substitution and pipelines are command positions too.
+        assert!(argv_may_invoke_sudo(&[
+            "bash".into(),
+            "-c".into(),
+            "x=$(sudo -n true); echo $x | sudo tee /etc/motd".into()
+        ]));
+    }
+
+    #[test]
+    fn sudo_detection_ignores_mere_substrings() {
+        // /etc/sudoers.d paths appear in the very scripts this must catch;
+        // the substring alone is not an invocation.
+        assert!(!argv_may_invoke_sudo(&[
+            "bash".into(),
+            "-c".into(),
+            "cat /etc/sudoers.d/kali-user-nopasswd; sudoedit --help".into()
+        ]));
+        assert!(!argv_may_invoke_sudo(&[
+            "flatpak".into(),
+            "update".into(),
+            "--system".into(),
+            "-y".into()
+        ]));
+        assert!(!argv_may_invoke_sudo(&[] as &[String]));
     }
 
     #[test]

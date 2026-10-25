@@ -1207,7 +1207,8 @@ export async function fetchSmbBrowse(host?: string | null): Promise<{ ok: boolea
 }
 export async function mountSmbShare(share: string): Promise<string> {
   if (!inTauriShell()) throw new Error("Share mounting is available from the installed Kyth Hub.");
-  return await invokeBounded<string>("smb_mount", { share }, 90_000);
+  const job = await invoke<string>("smb_mount", { share });
+  return await waitHubJob(job, 120);
 }
 export interface ConfiguredNetworkShare {
   name: string;
@@ -1603,7 +1604,7 @@ export async function fetchPlasmaPresets(): Promise<string[] | null> {
   try { return await invoke<string[]>("plasma_presets"); } catch { return null; }
 }
 
-// Update availability check (Hub-side 90s deadline, issue #164)
+// Update availability check (Hub-side 95s deadline, issue #164)
 export interface AvailabilityStatusLive { state: string; detail: string; flatpak_count: number; flatpak_detail: string; staged: boolean; manifest_raw: string; blocked_reason: string; }
 /** Run the user-requested availability check without hiding an invoke error.
  * The explicit button press needs to tell the page why it could not run so
@@ -1617,7 +1618,7 @@ export async function checkForUpdates(): Promise<AvailabilityStatusLive> {
   if (availabilityCheckInFlight) return availabilityCheckInFlight;
   const task = (async (): Promise<AvailabilityStatusLive> => {
     // The backend check fans out to the update registry and can hang on a
-    // dead mirror past the Hub-side 90s deadline (issue #164): race the
+    // dead mirror past the Hub-side 95s deadline (issue #164): race the
     // invoke against a 95s timer so the button always settles with a
     // friendly, actionable error instead of spinning forever.
     let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
@@ -1627,7 +1628,6 @@ export async function checkForUpdates(): Promise<AvailabilityStatusLive> {
     try {
       return await Promise.race([
         invoke<AvailabilityStatusLive>("collect_availability", {
-          branch: null,
           useCached: false,
         }),
         timeout,

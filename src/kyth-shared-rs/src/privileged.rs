@@ -28,6 +28,27 @@ const MAX_CLIENTS: usize = 32;
 const AUDIT_LOG: &str = "/var/log/kyth/privileged.log";
 const MAX_SHARE_PAYLOAD: usize = 64 * 1024;
 const OPERATION_TIMEOUT: Duration = Duration::from_secs(900);
+/// How long a connected client may stay silent before the daemon stops
+/// waiting for its request line. The Hub writes its request immediately
+/// after connecting (its own write timeout is 30 s), so a connection
+/// silent for this long is broken or hostile; without the bound it held
+/// one of the MAX_CLIENTS threads forever. Bounds ONLY the request-read
+/// phase — see serve_requests.
+const REQUEST_READ_TIMEOUT: Duration = Duration::from_secs(30);
+/// Largest response detail, in chars, on either side of the socket.
+/// Helper diagnostics are routinely multi-line (fwupd, flatpak), so the
+/// detail keeps its lines and gets a far larger cap than the old
+/// flattened 400; the audit log keeps its own single-line 400-char
+/// sanitize because it is a line-oriented log, not a display surface.
+/// Enforced by the daemon when encoding (cap_detail after redaction)
+/// and by the Hub client when decoding, from this one definition.
+pub const MAX_DETAIL_CHARS: usize = 4096;
+/// Largest single response line, in bytes, the Hub client will read.
+/// A response is one JSON object whose detail is at most
+/// MAX_DETAIL_CHARS chars; even fully \uXXXX-escaped that is under
+/// 25 KiB, so 64 KiB leaves generous headroom while giving the client's
+/// read a hard memory bound behind its 910 s read timeout.
+pub const MAX_RESPONSE_LINE_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug)]
 struct ExecSpec {
@@ -290,7 +311,7 @@ fn display_detail(stdout: &[u8], stderr: &[u8], status: std::process::ExitStatus
     } else {
         stderr
     };
-    let detail = sanitize(String::from_utf8_lossy(output).trim());
+    let detail = cap_detail(String::from_utf8_lossy(output).trim());
     if !detail.trim().is_empty() {
         detail
     } else if let Some(code) = status.code() {
@@ -381,21 +402,12 @@ fn acquire_flatpak_lock(
     }
 }
 
-fn run_operation_bounded(
-    spec: ExecSpec,
-    deadline: Instant,
-    client_gone: &AtomicBool,
-) -> Result<String, String> {
+/// Build the daemon's child command for one operation: fixed argv, a
+/// cleared minimal environment, /dev/null stdin unless the operation
+/// carries explicit input, its own process group, and — on Linux — a
+/// parent-death signal.
+fn op_command(spec: &ExecSpec) -> Command {
     use std::os::unix::process::CommandExt;
-    // Held for the whole operation when this is a flatpak mutation; the
-    // guard is intentionally unused-named so it drops at function exit —
-    // including the kill paths below, so a cancelled or timed-out
-    // operation never wedges the lock for the next client.
-    let _flatpak_guard = if is_flatpak_mutation(&spec.argv) {
-        Some(acquire_flatpak_lock(deadline, client_gone)?)
-    } else {
-        None
-    };
     let mut command = Command::new(&spec.argv[0]);
     command
         .args(&spec.argv[1..])
@@ -411,16 +423,55 @@ fn run_operation_bounded(
     // Stdin is /dev/null unless the op carries explicit input: a pipe held
     // open forever turns any unexpected helper prompt (new fwupd flow,
     // recipe confirmation) into a 900s hang. Fail fast instead; ops that
-    // need input (keys, shares) keep piped+close below.
+    // need input (keys, shares) keep piped+close in run_operation_bounded.
     if spec.stdin.is_some() {
         command.stdin(Stdio::piped());
     } else {
         command.stdin(Stdio::null());
     }
-    // Own process group so the timeout kill below reaches forked
-    // grandchildren (fwupdmgr helpers, ujust chains) instead of leaving
-    // root orphans a retry would race.
+    // Own process group so the timeout kill in run_operation_bounded
+    // reaches forked grandchildren (fwupdmgr helpers, ujust chains)
+    // instead of leaving root orphans a retry would race.
     command.process_group(0);
+    // Daemon death (stop, restart, crash) must not leave the operation
+    // running as an unobserved root orphan: PR_SET_PDEATHSIG makes the
+    // kernel SIGKILL this child when the daemon dies. It is a backstop
+    // for daemon death only — the watcher-driven process-group kill
+    // stays the cancel/timeout mechanism, and it, not this signal, is
+    // what reaches the operation's own children.
+    #[cfg(target_os = "linux")]
+    unsafe {
+        command.pre_exec(|| {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                return Err(io::Error::last_os_error());
+            }
+            // The daemon may already have died between fork and prctl,
+            // in which case this child has been reparented to init:
+            // die now instead of running on unobserved.
+            if libc::getppid() == 1 {
+                libc::raise(libc::SIGKILL);
+            }
+            Ok(())
+        });
+    }
+    command
+}
+
+fn run_operation_bounded(
+    spec: ExecSpec,
+    deadline: Instant,
+    client_gone: &AtomicBool,
+) -> Result<String, String> {
+    // Held for the whole operation when this is a flatpak mutation; the
+    // guard is intentionally unused-named so it drops at function exit —
+    // including the kill paths below, so a cancelled or timed-out
+    // operation never wedges the lock for the next client.
+    let _flatpak_guard = if is_flatpak_mutation(&spec.argv) {
+        Some(acquire_flatpak_lock(deadline, client_gone)?)
+    } else {
+        None
+    };
+    let mut command = op_command(&spec);
     let mut child = command
         .spawn()
         .map_err(|error| format!("could not start privileged operation: {error}"))?;
@@ -485,6 +536,21 @@ fn run_operation_bounded(
 
 fn sanitize(value: &str) -> String {
     value.replace(['\n', '\r'], " ").chars().take(400).collect()
+}
+
+/// Cap a response detail at MAX_DETAIL_CHARS chars, preserving its line
+/// structure: multi-line helper diagnostics are the actionable part and
+/// the old flatten-to-one-line sanitize destroyed them. Char-counted (a
+/// byte cut could split a UTF-8 sequence) and marked when truncated,
+/// matching drain_capped's convention. Redaction is a separate step and
+/// is applied by the callers exactly as before.
+pub fn cap_detail(detail: &str) -> String {
+    if detail.chars().count() <= MAX_DETAIL_CHARS {
+        return detail.to_string();
+    }
+    let mut capped: String = detail.chars().take(MAX_DETAIL_CHARS).collect();
+    capped.push_str("\n...[truncated]");
+    capped
 }
 
 fn audit(uid: u32, operation: &str, ok: bool, detail: &str) {
@@ -685,6 +751,20 @@ fn handle_client(stream: UnixStream) {
             return;
         }
     };
+    serve_requests(stream, uid, gid, REQUEST_READ_TIMEOUT);
+}
+
+/// Serve sequential requests on one authorized connection.
+///
+/// `request_read_timeout` bounds ONLY the wait for each request line: a
+/// client that connects and stays silent would otherwise hold this
+/// connection (and one of the MAX_CLIENTS slots) forever. The timeout is
+/// armed immediately before each read and cleared as soon as a line
+/// arrives, before the operation runs — the execution phase performs no
+/// reads on this socket (client-disappearance detection is the watcher's
+/// poll + MSG_PEEK, which SO_RCVTIMEO does not govern), so a long
+/// operation can never be cut by it.
+fn serve_requests(stream: UnixStream, uid: u32, gid: u32, request_read_timeout: Duration) {
     // One watcher per connection: it notices the peer going away while an
     // operation runs (see watch_client) so run_operation_bounded can
     // abandon work nobody is waiting for. The flag is per-connection and
@@ -704,6 +784,12 @@ fn handle_client(stream: UnixStream) {
     let mut line = String::new();
     loop {
         line.clear();
+        // Arm the read timeout for this wait only (see the fn doc): it
+        // is cleared below as soon as a line arrives, before anything
+        // executes.
+        let _ = reader
+            .get_ref()
+            .set_read_timeout(Some(request_read_timeout));
         // A single unbounded line can OOM the root daemon: cap at 128 KiB
         // and drop the connection past it. take() ends the read at the
         // cap, and any bytes beyond a full line mean the peer is hostile.
@@ -711,6 +797,7 @@ fn handle_client(stream: UnixStream) {
         match capped.read_line(&mut line) {
             Ok(0) => break,
             Ok(_) => {
+                let _ = reader.get_ref().set_read_timeout(None);
                 if line.len() as u64 >= MAX_REQUEST_LINE_BYTES && !line.ends_with('\n') {
                     audit(uid, "oversize", false, "request line exceeded cap");
                     break;
@@ -742,6 +829,10 @@ fn handle_client(stream: UnixStream) {
                     |_| crate::system::process::redact_sensitive_text(&detail),
                     |value| redact_request_detail(value, &detail),
                 );
+                // The wire cap is applied after redaction (redaction is
+                // untouched) and before both the audit log and the
+                // response, so every exit path carries the same bound.
+                let detail = cap_detail(&detail);
                 audit(uid, &operation, ok, &detail);
                 if writer.write_all(&response(ok, &detail)).is_err() {
                     break;
@@ -749,6 +840,16 @@ fn handle_client(stream: UnixStream) {
                 let _ = writer.flush();
             }
             Err(error) => {
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) {
+                    // The armed request-read timeout expired: the peer
+                    // connected but never sent a request. Reap the
+                    // connection; there is no request to answer.
+                    audit(uid, "timeout", false, "no request before the read deadline");
+                    break;
+                }
                 let detail = error.to_string();
                 audit(uid, "invalid", false, &detail);
                 let _ = writer.write_all(&response(false, &detail));
@@ -818,9 +919,9 @@ mod tests {
 
     use super::display_detail;
     use super::{
-        acquire_flatpak_lock, drain_capped, is_flatpak_mutation, parse_wheel_gid,
-        redact_request_detail, run_operation, run_operation_bounded, validate_request, ExecSpec,
-        FLATPAK_OP_LOCK,
+        acquire_flatpak_lock, cap_detail, drain_capped, is_flatpak_mutation, op_command,
+        parse_wheel_gid, redact_request_detail, run_operation, run_operation_bounded,
+        serve_requests, validate_request, ExecSpec, FLATPAK_OP_LOCK, MAX_DETAIL_CHARS,
     };
 
     #[test]
@@ -908,9 +1009,123 @@ mod tests {
     }
 
     #[test]
-    fn success_detail_still_uses_stdout_and_collapses_lines() {
+    fn success_detail_still_uses_stdout_and_preserves_lines() {
+        // Multi-line diagnostics are the actionable part of helper
+        // output; the detail no longer flattens them to one line.
         let detail = display_detail(b"line one\nline two\n", b"", exit_status(true));
-        assert_eq!(detail, "line one line two");
+        assert_eq!(detail, "line one\nline two");
+    }
+
+    #[test]
+    fn cap_detail_preserves_multiline_detail_under_the_cap() {
+        let detail = "first line\nsecond line\nthird line";
+        assert_eq!(cap_detail(detail), detail);
+    }
+
+    #[test]
+    fn cap_detail_truncates_at_the_char_cap_with_a_marker() {
+        // Multibyte chars: the cap counts chars, so the cut can never
+        // split a UTF-8 sequence.
+        let detail = "ü".repeat(MAX_DETAIL_CHARS + 500);
+        let capped = cap_detail(&detail);
+        assert!(capped.starts_with(&"ü".repeat(MAX_DETAIL_CHARS)));
+        assert!(capped.ends_with("\n...[truncated]"));
+        assert_eq!(
+            capped.chars().count(),
+            MAX_DETAIL_CHARS + "\n...[truncated]".chars().count()
+        );
+    }
+
+    #[test]
+    fn silent_client_is_reaped_by_the_request_read_timeout() {
+        use std::io::Write as _;
+        let (mut client, server) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let serve = std::thread::spawn(move || {
+            serve_requests(server, 1000, 1000, std::time::Duration::from_millis(200));
+            let _ = done_tx.send(());
+        });
+        // The client connects and says nothing: the serve loop must give
+        // up on it promptly instead of holding the connection forever.
+        done_rx
+            .recv_timeout(std::time::Duration::from_secs(5))
+            .expect("a silent client must be reaped by the read timeout");
+        // The reaped connection refuses further requests.
+        let _ = client.write_all(b"{\"operation\":\"kernel_switch\"}\n");
+        serve.join().expect("serve thread panicked");
+    }
+
+    #[test]
+    fn request_is_answered_with_the_read_timeout_armed() {
+        use std::io::{BufRead, BufReader, Write};
+        let (mut client, server) = std::os::unix::net::UnixStream::pair().unwrap();
+        let serve = std::thread::spawn(move || {
+            serve_requests(server, 1000, 1000, std::time::Duration::from_secs(5));
+        });
+        client
+            .write_all(b"{\"operation\":\"not-allowed\"}\n")
+            .unwrap();
+        client
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut response = String::new();
+        BufReader::new(&client).read_line(&mut response).unwrap();
+        assert!(response.contains("\"ok\":false"), "{response}");
+        assert!(response.contains("not allowlisted"), "{response}");
+        // Orderly close ends the serve loop.
+        drop(client);
+        serve.join().expect("serve thread panicked");
+    }
+
+    #[test]
+    fn op_child_dies_when_its_parent_dies() {
+        // Helper half: a re-executed copy of this test binary acts as a
+        // short-lived parent. It spawns a sleeper through the production
+        // command builder, reports its pid, and exits without waiting —
+        // the sleeper must not survive it (PR_SET_PDEATHSIG).
+        if std::env::var_os("KYTH_PDEATHSIG_HELPER").is_some() {
+            let spec = ExecSpec {
+                argv: vec!["/usr/bin/sleep".to_string(), "60".to_string()],
+                stdin: None,
+            };
+            let child = op_command(&spec).spawn().expect("spawn sleeper");
+            println!("SLEEPER_PID={}", child.id());
+            std::process::exit(0);
+        }
+        let exe = std::env::current_exe().expect("test binary path");
+        let output = std::process::Command::new(exe)
+            .args([
+                "--exact",
+                "privileged::tests::op_child_dies_when_its_parent_dies",
+                "--nocapture",
+            ])
+            .env("KYTH_PDEATHSIG_HELPER", "1")
+            .output()
+            .expect("run helper copy of the test binary");
+        let text = String::from_utf8_lossy(&output.stdout);
+        let pid: u32 = text
+            .lines()
+            .find_map(|line| line.trim().strip_prefix("SLEEPER_PID="))
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or_else(|| panic!("helper reported no sleeper pid; output was: {text}"));
+        // The parent is already gone; the sleeper must be reaped
+        // promptly (gone entirely, or a zombie awaiting init's reap).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok();
+            let state = stat
+                .as_deref()
+                .and_then(|stat| stat.rsplit(')').next())
+                .and_then(|rest| rest.trim_start().chars().next());
+            match state {
+                None | Some('Z') => break,
+                Some(state) if std::time::Instant::now() < deadline => {
+                    let _ = state;
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+                Some(state) => panic!("sleeper {pid} still in state {state} after its parent died"),
+            }
+        }
     }
 
     #[test]

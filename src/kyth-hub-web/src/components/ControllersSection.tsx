@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { fetchControllers, fetchControllersLive, type ControllerInfo, type ControllersLive } from "../services/liveData";
+import { inTauriShell } from "../services/tauriEnv";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
@@ -142,7 +143,7 @@ export function ControllersSection({ section }: { section: HubSection }) {
           onClick={() =>
             run("rescan", "Rescanning…", async () => {
               const fresh = await fetchControllersLive();
-              if (!fresh) return "Not available outside the Hub shell.";
+              if (!fresh) return inTauriShell() ? "Couldn't rescan controllers — the live detection failed. Try Rescan again." : "Not available outside the Hub shell.";
               setLive(fresh);
               return `${fresh.usb_controllers.length} controller(s), ${fresh.input_nodes.length} input node(s).`;
             })

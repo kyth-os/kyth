@@ -25,7 +25,7 @@ export function Topbar({ crumb }: { crumb: string }) {
   // deep-link contract uses, so a section reached by search and the same
   // section reached from krunner land on exactly one route.
   const go = (result: SearchResult) => {
-    navigate(routeForPage(result.entry.key));
+    navigate(result.entry.route ?? routeForPage(result.entry.key));
     setQuery("");
     setOpen(false);
   };

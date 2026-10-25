@@ -18,12 +18,17 @@ fn update_jobs() -> &'static JobStore {
 }
 
 /// In-process slot for mutating update launches (stage/rollback/switch/
-/// apply). The flock admission probe below is check-then-act: two rapid
-/// invocations (double-click, two tabs) both pass it, then spawn two
-/// `sudo -A` jobs that stack prompts and race on finalize. The slot closes
-/// that window — the second launch fails fast with the same busy wording.
-/// Cross-process serialization still rests on the flock, which each helper
-/// holds for its whole run.
+/// apply). Without it, two rapid invocations (double-click, two tabs)
+/// would each spawn a `sudo -A` job — stacked prompts racing on
+/// finalize. The slot closes that window: the second launch fails fast
+/// with the busy wording below. The slot is this shell's only admission
+/// control; the shell itself must never probe the root-only bootc lock
+/// (see the regression test at the bottom of this file). Cross-process
+/// serialization is layered underneath: the stage and switch helpers
+/// hold the bootc flock for their whole run, rollback invokes `bootc`
+/// directly with no flock, and every path ultimately rests on
+/// bootc/ostree's internal sysroot lock, which refuses a second
+/// concurrent writer.
 static UPDATE_MUTATING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 struct MutatingSlot;
@@ -51,6 +56,17 @@ fn take_mutating_slot() -> Result<MutatingSlot, String> {
         .map_err(|_| {
             "Another system update operation is already in progress. Wait for it to finish, or check its status, before trying again.".to_string()
         })
+}
+
+/// Binary precheck shared by the mutating launchers: fail before a job
+/// (and its sudo prompt) exists when the binary the launcher is about to
+/// run is absent, instead of spawning a job that dies on exec.
+fn require_binary(path: &str, missing: &str) -> Result<(), String> {
+    if std::path::Path::new(path).exists() {
+        Ok(())
+    } else {
+        Err(missing.to_string())
+    }
 }
 
 /// Latest live staging progress, streamed from `kyth-safe-upgrade` marker
@@ -1358,9 +1374,10 @@ pub(crate) fn hub_action_cancel(job: String) -> crate::InstallStatus {
 
 #[tauri::command]
 pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
-    if !std::path::Path::new("/usr/bin/kyth-safe-upgrade").exists() {
-        return Err("The native KythOS update helper is not installed on this system.".to_string());
-    }
+    require_binary(
+        "/usr/bin/kyth-safe-upgrade",
+        "The native KythOS update helper is not installed on this system.",
+    )?;
     // No lock check here on purpose: the Hub shell runs as the user and
     // /run/kyth-bootc.lock is root-only, so opening it here fails with
     // EACCES before any update can start. Serialization is the slot above
@@ -1381,9 +1398,13 @@ pub(crate) fn bootc_upgrade() -> Result<UpdateActionLaunch, String> {
 
 #[tauri::command]
 pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
+    require_binary("/usr/bin/bootc", "bootc is not installed on this system.")?;
     // No lock check here on purpose (see bootc_upgrade): the Hub shell
-    // runs as the user and cannot open the root-only lock file. The slot
-    // above plus the helper-owned flock provide the serialization.
+    // runs as the user and cannot open the root-only lock file. Unlike
+    // stage/switch, rollback has no helper and takes no flock — it runs
+    // `bootc rollback` directly, so cross-process serialization rests
+    // on bootc/ostree's internal sysroot lock (a second concurrent
+    // writer is refused) plus the slot above within this Hub.
     let slot = take_mutating_slot()?;
     start_update_job(
         "rollback",
@@ -1399,6 +1420,10 @@ pub(crate) fn bootc_rollback() -> Result<UpdateActionLaunch, String> {
 
 #[tauri::command]
 pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, String> {
+    require_binary(
+        "/usr/bin/kyth-bootc-guard",
+        "The KythOS bootc guard helper is not installed on this system.",
+    )?;
     let channel = kyth_shared::system::bootc_policy::switch_channel_arg(&branch)
         .ok_or_else(|| "unknown channel".to_string())?;
     let operation = format!(
@@ -1414,9 +1439,11 @@ pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, 
         .map(String::from)
         .collect::<Vec<_>>();
     argv.push(operation);
-    // Same as rollback: no in-process lock check — the Hub shell cannot
-    // open the root-only lock file; kyth-bootc-guard takes it for the
-    // whole switch.
+    // No in-process lock check — the Hub shell cannot open the root-only
+    // lock file. kyth-bootc-guard holds the bootc flock for the whole
+    // switch, but that flock only excludes other flock holders; against
+    // direct `bootc` callers (rollback above) the final serializer is
+    // bootc/ostree's internal sysroot lock.
     let slot = take_mutating_slot()?;
     // LongTransfer (3600s), not the 300s download-free tier: switching
     // to a channel whose image is not already cached pulls it — the
@@ -1433,9 +1460,10 @@ pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, 
 
 #[tauri::command]
 pub(crate) fn apply_staged() -> Result<UpdateActionLaunch, String> {
-    if !std::path::Path::new("/usr/libexec/kyth-finalize-staged").exists() {
-        return Err("The staged-update finalizer is not installed on this system.".to_string());
-    }
+    require_binary(
+        "/usr/libexec/kyth-finalize-staged",
+        "The staged-update finalizer is not installed on this system.",
+    )?;
     // No in-process lock check (see bootc_upgrade): the slot above keeps
     // the restart from racing an upgrade/switch launched from this Hub.
     let slot = take_mutating_slot()?;
@@ -1532,15 +1560,9 @@ pub(crate) struct AvailabilityStatusResponse {
 }
 
 #[tauri::command]
-pub(crate) async fn collect_availability(
-    branch: Option<String>,
-    use_cached: Option<bool>,
-) -> AvailabilityStatusResponse {
+pub(crate) async fn collect_availability(use_cached: Option<bool>) -> AvailabilityStatusResponse {
     let status = tauri::async_runtime::spawn_blocking(move || {
-        kyth_shared::system::update_availability::collect_availability(
-            branch.as_deref(),
-            use_cached.unwrap_or(true),
-        )
+        kyth_shared::system::update_availability::collect_availability(use_cached.unwrap_or(true))
     })
     .await
     .unwrap_or_else(
@@ -2202,12 +2224,29 @@ mod tests {
     }
 
     #[test]
+    fn binary_precheck_fails_missing_and_passes_present() {
+        assert_eq!(
+            super::require_binary(
+                "/nonexistent/kyth-bootc",
+                "bootc is not installed on this system."
+            ),
+            Err("bootc is not installed on this system.".to_string())
+        );
+        let exe = std::env::current_exe().expect("test exe path");
+        assert!(
+            super::require_binary(exe.to_str().expect("utf8 exe path"), "unused").is_ok(),
+            "a present binary passes the precheck"
+        );
+    }
+
+    #[test]
     fn hub_shell_launchers_never_touch_the_root_only_bootc_lock() {
         // Regression pin: the Hub shell runs as the user and /run is
         // root-only, so a with_bootc_lock() admission check in any launch
-        // command fails with EACCES before the job can start. Serialization
-        // is take_mutating_slot() plus the flock each privileged helper
-        // holds for its whole run.
+        // command fails with EACCES before the job can start. In-process
+        // serialization is take_mutating_slot(); underneath it, the
+        // stage/switch helpers hold the bootc flock for their whole run
+        // while rollback relies on bootc/ostree's internal sysroot lock.
         let source = include_str!("updates.rs");
         for launcher in [
             "pub(crate) fn bootc_upgrade()",

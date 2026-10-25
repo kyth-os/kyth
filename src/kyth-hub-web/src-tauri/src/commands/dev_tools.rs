@@ -110,6 +110,16 @@ fn validate_selection(
         // Guards a malformed/replayed request rather than a real user pick.
         return Err("Too many tools selected.".to_string());
     }
+    // resolve_selection preserves repeats, so without this check one
+    // request could run the same host installer twice (and provision
+    // the same in-box tool twice) for a duplicated id.
+    let mut seen = std::collections::HashSet::new();
+    if selected_ids.iter().any(|id| !seen.insert(id.as_str())) {
+        return Err(
+            "The selection lists the same tool more than once. Refresh the catalog and try again."
+                .to_string(),
+        );
+    }
     let resolved = dev_tools_catalog::resolve_selection(selected_ids);
     if resolved.is_empty() {
         return Err("None of the selected tools are recognized.".to_string());
@@ -169,6 +179,39 @@ fn install_budget(host_tool_count: usize) -> Duration {
     let host_steps = u32::try_from(host_tool_count).unwrap_or(u32::MAX);
     timeout_for(JobTimeoutClass::ExtendedWork) * 2
         + timeout_for(JobTimeoutClass::ToolInstall) * host_steps
+}
+
+/// Split the selection's host-level tools into ones whose installer
+/// still needs to run and ones already present on the host. A host
+/// installer is a downloaded script or a `sudo dnf` transaction —
+/// re-running one for an already-installed tool wastes the wait and
+/// can churn a working install, so the wizard skips those and says so.
+/// The probe is injected so tests can stub it; production passes
+/// `ai_dev::dev_tool_is_installed`, the same probe the catalog list
+/// renders `installed` from, so the wizard and the list cannot
+/// disagree about what is already there.
+fn host_tools_needing_install<'a>(
+    selected: &[&'a dev_tools_catalog::DevTool],
+    is_installed: impl Fn(&dev_tools_catalog::DevTool) -> bool,
+) -> (
+    Vec<&'a dev_tools_catalog::DevTool>,
+    Vec<&'a dev_tools_catalog::DevTool>,
+) {
+    let mut to_install = Vec::new();
+    let mut already_installed = Vec::new();
+    for tool in selected.iter().copied().filter(|tool| {
+        matches!(
+            tool.install,
+            InstallMethod::HostScript { .. } | InstallMethod::HostRpmUrl(_)
+        )
+    }) {
+        if is_installed(tool) {
+            already_installed.push(tool);
+        } else {
+            to_install.push(tool);
+        }
+    }
+    (to_install, already_installed)
 }
 
 /// Sets the flag on drop; stops the install watchdog on every task exit.
@@ -350,12 +393,16 @@ pub(crate) fn dev_tools_install_selection(
             return ("cancelled".into(), "Cancelled.".into());
         }
 
-        for tool in selected_owned.iter().filter(|tool| {
-            matches!(
-                tool.install,
-                InstallMethod::HostScript { .. } | InstallMethod::HostRpmUrl(_)
-            )
-        }) {
+        let (host_to_install, host_skipped) =
+            host_tools_needing_install(&selected_owned, ai_dev::dev_tool_is_installed);
+        for tool in &host_skipped {
+            update_job(
+                &worker_job,
+                &format!("{} is already installed; skipping.", tool.name),
+            );
+        }
+        let skipped_names: Vec<&str> = host_skipped.iter().map(|tool| tool.name).collect();
+        for tool in host_to_install.iter() {
             update_job(&worker_job, &format!("Installing {}…", tool.name));
             let Some(argv) = ai_dev::host_install_command(tool) else {
                 return (
@@ -413,10 +460,21 @@ pub(crate) fn dev_tools_install_selection(
             }
         }
 
-        (
-            "complete".into(),
-            format!("Installed {} tool(s).", selected_owned.len()),
-        )
+        if skipped_names.is_empty() {
+            (
+                "complete".into(),
+                format!("Installed {} tool(s).", selected_owned.len()),
+            )
+        } else {
+            (
+                "complete".into(),
+                format!(
+                    "Installed {} tool(s). Already installed, skipped: {}.",
+                    selected_owned.len() - skipped_names.len(),
+                    skipped_names.join(", ")
+                ),
+            )
+        }
     });
 
     Ok(DevToolsActionLaunch {
@@ -487,5 +545,42 @@ mod tests {
         let list = dev_tools_catalog_list();
         assert_eq!(list.len(), DEV_TOOLS.len());
         assert!(list.iter().all(|tool| !tool.category_label.is_empty()));
+    }
+
+    #[test]
+    fn duplicate_selection_is_rejected() {
+        let error = validate_selection(&["vscode".to_string(), "vscode".to_string()]).unwrap_err();
+        assert!(error.contains("more than once"), "got: {error}");
+        assert!(validate_selection(&[
+            "vscode".to_string(),
+            "git".to_string(),
+            "vscode".to_string(),
+        ])
+        .is_err());
+        // A duplicate-free selection still validates.
+        assert!(validate_selection(&["vscode".to_string(), "git".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn host_tools_needing_install_skips_installed_and_ignores_box_tools() {
+        // vscode installs inside the box; hermes-desktop is a host
+        // script and codex-desktop a host RPM.
+        let vscode = dev_tools_catalog::find_dev_tool("vscode").unwrap();
+        let hermes = dev_tools_catalog::find_dev_tool("hermes-desktop").unwrap();
+        let codex_desktop = dev_tools_catalog::find_dev_tool("codex-desktop").unwrap();
+        let selected = vec![vscode, hermes, codex_desktop];
+
+        let (to_install, skipped) =
+            host_tools_needing_install(&selected, |tool| tool.id == "hermes-desktop");
+        assert_eq!(to_install.len(), 1);
+        assert_eq!(to_install[0].id, "codex-desktop");
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].id, "hermes-desktop");
+
+        // Nothing installed: every host tool is queued, none skipped,
+        // and the in-box tool appears in neither list.
+        let (to_install, skipped) = host_tools_needing_install(&selected, |_| false);
+        assert_eq!(to_install.len(), 2);
+        assert!(skipped.is_empty());
     }
 }

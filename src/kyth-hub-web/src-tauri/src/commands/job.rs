@@ -1,10 +1,25 @@
-//! Shared background-job runner for bounded shell/argv actions that take too
+//! Shared background-job runner for bounded argv actions that take too
 //! long to block a Tauri command — installs, container lifecycle steps,
-//! recipe-adjacent fixes. One job store, one `job_status` poll command;
-//! every domain module (`security`, `gaming`) gets its own `start_job`
-//! prefix so job ids stay readable in logs, but the store and polling
-//! contract are identical everywhere. Reports running/complete/failed, not
-//! a live percentage — see `security_container`'s module doc for why.
+//! recipe-adjacent fixes. The domain modules (`security`, `gaming`,
+//! `dev_tools`) and a few `main.rs` commands (cloud sync, PST
+//! conversion, SMB mount) start jobs in THIS module's store via
+//! `start_job`, each with its own id prefix so job ids stay readable in
+//! logs, and the frontend polls them through `job_status`/`cancel_job`
+//! (plus per-domain wrappers over this same store). Reports
+//! running/complete/failed, not a live percentage — see
+//! `security_container`'s module doc for why.
+//!
+//! This is not the Hub's only job store, and a job id is only
+//! meaningful to the store that issued it — `job_status` here cannot
+//! see the others. `updates` keeps its own `UPDATE_JOBS` and
+//! `HUB_ACTION_JOBS` stores (polled via `update_job_status`), and bootc
+//! stage jobs additionally publish a separate progress snapshot via
+//! `stage_progress`. `vpn` keeps connection state in `VpnRuntime`, not
+//! a job store at all (polled via `vpn_status`). `privilege` keeps its
+//! own store (`privileged_action_status`/`privileged_action_cancel`),
+//! and `main.rs` keeps two more: app installs (`install_status`/
+//! `install_cancel`) and Guardian checks (`guardian_check_status`/
+//! `guardian_check_cancel`).
 
 use std::process::{Command, Output};
 use std::sync::atomic::AtomicBool;
@@ -105,7 +120,7 @@ pub(crate) fn take_hub_action_slot() -> Result<HubActionSlot, String> {
 /// which used to make installs from one page fail while pages that did
 /// this step self-healed.
 pub(crate) fn ensure_flathub_user_remote(cancel: &AtomicBool) -> Result<(), String> {
-    let mut command = Command::new("flatpak");
+    let mut command = Command::new("/usr/bin/flatpak");
     command.args([
         "remote-add",
         "--user",
@@ -242,18 +257,30 @@ pub(crate) fn spawn_argv_job(
             let mut command = Command::new(&argv[0]);
             command.args(&argv[1..]);
             // Sudo children never inherit the caller environment: clear it and
-            // keep only the minimal desktop set via the shared sanitizer, then
-            // set the askpass helper explicitly. No `-E` passthrough.
-            if argv
+            // keep only a sanitized set via the shared policies, then set the
+            // askpass helper explicitly. No `-E` passthrough. A direct sudo
+            // spawn gets the minimal Desktop set; a job whose script invokes
+            // sudo internally (the bash -c Kali create/export jobs) gets the
+            // Sanitized set instead — it strips the injection-prone variables
+            // (LD_*, PYTHON*, ...) while keeping USER/LOGNAME, which those
+            // scripts expand in the outer shell before sudo runs.
+            let direct_sudo = argv
                 .first()
-                .is_some_and(|program| program == "sudo" || program.ends_with("/sudo"))
-            {
+                .is_some_and(|program| program == "sudo" || program.ends_with("/sudo"));
+            if direct_sudo {
                 let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
                 let desktop = kyth_shared::commands::environment_for(
                     kyth_shared::commands::EnvironmentPolicy::Desktop,
                     &inherited,
                 );
                 command.env_clear().envs(desktop);
+            } else if kyth_shared::system::process::argv_may_invoke_sudo(&argv) {
+                let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+                let sanitized = kyth_shared::commands::environment_for(
+                    kyth_shared::commands::EnvironmentPolicy::Sanitized,
+                    &inherited,
+                );
+                command.env_clear().envs(sanitized);
             }
             askpass_env(&mut command);
             let result =

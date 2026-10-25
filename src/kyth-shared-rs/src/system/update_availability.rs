@@ -46,7 +46,7 @@ pub fn availability_view(
     )
 }
 
-pub fn collect_availability(_branch: Option<&str>, use_cached: bool) -> AvailabilityStatus {
+pub fn collect_availability(use_cached: bool) -> AvailabilityStatus {
     let deadline = Instant::now() + AVAILABILITY_TIMEOUT;
     // staged takes precedence — no registry call needed
     let staged = crate::system::bootc::has_staged_update();
@@ -360,7 +360,7 @@ mod tests {
     use super::*;
     #[test]
     fn collect_returns() {
-        let s = collect_availability(None, true);
+        let s = collect_availability(true);
         assert!(["staged", "uptodate", "available", "error"].contains(&s.state.as_str()));
     }
 

@@ -2,21 +2,19 @@ import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { fetchJustList, type JustRecipe } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
-import { ActionStatus } from "./SectionActions";
 
 // "This PC > Recipes (Just)" — read-only inventory via Tauri `just_list`.
-// Mutating actions are exposed only through the explicit HubAction enum in
-// Rust; arbitrary recipe names are never executable from this page.
-//
-// Only recipes that take no arguments get a button: a launch passes no
-// arguments, so a parameterized recipe would silently run its defaults.
-// `switch-kernel flavor="fedora"` was one click from staging a switch off
-// the CachyOS default here. Those rows render as text instead.
+// Nothing on this page launches a recipe: rows render as reference text
+// only. Mutating actions live behind the explicit HubAction enum in Rust
+// on their own pages; arbitrary recipe names are never executable from
+// here. There are deliberately no launch buttons — a launch passes no
+// arguments, so a parameterized recipe would silently run its defaults
+// (`switch-kernel flavor="fedora"` would stage a switch off the CachyOS
+// default).
 export function JustSection({ section }: { section: HubSection }) {
   const [recipes, setRecipes] = useState<JustRecipe[] | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [query, setQuery] = useState("");
-  const [status] = useState<string | null>(null);
   useEffect(() => {
     let c = false;
     fetchJustList().then((r) => {
@@ -76,7 +74,6 @@ export function JustSection({ section }: { section: HubSection }) {
             <p className="card-copy" style={{ fontSize: 11, marginTop: 8 }}>
               Recipes are shown for reference; mutating actions are available from their typed Hub controls.
             </p>
-            <ActionStatus status={status} />
           </div>
         ) : (
           <p className="card-copy" style={{ marginTop: 20, fontSize: 13 }}>No just recipes found.</p>

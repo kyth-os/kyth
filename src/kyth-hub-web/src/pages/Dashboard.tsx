@@ -75,9 +75,27 @@ export function Dashboard() {
       void recordHubAcceptance("dashboard", JSON.stringify({ state: hasInitialReadings ? "live" : "degraded", label: hasInitialReadings ? "System at a glance" : "Status unavailable" }));
     }
     void readDashboard();
+    // The 60 s refresh re-reads every tile, not just Guardian — the other
+    // seven readings used to freeze at their mount-time values for the
+    // page's whole life. A failed re-read keeps the last good value: one
+    // transient failure must not blank a tile that was reading fine (the
+    // Guardian-only version of this poll did exactly that).
     const refresh = window.setInterval(() => {
       if (forcedDegraded) return;
-      fetchGuardianSnapshot().then((value) => { if (!cancelled) setGuardian(value); });
+      void Promise.all([
+        fetchGuardianSnapshot(), fetchUpdateChannel(), fetchGpuName(), fetchStorageFree(),
+        fetchUserName(), fetchBootRuntimeChecks(), fetchRecoveryStatus(), fetchFirstbootAppsStatus(),
+      ]).then(([nextGuardian, nextChannel, nextGpu, nextStorage, nextUser, nextBoot, nextRecovery, nextFirstboot]) => {
+        if (cancelled) return;
+        setGuardian((prev) => nextGuardian ?? prev);
+        setUpdateChannel((prev) => nextChannel ?? prev);
+        setGpuName((prev) => nextGpu ?? prev);
+        setStorageFree((prev) => nextStorage ?? prev);
+        setUserName((prev) => nextUser ?? prev);
+        setBootChecks((prev) => nextBoot ?? prev);
+        setRecovery((prev) => nextRecovery ?? prev);
+        setFirstboot((prev) => nextFirstboot ?? prev);
+      });
       setClock(Date.now());
     }, 60_000);
     const clock = window.setInterval(() => setClock(Date.now()), 30_000);

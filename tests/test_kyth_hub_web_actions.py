@@ -418,16 +418,36 @@ class HubWebUpdateActionTests(unittest.TestCase):
 
     def test_app_update_remaining_count_gets_a_truthful_next_step(self):
         messages = (HUB_WEB / "components" / "updateMessages.ts").read_text(encoding="utf-8")
-        apps = messages.split('if (action === "apps")', 1)[1].split("\n  }", 1)[0]
+        # The claims are about friendlyActionNextStep's apps branch. This
+        # test used to slice the FIRST `if (action === "apps")` in the
+        # file — which lives in friendlyActionError — so it passed against
+        # that function's copy while NextStep's own wording went
+        # unguarded. Anchor on the NextStep export first, then take its
+        # apps branch (bounded by the branch's closing brace, as before).
+        self.assertIn("export function friendlyActionNextStep", messages)
+        next_step_fn = messages.split("export function friendlyActionNextStep", 1)[1]
+        self.assertIn('if (action === "apps")', next_step_fn)
+        apps = next_step_fn.split('if (action === "apps")', 1)[1].split("\n  }", 1)[0]
         self.assertIn("updates remain", apps.lower())
         self.assertIn("update remains", apps.lower())
         self.assertIn("could not be verified", apps.lower())
+        # Pin the actual next-step copy, not just the branch conditions:
+        # these sentences exist only in NextStep's apps returns.
+        self.assertIn("retry the remaining updates", apps)
+        self.assertIn("refresh app status before retrying", apps)
         self.assertLess(apps.lower().index("updates remain"), apps.lower().index("check your connection"))
         self.assertLess(apps.lower().index("could not be verified"), apps.lower().index("check your connection"))
 
     def test_restart_failure_keeps_the_helper_diagnostic(self):
         messages = (HUB_WEB / "components" / "updateMessages.ts").read_text(encoding="utf-8")
-        errors = messages.split("export function friendlyActionError", 1)[1]
+        # Bound the slice to friendlyActionError's own body: it used to
+        # run to EOF, so copy in friendlyActionResult /
+        # friendlyActionNextStep below it could have satisfied these
+        # assertions with the Error function's diagnostic handling gone.
+        self.assertIn("export function friendlyActionError", messages)
+        errors = messages.split("export function friendlyActionError", 1)[1].split(
+            "\nexport function ", 1
+        )[0]
         apply_start = errors.index('if (action === "apply")')
         rollback_start = errors.index('if (action === "rollback")')
         apply = errors[apply_start:rollback_start]
@@ -528,7 +548,23 @@ class HubWebUpdateActionTests(unittest.TestCase):
         app_store = (HUB_WEB / "components" / "AppStoreSection.tsx").read_text(encoding="utf-8")
         messages = (HUB_WEB / "components" / "updateMessages.ts").read_text(encoding="utf-8")
         self.assertIn("friendlyActionNextStep", app_store)
-        next_step = messages.split("function friendlyActionNextStep", 1)[1]
+        # Brace-balanced extraction of exactly the NextStep function: the
+        # old slice ran to EOF, which was the function's end only because
+        # NextStep happens to be the file's last export today.
+        self.assertIn("export function friendlyActionNextStep", messages)
+        start = messages.index("export function friendlyActionNextStep")
+        depth = 0
+        end = None
+        for pos in range(messages.index("{", start), len(messages)):
+            if messages[pos] == "{":
+                depth += 1
+            elif messages[pos] == "}":
+                depth -= 1
+                if depth == 0:
+                    end = pos + 1
+                    break
+        self.assertIsNotNone(end, "friendlyActionNextStep body never closes")
+        next_step = messages[start:end]
         self.assertIn("updates remain", next_step.lower())
         self.assertIn("update remains", next_step.lower())
         self.assertIn("Check for updates", next_step)

@@ -26,8 +26,13 @@ HUB_WEB = ROOT / "src" / "kyth-hub-web" / "src"
 DASHBOARD = (HUB_WEB / "pages" / "Dashboard.tsx").read_text(encoding="utf-8")
 PLAY = (HUB_WEB / "pages" / "Play.tsx").read_text(encoding="utf-8")
 PLAY_OVERVIEW = (HUB_WEB / "components" / "PlayOverview.tsx").read_text(encoding="utf-8")
-HERO_CARD = (HUB_WEB / "components" / "HeroCard.tsx").read_text(encoding="utf-8")
-GAUGE_CARD = (HUB_WEB / "components" / "GaugeCard.tsx").read_text(encoding="utf-8")
+# HeroCard.tsx / GaugeCard.tsx are deliberately NOT read here anymore.
+# Verified 2026-10-25: nothing in src/kyth-hub-web/src imports either
+# component (grep over src/ + the smoke suite) — the Home page inlines the
+# hero and the gauge-style cards in Dashboard.tsx. The hero/gauge
+# assertions below therefore target Dashboard.tsx, the live code carrying
+# those properties; asserting on the dead files passed forever while the
+# live page could regress in exactly the properties they name.
 PERF_CHART = (HUB_WEB / "components" / "PerformanceChart.tsx").read_text(encoding="utf-8")
 SESSIONS_CHART = (HUB_WEB / "components" / "SessionsChart.tsx").read_text(encoding="utf-8")
 LIVE_DATA = (HUB_WEB / "services" / "liveData.ts").read_text(encoding="utf-8")
@@ -54,7 +59,6 @@ def _code_only(source: str) -> str:
 
 
 DASHBOARD_CODE = _code_only(DASHBOARD)
-HERO_CODE = _code_only(HERO_CARD)
 GUARDIAN_CODE = _code_only(GUARDIAN_CARD)
 TOPBAR_CODE = _code_only(TOPBAR)
 
@@ -86,20 +90,26 @@ class DashboardHonestyTests(unittest.TestCase):
             "each tile needs an explicit no-reading fallback",
         )
 
-    def test_hero_card_is_not_given_a_literal_name(self):
+    def test_home_hero_is_not_given_a_literal_name(self):
+        # The greeting must be built from the identity read (userName),
+        # never a hardcoded person rendered as though it were the user.
+        self.assertIn("Welcome back{userName ?", DASHBOARD_CODE)
         self.assertNotRegex(
             DASHBOARD_CODE,
-            r"<HeroCard[^>]*name=\"[A-Za-z]",
-            "HeroCard must receive the live identity read, never a hardcoded person",
+            r"Welcome back,\s*[A-Z]",
+            "the live greeting must come from fetchUserName, never a literal name",
         )
 
-    def test_hero_card_has_no_hardcoded_person_anywhere(self):
-        self.assertNotIn("Mark", HERO_CODE)
+    def test_home_hero_has_no_hardcoded_person_anywhere(self):
+        self.assertNotIn("Mark", DASHBOARD_CODE)
 
-    def test_hero_card_distinguishes_unknown_guardian_state(self):
-        # "no answer yet" must not render as "answered: all clear".
-        self.assertIn("pendingCount === null", HERO_CODE)
-        self.assertNotIn("Guardian found nothing new to fix today", HERO_CODE)
+    def test_home_hero_distinguishes_unknown_guardian_state(self):
+        # "no answer yet" must not render as "answered: all clear": a
+        # null Guardian read stays null through the derivation and the
+        # tile renders Unavailable, not Healthy.
+        self.assertIn("guardian === null ? null : guardian.pendingCount === 0", DASHBOARD_CODE)
+        self.assertIn('guardian === null ? "Unavailable"', DASHBOARD_CODE)
+        self.assertNotIn("Guardian found nothing new to fix today", DASHBOARD_CODE)
 
     def test_gauges_are_not_hardcoded_scores(self):
         for literal in (r"value=\{95\}", r"value=\{9\.3\}"):
@@ -109,8 +119,12 @@ class DashboardHonestyTests(unittest.TestCase):
                 "a gauge must derive from a real read or show no reading",
             )
 
-    def test_gauge_card_renders_a_no_reading_state(self):
-        self.assertIn("value === null", _code_only(GAUGE_CARD))
+    def test_home_cards_render_a_no_reading_state(self):
+        # The live gauge is HomeCard's <meter>: it must not render at all
+        # without a reading, and a null verdict renders the muted/pending
+        # treatment rather than a score.
+        self.assertIn("meterValue !== undefined && meterValue !== null", DASHBOARD_CODE)
+        self.assertIn('good === null ? "home-card-muted"', DASHBOARD_CODE)
 
     def test_gauges_derive_from_real_reads(self):
         for fetcher in ("fetchBootRuntimeChecks", "fetchRecoveryStatus"):
@@ -158,8 +172,9 @@ class PagePlacementTests(unittest.TestCase):
 class IdentityReadTests(unittest.TestCase):
     def test_identity_command_is_registered_in_the_shell(self):
         self.assertRegex(MAIN_RS, r"fn current_user_name\(\)")
-        handler = MAIN_RS.split("generate_handler!")[1]
-        self.assertIn("current_user_name", handler.split("]")[0])
+        self.assertIn("generate_handler!", MAIN_RS)
+        handler = MAIN_RS.split("generate_handler!", 1)[1].split("]", 1)[0]
+        self.assertIn("current_user_name", handler)
 
     def test_identity_bridge_exists_and_is_used(self):
         self.assertIn("export async function fetchUserName", LIVE_DATA)
@@ -226,7 +241,11 @@ class NotificationLabelTests(unittest.TestCase):
         # told "nothing needs attention" before there is an answer.
         # Split on the next prop, not "}": the label itself contains a
         # template-literal "}" that would truncate the region under test.
-        label = TOPBAR_CODE.split("aria-label={")[-1].split("onClick=")[0]
+        # Assert the anchor first: split(...) [-1] on a missing anchor
+        # silently falls back to the whole file, which contains both
+        # strings below in order and would pass vacuously.
+        self.assertIn("aria-label={", TOPBAR_CODE)
+        label = TOPBAR_CODE.split("aria-label={", 1)[1].split("onClick=", 1)[0]
         self.assertIn("pendingCount === null", label)
         self.assertLess(
             label.index("pendingCount === null"),

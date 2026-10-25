@@ -70,6 +70,7 @@ static GUARDIAN_OP_RUNNING: AtomicBool = AtomicBool::new(false);
 static CLOUD_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
 static PST_CONVERT_RUNNING: AtomicBool = AtomicBool::new(false);
 static BOTTLES_OP_RUNNING: AtomicBool = AtomicBool::new(false);
+static SMB_MOUNT_RUNNING: AtomicBool = AtomicBool::new(false);
 
 /// Spawn a job worker whose panic still finishes the job. The raw spawns
 /// this replaces had `finish` as their only exit, so a panicking worker
@@ -549,31 +550,67 @@ fn smb_mount(share: String) -> Result<String, String> {
     // host+share only.
     let display = kyth_shared::system::smb::redact_smb_uri(share);
     let argv = kyth_shared::system::smb::smb_mount_command(share);
-    // `gio mount` may need auth or fail outright; a detached spawn reports
-    // success for a mount that never happened. Run it bounded and report
-    // its real exit status instead.
-    let output =
-        kyth_shared::system::process::run_bounded(&argv, std::time::Duration::from_secs(30))
-            .map_err(|error| {
-                if error.kind() == std::io::ErrorKind::TimedOut {
-                    format!("Mounting {display} took too long and was stopped.")
+    // One mount at a time, tracked like convert_pst: this used to be a
+    // bare invoke the frontend could only race against a timeout —
+    // untracked, uncancellable, and blocking the caller for the whole
+    // attempt. The job now carries the mount's real outcome, and the
+    // frontend polls it through the generic job store.
+    let slot = take_op_slot(
+        &SMB_MOUNT_RUNNING,
+        "A share mount is already in progress. \
+         Wait for it to finish before starting another.",
+    )?;
+    let job = commands::job::start_job("smb-mount", &format!("Mounting {display}…"))?;
+    commands::job::spawn_task_job(job.clone(), move |_worker_job, cancel| {
+        // Held until the task returns so the slot covers the whole mount.
+        let _slot = slot;
+        let mut command = std::process::Command::new(&argv[0]);
+        command.args(&argv[1..]);
+        // `gio mount` may need auth or fail outright; a detached spawn
+        // reports success for a mount that never happened. Run it
+        // bounded and report its real exit status instead. The bound
+        // is 90 s — the deadline the frontend used to race the bare
+        // invoke against, now enforced on the job itself — and the
+        // job's cancel flag kills a wedged mount outright.
+        match kyth_shared::system::process::run_bounded_command_cancel(
+            command,
+            std::time::Duration::from_secs(90),
+            &cancel,
+        ) {
+            Ok(output) if output.status.success() => {
+                ("complete".into(), format!("Mounted {display}."))
+            }
+            Ok(output) => {
+                let detail = commands::process::bounded_text(&output.stderr);
+                if detail.is_empty() {
+                    (
+                        "failed".into(),
+                        format!(
+                            "Could not mount {display} (exit {}).",
+                            output.status.code().unwrap_or(-1)
+                        ),
+                    )
                 } else {
-                    format!("could not start the desktop share mount: {error}")
+                    (
+                        "failed".into(),
+                        format!("Could not mount {display}: {detail}"),
+                    )
                 }
-            })?;
-    if output.status.success() {
-        Ok(format!("Mounted {display}."))
-    } else {
-        let detail = commands::process::bounded_text(&output.stderr);
-        if detail.is_empty() {
-            Err(format!(
-                "Could not mount {display} (exit {}).",
-                output.status.code().unwrap_or(-1)
-            ))
-        } else {
-            Err(format!("Could not mount {display}: {detail}"))
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => (
+                "failed".into(),
+                format!("Mounting {display} took too long and was stopped."),
+            ),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                ("cancelled".into(), "Cancelled.".into())
+            }
+            Err(error) => (
+                "failed".into(),
+                format!("could not start the desktop share mount: {error}"),
+            ),
         }
-    }
+    });
+    Ok(job)
 }
 
 /// Non-secret metadata saved by the legacy Hub after its root helper has
@@ -967,7 +1004,7 @@ fn open_backup_app() -> Result<String, String> {
         );
     }
     kyth_shared::system::process::spawn_detached(
-        std::process::Command::new("flatpak").args(["run", "org.gnome.World.PikaBackup"]),
+        std::process::Command::new("/usr/bin/flatpak").args(["run", "org.gnome.World.PikaBackup"]),
     )
     .map_err(|error| format!("could not open Pika Backup: {error}"))?;
     Ok("Opened Pika Backup.".to_string())
@@ -1001,8 +1038,10 @@ fn m365_app(name: &str) -> Option<(&'static str, &'static str)> {
 #[tauri::command]
 fn open_m365_app(name: String) -> Result<String, String> {
     let (url, _) = m365_app(&name).ok_or_else(|| "unknown Microsoft 365 app".to_string())?;
-    kyth_shared::system::process::spawn_detached(std::process::Command::new("xdg-open").arg(url))
-        .map_err(|error| format!("could not open {name}: {error}"))?;
+    kyth_shared::system::process::spawn_detached(
+        std::process::Command::new("/usr/bin/xdg-open").arg(url),
+    )
+    .map_err(|error| format!("could not open {name}: {error}"))?;
     Ok(format!("Opened {name}."))
 }
 
@@ -1655,7 +1694,7 @@ fn uninstall_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
         } else {
             // A stalled mirror must surface as a timeout, not a forever
             // "running" job: bounded by the flatpak transfer tier.
-            let mut command = std::process::Command::new("flatpak");
+            let mut command = std::process::Command::new("/usr/bin/flatpak");
             command.args(["uninstall", "--user", "-y", "--", &app_id]);
             kyth_shared::system::process::run_bounded_command_cancel(
                 command,
@@ -1754,7 +1793,7 @@ fn update_flatpaks() -> Result<InstallActionLaunch, String> {
         // Held until the worker returns so the slot covers both phases
         // and the verification recount.
         let _slot = slot;
-        let mut user_command = std::process::Command::new("flatpak");
+        let mut user_command = std::process::Command::new("/usr/bin/flatpak");
         user_command.args(["update", "--user", "-y"]);
         // A stalled mirror must surface as a timeout, not a forever
         // "running" job. The user phase runs as the user (not through the
@@ -1850,7 +1889,7 @@ fn install_flatpak(app_id: String) -> Result<InstallActionLaunch, String> {
         }
         // Unbounded `.output()` hangs on a stalled mirror with no way to
         // cancel; run bounded and cancellable like the other install paths.
-        let mut command = std::process::Command::new("flatpak");
+        let mut command = std::process::Command::new("/usr/bin/flatpak");
         command.args(["install", "--user", "-y", "flathub", "--", &app_id]);
         let result = kyth_shared::system::process::run_bounded_command_cancel(
             command,
@@ -2108,8 +2147,10 @@ fn open_feedback_issue(title: String, body: String) -> Result<String, String> {
         &body,
         None,
     );
-    kyth_shared::system::process::spawn_detached(std::process::Command::new("xdg-open").arg(&url))
-        .map_err(|err| format!("could not open browser: {err}"))?;
+    kyth_shared::system::process::spawn_detached(
+        std::process::Command::new("/usr/bin/xdg-open").arg(&url),
+    )
+    .map_err(|err| format!("could not open browser: {err}"))?;
     Ok("Opened a prefilled issue in your browser.".to_string())
 }
 
@@ -2399,7 +2440,7 @@ fn exe_handler_set_auto_bottles(enabled: bool) -> Result<(), String> {
 #[tauri::command]
 fn exe_handler_open_flathub(search_term: String) -> Result<(), String> {
     let query: String = url::form_urlencoded::byte_serialize(search_term.as_bytes()).collect();
-    let mut open = Command::new("xdg-open");
+    let mut open = Command::new("/usr/bin/xdg-open");
     open.arg(format!("https://flathub.org/apps/search?q={query}"))
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
@@ -2417,7 +2458,7 @@ fn exe_handler_flatpak_installed(app_id: String) -> Result<bool, String> {
     // "not installed" for the UI rather than an error.
     match kyth_shared::system::process::run_bounded(
         &[
-            "flatpak".to_string(),
+            "/usr/bin/flatpak".to_string(),
             "info".to_string(),
             "--user".to_string(),
             "--".to_string(),
@@ -2436,7 +2477,7 @@ fn exe_handler_launch_flatpak(app_id: String) -> Result<(), String> {
     if !kyth_shared::system::software_catalog::is_flatpak_installed(&app_id) {
         return Err("That Linux application is not installed.".to_string());
     }
-    let mut run = Command::new("flatpak");
+    let mut run = Command::new("/usr/bin/flatpak");
     run.args(["run", "--user", "--", &app_id])
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

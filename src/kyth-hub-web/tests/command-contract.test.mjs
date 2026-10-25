@@ -177,7 +177,11 @@ test("native bridge calls have a default deadline and polling uses a shorter pro
 });
 
 test("invalidated reads cannot repopulate stale cache and persisted jobs reject future timestamps", () => {
-  assert.match(service, /sharedReads\.get\(key\)\?\.pending === pending[\s\S]*?sharedReads\.set\(key, \{ value, expiresAt:/);
+  // Scoped to sharedRead's own body: over the whole file, the set() half
+  // of this sequence could have come from a different function.
+  const sharedRead = service.match(/async function sharedRead\b[\s\S]*?\n}/)?.[0] ?? "";
+  assert.notEqual(sharedRead, "", "sharedRead not found");
+  assert.match(sharedRead, /sharedReads\.get\(key\)\?\.pending === pending[\s\S]*?sharedReads\.set\(key, \{ value, expiresAt:/);
   assert.match(service, /const age = Date\.now\(\) - ts;\s*if \(age < 0 \|\| age > REATTACHED_JOB_TTL_MS\) return null;/);
   assert.match(service, /if \(!Number\.isFinite\(unixSeconds\)\) return "unknown time"/);
 });
@@ -190,12 +194,20 @@ test("Updates wrappers are present and used by the page", () => {
 });
 
 test("Updates actions use the native job bridge instead of just recipes", () => {
+  // Per-function scoping: the old whole-file regexes let a LATER function
+  // in updates.rs satisfy the claim for a command that had lost its own
+  // job-bridge call. Extract each command's body (rustfmt puts the
+  // closing brace at column 0) and assert inside it.
   for (const command of ["bootc_rollback", "apply_staged"]) {
-    assert.match(updatesRust, new RegExp(`fn ${command}\\b[\\s\\S]*?start_update_job`), command);
+    const body = updatesRust.match(new RegExp(`fn ${command}\\b[\\s\\S]*?\\n}`))?.[0] ?? "";
+    assert.notEqual(body, "", `${command} not found`);
+    assert.match(body, /start_update_job/, command);
   }
   // The stage path streams helper progress markers, so it launches through
   // the streaming variant — same job bridge, same cancel/timeout contract.
-  assert.match(updatesRust, /fn bootc_upgrade\b[\s\S]*?start_stage_job/, "bootc_upgrade");
+  const bootcUpgrade = updatesRust.match(/fn bootc_upgrade\b[\s\S]*?\n}/)?.[0] ?? "";
+  assert.notEqual(bootcUpgrade, "", "bootc_upgrade not found");
+  assert.match(bootcUpgrade, /start_stage_job/, "bootc_upgrade");
   assert.match(updatesOverview, /invokeApplyStaged/);
   assert.doesNotMatch(updatesOverview, /RecipeButton recipe="(?:apply-staged|update-health)"/);
 });
@@ -211,8 +223,12 @@ test("App updates poll long enough for bounded backend work and refresh the snap
 });
 
 test("Backend flatpak update is bounded so a hung mirror can't wedge the job forever", () => {
-  assert.match(rust, /fn update_flatpaks\b[\s\S]*?run_bounded_command/, "update_flatpaks must run the user flatpak update through run_bounded_command, not a raw .output() call");
-  assert.match(rust, /fn update_flatpaks\b[\s\S]*?ErrorKind::TimedOut/, "a timeout from run_bounded_command must be reported as a timeout, not misreported as \"Could not start Flatpak\"");
+  // Scoped to update_flatpaks' own body: the whole-file regex let any
+  // later function in main.rs using run_bounded_command satisfy this.
+  const updateFlatpaks = rust.match(/fn update_flatpaks\b[\s\S]*?\n}/)?.[0] ?? "";
+  assert.notEqual(updateFlatpaks, "", "update_flatpaks not found");
+  assert.match(updateFlatpaks, /run_bounded_command/, "update_flatpaks must run the user flatpak update through run_bounded_command, not a raw .output() call");
+  assert.match(updateFlatpaks, /ErrorKind::TimedOut/, "a timeout from run_bounded_command must be reported as a timeout, not misreported as \"Could not start Flatpak\"");
 });
 
 test("Updates page reconciles the explicit check into the read model", () => {
@@ -797,7 +813,9 @@ test("phase-4 backend honesty is enforced, not documented", async () => {
   // flatpak permission fixes run shell-free, and the health check verifies
   // futex2/preempt/VRR/MangoHud instead of assuming them.
   const securityRust = await readFile(resolve(root, "src-tauri/src/commands/security.rs"), "utf8");
-  assert.match(securityRust, /build_kali_create_command\([\s\S]*?parsed,?\s*\)\?/, "invalid box names must fail the command, not reach bash");
+  const kaliCreate = securityRust.match(/fn kali_create\b[\s\S]*?\n}/)?.[0] ?? "";
+  assert.notEqual(kaliCreate, "", "kali_create not found");
+  assert.match(kaliCreate, /build_kali_create_command\([\s\S]*?parsed,?\s*\)\?/, "invalid box names must fail the command, not reach bash");
   assert.match(securityRust, /build_kali_remove_command\(DEFAULT_KALI_BOX\)\?/, "remove must fail closed too");
 });
 
@@ -805,7 +823,12 @@ test("phase-5 stops silent data loss and fake success", async () => {
   // Cloud copy never deletes, destructive recipes fail loudly without a
   // TTY, app opens precheck, archives refuse symlinks, shrinks refuse
   // unknown encryption, and focus reaps orphaned inhibitors.
-  assert.match(rust, /"copy"\.to_string\(\),[\s\S]*?--backup-dir/, "cloud sync must copy with a backup dir, never sync-delete");
+  // Scoped to cloud_sync_now's own body: the whole-file regex let the
+  // "copy" and the --backup-dir come from two different functions.
+  const cloudSync = rust.match(/fn cloud_sync_now\b[\s\S]*?\n}/)?.[0] ?? "";
+  assert.notEqual(cloudSync, "", "cloud_sync_now not found");
+  assert.match(cloudSync, /"copy"\.to_string\(\)/, "cloud sync must copy, never sync-delete");
+  assert.match(cloudSync, /--backup-dir/, "cloud sync must copy with a backup dir, never sync-delete");
   assert.match(rust, /Pika Backup is not installed; install it from the App Store first/, "missing backup app must say so");
   assert.match(rust, /reap_stale_focus_inhibits/, "focus must reap orphaned inhibitors");
   assert.match(service, /Files already here are kept; overwritten ones are backed up first/, "cloud confirm must promise no deletion");
@@ -900,5 +923,10 @@ test("bug-hunt round 3: destructive privileged ops require modal confirmation", 
   }
   assert.match(service, /DESTRUCTIVE_PRIVILEGED_OPS/, "destructive ops must be enumerated in one place");
   assert.match(service, /confirmUserAction\(privilegedActionPrompt\(operation, payload\)\)/, "privileged actions must confirm via modal before invoking");
-  assert.match(service, /removeKaliBox[\s\S]*?confirmUserAction\("Remove the Kali/, "kali_remove must confirm via modal before invoking");
+  // Scoped to removeKaliBox's own body: over the whole file, a confirm
+  // in any later function could satisfy this for a removeKaliBox that
+  // had lost its own.
+  const removeKaliBoxBody = service.match(/export async function removeKaliBox\(\)[\s\S]*?\n}/)?.[0] ?? "";
+  assert.notEqual(removeKaliBoxBody, "", "removeKaliBox not found");
+  assert.match(removeKaliBoxBody, /confirmUserAction\("Remove the Kali/, "kali_remove must confirm via modal before invoking");
 });

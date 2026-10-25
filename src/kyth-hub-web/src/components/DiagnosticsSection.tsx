@@ -56,9 +56,16 @@ export function DiagnosticsSection({ section }: { section: HubSection }) {
         <div style={{ marginTop: 20 }}>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 12 }}>
             {checks && (
-              <span className={`pill ${failed.length === 0 ? "pill-ok" : "pill-warn"}`}>
-                boot checks: {checks.length - failed.length}/{checks.length} passed
-              </span>
+              checks.length === 0 ? (
+                // An empty list is a read that reported nothing, not a
+                // pass: "0/0 passed" in green claimed a success that
+                // never happened.
+                <span className="pill pill-dim">boot checks: couldn’t check</span>
+              ) : (
+                <span className={`pill ${failed.length === 0 ? "pill-ok" : "pill-warn"}`}>
+                  boot checks: {checks.length - failed.length}/{checks.length} passed
+                </span>
+              )
             )}
             {memory && (
               <span className={`pill ${memory.status === "ok" ? "pill-ok" : "pill-warn"}`}>memory: {memory.status}</span>

@@ -50,19 +50,38 @@ export function ChannelsSection({ section }: { section: HubSection }) {
             </p>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
               {SWITCHABLE_CHANNELS.map(({ key, label }) => {
-                const current = rawTag != null && rawTag.startsWith(TAG_FOR_CHANNEL[key]);
+                // Current means the exact tag: a "latest-cachy" device is
+                // on the CachyOS-kernel variant of Stable, not plain
+                // Stable, and startsWith() used to mark it "(current)"
+                // under the plain label.
+                const current = rawTag != null && rawTag === TAG_FOR_CHANNEL[key];
                 return (
                   <ActionButton
                     key={key}
                     label={
                       busy === key ? `Switching to ${label}…` : current ? `${label} (current)` : `Switch to ${label}`
                     }
-                    disabled={busy !== null || current}
+                    disabled={busy !== null || current || rawTag === null}
                     onClick={() => run(key, `Switching to ${label}…`, () => invokeBootcSwitchBranch(key))}
                   />
                 );
               })}
             </div>
+            {loaded && rawTag === null && (
+              // The display name resolved but the raw tag read failed:
+              // which channel is current is unknown, so both switches
+              // stay disabled — offering them anyway put a redeploy of
+              // the channel the device may already be on one click away.
+              <p className="card-copy" role="alert" style={{ fontSize: 12, marginTop: 12 }}>
+                Couldn’t check the current channel — switching is unavailable until that read works.
+              </p>
+            )}
+            {loaded && (rawTag === "latest-cachy" || rawTag === "testing-cachy") && (
+              <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
+                This device follows the CachyOS kernel variant of its channel (named above), so neither plain
+                channel is marked current — switching chooses the plain channel instead.
+              </p>
+            )}
             <ActionStatus status={status} />
           </div>
         </div>

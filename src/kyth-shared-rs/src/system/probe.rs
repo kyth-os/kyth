@@ -35,14 +35,9 @@ pub fn disk_ttl() -> HashMap<&'static str, f64> {
         ("nvidia-detect", 300.0),
         ("controllers-detect", 120.0),
         ("display-detect", 30.0),
-        ("hardware-probes", 30.0),
         ("hardware-snapshot", 600.0),
-        ("ntfs-drives", 30.0),
-        ("secureboot-state", 300.0),
         ("hardware-summary", 30.0),
         ("network-summary", 60.0),
-        ("audit-cache", 30.0),
-        ("firmware-cache", 300.0),
     ])
 }
 
@@ -772,6 +767,18 @@ mod tests {
     }
 
     #[test]
+    fn disk_ttl_covers_exactly_the_emitted_sections() {
+        // A TTL entry for a section no collector emits makes read_section
+        // callers wait on data that can never arrive (the dead
+        // secureboot-state / firmware-cache / audit-cache / ntfs-drives /
+        // hardware-probes entries did exactly that); a missing entry makes
+        // an emitted section unreadable. The lists must stay identical.
+        let ttl: std::collections::HashSet<_> = disk_ttl().keys().copied().collect();
+        let emitted: std::collections::HashSet<_> = CACHEABLE_SECTIONS.iter().copied().collect();
+        assert_eq!(ttl, emitted);
+    }
+
+    #[test]
     fn skipped_sections_never_appear_in_the_parallel_snapshot() {
         // Exercises the threaded collector: skipped keys must be absent even
         // when every other section is collected live.
@@ -905,9 +912,9 @@ mod tests {
 
     #[test]
     fn invalidates_all_known_sections_but_preserves_unknown_sections() {
-        let document = json!({"sections":{"audit-cache":{},"custom":{}},"metadata":"keep"});
+        let document = json!({"sections":{"flatpak-apps":{},"custom":{}},"metadata":"keep"});
         let updated = invalidate_sections(&document, None, 9.0).unwrap();
-        assert!(updated["sections"].get("audit-cache").is_none());
+        assert!(updated["sections"].get("flatpak-apps").is_none());
         assert!(updated["sections"].get("custom").is_some());
         assert_eq!(updated["metadata"], "keep");
     }

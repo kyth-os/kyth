@@ -1,5 +1,6 @@
 import type { ComponentType, SVGProps } from "react";
 import { DESTINATIONS } from "./data/destinations";
+import { IconGrid, IconHome, IconTerminal } from "./components/icons";
 
 /** Hub search over the shared route manifest.
  *
@@ -20,11 +21,30 @@ export interface SearchEntry {
   description: string;
   destination: string;
   Icon: ComponentType<SVGProps<SVGSVGElement>>;
+  /** Explicit route for destination-level entries. Section entries omit
+   * it and keep routing through routeForPage(entry.key); destination
+   * entries carry theirs because the deep-link table is keyed by
+   * section/destination keys and the shell-only pages below (Home,
+   * Dev Tools) have no manifest destination to resolve from at all. */
+  route?: string;
 }
 
 function buildIndex(): SearchEntry[] {
   const entries: SearchEntry[] = [];
-  for (const { key: destination, sections } of DESTINATIONS) {
+  // Destination-level entries: the index used to hold sections only, so
+  // the pages users name first — Home, Dev Tools, and the destinations
+  // themselves ("This PC", "Move In") — matched nothing, or only stray
+  // description substrings on unrelated sections. One entry per
+  // destination, titled by its displayed name, alongside its sections.
+  entries.push({
+    key: "dest:Home",
+    title: "Home",
+    description: "Health and the next step",
+    destination: "Destination",
+    route: "/",
+    Icon: IconHome,
+  });
+  for (const { key: destination, route, sections } of DESTINATIONS) {
     for (const section of sections) {
       entries.push({
         key: section.key,
@@ -34,7 +54,23 @@ function buildIndex(): SearchEntry[] {
         Icon: section.Icon,
       });
     }
+    entries.push({
+      key: `dest:${destination}`,
+      title: destination,
+      description: sections.map((section) => section.title).join(" · "),
+      destination: "Destination",
+      route,
+      Icon: sections[0]?.Icon ?? IconGrid,
+    });
   }
+  entries.push({
+    key: "dest:Dev Tools",
+    title: "Dev Tools",
+    description: "AI dev box, editors, agents",
+    destination: "Destination",
+    route: "/dev-tools",
+    Icon: IconTerminal,
+  });
   return entries;
 }
 

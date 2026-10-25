@@ -62,14 +62,18 @@ export function SessionsChart({ sessions }: { sessions: TelemetrySession[] }) {
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 160 }}>
             <p className="card-copy" style={{ fontSize: 12 }}>
-              No sessions recorded yet.
+              {isLive
+                ? "Sessions are recorded, but none have a start time to place on the chart yet."
+                : "No sessions recorded yet."}
             </p>
           </div>
         )}
       </div>
       {!showLiveData && (
         <p className="card-copy" style={{ marginTop: 12, fontSize: 11.5 }}>
-          No telemetry sessions are available yet.
+          {isLive
+            ? "Sessions exist, but none carry a start time the chart can use yet."
+            : "No telemetry sessions are available yet."}
         </p>
       )}
       {showLiveData && (

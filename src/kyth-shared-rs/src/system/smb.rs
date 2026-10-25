@@ -34,7 +34,11 @@ pub fn smb_discover_command(host: Option<&str>) -> Vec<String> {
 }
 
 pub fn smb_mount_command(share: &str) -> Vec<String> {
-    vec!["gio".to_string(), "mount".to_string(), share.to_string()]
+    vec![
+        "/usr/bin/gio".to_string(),
+        "mount".to_string(),
+        share.to_string(),
+    ]
 }
 
 /// Display form of an SMB URI with userinfo stripped: `smb://user:pass@host/share`
@@ -153,7 +157,7 @@ mod tests {
     fn mount() {
         assert_eq!(
             smb_mount_command("smb://host/share"),
-            vec!["gio", "mount", "smb://host/share"]
+            vec!["/usr/bin/gio", "mount", "smb://host/share"]
         );
     }
 }

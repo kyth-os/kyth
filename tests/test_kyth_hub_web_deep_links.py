@@ -110,9 +110,24 @@ class HubWebDeepLinkTests(unittest.TestCase):
         )
 
     def test_updates_is_the_last_left_rail_destination(self):
-        entries = re.findall(r'\{ to: "([^"]+)", label: "([^"]+)",', SIDEBAR_TSX)
-        self.assertTrue(entries)
-        self.assertEqual(entries[-1], ("/updates", "Updates"))
+        # The rail is derived from the manifest, not hardcoded: a Home
+        # splice, the first two manifest destinations, a Dev Tools splice,
+        # then the remaining manifest destinations in manifest order.
+        # Rebuild the rendered rail from those exact sources; Updates must
+        # still come last (it is a global action that stays out of the way
+        # of the everyday workflow).
+        self.assertIn("DESTINATIONS.map", SIDEBAR_TSX)
+        splices = re.findall(r'\{ to: "([^"]+)", label: "([^"]+)",', SIDEBAR_TSX)
+        self.assertEqual(splices, [("/", "Home"), ("/dev-tools", "Dev Tools")])
+        self.assertIn("...workspaceDestinations.slice(0, 2)", SIDEBAR_TSX)
+        self.assertIn("...workspaceDestinations.slice(2)", SIDEBAR_TSX)
+        manifest = [
+            (destination["route"], destination["key"])
+            for destination in HUB_ROUTES["destinations"]
+        ]
+        rail = [splices[0], *manifest[:2], splices[1], *manifest[2:]]
+        self.assertEqual(rail[0], ("/", "Home"))
+        self.assertEqual(rail[-1], ("/updates", "Updates"))
 
     def test_sections_are_derived_not_hardcoded_in_the_route_table(self):
         # Guards the regression's actual cause: if someone re-lists sections

@@ -73,7 +73,6 @@ pub mod hardware_view;
 pub mod hdr;
 pub mod hdr_per_game;
 pub mod hdr_store;
-pub mod hub_snapshot;
 pub mod input_preset;
 pub mod installer_plan;
 pub mod installer_query;

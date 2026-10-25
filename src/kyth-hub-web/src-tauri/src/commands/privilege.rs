@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::sync::{Mutex, OnceLock};
@@ -307,9 +307,101 @@ fn send_request_for_job(request: Value, job: &str) -> Result<String, String> {
     send_request_inner(request, Some(job))
 }
 
+/// Connect to the privileged daemon with a bounded wait.
+///
+/// `UnixStream::connect` has no timeout: against a wedged daemon whose
+/// listen backlog is full it can block indefinitely. The honest bound
+/// for a local socket is a nonblocking connect with a poll deadline;
+/// blocking mode is restored before the stream is handed over, so the
+/// caller's explicit read/write timeouts govern from there. (A plain
+/// local connect that succeeds or refuses immediately — the normal
+/// cases — never reaches the poll.)
+fn connect_privileged_socket() -> Result<UnixStream, String> {
+    connect_unix_with_timeout(
+        "/run/kyth/privileged.sock",
+        std::time::Duration::from_secs(10),
+    )
+}
+
+fn connect_unix_with_timeout(
+    path: &str,
+    timeout: std::time::Duration,
+) -> Result<UnixStream, String> {
+    use std::os::unix::io::FromRawFd;
+    let unavailable = || tag_privileged("privileged service is unavailable".to_string());
+    let path_bytes = path.as_bytes();
+    let mut address: libc::sockaddr_un = unsafe { std::mem::zeroed() };
+    if path_bytes.len() >= address.sun_path.len() {
+        return Err(unavailable());
+    }
+    address.sun_family = libc::AF_UNIX as libc::sa_family_t;
+    for (slot, byte) in address.sun_path.iter_mut().zip(path_bytes.iter()) {
+        *slot = *byte as libc::c_char;
+    }
+    let fd = unsafe {
+        libc::socket(
+            libc::AF_UNIX,
+            libc::SOCK_STREAM | libc::SOCK_NONBLOCK | libc::SOCK_CLOEXEC,
+            0,
+        )
+    };
+    if fd < 0 {
+        return Err(unavailable());
+    }
+    // The fd must be closed on every failure path from here.
+    let connected = unsafe {
+        let length =
+            (std::mem::size_of::<libc::sa_family_t>() + path_bytes.len()) as libc::socklen_t;
+        let rc = libc::connect(
+            fd,
+            &address as *const libc::sockaddr_un as *const libc::sockaddr,
+            length,
+        );
+        if rc == 0 {
+            true
+        } else if std::io::Error::last_os_error().raw_os_error() != Some(libc::EINPROGRESS) {
+            false
+        } else {
+            let mut pollfd = libc::pollfd {
+                fd,
+                events: libc::POLLOUT,
+                revents: 0,
+            };
+            let millis = timeout.as_millis().min(libc::c_int::MAX as u128) as libc::c_int;
+            if libc::poll(&mut pollfd, 1, millis) != 1 {
+                false
+            } else {
+                let mut so_error: libc::c_int = 0;
+                let mut so_len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+                libc::getsockopt(
+                    fd,
+                    libc::SOL_SOCKET,
+                    libc::SO_ERROR,
+                    &mut so_error as *mut libc::c_int as *mut libc::c_void,
+                    &mut so_len,
+                ) == 0
+                    && so_error == 0
+            }
+        }
+    };
+    // Restore blocking mode: SO_RCVTIMEO (set by the caller right after)
+    // is ignored on a nonblocking socket, so a stream left nonblocking
+    // would silently lose its read bound.
+    let blocking = unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        flags >= 0 && libc::fcntl(fd, libc::F_SETFL, flags & !libc::O_NONBLOCK) == 0
+    };
+    if !connected || !blocking {
+        unsafe {
+            libc::close(fd);
+        }
+        return Err(unavailable());
+    }
+    Ok(unsafe { UnixStream::from_raw_fd(fd) })
+}
+
 fn send_request_inner(request: Value, job: Option<&str>) -> Result<String, String> {
-    let mut stream = UnixStream::connect("/run/kyth/privileged.sock")
-        .map_err(|_| tag_privileged("privileged service is unavailable".to_string()))?;
+    let mut stream = connect_privileged_socket()?;
     // Registered as soon as the connection exists, so a cancel that lands
     // at any point during the request can shut it down.
     let _registration = job.map(|job| {
@@ -338,28 +430,40 @@ fn send_request_inner(request: Value, job: Option<&str>) -> Result<String, Strin
         .map_err(|error| {
             tag_privileged(format!("could not contact privileged service: {error}"))
         })?;
+    // The response is one JSON line whose detail is capped by the
+    // protocol (MAX_DETAIL_CHARS); bound the read to the protocol's max
+    // frame so a wedged or hostile daemon cannot grow this buffer
+    // without limit behind the 910 s read timeout.
     let mut response = String::new();
-    BufReader::new(stream)
+    let read = BufReader::new(stream)
+        .take(kyth_shared::privileged::MAX_RESPONSE_LINE_BYTES)
         .read_line(&mut response)
         .map_err(|error| tag_privileged(format!("could not read privileged service: {error}")))?;
+    if read as u64 >= kyth_shared::privileged::MAX_RESPONSE_LINE_BYTES && !response.ends_with('\n')
+    {
+        return Err(tag_privileged(
+            "privileged service response exceeded the protocol size limit".to_string(),
+        ));
+    }
     let value: Value = serde_json::from_str(&response)
         .map_err(|error| tag_privileged(format!("invalid privileged service response: {error}")))?;
+    // The shared cap is re-applied on decode, after the (untouched)
+    // redaction, so the bound holds even against a daemon that does not
+    // enforce it.
     if value.get("ok").and_then(Value::as_bool).unwrap_or(false) {
         let detail = value
             .get("detail")
             .and_then(Value::as_str)
             .unwrap_or("Operation complete.");
-        Ok(kyth_shared::privileged::redact_request_detail(
-            &request, detail,
-        ))
+        let detail = kyth_shared::privileged::redact_request_detail(&request, detail);
+        Ok(kyth_shared::privileged::cap_detail(&detail))
     } else {
         let detail = value
             .get("detail")
             .and_then(Value::as_str)
             .unwrap_or("privileged operation failed");
-        Err(tag_privileged(
-            kyth_shared::privileged::redact_request_detail(&request, detail),
-        ))
+        let detail = kyth_shared::privileged::redact_request_detail(&request, detail);
+        Err(tag_privileged(kyth_shared::privileged::cap_detail(&detail)))
     }
 }
 
@@ -564,6 +668,33 @@ mod tests {
             &payload(json!({ "device": "/dev/sda1", "key": key }))
         )
         .is_err());
+    }
+
+    #[test]
+    fn bounded_connect_reaches_a_listener_and_refuses_a_missing_socket() {
+        let dir =
+            std::env::temp_dir().join(format!("kyth-priv-connect-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("daemon.sock");
+        let path = path.to_str().unwrap().to_string();
+        let listener = std::os::unix::net::UnixListener::bind(&path).unwrap();
+        // A listening socket accepts (via its backlog) and the returned
+        // stream is back in blocking mode.
+        let stream = super::connect_unix_with_timeout(&path, std::time::Duration::from_secs(5))
+            .expect("connect to a listening socket must succeed");
+        assert!(stream
+            .set_read_timeout(Some(std::time::Duration::from_millis(50)))
+            .is_ok());
+        drop(stream);
+        drop(listener);
+        // The socket file remains but nothing listens: refusal is fast
+        // and reported as unavailability, not a hang.
+        let started = std::time::Instant::now();
+        let missing = super::connect_unix_with_timeout(&path, std::time::Duration::from_secs(5));
+        assert!(missing.is_err());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

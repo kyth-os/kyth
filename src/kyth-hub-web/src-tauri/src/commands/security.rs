@@ -313,7 +313,7 @@ pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityAction
             return ("cancelled".into(), "Cancelled.".into());
         }
         update_job(&worker_job, &format!("Installing {worker_name}…"));
-        let mut command = Command::new("flatpak");
+        let mut command = Command::new("/usr/bin/flatpak");
         command.args(["install", "--user", "-y", "flathub", "--", &flatpak_id]);
         match kyth_shared::system::process::run_bounded_command_cancel(
             command,
@@ -352,7 +352,7 @@ pub(crate) fn sec_host_tool_uninstall(flatpak_id: String) -> Result<SecurityActi
     // Pin the user scope: an unscoped uninstall can target (or prompt for)
     // the system installation instead of the per-user one this grid manages.
     let argv = vec![
-        "flatpak".to_string(),
+        "/usr/bin/flatpak".to_string(),
         "uninstall".to_string(),
         "--user".to_string(),
         "-y".to_string(),

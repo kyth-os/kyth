@@ -64,7 +64,11 @@ class TopbarSearchWiringTests(unittest.TestCase):
 
     def test_bell_dot_is_not_permanently_lit(self):
         self.assertIn("pendingCount", TOPBAR_CODE)
-        self.assertIn("{!!pendingCount && (", TOPBAR_CODE.split("IconBell")[-1])
+        # Assert the anchor first: split(...) [-1] on a missing "IconBell"
+        # silently falls back to the whole file, and the assertIn below
+        # could be satisfied by any later Topbar code.
+        self.assertIn("IconBell", TOPBAR_CODE)
+        self.assertIn("{!!pendingCount && (", TOPBAR_CODE.rsplit("IconBell", 1)[-1])
 
 class SearchRankingTests(unittest.TestCase):
     @classmethod
@@ -98,11 +102,20 @@ class SearchRankingTests(unittest.TestCase):
 
     def test_rankings_use_manifest_keys_and_scores(self):
         manifest_keys = {key for key, _title, _description in _sections_from_manifest()}
+        # The index also carries one entry per destination, keyed
+        # "dest:<destination key>" from the same manifest, plus the two
+        # shell-only entries (Home, Dev Tools) that search.ts splices in.
+        # Anything outside these three sources is still a failure: the
+        # ranker must not invent keys.
+        destination_keys = {
+            f"dest:{destination['key']}" for destination in HUB_ROUTES["destinations"]
+        } | {"dest:Home", "dest:Dev Tools"}
+        accepted_keys = manifest_keys | destination_keys
         for query in QUERIES:
             with self.subTest(query=query):
                 self.assertLessEqual(len(self.ts_rankings[query]), 5)
                 for key, score in self.ts_rankings[query]:
-                    self.assertIn(key, manifest_keys)
+                    self.assertIn(key, accepted_keys)
                     self.assertGreater(score, 0)
 
     def test_comparison_is_not_vacuous(self):

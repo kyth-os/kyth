@@ -19,6 +19,25 @@ MAIN_RS = (HUB / "src-tauri" / "src" / "main.rs").read_text(encoding="utf-8")
 DASHBOARD_RS = (HUB / "src-tauri" / "src" / "commands" / "dashboard.rs").read_text(encoding="utf-8")
 
 
+
+def _function_body(source: str, anchor: str) -> str:
+    """The brace-balanced region starting at `anchor` (a fn signature).
+
+    Raises ValueError if the anchor is absent, so a renamed/removed
+    command fails loudly instead of degrading to a whole-file search.
+    The anchored signatures contain no braces before the body opens.
+    """
+    start = source.index(anchor)
+    depth = 0
+    for pos in range(source.index("{", start), len(source)):
+        if source[pos] == "{":
+            depth += 1
+        elif source[pos] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start : pos + 1]
+    raise AssertionError(f"unbalanced braces after {anchor!r}")
+
 class HubWebPerformanceTests(unittest.TestCase):
     def test_overview_destinations_do_not_mount_a_workspace_by_default(self) -> None:
         self.assertIn("defaultToFirstSection = false", HUB_PAGE)
@@ -61,19 +80,31 @@ class HubWebPerformanceTests(unittest.TestCase):
         self.assertNotIn("fetchTelemetryRecent", SESSIONS_CHART)
 
     def test_subprocess_backed_reads_use_the_blocking_runtime(self) -> None:
-        for command in (
-            "async fn network_identity",
-            "async fn installed_flatpaks",
-            "async fn desktop_stack_checks",
-            "async fn controllers_detect",
-            "async fn btrfs_health",
-            "async fn mok_status",
+        # Per-command scoping. The old form asserted each signature exists
+        # somewhere in its file plus a file-wide spawn_blocking COUNT
+        # (>= 6 in main.rs, >= 3 in dashboard.rs): one command could lose
+        # its blocking runtime — and start freezing a command worker on
+        # subprocess work — while unrelated commands kept the aggregate
+        # green. Extract each command's own body and require the call in
+        # it. (Bodies verified free of brace-bearing strings that would
+        # break the balanced scan for these eight commands.)
+        for source, commands in (
+            (
+                MAIN_RS,
+                (
+                    "network_identity",
+                    "installed_flatpaks",
+                    "desktop_stack_checks",
+                    "controllers_detect",
+                    "btrfs_health",
+                    "mok_status",
+                ),
+            ),
+            (DASHBOARD_RS, ("hardware_snapshot", "boot_runtime_checks")),
         ):
-            self.assertIn(command, MAIN_RS)
-        for command in ("async fn hardware_snapshot", "async fn boot_runtime_checks"):
-            self.assertIn(command, DASHBOARD_RS)
-        self.assertGreaterEqual(MAIN_RS.count("spawn_blocking"), 6)
-        self.assertGreaterEqual(DASHBOARD_RS.count("spawn_blocking"), 3)
+            for command in commands:
+                body = _function_body(source, f"async fn {command}")
+                self.assertIn("spawn_blocking", body, command)
 
     def test_embedded_production_frontend_does_not_ship_source_maps(self) -> None:
         self.assertIn("sourcemap: false", VITE_CONFIG)

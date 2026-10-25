@@ -69,7 +69,9 @@ export function PerformanceChart({ sessions }: { sessions: TelemetrySession[] })
         ) : (
           <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", minHeight: 220 }}>
             <p className="card-copy" style={{ fontSize: 12 }}>
-              No sessions recorded yet — play a game and check back.
+              {isLive
+                ? "Sessions are recorded, but none have FPS data to chart yet."
+                : "No sessions recorded yet — play a game and check back."}
             </p>
           </div>
         )}

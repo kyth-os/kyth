@@ -114,9 +114,24 @@ setup-quality:
 # Run the complete validation suite used by GitHub Actions and pre-push.
 # Wrapped via the scripts' own systemd-run --scope deprioritization so direct
 # `just validate` on a live desktop doesn't starve kwin/Plasma.
+# After validate.sh, the Hub's behavioral .mjs suites run too — they used to
+# execute only under `just check-hub-shell` / CI's hub-shell job, so the
+# standing local gate (just test + just validate) never ran a behavioral Hub
+# test. Skipped with a message when the frontend dependencies are not
+# installed. CI is unaffected: its validation job calls validate.sh directly
+# and its hub-shell job runs these suites on every push.
 [group('Quality')]
 validate:
+    #!/usr/bin/env bash
+    set -euo pipefail
     ./build_files/scripts/validate.sh
+    hub_web="src/kyth-hub-web"
+    if [[ -d "${hub_web}/node_modules" ]] && command -v npm >/dev/null 2>&1; then
+        echo "==> Hub behavioral suites (.mjs)"
+        (cd "${hub_web}" && npm run test:contracts && npm run test:vpn-handoff && npm run test:exe-poll && npm run test:job-results && npm run test:smoke)
+    else
+        echo "==> Hub behavioral suites SKIPPED — frontend dependencies not installed (run 'just setup-hub'); CI's hub-shell job runs them on every push"
+    fi
 
 # Run Validation plus changed-file Codacy and pinned CodeQL security checks.
 # Same deprioritization as validate — this is the heaviest local gate.

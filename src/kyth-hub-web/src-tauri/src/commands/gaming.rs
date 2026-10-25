@@ -93,7 +93,7 @@ pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaun
         }
 
         update_job(&worker_job, &format!("Installing {worker_name}…"));
-        let mut command = Command::new("flatpak");
+        let mut command = Command::new("/usr/bin/flatpak");
         command.args(["install", "--user", "-y", "flathub"]);
         command.arg(flatpak_id);
         match kyth_shared::system::process::run_bounded_command_cancel(
@@ -133,7 +133,7 @@ pub(crate) fn gaming_tool_uninstall(flatpak_id: String) -> Result<GamingActionLa
     // Pin the user scope: an unscoped uninstall can target (or prompt for)
     // the system installation instead of the per-user one this grid manages.
     let argv = vec![
-        "flatpak".to_string(),
+        "/usr/bin/flatpak".to_string(),
         "uninstall".to_string(),
         "--user".to_string(),
         "-y".to_string(),
@@ -298,7 +298,7 @@ pub(crate) fn open_game_folder(key: String) -> Result<String, String> {
     if !std::path::Path::new(&expanded).exists() {
         return Err(format!("Folder not found yet: {expanded}"));
     }
-    kyth_shared::system::process::spawn_detached(Command::new("xdg-open").arg(&expanded))
+    kyth_shared::system::process::spawn_detached(Command::new("/usr/bin/xdg-open").arg(&expanded))
         .map_err(|err| format!("could not open {expanded}: {err}"))?;
     Ok(format!("Opened {expanded}"))
 }

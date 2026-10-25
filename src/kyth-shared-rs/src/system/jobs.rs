@@ -12,10 +12,14 @@
 //! - every running entry carries a cancellation flag. Workers that run a
 //!   child process poll it via
 //!   [`crate::system::process::run_bounded_command_cancel`], so cancelling
-//!   actually kills the process. Workers that only do socket I/O (the
-//!   privileged helper) cannot be killed mid-request: cancelling them marks
-//!   the job `cancelled` and their late `finish` becomes a no-op so the UI
-//!   never resurrects a job the user dismissed.
+//!   actually kills the process. The privileged worker does socket I/O
+//!   against the root daemon, so it registers its connection under the job
+//!   id instead: cancelling shuts that connection down, the daemon treats
+//!   the vanished client as abandonment and kills the operation's process
+//!   group, and the worker's blocked read fails. For every worker shape
+//!   the store is the backstop — cancelling marks the job `cancelled` and
+//!   a late `finish` becomes a no-op, so the UI never resurrects a job
+//!   the user dismissed.
 //!
 //! A `finish` for a cancelled job is always a no-op, and `cancel` for a
 //! terminal or unknown job returns `false`.
@@ -122,8 +126,10 @@ impl JobStore {
     }
 
     /// Register a job as running and return its cancellation flag, which the
-    /// worker thread must hand to the cancellable runner (or hold, for
-    /// socket-I/O workers that can only be marked cancelled). A start for
+    /// worker thread must hand to the cancellable runner (or, for the
+    /// privileged socket worker, check before sending while its cancel
+    /// hook — the registered daemon connection — takes over mid-request).
+    /// A start for
     /// an id that is ALREADY present (same-tick double start, stale client,
     /// id reuse) must not clobber it: the first worker would be
     /// orphaned, cancels would signal the wrong generation, and finishes
