@@ -5,6 +5,8 @@ import { applyPipewireQuantum, fetchAudioPresets, fetchAuditCache, fetchGamingPe
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
+type SectionRun = (id: string, pendingLabel: string, action: () => Promise<string>) => Promise<void>;
+
 // "Play > Performance" — scheduler / memory tunables from audit-cache,
 // performance profiles, sched-ext/overlay state, and the PipeWire quantum,
 // which is the audio-latency knob that matters for gaming.
@@ -17,17 +19,23 @@ export function PerformanceSection({ section }: { section: HubSection }) {
   const [gamingTools, setGamingTools] = useState<GamingPerfStatus | null>(null);
   const [scx, setScx] = useState<ScxStatus | null>(null);
   const [scxAvailable, setScxAvailable] = useState<string[] | null>(null);
-  const { status, busy, run } = useSectionAction("gaming");
+  const { status, busy, run, runCancel } = useSectionAction("gaming");
+  async function fetchAll() {
+    return Promise.all([fetchAuditCache(), fetchAudioPresets(), fetchTelemetryRecent(8), fetchGamingPerfStatus(), fetchScxStatus(), fetchScxAvailable()]);
+  }
+  function applyAll([a, p, recent, tools, scheduler, available]: Awaited<ReturnType<typeof fetchAll>>) {
+    setAudit(a);
+    setAudioPresets(p);
+    setSessions(recent);
+    setGamingTools(tools);
+    setScx(scheduler);
+    setScxAvailable(available);
+  }
   useEffect(() => {
     let c = false;
-    Promise.all([fetchAuditCache(), fetchAudioPresets(), fetchTelemetryRecent(8), fetchGamingPerfStatus(), fetchScxStatus(), fetchScxAvailable()]).then(([a, p, recent, tools, scheduler, available]) => {
+    fetchAll().then((values) => {
       if (!c) {
-        setAudit(a);
-        setAudioPresets(p);
-        setSessions(recent);
-        setGamingTools(tools);
-        setScx(scheduler);
-        setScxAvailable(available);
+        applyAll(values);
         setLoaded(true);
       }
     });
@@ -35,6 +43,14 @@ export function PerformanceSection({ section }: { section: HubSection }) {
       c = true;
     };
   }, []);
+  // Profile recipes change the audit cache the pills render from, so
+  // refetch it once the recipe settles instead of leaving the pills
+  // showing the pre-switch profile until the page is reopened.
+  const runProfileRecipe: SectionRun = async (id, label, action) => {
+    await run(id, label, action);
+    const fresh = await fetchAuditCache();
+    if (fresh) setAudit(fresh);
+  };
   async function changeScheduler(scheduler: "rusty" | "lavd" | "bpfland" | "stop"): Promise<string> {
     const result = await setScxScheduler(scheduler);
     setScx(await fetchScxStatus());
@@ -83,9 +99,10 @@ export function PerformanceSection({ section }: { section: HubSection }) {
           both back.
         </p>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 8 }}>
-          <RecipeButton recipe="gaming-mode" label="Performance (gaming profile)" busy={busy} run={run} />
-          <RecipeButton recipe="balanced-mode" label="Balanced" busy={busy} run={run} />
-          <RecipeButton recipe="system-audit" label="Run full audit" busy={busy} run={run} />
+          <RecipeButton recipe="gaming-mode" label="Performance (gaming profile)" busy={busy} run={runProfileRecipe} runCancel={runCancel} />
+          <RecipeButton recipe="balanced-mode" label="Balanced" busy={busy} run={runProfileRecipe} runCancel={runCancel} />
+          <RecipeButton recipe="system-audit" label="Run full audit" busy={busy} run={run} runCancel={runCancel} />
+          <ActionButton label={busy === "perf-refresh" ? "Refreshing…" : "Refresh readings"} disabled={busy !== null} onClick={() => run("perf-refresh", "Refreshing performance readings…", async () => { applyAll(await fetchAll()); return "Performance readings refreshed."; })} />
         </div>
 
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
@@ -103,13 +120,14 @@ export function PerformanceSection({ section }: { section: HubSection }) {
             </>}
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            {(scxAvailable ?? ["rusty"]).map((name) => (
+            {(scxAvailable ?? []).map((name) => (
               <ActionButton key={name} label={busy === `scheduler-${name}` ? "Starting…" : scx?.active && scx?.configured === `scx_${name}` ? `${name} on ✓` : `Use ${name}`} disabled={busy !== null} onClick={() => run(`scheduler-${name}`, `Starting scx_${name}…`, () => changeScheduler(name as "rusty" | "lavd" | "bpfland"))} />
             ))}
             <ActionButton label={busy === "scheduler-stop" ? "Stopping…" : "Stop sched-ext"} disabled={busy !== null} onClick={() => run("scheduler-stop", "Stopping sched-ext…", () => changeScheduler("stop"))} />
+            {loaded && scxAvailable === null && <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Couldn&apos;t check which schedulers are installed — scheduler choices stay hidden until that read succeeds. Use Refresh readings above to retry.</p>}
             {scxAvailable !== null && !scxAvailable.includes("lavd") && <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Only the installed schedulers are listed — lavd and bpfland appear here when their packages are installed.</p>}
-            <RecipeButton recipe="system-audit" label="Gaming audit" busy={busy} run={run} />
-            <RecipeButton recipe="gaming-stack-status" label="Stack status" busy={busy} run={run} />
+            <RecipeButton recipe="system-audit" label="Gaming audit" busy={busy} run={run} runCancel={runCancel} />
+            <RecipeButton recipe="gaming-stack-status" label="Stack status" busy={busy} run={run} runCancel={runCancel} />
             {gamingTools && (gamingTools.mangohud_installed
               ? <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Run any game with <code>MANGOHUD=1</code> for the FPS overlay — install GOverlay from Play &gt; Gaming to tune its layout without editing configs.</p>
               : <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>MangoHud ships with KythOS; seeing “missing” here means this Hub is running on another system.</p>)}
@@ -170,9 +188,9 @@ export function PerformanceSection({ section }: { section: HubSection }) {
             These native actions expose the same Gamescope, sched-ext, and low-latency paths without requiring Steam launch flags or a terminal.
           </p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-            <RecipeButton recipe="hdr-per-game" label="Build HDR per-game config" busy={busy} run={run} />
-            <RecipeButton recipe="enable-bpftune" label="Enable experimental bpftune" busy={busy} run={run} />
-            <RecipeButton recipe="disable-bpftune" label="Remove bpftune" busy={busy} run={run} />
+            <RecipeButton recipe="hdr-per-game" label="Build HDR per-game config" busy={busy} run={run} runCancel={runCancel} />
+            <RecipeButton recipe="enable-bpftune" label="Enable experimental bpftune" busy={busy} run={run} runCancel={runCancel} />
+            <RecipeButton recipe="disable-bpftune" label="Remove bpftune" busy={busy} run={run} runCancel={runCancel} />
           </div>
           <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>
             bpftune is experimental and installs from a third-party COPR (crono/bpftune-gaming) — it can fight the gaming profile. Enable it from a terminal instead: <code>ujust enable-bpftune</code>

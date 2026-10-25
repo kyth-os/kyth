@@ -99,6 +99,15 @@ struct VpnRuntime {
     child: Mutex<Option<(u64, Child)>>,
     stopped: AtomicBool,
     generation: AtomicU64,
+    /// Connect-attempt epoch. Captured when the SAML window opens and
+    /// checked by every callback/reconnect acting for that attempt;
+    /// disconnect and the connect watchdog bump it, so a callback from a
+    /// superseded attempt can never clear `stopped` or spawn a reconnect.
+    attempt: AtomicU64,
+    /// Serializes lifecycle transitions (disconnect vs. reconnect claim
+    /// vs. watchdog timeout) so a check-and-spawn cannot interleave with
+    /// a disconnect landing between the check and the spawn.
+    lifecycle: Mutex<()>,
     gateway: String,
     protocol: String,
     os_emulation: String,
@@ -119,6 +128,35 @@ fn get_job(job: &str) -> Result<Arc<VpnRuntime>, String> {
         .get(job)
         .cloned()
         .ok_or_else(|| "VPN job not found".to_string())
+}
+
+/// Webview label for a job's SAML sign-in window. One constructor so the
+/// opener and the disconnect/timeout closers cannot drift apart.
+fn saml_window_label(job: &str) -> String {
+    format!("vpn-saml-{job}")
+}
+
+/// Whether a SAML callback captured under `captured` still belongs to
+/// the live attempt: the epoch must not have moved (disconnect and the
+/// connect watchdog bump it) and the job must not be stopped. Pure so
+/// the staleness rule is unit-testable.
+fn attempt_is_current(current: u64, captured: u64, stopped: bool) -> bool {
+    !stopped && current == captured
+}
+
+/// States in which a connect attempt is still in flight: the tunnel is
+/// neither up nor terminally resolved, so the attempt deadline applies.
+/// These are also the states excluded from job reaping — a job wedged
+/// here would otherwise be tracked (and polled) forever.
+fn attempt_state_is_pending(state: &str) -> bool {
+    matches!(state, "connecting" | "authentication_required")
+}
+
+fn lifecycle_guard(runtime: &VpnRuntime) -> std::sync::MutexGuard<'_, ()> {
+    runtime
+        .lifecycle
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Fixed askpass helper for every `sudo -A` spawn in this module. One
@@ -191,6 +229,17 @@ fn stage_network_preset(rendered: &str) -> Result<PathBuf, String> {
     Err("could not stage network preset: no unique staging name".to_string())
 }
 
+/// Byte cap for a gateway that gets persisted to the saved profile.
+/// The shared command builder accepts up to 2048 bytes, but the Hub's
+/// saved-profile reader (`vpn_saved_profile` in main.rs) rejects values
+/// over 253 — a longer gateway would be saved here and then silently
+/// never reloaded. Reject it at connect time instead.
+const MAX_SAVED_GATEWAY_BYTES: usize = 253;
+
+fn gateway_fits_saved_profile(gateway: &str) -> bool {
+    gateway.len() <= MAX_SAVED_GATEWAY_BYTES
+}
+
 fn save_profile(
     gateway: &str,
     protocol: &str,
@@ -259,9 +308,47 @@ fn vpn_lockdown_target(preset: &network_preset::NetworkPreset, lockdown: bool) -
     })
 }
 
-/// Whether the Hub opted into fail-closed VPN lockdown.
+/// Whether an unexpected drop must engage the fail-closed lockdown.
+/// A corrupt preset file is NOT an opt-out: it cannot prove the user
+/// disabled protection, so the drop check fails closed and engages.
+fn vpn_fail_closed_enabled_at(path: &std::path::Path) -> bool {
+    match network_preset::load_checked(path) {
+        network_preset::PresetLoad::Loaded(preset) => preset.vpn_fail_closed,
+        network_preset::PresetLoad::Missing(_) => false,
+        network_preset::PresetLoad::Corrupt => true,
+    }
+}
+
 fn vpn_fail_closed_enabled() -> bool {
-    network_preset::load(preset_path()).vpn_fail_closed
+    vpn_fail_closed_enabled_at(&preset_path())
+}
+
+/// Preset a lockdown decision must use. Same fail-closed rule as the
+/// drop check: a corrupt file is treated as opted-in with the default
+/// (restrictive) zone, never as a deliberate opt-out.
+fn lockdown_effective_preset(load: network_preset::PresetLoad) -> network_preset::NetworkPreset {
+    match load {
+        network_preset::PresetLoad::Loaded(preset)
+        | network_preset::PresetLoad::Missing(preset) => preset,
+        network_preset::PresetLoad::Corrupt => network_preset::NetworkPreset {
+            vpn_fail_closed: true,
+            ..network_preset::NetworkPreset::default()
+        },
+    }
+}
+
+/// Serializes every network-preset write and firewall lockdown flip.
+/// `set_vpn_protection_at` is a load→render→stage→write→read-back chain
+/// (concurrent toggles lose each other's updates), and lockdown flips
+/// arrive concurrently from the worker, disconnect, and reconnect paths
+/// with no ordering (a release landing after a drop-engage would defeat
+/// fail-closed). One lock for both: they mutate the same system state.
+static NETWORK_MUTATION_LOCK: Mutex<()> = Mutex::new(());
+
+fn network_mutation_guard() -> std::sync::MutexGuard<'static, ()> {
+    NETWORK_MUTATION_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 /// Fail-closed lockdown (Hub opt-in `vpn_fail_closed`): flip firewalld to
@@ -291,7 +378,8 @@ fn set_vpn_lockdown_at(
     lockdown: bool,
     preset_file: &std::path::Path,
 ) -> bool {
-    let preset = network_preset::load(preset_file);
+    let _guard = network_mutation_guard();
+    let preset = lockdown_effective_preset(network_preset::load_checked(preset_file));
     let Some(zone) = vpn_lockdown_target(&preset, lockdown) else {
         // Opt-out no-op. Releasing lockdown stays silent — the caller owns
         // `connected`/`complete` there. But an *engage* that turns out to be
@@ -484,7 +572,11 @@ fn start_process(
                         );
                         if !saml_opened {
                             saml_opened = true;
-                            open_saml_window(&app, &job, &runtime.gateway, &saml_url);
+                            // Capture the attempt epoch for the window:
+                            // its callbacks are only honored while this
+                            // exact attempt is still the live one.
+                            let attempt = runtime.attempt.load(Ordering::SeqCst);
+                            open_saml_window(&app, &job, &runtime.gateway, &saml_url, attempt);
                         }
                     } else if kyth_shared::system::vpn_saml::line_is_connected(&line) {
                         status(&runtime, "connected", "VPN connection established.");
@@ -585,18 +677,133 @@ fn start_process(
     });
 }
 
-fn start_reconnect(app: AppHandle, job: String, cookie: String) {
+/// Overall budget for one connect attempt, including the SAML sign-in
+/// wait. A hung openconnect or an abandoned sign-in window must not
+/// wedge the job in `connecting`/`authentication_required` forever:
+/// those states are excluded from reaping, so a wedged job would also
+/// consume the capped job-store budget until a manual disconnect.
+const CONNECT_ATTEMPT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(600);
+
+fn attempt_expired(started: std::time::Instant, now: std::time::Instant) -> bool {
+    now.duration_since(started) >= CONNECT_ATTEMPT_DEADLINE
+}
+
+/// Deadline enforcement for one connect attempt, spawned alongside the
+/// first process. Exits quietly as soon as the attempt resolves
+/// (connected, terminal, disconnected, or superseded); on expiry it
+/// fails the attempt through `fail_attempt_timeout`.
+fn spawn_attempt_watchdog(app: AppHandle, job: String, runtime: Arc<VpnRuntime>, attempt: u64) {
+    thread::spawn(move || {
+        let started = std::time::Instant::now();
+        loop {
+            thread::sleep(std::time::Duration::from_secs(2));
+            if !attempt_is_current(
+                runtime.attempt.load(Ordering::SeqCst),
+                attempt,
+                runtime.stopped.load(Ordering::SeqCst),
+            ) {
+                return;
+            }
+            let state = runtime
+                .status
+                .lock()
+                .map(|guard| guard.0.clone())
+                .unwrap_or_default();
+            if !attempt_state_is_pending(&state) {
+                return;
+            }
+            if attempt_expired(started, std::time::Instant::now()) {
+                fail_attempt_timeout(&app, &job, &runtime, attempt);
+                return;
+            }
+        }
+    });
+}
+
+/// Fail one connect attempt for exceeding `CONNECT_ATTEMPT_DEADLINE`:
+/// terminal `failed` status, epoch bumped (outstanding SAML callbacks
+/// go stale), sign-in window closed, child killed. The state transition
+/// runs under the lifecycle lock so it cannot interleave with a
+/// reconnect claim or a disconnect.
+fn fail_attempt_timeout(app: &AppHandle, job: &str, runtime: &VpnRuntime, attempt: u64) {
+    {
+        let _guard = lifecycle_guard(runtime);
+        if !attempt_is_current(
+            runtime.attempt.load(Ordering::SeqCst),
+            attempt,
+            runtime.stopped.load(Ordering::SeqCst),
+        ) {
+            return;
+        }
+        let state = runtime
+            .status
+            .lock()
+            .map(|guard| guard.0.clone())
+            .unwrap_or_default();
+        if !attempt_state_is_pending(&state) {
+            return;
+        }
+        runtime.stopped.store(true, Ordering::SeqCst);
+        runtime.attempt.fetch_add(1, Ordering::SeqCst);
+        runtime.generation.fetch_add(1, Ordering::SeqCst);
+        status(
+            runtime,
+            "failed",
+            "VPN connection timed out before it connected; try again.",
+        );
+    }
+    if let Some(window) = app.get_webview_window(&saml_window_label(job)) {
+        let _ = window.close();
+    }
+    terminate_child(runtime);
+    release_saml_cookie(job);
+}
+
+/// Atomically (against disconnect and the watchdog) claim a reconnect
+/// for the captured attempt: re-check the epoch under the lifecycle
+/// lock, then clear `stopped` and move to `connecting`. Returns false
+/// when the attempt went stale in between — the caller must spawn
+/// nothing.
+fn try_begin_reconnect(runtime: &VpnRuntime, captured_attempt: u64) -> bool {
+    let _guard = lifecycle_guard(runtime);
+    if !attempt_is_current(
+        runtime.attempt.load(Ordering::SeqCst),
+        captured_attempt,
+        runtime.stopped.load(Ordering::SeqCst),
+    ) {
+        return false;
+    }
+    runtime.stopped.store(false, Ordering::SeqCst);
+    status(
+        runtime,
+        "connecting",
+        "SAML sign-in complete; reconnecting VPN…",
+    );
+    true
+}
+
+fn start_reconnect(app: AppHandle, job: String, cookie: String, captured_attempt: u64) {
     let Ok(runtime) = get_job(&job) else {
         return;
     };
-    terminate_child(&runtime);
+    // A callback from a superseded attempt (disconnect or the connect
+    // watchdog bumped the epoch while the portal page was open, or
+    // during the ACS replay) must not clear `stopped` or spawn
+    // anything: the VPN stays off until the user reconnects.
+    if !attempt_is_current(
+        runtime.attempt.load(Ordering::SeqCst),
+        captured_attempt,
+        runtime.stopped.load(Ordering::SeqCst),
+    ) {
+        return;
+    }
     let interface = runtime
         .interface
         .lock()
         .ok()
         .map(|value| value.clone())
         .unwrap_or_else(|| "portal".into());
-    match kyth_shared::system::vpn_saml::build_reconnect_command(
+    let command = match kyth_shared::system::vpn_saml::build_reconnect_command(
         &runtime.gateway,
         &runtime.protocol,
         &runtime.os_emulation,
@@ -604,21 +811,23 @@ fn start_reconnect(app: AppHandle, job: String, cookie: String) {
         &cookie,
         &runtime.username,
     ) {
-        Ok(command) => {
-            runtime.stopped.store(false, Ordering::SeqCst);
+        Ok(command) => command,
+        Err(_) => {
             status(
                 &runtime,
-                "connecting",
-                "SAML sign-in complete; reconnecting VPN…",
+                "failed",
+                "VPN authentication response was invalid.",
             );
-            start_process(runtime, app, job, command);
+            return;
         }
-        Err(_) => status(
-            &runtime,
-            "failed",
-            "VPN authentication response was invalid.",
-        ),
+    };
+    terminate_child(&runtime);
+    // Re-check under the lifecycle lock: a disconnect that landed during
+    // the command build or the child reap must still win.
+    if !try_begin_reconnect(&runtime, captured_attempt) {
+        return;
     }
+    start_process(runtime, app, job, command);
 }
 
 fn callback_value(url: &Url, key: &str) -> Option<String> {
@@ -632,8 +841,23 @@ fn handle_saml_callback(
     job: String,
     gateway: String,
     callback: String,
+    captured_attempt: u64,
 ) {
     thread::spawn(move || {
+        // Staleness gate before anything else: a callback from a
+        // superseded attempt (the user disconnected, or the attempt
+        // timed out, while this portal page was open) must not mark the
+        // job failed, consume the cookie claim, or start a reconnect.
+        let Ok(runtime) = get_job(&job) else {
+            return;
+        };
+        if !attempt_is_current(
+            runtime.attempt.load(Ordering::SeqCst),
+            captured_attempt,
+            runtime.stopped.load(Ordering::SeqCst),
+        ) {
+            return;
+        }
         let Ok(url) = Url::parse(&callback) else {
             if let Ok(runtime) = get_job(&job) {
                 status(&runtime, "failed", "VPN sign-in callback was invalid.");
@@ -661,7 +885,7 @@ fn handle_saml_callback(
             if let Some(window) = app.get_webview_window(&label) {
                 let _ = window.close();
             }
-            start_reconnect(app, job, cookie);
+            start_reconnect(app, job, cookie, captured_attempt);
             return;
         }
         let form = callback_value(&url, "url").zip(callback_value(&url, "body"));
@@ -735,7 +959,7 @@ fn handle_saml_callback(
                 if !claim_saml_cookie(&job) {
                     return;
                 }
-                start_reconnect(app, job, cookie)
+                start_reconnect(app, job, cookie, captured_attempt)
             }
             None => {
                 if let Ok(runtime) = get_job(&job) {
@@ -750,8 +974,14 @@ fn handle_saml_callback(
     });
 }
 
-fn open_saml_window(app: &AppHandle, job: &str, gateway: &str, saml_url: &str) {
-    let label = format!("vpn-saml-{job}");
+fn open_saml_window(
+    app: &AppHandle,
+    job: &str,
+    gateway: &str,
+    saml_url: &str,
+    captured_attempt: u64,
+) {
+    let label = saml_window_label(job);
     if let Some(window) = app.get_webview_window(&label) {
         let _ = window.show();
         let _ = window.set_focus();
@@ -828,6 +1058,7 @@ fn open_saml_window(app: &AppHandle, job: &str, gateway: &str, saml_url: &str) {
                     callback_job.clone(),
                     callback_gateway.clone(),
                     url.as_str().to_string(),
+                    captured_attempt,
                 );
                 false
             } else {
@@ -866,6 +1097,15 @@ pub(crate) fn vpn_connect(
     username: String,
     password: String,
 ) -> Result<String, String> {
+    // The saved-profile reader rejects gateways over 253 bytes even
+    // though the command builder accepts 2048: refuse up front rather
+    // than persist a profile that can never be reloaded.
+    if !gateway_fits_saved_profile(&gateway) {
+        return Err(format!(
+            "VPN gateway is too long ({} bytes at most).",
+            MAX_SAVED_GATEWAY_BYTES
+        ));
+    }
     // A second connect to the same gateway while one is already live would
     // fork a duplicate openconnect fighting over the tunnel route. Reject
     // unless the previous job for this gateway is in an explicitly
@@ -892,7 +1132,6 @@ pub(crate) fn vpn_connect(
         &username,
         &password,
     )?;
-    save_profile(&gateway, &protocol, &os_emulation, &username)?;
     let job = format!(
         "vpn-{}",
         std::time::SystemTime::now()
@@ -905,6 +1144,8 @@ pub(crate) fn vpn_connect(
         child: Mutex::new(None),
         stopped: AtomicBool::new(false),
         generation: AtomicU64::new(0),
+        attempt: AtomicU64::new(1),
+        lifecycle: Mutex::new(()),
         gateway,
         protocol,
         os_emulation,
@@ -965,6 +1206,24 @@ pub(crate) fn vpn_connect(
         release_saml_cookie(&reaped_job);
     }
     reap_saml_cookies();
+    // Save the profile only now that the connect is actually accepted:
+    // saving earlier let a connect the in-lock recheck then rejected as
+    // a duplicate overwrite the saved gateway with an unaccepted one.
+    // On save failure, roll back the registration so no phantom job
+    // lingers in the store.
+    if let Err(error) = save_profile(
+        &runtime.gateway,
+        &runtime.protocol,
+        &runtime.os_emulation,
+        &runtime.username,
+    ) {
+        if let Ok(mut store) = jobs().lock() {
+            store.remove(&unique_job);
+        }
+        return Err(error);
+    }
+    let attempt = runtime.attempt.load(Ordering::SeqCst);
+    spawn_attempt_watchdog(app.clone(), unique_job.clone(), runtime.clone(), attempt);
     start_process(runtime, app, unique_job.clone(), command);
     Ok(unique_job)
 }
@@ -992,12 +1251,35 @@ pub(crate) fn vpn_status(job: String) -> InstallStatus {
 }
 
 #[tauri::command]
-pub(crate) fn vpn_disconnect(job: String) -> Result<String, String> {
-    let runtime = get_job(&job)?;
-    runtime.stopped.store(true, Ordering::SeqCst);
-    runtime.generation.fetch_add(1, Ordering::SeqCst);
+pub(crate) async fn vpn_disconnect(app: AppHandle, job: String) -> Result<String, String> {
+    // The body blocks on the child reap and a bounded 60s sudo firewall
+    // call: keep it on the blocking pool so the UI thread never freezes
+    // on a disconnect.
+    match tauri::async_runtime::spawn_blocking(move || disconnect_vpn(&app, &job)).await {
+        Ok(result) => result,
+        Err(error) => Err(format!("VPN disconnect task failed: {error}")),
+    }
+}
+
+/// Synchronous disconnect body (see `vpn_disconnect`). The stop
+/// transition runs under the runtime's lifecycle lock so a SAML
+/// reconnect claim cannot interleave between the stop flag and the
+/// kill; the attempt epoch bump retires any callback already in flight
+/// (including one inside the ≤35s ACS replay), and the sign-in window
+/// is closed so the portal cannot deliver one later either.
+fn disconnect_vpn(app: &AppHandle, job: &str) -> Result<String, String> {
+    let runtime = get_job(job)?;
+    {
+        let _guard = lifecycle_guard(&runtime);
+        runtime.stopped.store(true, Ordering::SeqCst);
+        runtime.attempt.fetch_add(1, Ordering::SeqCst);
+        runtime.generation.fetch_add(1, Ordering::SeqCst);
+    }
+    if let Some(window) = app.get_webview_window(&saml_window_label(job)) {
+        let _ = window.close();
+    }
     terminate_child(&runtime);
-    release_saml_cookie(&job);
+    release_saml_cookie(job);
     reap_saml_cookies();
     status(&runtime, "complete", "VPN disconnected.");
     // Clean user disconnect lifts any fail-closed lockdown. A failed
@@ -1020,6 +1302,12 @@ pub(crate) struct VpnProtectionStatus {
     pub(crate) vpn_fail_closed: bool,
     pub(crate) vpn_dns_exclusive: bool,
     pub(crate) firewall_zone: String,
+    /// True when the preset file exists but could not be parsed. The
+    /// Hub must show a degraded state rather than present the defaults
+    /// as the user's deliberate choices; `vpn_fail_closed` reports true
+    /// in that case because the drop-time check engages the lockdown
+    /// for a corrupt file (fail closed, never a silent opt-out).
+    pub(crate) preset_corrupt: bool,
 }
 
 fn preset_path() -> PathBuf {
@@ -1027,11 +1315,20 @@ fn preset_path() -> PathBuf {
 }
 
 fn vpn_protection_status_at(path: &std::path::Path) -> VpnProtectionStatus {
-    let preset = network_preset::load(path);
-    VpnProtectionStatus {
-        vpn_fail_closed: preset.vpn_fail_closed,
-        vpn_dns_exclusive: preset.vpn_dns_exclusive,
-        firewall_zone: preset.firewall_zone,
+    match network_preset::load_checked(path) {
+        network_preset::PresetLoad::Loaded(preset)
+        | network_preset::PresetLoad::Missing(preset) => VpnProtectionStatus {
+            vpn_fail_closed: preset.vpn_fail_closed,
+            vpn_dns_exclusive: preset.vpn_dns_exclusive,
+            firewall_zone: preset.firewall_zone,
+            preset_corrupt: false,
+        },
+        network_preset::PresetLoad::Corrupt => VpnProtectionStatus {
+            vpn_fail_closed: true,
+            vpn_dns_exclusive: false,
+            firewall_zone: network_preset::NetworkPreset::default().firewall_zone,
+            preset_corrupt: true,
+        },
     }
 }
 
@@ -1054,7 +1351,19 @@ fn set_vpn_protection_at(
     vpn_fail_closed: bool,
     vpn_dns_exclusive: bool,
 ) -> Result<String, String> {
-    let mut preset = network_preset::load(path);
+    let _guard = network_mutation_guard();
+    // A corrupt preset must not be silently overwritten with defaults:
+    // refuse and surface it, so the user fixes or removes the file.
+    let mut preset = match network_preset::load_checked(path) {
+        network_preset::PresetLoad::Loaded(preset)
+        | network_preset::PresetLoad::Missing(preset) => preset,
+        network_preset::PresetLoad::Corrupt => {
+            return Err(
+                "the network preset file is corrupt and could not be read; fix or remove it before changing VPN protection."
+                    .to_string(),
+            )
+        }
+    };
     preset.vpn_fail_closed = vpn_fail_closed;
     preset.vpn_dns_exclusive = vpn_dns_exclusive;
     let rendered = network_preset::render_network_toml(&preset);
@@ -1158,11 +1467,21 @@ fn vpn_protection_summary(preset: &network_preset::NetworkPreset) -> String {
 }
 
 #[tauri::command]
-pub(crate) fn set_vpn_protection(
+pub(crate) async fn set_vpn_protection(
     vpn_fail_closed: bool,
     vpn_dns_exclusive: bool,
 ) -> Result<String, String> {
-    set_vpn_protection_at(&preset_path(), vpn_fail_closed, vpn_dns_exclusive)
+    // The write path runs two sequential bounded 60s sudo operations:
+    // keep them on the blocking pool, not the command thread.
+    let path = preset_path();
+    match tauri::async_runtime::spawn_blocking(move || {
+        set_vpn_protection_at(&path, vpn_fail_closed, vpn_dns_exclusive)
+    })
+    .await
+    {
+        Ok(result) => result,
+        Err(error) => Err(format!("VPN protection task failed: {error}")),
+    }
 }
 
 /// Collision suffix for same-tick VPN job ids. Must stay inside the
@@ -1250,6 +1569,8 @@ mod tests {
             child: Mutex::new(None),
             stopped: AtomicBool::new(false),
             generation: AtomicU64::new(0),
+            attempt: AtomicU64::new(1),
+            lifecycle: Mutex::new(()),
             gateway: "https://vpn.example".into(),
             protocol: "gp".into(),
             os_emulation: "win".into(),
@@ -1312,6 +1633,103 @@ mod tests {
         let release = test_runtime("connected");
         assert!(set_vpn_lockdown_at(&release, false, &preset_file));
         assert_eq!(runtime_state(&release).0, "connected");
+    }
+
+    #[test]
+    fn attempt_currency_requires_same_epoch_and_not_stopped() {
+        assert!(attempt_is_current(3, 3, false));
+        assert!(!attempt_is_current(4, 3, false), "epoch moved on");
+        assert!(!attempt_is_current(3, 4, false), "captured in the future");
+        assert!(!attempt_is_current(3, 3, true), "stopped is never current");
+        // A window opened for a vanished runtime captures u64::MAX and
+        // must never match a real epoch.
+        assert!(!attempt_is_current(1, u64::MAX, false));
+    }
+
+    #[test]
+    fn pending_attempt_states_are_only_connecting_and_auth() {
+        assert!(attempt_state_is_pending("connecting"));
+        assert!(attempt_state_is_pending("authentication_required"));
+        for state in VPN_TERMINAL_STATES {
+            assert!(!attempt_state_is_pending(state), "{state} is resolved");
+        }
+    }
+
+    #[test]
+    fn attempt_deadline_is_ten_minutes_from_start() {
+        let started = std::time::Instant::now();
+        assert!(!attempt_expired(started, started));
+        let just_inside = started + CONNECT_ATTEMPT_DEADLINE - std::time::Duration::from_secs(1);
+        assert!(!attempt_expired(started, just_inside));
+        let past = started + CONNECT_ATTEMPT_DEADLINE + std::time::Duration::from_secs(1);
+        assert!(attempt_expired(started, past));
+    }
+
+    #[test]
+    fn reconnect_claim_fails_once_the_attempt_is_superseded() {
+        let runtime = test_runtime("authentication_required");
+        assert!(try_begin_reconnect(&runtime, 1));
+        assert_eq!(runtime_state(&runtime).0, "connecting");
+        assert!(!runtime.stopped.load(Ordering::SeqCst));
+        // Simulate disconnect: stopped set and epoch bumped under the
+        // lifecycle lock. Neither the old capture nor the new epoch may
+        // claim a reconnect afterwards.
+        {
+            let _guard = lifecycle_guard(&runtime);
+            runtime.stopped.store(true, Ordering::SeqCst);
+            runtime.attempt.fetch_add(1, Ordering::SeqCst);
+        }
+        assert!(!try_begin_reconnect(&runtime, 1), "stale epoch");
+        assert!(
+            !try_begin_reconnect(&runtime, 2),
+            "stopped rejects even the current epoch"
+        );
+    }
+
+    #[test]
+    fn gateway_cap_matches_the_saved_profile_reader() {
+        assert!(gateway_fits_saved_profile(&"a".repeat(253)));
+        assert!(!gateway_fits_saved_profile(&"a".repeat(254)));
+        assert!(gateway_fits_saved_profile("https://vpn.example"));
+    }
+
+    #[test]
+    fn corrupt_preset_fails_closed_and_reports_degraded() {
+        let dir = tempfile::tempdir().unwrap();
+        let preset_file = dir.path().join("network.toml");
+        std::fs::write(&preset_file, "dns = [unclosed").unwrap();
+        // The drop-time check must engage lockdown, not read an opt-out.
+        assert!(vpn_fail_closed_enabled_at(&preset_file));
+        // The effective lockdown preset is opted-in: block on engage,
+        // the restrictive default zone on release.
+        let effective = lockdown_effective_preset(network_preset::load_checked(&preset_file));
+        assert!(effective.vpn_fail_closed);
+        assert_eq!(
+            vpn_lockdown_target(&effective, true).as_deref(),
+            Some("block")
+        );
+        assert_eq!(
+            vpn_lockdown_target(&effective, false).as_deref(),
+            Some("public")
+        );
+        // Status surfaces the degradation instead of fake user choices.
+        let status = vpn_protection_status_at(&preset_file);
+        assert!(status.preset_corrupt);
+        assert!(status.vpn_fail_closed);
+        // Toggling refuses rather than overwriting the corrupt file.
+        let error = set_vpn_protection_at(&preset_file, true, false).unwrap_err();
+        assert!(error.contains("corrupt"), "{error}");
+    }
+
+    #[test]
+    fn absent_preset_stays_a_plain_opt_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let preset_file = dir.path().join("network.toml");
+        assert!(!vpn_fail_closed_enabled_at(&preset_file));
+        let status = vpn_protection_status_at(&preset_file);
+        assert!(!status.preset_corrupt);
+        assert!(!status.vpn_fail_closed);
+        assert_eq!(status.firewall_zone, "public");
     }
 
     #[test]

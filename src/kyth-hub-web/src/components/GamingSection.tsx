@@ -11,6 +11,7 @@ import {
   installGamingTool,
   uninstallGamingTool,
   cancelGamingJob,
+  confirmUserAction,
   launchGamingTool,
   fixDiscordScreenshare,
   fixObsPipewire,
@@ -41,21 +42,39 @@ const gamingBtnStyle = { padding: "6px 12px", borderRadius: 999, border: "1px so
 
 // Install/launch/uninstall grid for the curated Flatpak gaming tools.
 // Mirrors page_gaming_tools_grid.py's GAMING_TOOLS tiles.
-function GamingToolGrid({ busy, run }: { busy: string | null; run: SectionRun }) {
+function GamingToolGrid({ busy, run, runCancel }: { busy: string | null; run: SectionRun; runCancel: SectionRun }) {
   const [tools, setTools] = useState<GamingTool[] | null>(null);
+  const [toolsLoaded, setToolsLoaded] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
-    fetchGamingTools().then((value) => { if (!cancelled) setTools(value); });
+    fetchGamingTools().then((value) => { if (!cancelled) { setTools(value); setToolsLoaded(true); } });
     return () => { cancelled = true; };
   }, []);
+
+  async function load(): Promise<void> {
+    const value = await fetchGamingTools();
+    setTools(value);
+    setToolsLoaded(true);
+  }
 
   async function refresh(): Promise<void> {
     const fresh = await fetchGamingTools();
     if (fresh) setTools(fresh);
   }
 
-  if (!tools) return null;
+  if (!tools) {
+    if (!toolsLoaded) return null;
+    return (
+      <div style={{ marginTop: 22 }}>
+        <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Gaming tools</p>
+        <p className="card-copy" style={{ fontSize: 12, marginTop: 4 }}>The gaming tool catalog couldn&apos;t be checked — the read failed, so install state can&apos;t be shown right now.</p>
+        <div style={{ marginTop: 8 }}>
+          <button onClick={() => void load()} style={gamingBtnStyle}>Retry</button>
+        </div>
+      </div>
+    );
+  }
   return (
     <div style={{ marginTop: 22 }}>
       <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Gaming tools</p>
@@ -81,7 +100,7 @@ function GamingToolGrid({ busy, run }: { busy: string | null; run: SectionRun })
       </div>
       {(busy?.startsWith("gt-") ?? false) && (
         <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
-          <button onClick={() => run("cancel-gaming", "Cancelling…", cancelGamingJob)} style={gamingBtnStyle}>Cancel</button>
+          <button onClick={() => runCancel("cancel-gaming", "Cancelling…", cancelGamingJob)} style={gamingBtnStyle}>Cancel</button>
         </div>
       )}
     </div>
@@ -90,7 +109,7 @@ function GamingToolGrid({ busy, run }: { busy: string | null; run: SectionRun })
 
 // Guided first-failure fixes and one-shot Discord/OBS capture permission
 // repairs. The actions stay in the Hub instead of asking users to copy flags.
-function FirstFailurePlaybook({ busy, run }: { busy: string | null; run: SectionRun }) {
+function FirstFailurePlaybook({ busy, run, runCancel }: { busy: string | null; run: SectionRun; runCancel: SectionRun }) {
   return (
     <div style={{ marginTop: 22 }}>
       <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Game will not launch</p>
@@ -103,12 +122,12 @@ function FirstFailurePlaybook({ busy, run }: { busy: string | null; run: Section
         <div><strong>Change one thing at a time</strong><span>Compatibility results and repair status stay in the Hub.</span></div>
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
-        <RecipeButton recipe="health-check" label="Run gaming health check" busy={busy} run={run} />
+        <RecipeButton recipe="health-check" label="Run gaming health check" busy={busy} run={run} runCancel={runCancel} />
         <ExternalLink className="action-button" href="https://www.protondb.com">Open ProtonDB</ExternalLink>
         <ExternalLink className="action-button" href="https://areweanticheatyet.com">Open Anti-Cheat Status</ExternalLink>
-        <button disabled={busy !== null} onClick={() => run("fix-discord", "Applying Discord screen share repair…", fixDiscordScreenshare)} style={gamingBtnStyle}>Fix Discord screen share</button>
+        <button disabled={busy !== null} onClick={() => { if (confirmUserAction("Apply the Discord screen-share repair? It changes Discord's Flatpak permissions so screen sharing can use the system portal.")) run("fix-discord", "Applying Discord screen share repair…", fixDiscordScreenshare); }} style={gamingBtnStyle}>Fix Discord screen share</button>
         <button disabled={busy !== null} onClick={() => run("gt-install-dev.vencord.Vesktop", "Installing Vesktop…", () => installGamingTool("dev.vencord.Vesktop"))} style={gamingBtnStyle}>Install Vesktop (Discord voice)</button>
-        <button disabled={busy !== null} onClick={() => run("fix-obs", "Applying OBS capture repair…", fixObsPipewire)} style={gamingBtnStyle}>Fix OBS capture</button>
+        <button disabled={busy !== null} onClick={() => { if (confirmUserAction("Apply the OBS capture repair? It changes OBS Studio's Flatpak permissions so PipeWire capture works.")) run("fix-obs", "Applying OBS capture repair…", fixObsPipewire); }} style={gamingBtnStyle}>Fix OBS capture</button>
       </div>
     </div>
   );
@@ -260,7 +279,7 @@ function ProfileBuilderCard({ busy, run }: { busy: string | null; run: SectionRu
 // sched-ext scheduler control. Mirrors page_gaming_tools_perf.py's
 // _build_scx_card — KythOS uses scx_rusty for gaming and falls back to
 // the kernel scheduler otherwise.
-function SchedExtCard({ busy, run }: { busy: string | null; run: SectionRun }) {
+function SchedExtCard({ busy, run, runCancel }: { busy: string | null; run: SectionRun; runCancel: SectionRun }) {
   const [status, setStatus] = useState<ScxStatus | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -290,7 +309,7 @@ function SchedExtCard({ busy, run }: { busy: string | null; run: SectionRun }) {
         {(busy?.startsWith("scx-") ?? false) && (
           <span className="hub-progress-inline">
             <ProgressRing size={22} />
-            <button onClick={() => run("cancel-scx", "Cancelling…", cancelGamingJob)} style={gamingBtnStyle}>Cancel</button>
+            <button onClick={() => runCancel("cancel-scx", "Cancelling…", cancelGamingJob)} style={gamingBtnStyle}>Cancel</button>
           </span>
         )}
       </div>
@@ -319,9 +338,10 @@ export function GamingSection({ section }: { section: HubSection }) {
   const [sliceAvailable, setSliceAvailable] = useState<boolean | null>(null);
   const [gameId, setGameId] = useState("");
   const [proton, setProton] = useState<ProtonDbResult[]>([]);
+  const [protonState, setProtonState] = useState<"idle" | "ok" | "failed">("idle");
   const [antiCheat, setAntiCheat] = useState<AntiCheatEntry[] | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction(["hub-action", "gaming"]);
+  const { status, busy, run, runCancel } = useSectionAction(["hub-action", "gaming"]);
   useEffect(() => {
     let c = false;
     Promise.all([
@@ -348,8 +368,11 @@ export function GamingSection({ section }: { section: HubSection }) {
     const ids = gameId.split(/[ ,]+/).map((id) => id.trim()).filter(Boolean).slice(0, 20);
     // Last lookup wins: a slow earlier response must not overwrite a newer one.
     const token = protonGate.current.start();
-    const results = (await fetchProtonDbMany(ids)) ?? [];
-    if (protonGate.current.isCurrent(token)) setProton(results);
+    const results = await fetchProtonDbMany(ids);
+    if (!protonGate.current.isCurrent(token)) return;
+    if (results === null) { setProton([]); setProtonState("failed"); return; }
+    setProtonState("ok");
+    setProton(results);
   }
   const live = audit !== null || launchers !== null;
   return (
@@ -403,7 +426,7 @@ export function GamingSection({ section }: { section: HubSection }) {
             <input value={gameId} onChange={(event) => setGameId(event.target.value)} placeholder="Steam IDs, e.g. 730, 570" inputMode="numeric" style={{ flex: 1, maxWidth: 220, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontSize: 13 }} />
             <button disabled={!gameId.trim()} onClick={lookupProtonDb} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600 }}>Look up</button>
           </div>
-          {proton.length > 0 ? proton.map((result) => <p key={result.app_id} className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>{result.app_id}: {result.detail}</p>) : gameId && <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Enter one or more Steam app IDs and look up current ProtonDB reports. Know the name but not the ID? <ExternalLink href={`https://www.protondb.com/search?q=${encodeURIComponent(gameId)}`}>Search ProtonDB by name</ExternalLink>, then paste the app ID here.</p>}
+          {protonState === "failed" ? <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>The ProtonDB lookup failed — the service couldn&apos;t be reached. Check your connection and try again.</p> : proton.length > 0 ? proton.map((result) => <p key={result.app_id} className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>{result.app_id}: {result.detail}</p>) : protonState === "ok" ? <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>No ProtonDB reports came back for those IDs.</p> : gameId && <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Enter one or more Steam app IDs and look up current ProtonDB reports. Know the name but not the ID? <ExternalLink href={`https://www.protondb.com/search?q=${encodeURIComponent(gameId)}`}>Search ProtonDB by name</ExternalLink>, then paste the app ID here.</p>}
         </div>
         {antiCheat && <div style={{ marginTop: 20 }}>
           <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Anti-cheat compatibility</p>
@@ -414,28 +437,28 @@ export function GamingSection({ section }: { section: HubSection }) {
           <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>Back up saves, install the launcher, verify each title in ProtonDB, then test controller and anti-cheat requirements before deleting the old install.</p>
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
-          <RecipeButton recipe="gaming-mode" label={audit && String(audit.master ?? "") === "gaming" ? "Gaming profile on ✓" : "Switch to gaming profile"} busy={busy} run={run} />
-          <RecipeButton recipe="gaming-stack-status" label="Gaming stack status" busy={busy} run={run} />
+          <RecipeButton recipe="gaming-mode" label={audit && String(audit.master ?? "") === "gaming" ? "Gaming profile on ✓" : "Switch to gaming profile"} busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="gaming-stack-status" label="Gaming stack status" busy={busy} run={run} runCancel={runCancel} />
         </div>
         <div style={{ marginTop: 22 }}>
           <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Gaming setup</p>
           <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Install a launcher or tool from this window. Progress, prompts, and the result stay in the Hub.</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            {launcherRecipes.map(([recipe, label]) => <RecipeButton key={recipe} recipe={recipe} label={label} busy={busy} run={run} />)}
+            {launcherRecipes.map(([recipe, label]) => <RecipeButton key={recipe} recipe={recipe} label={label} busy={busy} run={run} runCancel={runCancel} />)}
           </div>
         </div>
         <div style={{ marginTop: 22 }}>
           <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Fixes and tools</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            {[...fixRecipes, ...toolRecipes].map(([recipe, label]) => <RecipeButton key={recipe} recipe={recipe} label={label} busy={busy} run={run} />)}
+            {[...fixRecipes, ...toolRecipes].map(([recipe, label]) => <RecipeButton key={recipe} recipe={recipe} label={label} busy={busy} run={run} runCancel={runCancel} />)}
           </div>
         </div>
-        <GamingToolGrid busy={busy} run={run} />
-        <FirstFailurePlaybook busy={busy} run={run} />
+        <GamingToolGrid busy={busy} run={run} runCancel={runCancel} />
+        <FirstFailurePlaybook busy={busy} run={run} runCancel={runCancel} />
         <FixMyGame busy={busy} run={run} steamPlay={steamPlay} />
         <OverlaysCard />
         <ProfileBuilderCard busy={busy} run={run} />
-        <SchedExtCard busy={busy} run={run} />
+        <SchedExtCard busy={busy} run={run} runCancel={runCancel} />
         <ActionStatus status={status} />
       </div>
     </LiveSectionCard>

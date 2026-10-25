@@ -22,14 +22,14 @@ const initialForm = { name: "", server: "", share_path: "", mount_point: "", use
 // privileged socket. The user config holds display metadata only, never a password.
 export function NetworkSharesSection({ section }: { section: HubSection }) {
   const [summary, setSummary] = useState<NetworkSummary | null>(null);
-  const [configured, setConfigured] = useState<ConfiguredNetworkShare[]>([]);
+  const [configured, setConfigured] = useState<ConfiguredNetworkShare[] | null>(null);
   const [host, setHost] = useState("");
   const [share, setShare] = useState("");
   const [form, setForm] = useState(initialForm);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("hub-action");
+  const { status, busy, run } = useSectionAction("privileged");
 
-  const refreshConfigured = async () => setConfigured((await fetchConfiguredNetworkShares()) ?? []);
+  const refreshConfigured = async () => setConfigured(await fetchConfiguredNetworkShares());
   const refreshSummary = async () => {
     const fresh = await fetchNetworkSummaryLive();
     if (fresh) setSummary(fresh);
@@ -39,7 +39,7 @@ export function NetworkSharesSection({ section }: { section: HubSection }) {
   useEffect(() => {
     let cancelled = false;
     Promise.all([fetchNetworkSummary(), fetchConfiguredNetworkShares()]).then(([network, shares]) => {
-      if (!cancelled) { setSummary(network); setConfigured(shares ?? []); setLoaded(true); }
+      if (!cancelled) { setSummary(network); setConfigured(shares); setLoaded(true); }
     });
     return () => { cancelled = true; };
   }, []);
@@ -50,7 +50,17 @@ export function NetworkSharesSection({ section }: { section: HubSection }) {
     const name = form.name.trim().replace(/[^A-Za-z0-9_-]/g, "_");
     const mountPoint = form.mount_point.trim() || (name ? `/mnt/kyth/${name}` : "");
     if (!name || !form.server.trim() || !form.share_path.trim() || !form.username.trim()) return "Share name, server, share path, and username are required.";
-    const detail = await addNetworkShare({ ...form, name, server: form.server.trim(), share_path: form.share_path.trim().replace(/^\/+/, ""), mount_point: mountPoint, username: form.username.trim(), domain: form.domain.trim() });
+    let detail: string;
+    try {
+      detail = await addNetworkShare({ ...form, name, server: form.server.trim(), share_path: form.share_path.trim().replace(/^\/+/, ""), mount_point: mountPoint, username: form.username.trim(), domain: form.domain.trim() });
+    } catch (error) {
+      // Add mounts first (privileged) and saves the config second, so a
+      // failure can leave the share mounted but unsaved. Refresh both
+      // views and clear the form (it held the password) either way.
+      await Promise.all([refreshConfigured(), refreshSummary()]);
+      setForm(initialForm);
+      throw new Error(`${error instanceof Error ? error.message : String(error)} The mount step may have succeeded before the failure — the share list and mount count above were refreshed; check them before adding the share again.`);
+    }
     if (detail === "Cancelled.") return detail;
     await Promise.all([refreshConfigured(), refreshSummary()]);
     setForm(initialForm);
@@ -85,14 +95,24 @@ export function NetworkSharesSection({ section }: { section: HubSection }) {
         </div>
         <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>Credentials go only to the protected root helper. This Hub keeps only the non-secret share details shown below.</p>
 
-        {configured.length > 0 && <div style={{ marginTop: 16 }}>
+        {configured === null && loaded && <p className="card-copy" style={{ fontSize: 12, marginTop: 16 }}>Couldn&apos;t check the saved share list — the read failed, so configured shares may be missing here. Use Refresh mounts below to retry.</p>}
+        {configured !== null && configured.length === 0 && loaded && <p className="card-copy" style={{ fontSize: 12, marginTop: 16 }}>No shares configured yet.</p>}
+        {configured !== null && configured.length > 0 && <div style={{ marginTop: 16 }}>
           <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Configured shares</p>
           {configured.map((item) => <div key={item.name} style={{ display: "flex", gap: 10, justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid var(--hairline)", flexWrap: "wrap" }}>
             <span className="card-copy" style={{ fontSize: 12 }}><strong>{item.name}</strong> — //{item.server}/{item.share_path} → {item.mount_point}{item.auto_mount ? " (auto)" : ""}</span>
             <ActionButton label={busy === `remove-${item.name}` ? "Removing…" : "Remove"} disabled={busy !== null} onClick={() => run(`remove-${item.name}`, `Removing ${item.name}…`, async () => {
-              const detail = await removeNetworkShare(item);
-              if (detail !== "Cancelled.") await Promise.all([refreshConfigured(), refreshSummary()]);
-              return detail;
+              try {
+                const detail = await removeNetworkShare(item);
+                if (detail !== "Cancelled.") await Promise.all([refreshConfigured(), refreshSummary()]);
+                return detail;
+              } catch (error) {
+                // Remove unmounts first and updates the config second;
+                // a failure can leave the share unmounted but still listed
+                // (or vice versa) — refresh so the page shows reality.
+                await Promise.all([refreshConfigured(), refreshSummary()]);
+                throw new Error(`${error instanceof Error ? error.message : String(error)} The unmount step may have succeeded before the failure — the list and mount count above were refreshed to show the current state.`);
+              }
             })} />
           </div>)}
         </div>}

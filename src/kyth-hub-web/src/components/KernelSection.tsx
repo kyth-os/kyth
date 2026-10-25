@@ -14,7 +14,7 @@ const FLAVOR_LABEL: Record<string, string> = {
 export function KernelSection({ section }: { section: HubSection }) {
   const [flavor, setFlavor] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("privileged");
+  const { status, busy, run, runCancel } = useSectionAction("privileged");
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +51,7 @@ export function KernelSection({ section }: { section: HubSection }) {
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
           {(["cachy", "fedora"] as const).map((target) => <ActionButton key={target} label={busy === `kernel-${target}` ? "Staging…" : `Switch to ${FLAVOR_LABEL[target]}`} disabled={busy !== null || flavor === target} onClick={() => run(`kernel-${target}`, `Staging ${target} kernel…`, () => runPrivilegedAction("kernel_switch", { flavor: target }))} />)}
           {(busy?.startsWith("kernel-") ?? false) && (
-            <ActionButton label="Cancel" onClick={() => run("cancel-kernel", "Cancelling…", cancelPrivilegedAction)} />
+            <ActionButton label="Cancel" onClick={() => runCancel("cancel-kernel", "Cancelling…", cancelPrivilegedAction)} />
           )}
         </div>
         <ActionStatus status={status} />

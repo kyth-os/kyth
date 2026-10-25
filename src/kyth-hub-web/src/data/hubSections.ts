@@ -52,11 +52,17 @@ const SECTION_ICONS: Record<string, ComponentType<SVGProps<SVGSVGElement>>> = {
 
 function sectionsFor(destinationKey: string): HubSection[] {
   const destination = routeManifest.destinations.find(({ key }) => key === destinationKey);
-  if (!destination) throw new Error(`Unknown Hub destination: ${destinationKey}`);
-  return destination.sections.map((section) => ({
-    ...section,
-    Icon: SECTION_ICONS[section.key],
-  }));
+  if (!destination) {
+    // sectionsFor runs at module init for every destination: throwing
+    // here would brick the whole shell over one manifest mismatch.
+    console.error(`Unknown Hub destination: ${destinationKey}`);
+    return [];
+  }
+  return destination.sections.map((section) => {
+    const Icon = SECTION_ICONS[section.key];
+    if (!Icon) console.error(`Hub section "${section.key}" has no icon entry; using the fallback icon.`);
+    return { ...section, Icon: Icon ?? IconGrid };
+  });
 }
 
 export const PLAY_SECTIONS = sectionsFor("Play");

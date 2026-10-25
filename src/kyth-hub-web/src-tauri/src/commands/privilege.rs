@@ -1,6 +1,8 @@
+use std::collections::HashMap;
 use std::io::{BufRead, BufReader, Write};
+use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -11,6 +13,42 @@ static JOBS: OnceLock<JobStore> = OnceLock::new();
 
 fn jobs() -> &'static JobStore {
     JOBS.get_or_init(JobStore::default)
+}
+
+/// Live daemon connections for running privileged jobs, keyed by job id.
+/// A cancel shuts the connection down from outside the worker thread: the
+/// daemon treats a client that goes away mid-operation as abandonment and
+/// kills the operation, which is what makes privileged cancel real.
+static LIVE_STREAMS: OnceLock<Mutex<HashMap<String, UnixStream>>> = OnceLock::new();
+
+fn live_streams() -> &'static Mutex<HashMap<String, UnixStream>> {
+    LIVE_STREAMS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn register_stream(job: &str, stream: &UnixStream) {
+    if let Ok(clone) = stream.try_clone() {
+        live_streams()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(job.to_string(), clone);
+    }
+}
+
+fn unregister_stream(job: &str) -> Option<UnixStream> {
+    live_streams()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .remove(job)
+}
+
+/// RAII cleanup so a worker removes its registry entry on every exit
+/// path, not just the success one.
+struct StreamRegistration(String);
+
+impl Drop for StreamRegistration {
+    fn drop(&mut self) {
+        unregister_stream(&self.0);
+    }
 }
 
 /// Typed frontend payload for the allowlisted privileged operations. Fields
@@ -74,7 +112,9 @@ fn validated_request(operation: &str, payload: &PrivilegedPayload) -> Result<Val
             if !valid_block_device(device) {
                 return Err("invalid block device".to_string());
             }
-            if !(8..=128).contains(&key.len()) || key.contains(['\n', '\r']) {
+            // Counted in chars, matching the daemon's check exactly: a
+            // byte count would reject non-ASCII keys the daemon accepts.
+            if !(8..=128).contains(&key.chars().count()) || key.contains(['\n', '\r']) {
                 return Err("invalid BitLocker key".to_string());
             }
             Ok(json!({ "operation": "bitlocker_unlock", "device": device, "key": key }))
@@ -91,6 +131,9 @@ fn validated_request(operation: &str, payload: &PrivilegedPayload) -> Result<Val
     }
 }
 
+/// Field length caps are counted in chars, matching the daemon's
+/// identical validation, so a non-ASCII value is judged the same way on
+/// both sides of the socket.
 fn share_text<'a>(
     payload: &'a PrivilegedPayload,
     field: &str,
@@ -109,7 +152,7 @@ fn share_text<'a>(
     }
     .ok_or_else(|| format!("{field} is required"))?;
     if (!allow_empty && value.is_empty())
-        || value.len() > maximum
+        || value.chars().count() > maximum
         || value.chars().any(|character| character.is_control())
     {
         return Err(format!("invalid {field}"));
@@ -210,16 +253,18 @@ pub(crate) fn privileged_action(
             .unwrap_or_default()
             .as_nanos()
     );
-    // The privileged worker only does socket I/O against the root-owned
-    // service, so there is no child to kill: cancelling marks the job and
-    // its late finish becomes a no-op.
+    // Cancellation is real, not just a mark: privileged_action_cancel
+    // shuts down this job's daemon connection, the daemon kills the
+    // operation it was running, and the worker's blocked read fails. The
+    // store still protects the outcome — finish() never overwrites a
+    // `cancelled` job, so that late failure cannot resurrect it.
     let (job, cancel) = jobs().start(&job, format!("Running {operation}…"));
     let job_for_thread = job.clone();
     std::thread::spawn(move || {
         let (state, detail) = if cancel.load(std::sync::atomic::Ordering::Relaxed) {
             ("cancelled", "Cancelled.".to_string())
         } else {
-            match send_request(request) {
+            match send_request_for_job(request, &job_for_thread) {
                 Ok(detail) => ("complete", detail),
                 Err(detail) => ("failed", detail),
             }
@@ -253,8 +298,24 @@ fn tag_privileged(detail: String) -> String {
 }
 
 pub(crate) fn send_request(request: Value) -> Result<String, String> {
+    send_request_inner(request, None)
+}
+
+/// Like `send_request`, but the connection is registered under `job` so
+/// privileged_action_cancel can shut it down mid-operation.
+fn send_request_for_job(request: Value, job: &str) -> Result<String, String> {
+    send_request_inner(request, Some(job))
+}
+
+fn send_request_inner(request: Value, job: Option<&str>) -> Result<String, String> {
     let mut stream = UnixStream::connect("/run/kyth/privileged.sock")
         .map_err(|_| tag_privileged("privileged service is unavailable".to_string()))?;
+    // Registered as soon as the connection exists, so a cancel that lands
+    // at any point during the request can shut it down.
+    let _registration = job.map(|job| {
+        register_stream(job, &stream);
+        StreamRegistration(job.to_string())
+    });
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(910)))
         .map_err(|error| {
@@ -343,25 +404,29 @@ pub(crate) fn privileged_action_status(job: String) -> crate::InstallStatus {
     }
 }
 
-/// Cancel a running privileged job. The worker only does socket I/O against
-/// the root-owned service, so there is no child to kill and a cancel cannot
-/// preempt it: a still-running job is reported as still running (with an
-/// honest note) instead of a `cancelled` state the operation would
-/// immediately contradict. Its real outcome still lands via `finish` and
-/// reaches the poller unchanged.
+/// Cancel a running privileged job: mark it `cancelled` in the store and
+/// shut down its daemon connection. The daemon sees its client go away
+/// mid-operation and kills the operation's process group, so the root
+/// work actually stops. The worker's blocked read then fails, but its
+/// finish() cannot overwrite the `cancelled` state.
 #[tauri::command]
 pub(crate) fn privileged_action_cancel(job: String) -> crate::InstallStatus {
-    let running = jobs()
-        .status(&job)
-        .is_some_and(|(state, _)| state == kyth_shared::system::jobs::STATE_RUNNING);
-    if running {
-        return crate::InstallStatus {
-            id: job,
-            state: kyth_shared::system::jobs::STATE_RUNNING.into(),
-            detail: "Cancel requested, but the privileged operation cannot be interrupted and is still running; its result will be reported when it finishes.".into(),
-        };
-    }
+    cancel_privileged_job(&job);
     privileged_action_status(job)
+}
+
+/// The cancellable core of privileged_action_cancel, split out for tests:
+/// cancel the store entry, then shut the registered connection down.
+fn cancel_privileged_job(job: &str) -> bool {
+    if !jobs().cancel(job) {
+        return false;
+    }
+    if let Some(stream) = unregister_stream(job) {
+        // shutdown() applies to the socket, not this fd: the worker's
+        // stream sees it too, which is what unblocks its read.
+        let _ = stream.shutdown(Shutdown::Both);
+    }
+    true
 }
 
 #[cfg(test)]
@@ -452,6 +517,53 @@ mod tests {
         assert!(
             validated_request("network_share_add", &payload(json!({"name":"bad/name"}))).is_err()
         );
+    }
+
+    #[test]
+    fn cancel_marks_the_job_and_shuts_down_the_daemon_connection() {
+        use std::io::Read;
+
+        // A socketpair stands in for the daemon connection: after cancel
+        // shuts the registered end down, the peer must observe EOF.
+        let (worker_side, mut daemon_side) = std::os::unix::net::UnixStream::pair().unwrap();
+        let (job, _flag) = super::jobs().start(
+            &format!("privileged-cancel-test-{}", std::process::id()),
+            "Running test…".to_string(),
+        );
+        super::register_stream(&job, &worker_side);
+        assert!(super::cancel_privileged_job(&job));
+        let (state, _) = super::jobs().status(&job).unwrap();
+        assert_eq!(state, kyth_shared::system::jobs::STATE_CANCELLED);
+        daemon_side
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut buf = [0u8; 1];
+        assert_eq!(
+            daemon_side.read(&mut buf).unwrap(),
+            0,
+            "peer must see EOF after the cancel shutdown"
+        );
+        // A second cancel is a no-op: the job is already terminal.
+        assert!(!super::cancel_privileged_job(&job));
+    }
+
+    #[test]
+    fn bitlocker_key_length_is_counted_in_chars_like_the_daemon() {
+        // 100 non-ASCII chars = 200 bytes: the daemon counts chars and
+        // accepts this; the Hub's old byte count rejected it.
+        let key = "ü".repeat(100);
+        assert!(validated_request(
+            "bitlocker_unlock",
+            &payload(json!({ "device": "/dev/sda1", "key": key }))
+        )
+        .is_ok());
+        // 129 chars is over the cap on both sides, however it is counted.
+        let key = "ü".repeat(129);
+        assert!(validated_request(
+            "bitlocker_unlock",
+            &payload(json!({ "device": "/dev/sda1", "key": key }))
+        )
+        .is_err());
     }
 
     #[test]

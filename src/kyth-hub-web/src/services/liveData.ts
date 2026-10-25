@@ -146,6 +146,11 @@ export interface GuardianSnapshot {
   pendingCount: number;
   pending: GuardianPendingItem[];
   history: GuardianHistoryItem[];
+  /** Guardian's own on/off and automatic-safe-fixes settings, read by
+   * the backend from the same config the service honors — the section's
+   * toggles render their actual state from these instead of guessing. */
+  enabled: boolean;
+  autofix: boolean;
 }
 
 // Mirrors main.rs's GuardianSnapshotResponse shape exactly.
@@ -167,6 +172,8 @@ interface GuardianBridgeResponse {
   pending_count: number;
   pending: GuardianBridgePendingItem[];
   history: GuardianBridgeHistoryItem[];
+  enabled: boolean;
+  autofix: boolean;
 }
 
 function statusFor(item: GuardianBridgeHistoryItem): GuardianHistoryItem["status"] {
@@ -182,6 +189,8 @@ export async function fetchGuardianSnapshot(): Promise<GuardianSnapshot | null> 
     const raw = await invokeBounded<GuardianBridgeResponse>("guardian_snapshot", undefined, 30_000);
     return {
       pendingCount: raw.pending_count,
+      enabled: raw.enabled,
+      autofix: raw.autofix,
       pending: raw.pending.map((item) => ({
         recipeId: item.recipe_id,
         title: item.title,
@@ -205,7 +214,15 @@ export async function fetchGuardianSnapshot(): Promise<GuardianSnapshot | null> 
 interface GuardianActionLaunch { job: string; state: "running"; detail: string; }
 function guardianJob(launch: GuardianActionLaunch): string { if (launch.state !== "running" || !launch.job) throw new Error(launch.detail || "Guardian action did not start."); return launch.job; }
 export async function runGuardianCheck(investigate = false): Promise<string> {
-  return guardianJob(await invokeBounded<GuardianActionLaunch>("guardian_check", { investigate }, 90_000));
+  const job = guardianJob(await invokeBounded<GuardianActionLaunch>("guardian_check", { investigate }, 90_000));
+  // Track at launch, not only inside the wait call: the id is
+  // persisted from this moment, so Cancel reaches the job even if the
+  // caller is interrupted before its wait begins — and if another
+  // section (This PC overview and the Guardian section are co-mounted)
+  // already owns the guardian slot, this just-started check is cancelled
+  // by id instead of running orphaned (see trackLaunchedJob).
+  await trackLaunchedJob("guardian", job, (orphan) => cancelBackendJob("guardian_check_cancel", orphan));
+  return job;
 }
 export async function waitGuardianCheck(job: string): Promise<string> {
   trackJob("guardian", job);
@@ -240,6 +257,19 @@ function resolveTerminalJob(state: InstallStatus): string {
 export type JobDomain = "guardian" | "privileged" | "hub-action" | "update" | "job" | "install" | "app-update" | "security" | "gaming" | "vpn" | "dev-tools";
 
 const inFlightJobs = new Map<JobDomain, string>();
+
+/** When each in-flight slot was tracked (or adopted from another tab).
+ * Persisted alongside the job id so a slot's reattach TTL ages from when
+ * the job was actually tracked — not from whenever some later persist
+ * happened to rewrite the whole map. */
+const inFlightTrackedAt = new Map<JobDomain, number>();
+
+/** Slots this tab explicitly released, by domain with the released job
+ * id (ids are unique per launch). Persist merges with what other tabs
+ * wrote, so without a tombstone a stale stored copy of a just-released
+ * slot would be written straight back by the merge and re-adopted from
+ * the next storage event. */
+const untrackedTombstones = new Map<JobDomain, string>();
 
 // Resumable job ids survive a page reload so Cancel still reaches the real
 // backend job after a refresh. Reattached on module init below.
@@ -290,10 +320,41 @@ function isValidPersistedJob(domain: string, job: unknown): job is string {
 function persistInFlightJobs(): void {
   try {
     if (typeof localStorage === "undefined") return;
-    if (inFlightJobs.size === 0) localStorage.removeItem(INFLIGHT_STORAGE_KEY);
-    else {
+    // Read-merge-write: storage is shared with every other Hub tab, and
+    // a whole-map write from a tab whose local map never saw another
+    // tab's slot would delete that slot — losing Cancel for a job that
+    // is still running. Start from what is stored, remove only the slots
+    // THIS tab explicitly released (tombstones), then overlay this tab's
+    // slots, each with its own tracked-at timestamp — never a blanket
+    // ts refresh, or a slot's reattach TTL would never age while any tab
+    // keeps persisting unrelated domains.
+    const merged = new Map<JobDomain, PersistedSlot>();
+    const raw = localStorage.getItem(INFLIGHT_STORAGE_KEY);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw) as Record<string, unknown>;
+        if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+          for (const [domain, entry] of Object.entries(parsed)) {
+            const slot = normalizePersistedSlot(domain, entry);
+            if (slot != null) merged.set(domain as JobDomain, slot);
+          }
+        }
+      } catch {
+        // Corrupt stored payload: rebuild from local state below.
+      }
+    }
+    for (const [domain, releasedJob] of untrackedTombstones) {
+      if (merged.get(domain)?.job === releasedJob) merged.delete(domain);
+    }
+    for (const [domain, job] of inFlightJobs) {
+      const trackedAt = inFlightTrackedAt.get(domain);
+      merged.set(domain, trackedAt === undefined ? { job, ts: Date.now() } : { job, ts: trackedAt });
+    }
+    if (merged.size === 0) {
+      localStorage.removeItem(INFLIGHT_STORAGE_KEY);
+    } else {
       const slots: Record<string, PersistedSlot> = {};
-      for (const [domain, job] of inFlightJobs) slots[domain] = { job, ts: Date.now() };
+      for (const [domain, slot] of merged) slots[domain] = slot;
       localStorage.setItem(INFLIGHT_STORAGE_KEY, JSON.stringify(slots));
     }
   } catch {
@@ -304,9 +365,9 @@ function persistInFlightJobs(): void {
 /** Normalize one persisted entry. Accepts the current `{job, ts}` object
  * and the legacy plain-string id (treated as freshly tracked) so older
  * Hub builds' entries still reattach instead of stranding a Cancel. */
-function normalizePersistedSlot(domain: string, entry: unknown): string | null {
+function normalizePersistedSlot(domain: string, entry: unknown): PersistedSlot | null {
   if (typeof entry === "string") {
-    return isValidPersistedJob(domain, entry) ? entry : null;
+    return isValidPersistedJob(domain, entry) ? { job: entry, ts: Date.now() } : null;
   }
   if (typeof entry !== "object" || entry === null || Array.isArray(entry)) return null;
   const { job, ts } = entry as { job?: unknown; ts?: unknown };
@@ -314,7 +375,7 @@ function normalizePersistedSlot(domain: string, entry: unknown): string | null {
   if (typeof ts !== "number" || !Number.isFinite(ts)) return null;
   const age = Date.now() - ts;
   if (age < 0 || age > REATTACHED_JOB_TTL_MS) return null;
-  return job;
+  return { job, ts };
 }
 
 function reattachInFlightJobs(): void {
@@ -326,12 +387,13 @@ function reattachInFlightJobs(): void {
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
     let dropped = false;
     for (const [domain, entry] of Object.entries(parsed)) {
-      const job = normalizePersistedSlot(domain, entry);
-      if (job == null) {
+      const slot = normalizePersistedSlot(domain, entry);
+      if (slot == null) {
         dropped = true;
         continue;
       }
-      inFlightJobs.set(domain as JobDomain, job);
+      inFlightJobs.set(domain as JobDomain, slot.job);
+      inFlightTrackedAt.set(domain as JobDomain, slot.ts);
     }
     // Drop mismatches from storage too so a poisoned entry cannot linger.
     if (dropped) persistInFlightJobs();
@@ -384,25 +446,34 @@ async function validateReattachedJobs(): Promise<void> {
 
 void validateReattachedJobs();
 
-/** Cross-tab single-flight: another Hub tab tracking or clearing a domain
- * slot adopts or releases it here, so two tabs never poll (or cancel) the
- * same backend job independently and a Cancel in one tab stops the other
- * tab's poller on its next tick (see pollJobUntilSettled). */
+/** Cross-tab single-flight: another Hub tab tracking a domain slot is
+ * adopted here, so two tabs never poll (or cancel) the same backend job
+ * independently. The merge is per-domain and timestamp-ordered — the
+ * incoming payload is the other tab's read-merge of the slots IT knows,
+ * not a snapshot of every tab's tracking, so a domain's ABSENCE here is
+ * not a release: deleting local slots on absence is what let one tab
+ * wipe another tab's live slot (and its Cancel) with an unrelated
+ * persist. A slot released in the other tab is instead observed through
+ * the backend status probe on this tab's next poll tick (a cancelled or
+ * finished job settles the poller), and a newer slot for the same domain
+ * replaces the local one, which stops a stale poller the same way.
+ * Slots this tab deliberately released (tombstones) are never
+ * re-adopted from a stale payload. */
 function handleInflightStorageEvent(event: StorageEvent): void {
   try {
     if (event.key !== INFLIGHT_STORAGE_KEY) return;
     const parsed = (event.newValue ? JSON.parse(event.newValue) : {}) as Record<string, unknown>;
     if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return;
-    const incoming = new Map<JobDomain, string>();
     for (const [domain, entry] of Object.entries(parsed)) {
-      const job = normalizePersistedSlot(domain, entry);
-      if (job != null) incoming.set(domain as JobDomain, job);
-    }
-    for (const [domain, job] of incoming) {
-      if (inFlightJobs.get(domain) !== job) inFlightJobs.set(domain, job);
-    }
-    for (const domain of [...inFlightJobs.keys()]) {
-      if (!incoming.has(domain)) inFlightJobs.delete(domain);
+      const slot = normalizePersistedSlot(domain, entry);
+      if (slot == null) continue;
+      const d = domain as JobDomain;
+      if (untrackedTombstones.get(d) === slot.job) continue;
+      const localTs = inFlightTrackedAt.get(d);
+      if (localTs === undefined || slot.ts > localTs) {
+        inFlightJobs.set(d, slot.job);
+        inFlightTrackedAt.set(d, slot.ts);
+      }
     }
   } catch {
     // Corrupt cross-tab payload: keep local tracking untouched.
@@ -424,12 +495,41 @@ function trackJob(domain: JobDomain, job: string): void {
     throw new Error("Another action is already running; wait for it to finish or cancel it first.");
   }
   inFlightJobs.set(domain, job);
+  inFlightTrackedAt.set(domain, Date.now());
+  untrackedTombstones.delete(domain);
   persistInFlightJobs();
 }
 
 function untrackJob(domain: JobDomain, job: string): void {
-  if (inFlightJobs.get(domain) === job) inFlightJobs.delete(domain);
+  if (inFlightJobs.get(domain) === job) {
+    inFlightJobs.delete(domain);
+    inFlightTrackedAt.delete(domain);
+    // Tombstone the release: persist merges with storage and the
+    // storage handler merges by timestamp, so without this a stale
+    // stored copy of the slot would be written back and re-adopted.
+    untrackedTombstones.set(domain, job);
+  }
   persistInFlightJobs();
+}
+
+/** Track a job the backend has ALREADY started (the launch invoke just
+ * returned its id). If the domain slot is owned by a different job —
+ * another tab, or a co-mounted section that launched first — trackJob
+ * throws, and the just-started job would be orphaned: running,
+ * untracked, and unreachable by Cancel. Cancel it by id instead and
+ * surface the conflict as this call's error, so a failed track never
+ * leaves work running behind the UI's back. */
+async function trackLaunchedJob(
+  domain: JobDomain,
+  job: string,
+  cancelOrphan: (orphan: string) => Promise<unknown>,
+): Promise<void> {
+  try {
+    trackJob(domain, job);
+  } catch (error) {
+    await cancelOrphan(job).catch(() => undefined);
+    throw error;
+  }
 }
 
 interface DomainPollOptions {
@@ -531,6 +631,9 @@ export const cancelGamingJob = (): Promise<string> => cancelTracked("gaming", "g
 export async function runGuardianControl(action: string): Promise<string> {
   if (!confirmUserAction(`Change Guardian setting: ${action}?`)) return "Cancelled.";
   const job = guardianJob(await invokeBounded<GuardianActionLaunch>("guardian_control", { action }, 90_000));
+  // Same launch-then-track guard as runGuardianCheck (waitGuardianCheck's
+  // own trackJob is then a same-id re-affirm, not the first registration).
+  await trackLaunchedJob("guardian", job, (orphan) => cancelBackendJob("guardian_check_cancel", orphan));
   return await waitGuardianCheck(job);
 }
 
@@ -1291,8 +1394,10 @@ export async function startVpnConnection(profile: { gateway: string; protocol: s
   // Tracked like every other cancellable job: Disconnect/Cancel keeps reaching
   // the real backend job after a reload via the reattached slot, and a second
   // connect is rejected while one owns the domain. Untracked when the
-  // section's poller observes a terminal state (see untrackVpnJob).
-  trackJob("vpn", job);
+  // section's poller observes a terminal state (see untrackVpnJob). If the
+  // slot is already owned, the just-started connection is disconnected
+  // again rather than left running untracked (see trackLaunchedJob).
+  await trackLaunchedJob("vpn", job, (orphan) => disconnectVpnConnection(orphan));
   return job;
 }
 export interface VpnConnectionStatus { id: string; state: "connecting" | "authentication_required" | "connected" | "disconnected" | "failed" | "complete" | "failed_lockdown" | "failed_lockdown_open" | "connected_firewall_open" | "complete_firewall_open" | "unknown"; detail: string; }
@@ -1327,7 +1432,7 @@ export async function cancelVpnConnection(): Promise<string> {
   return disconnectVpnConnection(job);
 }
 export interface VpnSavedProfile { gateway: string; protocol: string; os: string; }
-export interface VpnProtectionStatus { vpn_fail_closed: boolean; vpn_dns_exclusive: boolean; firewall_zone: string; }
+export interface VpnProtectionStatus { vpn_fail_closed: boolean; vpn_dns_exclusive: boolean; firewall_zone: string; preset_corrupt: boolean; }
 export async function fetchVpnProtectionStatus(): Promise<VpnProtectionStatus | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<VpnProtectionStatus>("vpn_protection_status"); } catch { return null; }
@@ -1387,9 +1492,13 @@ export async function fetchRecoveryStatus(): Promise<RecoveryStatus | null> {
 export interface UpdateStatusLive { booted?: string | null; staged: boolean; rollback: boolean; remote_digest?: string | null; blocked_reason?: string | null; retry_cmd?: string | null; check_state: string; detail: string; }
 export async function fetchUpdateStatus(): Promise<UpdateStatusLive | null> {
   if (!inTauriShell()) return null;
-  return sharedRead("update-status", 10_000, async () => {
-    try { return await invoke<UpdateStatusLive>("update_status"); } catch { return null; }
-  });
+  // Same rule as fetchPendingUpdatesSummary: the loader must NOT convert
+  // a failure to null inside sharedRead — that cached one failed check
+  // as the answer for the whole TTL. Let it throw (nothing is cached)
+  // and convert to null only for the caller.
+  try {
+    return await sharedRead("update-status", 10_000, () => invoke<UpdateStatusLive>("update_status"));
+  } catch { return null; }
 }
 
 export interface UpdateReleaseSummary {
@@ -1405,9 +1514,15 @@ export interface UpdateReleaseSummary {
  * the UI never guesses a target release from the channel name alone. */
 export async function fetchUpdateReleaseSummary(digest: string): Promise<UpdateReleaseSummary | null> {
   if (!inTauriShell() || !/^sha256:[a-f0-9]{64}$/.test(digest)) return null;
-  return sharedRead(`update-release-summary:${digest}`, 5 * 60_000, async () => {
-    try { return await invoke<UpdateReleaseSummary | null>("update_release_summary", { digest }); } catch { return null; }
-  });
+  // The loader throws on invoke failure so the failure is never cached
+  // as "no summary" for the 5-minute TTL; null is produced out here. (A
+  // successful read may still BE null — no release matched the digest —
+  // and that success caches as before.)
+  try {
+    return await sharedRead(`update-release-summary:${digest}`, 5 * 60_000, () =>
+      invoke<UpdateReleaseSummary | null>("update_release_summary", { digest }),
+    );
+  } catch { return null; }
 }
 
 export interface UpdateHistoryEntry {
@@ -1426,17 +1541,24 @@ export interface UpdateHistoryEntry {
  * the native side parses each release's notes so the UI never guesses. */
 export async function fetchUpdateReleaseHistory(): Promise<UpdateHistoryEntry[]> {
   if (!inTauriShell()) return [];
-  return sharedRead("update-release-history", 5 * 60_000, async () => {
-    try { return await invoke<UpdateHistoryEntry[]>("update_release_history"); } catch { return []; }
-  });
+  // The loader throws on invoke failure so the failure is never cached
+  // as an empty history for the 5-minute TTL (it rendered as "No
+  // published updates to show yet"); [] is produced out here.
+  try {
+    return await sharedRead("update-release-history", 5 * 60_000, () =>
+      invoke<UpdateHistoryEntry[]>("update_release_history"),
+    );
+  } catch { return []; }
 }
 
 export interface UpdateHealthLive { status: string; pending_digest: string; last_healthy_digest: string; failures: number; quarantined: number; detail: string; }
 export async function fetchUpdateHealth(): Promise<UpdateHealthLive | null> {
   if (!inTauriShell()) return null;
-  return sharedRead("update-health", 10_000, async () => {
-    try { return await invoke<UpdateHealthLive>("update_health"); } catch { return null; }
-  });
+  // Loader throws on failure (never cached); null is produced out here —
+  // same rule as fetchPendingUpdatesSummary / fetchUpdateStatus.
+  try {
+    return await sharedRead("update-health", 10_000, () => invoke<UpdateHealthLive>("update_health"));
+  } catch { return null; }
 }
 
 export interface UpdatesSnapshot {
@@ -1466,7 +1588,10 @@ export async function fetchIsLiveSession(): Promise<boolean | null> {
   try { return await invoke<boolean>("is_live_session"); } catch { return null; }
 }
 
-// Firmware — fwupd counts (Hardware)
+// Firmware — fwupd counts (Hardware). The backend command returns
+// Result<i32, String>: an invoke rejection is the "couldn't check" case
+// and becomes null here — 0 only ever means the backend successfully
+// counted zero updates, never a failed probe.
 export async function fetchFirmwareUpdatesCount(): Promise<number | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<number>("firmware_updates_count"); } catch { return null; }
@@ -1552,14 +1677,13 @@ export interface TelemetrySession {
 
 export async function fetchTelemetryRecent(limit = 7): Promise<TelemetrySession[] | null> {
   if (!inTauriShell()) return null;
-  return sharedRead(`telemetry:${limit}`, 10_000, async () => {
-    try {
-      const rows = await invoke<TelemetrySession[]>("telemetry_recent", { limit });
-      return rows;
-    } catch {
-      return null;
-    }
-  });
+  // Loader throws on failure (never cached); null is produced out here —
+  // same rule as fetchPendingUpdatesSummary / fetchUpdateStatus.
+  try {
+    return await sharedRead(`telemetry:${limit}`, 10_000, () =>
+      invoke<TelemetrySession[]>("telemetry_recent", { limit }),
+    );
+  } catch { return null; }
 }
 
 export interface CompatibilityGame {
@@ -1838,15 +1962,34 @@ export async function waitInstallJob(job: string, limit = 120): Promise<string> 
 // kyth-shared-rs's security_container module doc for why.
 // ---------------------------------------------------------------------
 
+/** Kali box presence. The backend command returns Result<bool, String>:
+ * null here means the probe itself failed (or we're outside the Hub
+ * shell) — it must never be collapsed to false, which the section reads
+ * as "no box" in front of a create that deletes and recreates. */
 export async function fetchKaliStatus(): Promise<boolean | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<boolean>("kali_status"); } catch { return null; }
 }
 
 export interface SecHostTool { flatpak: string; name: string; desc: string; installed: boolean }
-export async function fetchSecHostTools(): Promise<SecHostTool[] | null> {
+/** The tools grid plus the flatpak scopes the installed-scan could not
+ * read. A failed scope is carried alongside the list, never folded into
+ * it: the affected tools' `installed` flags are unknown, and the section
+ * must be able to say the scan was partial instead of presenting every
+ * tool in that scope as simply not installed. */
+export interface SecHostToolsResult { tools: SecHostTool[]; scanFailedScopes: string[] }
+// Mirrors SecHostToolResponse: the backend repeats the shared scan's
+// failed scopes on every entry; the wrapper lifts them into one list.
+interface SecHostToolRaw { flatpak: string; name: string; desc: string; installed: boolean; scan_failed_scopes: string[] }
+export async function fetchSecHostTools(): Promise<SecHostToolsResult | null> {
   if (!inTauriShell()) return null;
-  try { return await invoke<SecHostTool[]>("sec_host_tools"); } catch { return null; }
+  try {
+    const raw = await invoke<SecHostToolRaw[]>("sec_host_tools");
+    return {
+      tools: raw.map((tool) => ({ flatpak: tool.flatpak, name: tool.name, desc: tool.desc, installed: tool.installed })),
+      scanFailedScopes: [...new Set(raw.flatMap((tool) => tool.scan_failed_scopes ?? []))],
+    };
+  } catch { return null; }
 }
 
 async function pollSecurityJob(job: string, maxIterations: number): Promise<string> {
@@ -1990,6 +2133,10 @@ export async function fetchDevToolsCatalog(): Promise<DevTool[] | null> {
 }
 
 export interface AiDevBoxStatus { exists: boolean; box_name: string; gpu: string }
+/** The backend command returns Result<AiDevBoxStatus, String>: null
+ * here means the probe itself failed — `exists: false` only ever comes
+ * from a successful probe, never from an error, so a failed read can't
+ * invite a recreating create over an existing box. */
 export async function fetchAiDevBoxStatus(): Promise<AiDevBoxStatus | null> {
   if (!inTauriShell()) return null;
   try { return await invoke<AiDevBoxStatus>("ai_dev_box_status"); } catch { return null; }
@@ -2007,7 +2154,10 @@ function devToolsJob(launch: DevToolsActionLaunch): string {
 export async function installSelectedDevTools(selectedIds: string[]): Promise<string> {
   if (!inTauriShell()) throw new Error("Dev Tools setup is available from the installed Kyth Hub.");
   const job = devToolsJob(await invoke<DevToolsActionLaunch>("dev_tools_install_selection", { selected_ids: selectedIds }));
-  trackJob("dev-tools", job);
+  // The backend job has already started at this point: if the dev-tools
+  // slot is owned (a second wizard run), the new job is cancelled by id
+  // instead of running untracked and uncancellable (see trackLaunchedJob).
+  await trackLaunchedJob("dev-tools", job, (orphan) => cancelBackendJob("dev_tools_job_cancel", orphan));
   try {
     const state = await pollJobUntilSettled("dev-tools", job, {
       statusCommand: "dev_tools_job_status",

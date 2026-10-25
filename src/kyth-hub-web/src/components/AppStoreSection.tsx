@@ -11,7 +11,7 @@ import {
   launchSecHostTool, invalidateSharedReads, fetchPendingUpdatesSummary, updateFlatpaks,
   onOnlineRefetch,
   type AppStoreSnapshot, type FamiliarApp, type AppImageEntry,
-  type AppStreamApp, type StarterPack, type InstalledFlatpak, type SecHostTool,
+  type AppStreamApp, type StarterPack, type InstalledFlatpak, type SecHostTool, type SecHostToolsResult,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionStatus, ProgressRing, RecipeButton, useSectionAction } from "./SectionActions";
@@ -64,22 +64,28 @@ function AppCard({ app, installed, busy, onInstall, onUninstall, onCancelInstall
 
 function KaliCard({ busy, run, runCancel }: { busy: string | null; run: SectionRun; runCancel: SectionRun }) {
   const [installed, setInstalled] = useState<boolean | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [tier, setTier] = useState<"headless" | "default" | "everything">("headless");
-  useEffect(() => { let cancelled = false; fetchKaliStatus().then((value) => { if (!cancelled) setInstalled(value); }); return () => { cancelled = true; }; }, []);
-  async function refresh(): Promise<void> { setInstalled(await fetchKaliStatus()); }
+  useEffect(() => { let cancelled = false; fetchKaliStatus().then((value) => { if (!cancelled) { setInstalled(value); setLoaded(true); } }); return () => { cancelled = true; }; }, []);
+  async function refresh(): Promise<void> { setInstalled(await fetchKaliStatus()); setLoaded(true); }
   return <div className="app-special-card">
     <div className="app-special-heading"><div className="app-special-icon">K</div><div><p className="app-special-title">Kali Linux Toolbox</p><p className="app-special-copy">A ready-to-use security environment managed from Kyth Hub.</p></div>{installed != null && <span className={`pill ${installed ? "pill-ok" : "pill-dim"}`}>{installed ? "Installed" : "Not installed"}</span>}</div>
+    {loaded && installed === null && <div className="app-special-controls"><p className="app-special-copy">Couldn&apos;t check whether the Kali toolbox exists — the status read failed, so it may already be installed.</p><button onClick={() => void refresh()} style={secBtnStyle}>Retry</button></div>}
     {installed === false && <div className="app-special-controls"><div className="app-choice-row">{([ ["headless", "Headless", "~150 CLI tools"], ["default", "Default", "CLI + GUI tools"], ["everything", "Everything", "All available tools"] ] as const).map(([value, label, detail]) => <label key={value} className={`app-choice ${tier === value ? "app-choice-selected" : ""}`}><input type="radio" name="kali-tier" checked={tier === value} onChange={() => setTier(value)} /><span><strong>{label}</strong><small>{detail}</small></span></label>)}</div>{busy === "kali-create" && <ProgressRing size={22} />}<button disabled={busy !== null} onClick={() => run("kali-create", "Creating Kali box…", async () => { const result = await createKaliBox(tier); await refresh(); return result; })} style={secBtnStyle}>{busy === "kali-create" ? "Creating…" : "Create toolbox"}</button></div>}
     {installed === true && <div className="app-special-actions"><button disabled={busy !== null} onClick={() => run("kali-enter", "Opening terminal…", enterKaliTerminal)} style={secBtnStyle}>{busy === "kali-enter" ? "Opening…" : "Launch terminal"}</button><button disabled={busy !== null} onClick={() => run("kali-export", "Exporting GUI apps…", exportKaliApps)} style={secBtnStyle}>{busy === "kali-export" ? "Exporting…" : "Export apps"}</button><button disabled={busy !== null} onClick={() => run("kali-remove", "Stopping and removing Kali box…", async () => { const result = await removeKaliBox(); await refresh(); return result; })} style={{ ...secBtnStyle, borderColor: "var(--danger, #c0392b)", color: "var(--danger, #c0392b)" }}>{busy === "kali-remove" ? "Removing…" : "Remove toolbox"}</button>{["kali-create", "kali-export", "kali-remove"].includes(busy ?? "") && <span className="hub-progress-inline"><ProgressRing size={22} /><button onClick={() => runCancel("cancel-kali", "Cancelling…", cancelSecurityJob)} style={secBtnStyle}>Cancel</button></span>}</div>}
   </div>;
 }
 
 function HostToolsGrid({ busy, run }: { busy: string | null; run: SectionRun }) {
-  const [tools, setTools] = useState<SecHostTool[] | null>(null);
-  useEffect(() => { let cancelled = false; fetchSecHostTools().then((value) => { if (!cancelled) setTools(value); }); return () => { cancelled = true; }; }, []);
-  async function refresh(): Promise<void> { const fresh = await fetchSecHostTools(); if (fresh) setTools(fresh); }
-  if (!tools || tools.length === 0) return null;
-  return <div className="app-special-list"><p className="app-subsection-label">Host-side security tools</p><p className="app-subsection-copy">Native Flatpak tools with first-class Wayland integration.</p><div className="app-tool-grid">{tools.map((tool) => <div key={tool.flatpak} className="app-tool-card"><AppIcon name={tool.name} id={tool.flatpak} /><div className="app-tool-copy"><strong>{tool.name}</strong><span>{tool.desc}</span></div>{tool.installed ? <div className="app-tool-actions"><button disabled={busy !== null} onClick={() => run(`sec-launch-${tool.flatpak}`, `Launching ${tool.name}…`, () => launchSecHostTool(tool.flatpak))} style={secBtnStyle}>Launch</button><button disabled={busy !== null} onClick={() => run(`sec-uninstall-${tool.flatpak}`, `Uninstalling ${tool.name}…`, async () => { const result = await uninstallSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Remove</button></div> : <button disabled={busy !== null} onClick={() => run(`sec-install-${tool.flatpak}`, `Installing ${tool.name}…`, async () => { const result = await installSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Install</button>}</div>)}</div></div>;
+  const [result, setResult] = useState<SecHostToolsResult | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  useEffect(() => { let cancelled = false; fetchSecHostTools().then((value) => { if (!cancelled) { setResult(value); setLoaded(true); } }); return () => { cancelled = true; }; }, []);
+  async function refresh(): Promise<void> { const fresh = await fetchSecHostTools(); if (fresh) setResult(fresh); setLoaded(true); }
+  if (!loaded) return null;
+  if (!result) return <div className="app-special-list"><p className="app-subsection-label">Host-side security tools</p><p className="app-subsection-copy">Couldn&apos;t check the host security tools — the status read failed, so install state can&apos;t be shown right now.</p><button onClick={() => void refresh()} style={secBtnStyle}>Retry</button></div>;
+  const tools: SecHostTool[] = result.tools;
+  if (tools.length === 0 && result.scanFailedScopes.length === 0) return null;
+  return <div className="app-special-list"><p className="app-subsection-label">Host-side security tools</p><p className="app-subsection-copy">Native Flatpak tools with first-class Wayland integration.</p>{result.scanFailedScopes.length > 0 && <p className="app-subsection-copy">Some app sources couldn&apos;t be scanned ({result.scanFailedScopes.join(", ")}), so a tool shown as “not installed” may actually be installed.</p>}{tools.length > 0 && <div className="app-tool-grid">{tools.map((tool) => <div key={tool.flatpak} className="app-tool-card"><AppIcon name={tool.name} id={tool.flatpak} /><div className="app-tool-copy"><strong>{tool.name}</strong><span>{tool.desc}</span></div>{tool.installed ? <div className="app-tool-actions"><button disabled={busy !== null} onClick={() => run(`sec-launch-${tool.flatpak}`, `Launching ${tool.name}…`, () => launchSecHostTool(tool.flatpak))} style={secBtnStyle}>Launch</button><button disabled={busy !== null} onClick={() => run(`sec-uninstall-${tool.flatpak}`, `Uninstalling ${tool.name}…`, async () => { const result = await uninstallSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Remove</button></div> : <button disabled={busy !== null} onClick={() => run(`sec-install-${tool.flatpak}`, `Installing ${tool.name}…`, async () => { const result = await installSecHostTool(tool.flatpak); await refresh(); return result; })} style={secBtnStyle}>Install</button>}</div>)}</div>}</div>;
 }
 
 function numericAppPending(pending: Record<string, string> | null): number {

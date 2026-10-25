@@ -4,6 +4,9 @@
 //! builders live in `kyth_shared::system::{ai_dev, dev_tools_catalog}`.
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
@@ -64,15 +67,25 @@ pub(crate) struct AiDevBoxStatus {
     gpu: String,
 }
 
+/// Fallible: the old shape swallowed every probe error into
+/// `exists: false`, which the wizard reads as "no box" — and creation
+/// is existence-gated, so a failed probe invited a recreate of a live
+/// box. Runs on the blocking pool: `distrobox list` alone is bounded
+/// at 120 s, far too long to stall the command thread.
 #[tauri::command]
-pub(crate) fn ai_dev_box_status() -> AiDevBoxStatus {
-    let config = config();
-    let exists = ai_dev::box_exists(&config).unwrap_or(false);
-    AiDevBoxStatus {
-        exists,
-        box_name: config.box_name,
-        gpu: ai_dev::gpu_description(ai_dev::gpu_kind()).to_string(),
-    }
+pub(crate) async fn ai_dev_box_status() -> Result<AiDevBoxStatus, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let config = config();
+        let exists = ai_dev::box_exists(&config)
+            .map_err(|error| format!("Could not check whether the dev box exists: {error}"))?;
+        Ok(AiDevBoxStatus {
+            exists,
+            box_name: config.box_name,
+            gpu: ai_dev::gpu_description(ai_dev::gpu_kind()).to_string(),
+        })
+    })
+    .await
+    .map_err(|err| format!("Dev box status check failed: {err}"))?
 }
 
 // ---------------------------------------------------------------------
@@ -116,6 +129,57 @@ fn validate_selection(
     Ok(resolved)
 }
 
+/// Single-flight for the dev-tools wizard install. Two runs at once
+/// would create/provision the same `kyth-ai-dev` box concurrently and
+/// run the same host installer scripts (incl. `sudo dnf`) in parallel.
+/// Same AtomicBool + RAII shape as the flatpak slot in `job.rs`.
+static DEV_TOOLS_INSTALLING: AtomicBool = AtomicBool::new(false);
+
+/// RAII handle for the wizard slot: dropping it frees the slot,
+/// including on panic paths inside the job worker.
+#[derive(Debug)]
+struct DevToolsSlot;
+
+impl Drop for DevToolsSlot {
+    fn drop(&mut self) {
+        DEV_TOOLS_INSTALLING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Claim the wizard slot, or explain what must finish first. Callers
+/// claim BEFORE starting their job and move the guard into the task so
+/// it is held for the job's whole life.
+fn take_dev_tools_slot() -> Result<DevToolsSlot, String> {
+    DEV_TOOLS_INSTALLING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .map(|_| DevToolsSlot)
+        .map_err(|_| {
+            "Another dev tools install is already in progress. \
+             Wait for it to finish before starting another."
+                .to_string()
+        })
+}
+
+/// Overall deadline for one wizard run: the chain's own worst case —
+/// box creation and in-box provisioning are each an `ExtendedWork`
+/// step, and every host-level tool is a `ToolInstall` step.
+/// `spawn_task_job` has no job-level timeout, so the task enforces this
+/// budget itself (see the watchdog in `dev_tools_install_selection`).
+fn install_budget(host_tool_count: usize) -> Duration {
+    let host_steps = u32::try_from(host_tool_count).unwrap_or(u32::MAX);
+    timeout_for(JobTimeoutClass::ExtendedWork) * 2
+        + timeout_for(JobTimeoutClass::ToolInstall) * host_steps
+}
+
+/// Sets the flag on drop; stops the install watchdog on every task exit.
+struct WatchdogStop(Arc<AtomicBool>);
+
+impl Drop for WatchdogStop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+}
+
 /// Run the wizard end to end: create `kyth-ai-dev` if it does not exist yet,
 /// provision every in-box tool the user picked in one script, then run each
 /// host-level tool's own install command in sequence. Reported as a single
@@ -126,15 +190,57 @@ pub(crate) fn dev_tools_install_selection(
     selected_ids: Vec<String>,
 ) -> Result<DevToolsActionLaunch, String> {
     let selected = validate_selection(&selected_ids)?;
+    // Wizard single-flight, claimed before the job exists.
+    let slot = take_dev_tools_slot()?;
     let config = config();
     let launch_detail = "Preparing the dev box…".to_string();
     let job = start_job("dev-tools-install", &launch_detail)?;
 
     let box_config = config.clone();
     let selected_owned: Vec<&'static dev_tools_catalog::DevTool> = selected;
+    let host_tool_count = selected_owned
+        .iter()
+        .filter(|tool| {
+            matches!(
+                tool.install,
+                InstallMethod::HostScript { .. } | InstallMethod::HostRpmUrl(_)
+            )
+        })
+        .count();
+    let budget = install_budget(host_tool_count);
     spawn_task_job(job.clone(), move |worker_job, cancel| {
         use super::job::update_job;
         use std::sync::atomic::Ordering::Relaxed;
+
+        // Held until the task returns so the slot covers the whole job.
+        let _slot = slot;
+
+        // Job-level deadline. `spawn_task_job` imposes none, and the
+        // chain's per-step timeouts sum to `budget` in the worst case —
+        // and a step wedged outside a bounded command would never end
+        // at all. A watchdog folds the deadline (and the job's own
+        // cancel flag) into a local flag handed to the bounded runner,
+        // so an in-flight step is killed at the deadline instead of
+        // whenever it happens to finish.
+        let deadline = Instant::now() + budget;
+        let effective_cancel = Arc::new(AtomicBool::new(false));
+        let watchdog_stop = Arc::new(AtomicBool::new(false));
+        {
+            let job_cancel = cancel.clone();
+            let effective = effective_cancel.clone();
+            let stop = watchdog_stop.clone();
+            std::thread::spawn(move || {
+                while !stop.load(Relaxed) {
+                    if job_cancel.load(Relaxed) || Instant::now() >= deadline {
+                        effective.store(true, Relaxed);
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(100));
+                }
+            });
+        }
+        let _watchdog_stop = WatchdogStop(watchdog_stop);
+        let past_deadline = || Instant::now() >= deadline;
 
         let box_exists = match ai_dev::box_exists(&box_config) {
             Ok(exists) => exists,
@@ -164,19 +270,34 @@ pub(crate) fn dev_tools_install_selection(
             match kyth_shared::system::process::run_bounded_command_cancel(
                 command,
                 timeout_for(JobTimeoutClass::ExtendedWork),
-                &cancel,
+                &effective_cancel,
             ) {
                 Ok(output) if output.status.success() => {}
                 Ok(output) => {
                     return ("failed".into(), failure_detail("Dev box creation", &output))
                 }
                 Err(error) => {
+                    if past_deadline() {
+                        return (
+                            "failed".into(),
+                            "Dev tools setup took too long and was stopped.".into(),
+                        );
+                    }
+                    if cancel.load(Relaxed) {
+                        return ("cancelled".into(), "Cancelled.".into());
+                    }
                     return (
                         "failed".into(),
                         format!("Could not create the dev box: {error}"),
-                    )
+                    );
                 }
             }
+        }
+        if past_deadline() {
+            return (
+                "failed".into(),
+                "Dev tools setup took too long and was stopped.".into(),
+            );
         }
         if cancel.load(Relaxed) {
             return ("cancelled".into(), "Cancelled.".into());
@@ -198,17 +319,32 @@ pub(crate) fn dev_tools_install_selection(
             match kyth_shared::system::process::run_bounded_command_cancel(
                 command,
                 timeout_for(JobTimeoutClass::ExtendedWork),
-                &cancel,
+                &effective_cancel,
             ) {
                 Ok(output) if output.status.success() => {}
                 Ok(output) => return ("failed".into(), failure_detail("Tool install", &output)),
                 Err(error) => {
+                    if past_deadline() {
+                        return (
+                            "failed".into(),
+                            "Dev tools setup took too long and was stopped.".into(),
+                        );
+                    }
+                    if cancel.load(Relaxed) {
+                        return ("cancelled".into(), "Cancelled.".into());
+                    }
                     return (
                         "failed".into(),
                         format!("Could not install the selected tools: {error}"),
-                    )
+                    );
                 }
             }
+        }
+        if past_deadline() {
+            return (
+                "failed".into(),
+                "Dev tools setup took too long and was stopped.".into(),
+            );
         }
         if cancel.load(Relaxed) {
             return ("cancelled".into(), "Cancelled.".into());
@@ -241,7 +377,7 @@ pub(crate) fn dev_tools_install_selection(
             match kyth_shared::system::process::run_bounded_command_cancel(
                 command,
                 timeout_for(JobTimeoutClass::ToolInstall),
-                &cancel,
+                &effective_cancel,
             ) {
                 Ok(output) if output.status.success() => {}
                 Ok(output) => {
@@ -251,11 +387,26 @@ pub(crate) fn dev_tools_install_selection(
                     )
                 }
                 Err(error) => {
+                    if past_deadline() {
+                        return (
+                            "failed".into(),
+                            "Dev tools setup took too long and was stopped.".into(),
+                        );
+                    }
+                    if cancel.load(Relaxed) {
+                        return ("cancelled".into(), "Cancelled.".into());
+                    }
                     return (
                         "failed".into(),
                         format!("Could not install {}: {error}", tool.name),
-                    )
+                    );
                 }
+            }
+            if past_deadline() {
+                return (
+                    "failed".into(),
+                    "Dev tools setup took too long and was stopped.".into(),
+                );
             }
             if cancel.load(Relaxed) {
                 return ("cancelled".into(), "Cancelled.".into());
@@ -297,6 +448,31 @@ mod tests {
             validate_selection(&["vscode".to_string(), "not-a-real-tool".to_string()]).is_err()
         );
         assert!(validate_selection(&["vscode".to_string()]).is_ok());
+    }
+
+    #[test]
+    fn install_budget_covers_the_chain_worst_case() {
+        let base = timeout_for(JobTimeoutClass::ExtendedWork) * 2;
+        let step = timeout_for(JobTimeoutClass::ToolInstall);
+        assert_eq!(install_budget(0), base);
+        assert_eq!(install_budget(3), base + step * 3);
+        assert!(install_budget(1) > install_budget(0));
+    }
+
+    #[test]
+    fn dev_tools_slot_is_single_flight_until_dropped() {
+        let first = take_dev_tools_slot().expect("first claim succeeds");
+        let second = take_dev_tools_slot();
+        assert!(
+            second.is_err(),
+            "a second wizard run must be rejected while one runs"
+        );
+        assert!(second.unwrap_err().contains("already in progress"));
+        drop(first);
+        assert!(
+            take_dev_tools_slot().is_ok(),
+            "dropping the guard frees the slot"
+        );
     }
 
     #[test]

@@ -637,6 +637,43 @@ fn config() -> Value {
         )
 }
 
+/// Apply one flag change to the on-disk Guardian config, preserving every
+/// other key. The Hub's guardian_control actions (enable / disable /
+/// auto-fix on|off) land here; without these subcommands the control
+/// actions failed with a usage error against the shipped binary. The
+/// read side stays config() above, with identical defaults, so the state
+/// written here is exactly the state the next check honors.
+fn apply_config_flag(config: &Value, key: &str, value: bool) -> Value {
+    let mut next = if config.is_object() {
+        config.clone()
+    } else {
+        json!({"enabled": true, "automatic_safe_fixes": false, "notifications": true})
+    };
+    next[key] = Value::Bool(value);
+    next
+}
+
+fn set_config_flag(key: &str, value: bool) -> Result<Value, String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    if home.is_empty() {
+        return Err("HOME is not set; cannot write the Guardian config".into());
+    }
+    let dir = Path::new(&home).join(".config/kyth");
+    std::fs::create_dir_all(&dir)
+        .map_err(|error| format!("could not create {}: {error}", dir.display()))?;
+    let path = dir.join("guardian.json");
+    let next = apply_config_flag(&config(), key, value);
+    let body = serde_json::to_string_pretty(&next)
+        .map_err(|error| format!("could not serialize the Guardian config: {error}"))?;
+    std::fs::write(&path, body)
+        .map_err(|error| format!("could not write {}: {error}", path.display()))?;
+    Ok(json!({
+        "schema_version": 1,
+        "enabled": next.get("enabled").and_then(Value::as_bool).unwrap_or(true),
+        "automatic_safe_fixes": next.get("automatic_safe_fixes").and_then(Value::as_bool).unwrap_or(false),
+    }))
+}
+
 fn check(persist: bool, allow_automatic: bool, investigate: bool) -> Value {
     let settings = config();
     let enabled = settings
@@ -789,8 +826,39 @@ fn main() -> std::process::ExitCode {
             }
             json!({"schema_version": 1, "user_initiated": true, "decisions": decisions})
         }
+        "enable" => match set_config_flag("enabled", true) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("kyth-guardian: {error}");
+                return std::process::ExitCode::from(1);
+            }
+        },
+        "disable" => match set_config_flag("enabled", false) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("kyth-guardian: {error}");
+                return std::process::ExitCode::from(1);
+            }
+        },
+        "auto-fix" => {
+            let on = match args.get(command_index + 1).map(String::as_str) {
+                Some("on") => true,
+                Some("off") => false,
+                _ => {
+                    eprintln!("usage: kyth-guardian [--json] auto-fix on|off");
+                    return std::process::ExitCode::from(2);
+                }
+            };
+            match set_config_flag("automatic_safe_fixes", on) {
+                Ok(value) => value,
+                Err(error) => {
+                    eprintln!("kyth-guardian: {error}");
+                    return std::process::ExitCode::from(1);
+                }
+            }
+        }
         _ => {
-            eprintln!("usage: kyth-guardian [--json] status|check|inspect|investigate|fix [--yes] [recipe-id ...]");
+            eprintln!("usage: kyth-guardian [--json] status|check|inspect|investigate|fix [--yes] [recipe-id ...]|enable|disable|auto-fix on|off");
             return std::process::ExitCode::from(2);
         }
     };
@@ -806,4 +874,27 @@ fn main() -> std::process::ExitCode {
         );
     }
     std::process::ExitCode::SUCCESS
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn config_flag_flip_preserves_other_keys() {
+        let config = json!({"enabled": true, "automatic_safe_fixes": false, "notifications": false, "custom": 3});
+        let next = apply_config_flag(&config, "enabled", false);
+        assert_eq!(next["enabled"], Value::Bool(false));
+        assert_eq!(next["automatic_safe_fixes"], Value::Bool(false));
+        assert_eq!(next["notifications"], Value::Bool(false));
+        assert_eq!(next["custom"], json!(3));
+    }
+
+    #[test]
+    fn config_flag_on_non_object_falls_back_to_defaults() {
+        let next = apply_config_flag(&Value::Null, "automatic_safe_fixes", true);
+        assert_eq!(next["enabled"], Value::Bool(true));
+        assert_eq!(next["automatic_safe_fixes"], Value::Bool(true));
+        assert_eq!(next["notifications"], Value::Bool(true));
+    }
 }

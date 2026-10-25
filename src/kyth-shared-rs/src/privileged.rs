@@ -10,7 +10,8 @@ use std::os::fd::AsRawFd;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::process::{Command, Stdio};
-use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -203,28 +204,44 @@ fn validate_request(request: &Value, uid: u32, gid: u32) -> Result<ExecSpec, Str
         .get("operation")
         .and_then(Value::as_str)
         .unwrap_or("");
+    // Most shapes are fixed literals; collect them as owned strings so an
+    // arm can also build its argv from a shared helper (firmware below).
+    let argv_of =
+        |parts: &[&str]| -> Vec<String> { parts.iter().map(|part| part.to_string()).collect() };
     let (argv, stdin) = match operation {
-        "flatpak_update" => (vec!["/usr/bin/flatpak", "update", "--system", "-y"], None),
+        "flatpak_update" => (
+            argv_of(&["/usr/bin/flatpak", "update", "--system", "-y"]),
+            None,
+        ),
         "flatpak_uninstall" => {
             let app_id = text(request, "app_id");
             if !valid_flatpak_id(app_id) {
                 return Err("invalid Flatpak application id".to_string());
             }
             (
-                vec!["/usr/bin/flatpak", "uninstall", "--system", "-y", app_id],
+                argv_of(&["/usr/bin/flatpak", "uninstall", "--system", "-y", app_id]),
                 None,
             )
         }
-        "firmware_update" => (vec!["/usr/bin/fwupdmgr", "update"], None),
-        "nvidia_install" => (vec!["/usr/bin/ujust", "install-nvidia-driver"], None),
+        "firmware_update" => {
+            // The shared helper owns the flag set: fwupdmgr prompts unless
+            // told --assume-yes, and daemon children run with stdin
+            // /dev/null, so a bare `fwupdmgr update` reads EOF at the first
+            // prompt and aborts. The daemon pins the absolute path like
+            // every other shape here; the helper spells the tool bare.
+            let mut argv = crate::system::firmware::firmware_update_command();
+            argv[0] = format!("/usr/bin/{}", argv[0]);
+            (argv, None)
+        }
+        "nvidia_install" => (argv_of(&["/usr/bin/ujust", "install-nvidia-driver"]), None),
         "kernel_switch" => {
             let flavor = text(request, "flavor");
             if !matches!(flavor, "fedora" | "cachy") {
                 return Err("kernel flavor must be fedora or cachy".to_string());
             }
-            (vec!["/usr/bin/ujust", "switch-kernel", flavor], None)
+            (argv_of(&["/usr/bin/ujust", "switch-kernel", flavor]), None)
         }
-        "secureboot_enroll" => (vec!["/usr/bin/ujust", "enroll-secureboot"], None),
+        "secureboot_enroll" => (argv_of(&["/usr/bin/ujust", "enroll-secureboot"]), None),
         "bitlocker_unlock" => {
             let device = text(request, "device");
             let key = text(request, "key");
@@ -235,34 +252,31 @@ fn validate_request(request: &Value, uid: u32, gid: u32) -> Result<ExecSpec, Str
                 return Err("invalid BitLocker key".to_string());
             }
             (
-                vec![
+                argv_of(&[
                     "/usr/bin/udisksctl",
                     "unlock",
                     "-b",
                     device,
                     "--key-file",
                     "/dev/stdin",
-                ],
+                ]),
                 Some(key.as_bytes().to_vec()),
             )
         }
         "network_share_add" | "network_share_remove" => (
-            vec![
+            argv_of(&[
                 "/usr/libexec/kyth-network-share",
                 if operation == "network_share_add" {
                     "add"
                 } else {
                     "remove"
                 },
-            ],
+            ]),
             Some(network_share_stdin(request, operation, uid, gid)?),
         ),
         _ => return Err("operation is not allowlisted".to_string()),
     };
-    Ok(ExecSpec {
-        argv: argv.into_iter().map(String::from).collect(),
-        stdin,
-    })
+    Ok(ExecSpec { argv, stdin })
 }
 
 fn display_detail(stdout: &[u8], stderr: &[u8], status: std::process::ExitStatus) -> String {
@@ -330,16 +344,55 @@ fn drain_capped<R: Read>(reader: R, cap: usize) -> Vec<u8> {
     kept
 }
 
+/// Unbounded-context entry for tests: full timeout budget from now and
+/// no client whose disappearance should abandon the operation.
 fn run_operation(spec: ExecSpec) -> Result<String, String> {
+    let never_gone = AtomicBool::new(false);
+    run_operation_bounded(spec, Instant::now() + OPERATION_TIMEOUT, &never_gone)
+}
+
+/// Acquire the flatpak mutex without waiting past `deadline` or past the
+/// client going away. A std Mutex has no timed lock, so poll try_lock:
+/// operations here run for seconds-to-minutes, so a 25 ms poll is cheap.
+fn acquire_flatpak_lock(
+    deadline: Instant,
+    client_gone: &AtomicBool,
+) -> Result<std::sync::MutexGuard<'static, ()>, String> {
+    loop {
+        match FLATPAK_OP_LOCK.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => {
+                return Ok(poisoned.into_inner());
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if client_gone.load(Ordering::SeqCst) {
+                    return Err(
+                        "privileged operation cancelled: the client disconnected".to_string()
+                    );
+                }
+                if Instant::now() >= deadline {
+                    return Err(
+                        "timed out waiting for another privileged operation to finish".to_string(),
+                    );
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+        }
+    }
+}
+
+fn run_operation_bounded(
+    spec: ExecSpec,
+    deadline: Instant,
+    client_gone: &AtomicBool,
+) -> Result<String, String> {
     use std::os::unix::process::CommandExt;
     // Held for the whole operation when this is a flatpak mutation; the
-    // guard is intentionally unused-named so it drops at function exit.
+    // guard is intentionally unused-named so it drops at function exit —
+    // including the kill paths below, so a cancelled or timed-out
+    // operation never wedges the lock for the next client.
     let _flatpak_guard = if is_flatpak_mutation(&spec.argv) {
-        Some(
-            FLATPAK_OP_LOCK
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner()),
-        )
+        Some(acquire_flatpak_lock(deadline, client_gone)?)
     } else {
         None
     };
@@ -390,17 +443,32 @@ fn run_operation(spec: ExecSpec) -> Result<String, String> {
         .ok_or_else(|| "privileged operation has no piped stderr".to_string())?;
     let stdout_thread = thread::spawn(move || drain_capped(stdout, 64 * 1024));
     let stderr_thread = thread::spawn(move || drain_capped(stderr, 64 * 1024));
-    let deadline = Instant::now() + OPERATION_TIMEOUT;
+    // `deadline` was fixed when the request was received, before any lock
+    // wait, so queueing behind another operation consumes the same budget
+    // the caller's read timeout is sized against: a queued operation can
+    // no longer be reported failed by the caller and then succeed here.
     let status = loop {
         match child
             .try_wait()
             .map_err(|error| format!("could not wait for privileged operation: {error}"))?
         {
             Some(status) => break status,
+            // The client that asked for this operation has gone away (the
+            // Hub's cancel shuts its connection down): nobody is waiting
+            // for the result, so the operation is abandoned — kill it
+            // like a timeout instead of letting root work run unobserved.
+            None if client_gone.load(Ordering::SeqCst) => {
+                crate::system::process::kill_process_group(&mut child);
+                let _ = child.wait();
+                return Err("privileged operation cancelled: the client disconnected".to_string());
+            }
             None if Instant::now() >= deadline => {
                 crate::system::process::kill_process_group(&mut child);
                 let _ = child.wait();
-                return Err("privileged operation timed out after 900 seconds".to_string());
+                return Err(format!(
+                    "privileged operation timed out after {} seconds",
+                    OPERATION_TIMEOUT.as_secs()
+                ));
             }
             None => thread::sleep(Duration::from_millis(50)),
         }
@@ -485,6 +553,16 @@ fn peer_credentials(stream: &UnixStream) -> io::Result<(u32, u32, u32)> {
     Ok((credentials.pid as u32, credentials.uid, credentials.gid))
 }
 
+/// Authorization model: any process running as root or as a wheel
+/// member may use the daemon; the peer is NOT verified to be the Hub
+/// binary. That is a deliberate trade-off, not an oversight: wheel
+/// membership is already sudo-equivalent on this system (a wheel member
+/// can obtain a root shell, and with it everything this daemon can do),
+/// so pinning the peer to one binary would add fragility — binary
+/// identity checks that must survive updates — without raising the bar
+/// for anyone the model excludes. The fixed operation allowlist, not
+/// peer identity, is the boundary that limits what root can be asked
+/// to do.
 fn peer_allowed(stream: &UnixStream) -> Result<(u32, u32, u32), String> {
     let (pid, uid, gid) = peer_credentials(stream).map_err(|error| error.to_string())?;
     let wheel = wheel_gid()?;
@@ -543,6 +621,61 @@ pub fn redact_request_detail(request: &Value, detail: &str) -> String {
     crate::system::process::redact_sensitive_text(&safe)
 }
 
+/// Watch one client connection for the peer going away. Uses poll(2) +
+/// MSG_PEEK rather than a read timeout: a timeout set on this socket
+/// would apply to the shared connection and break the request loop's
+/// blocking reads, and peeking never consumes bytes the loop needs.
+fn watch_client(stream: UnixStream, gone: Arc<AtomicBool>) {
+    let fd = stream.as_raw_fd();
+    let mut pollfd = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    loop {
+        pollfd.revents = 0;
+        let ready = unsafe { libc::poll(&mut pollfd, 1, 250) };
+        if ready < 0 {
+            if io::Error::last_os_error().raw_os_error() == Some(libc::EINTR) {
+                continue;
+            }
+            gone.store(true, Ordering::SeqCst);
+            return;
+        }
+        if ready == 0 {
+            continue; // still connected, nothing pending
+        }
+        if pollfd.revents & (libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            gone.store(true, Ordering::SeqCst);
+            return;
+        }
+        if pollfd.revents & libc::POLLIN != 0 {
+            let mut byte = [0u8; 1];
+            let count = unsafe {
+                libc::recv(
+                    fd,
+                    byte.as_mut_ptr() as *mut libc::c_void,
+                    byte.len(),
+                    libc::MSG_PEEK | libc::MSG_DONTWAIT,
+                )
+            };
+            if count == 0 {
+                // Orderly shutdown: the peer closed its side.
+                gone.store(true, Ordering::SeqCst);
+                return;
+            }
+            if count < 0 && io::Error::last_os_error().raw_os_error() != Some(libc::EAGAIN) {
+                gone.store(true, Ordering::SeqCst);
+                return;
+            }
+            // Bytes are pending (the next request arriving early is not a
+            // disconnect). They stay buffered for the request loop; pause
+            // so peek does not spin on the same byte.
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+}
+
 fn handle_client(stream: UnixStream) {
     let (_pid, uid, gid) = match peer_allowed(&stream) {
         Ok(credentials) => credentials,
@@ -552,6 +685,16 @@ fn handle_client(stream: UnixStream) {
             return;
         }
     };
+    // One watcher per connection: it notices the peer going away while an
+    // operation runs (see watch_client) so run_operation_bounded can
+    // abandon work nobody is waiting for. The flag is per-connection and
+    // reset before each operation; requests on one connection are handled
+    // sequentially, so there is no cross-request race.
+    let client_gone = Arc::new(AtomicBool::new(false));
+    if let Ok(watch_stream) = stream.try_clone() {
+        let gone = Arc::clone(&client_gone);
+        thread::spawn(move || watch_client(watch_stream, gone));
+    }
     let reader_stream = match stream.try_clone() {
         Ok(stream) => stream,
         Err(_) => return,
@@ -580,8 +723,15 @@ fn handle_client(stream: UnixStream) {
                     .and_then(Value::as_str)
                     .unwrap_or("invalid")
                     .to_string();
+                // The operation budget starts at request receipt, before
+                // validation and before any flatpak-lock wait inside the
+                // operation (the Hub's read timeout is sized against the
+                // same 900 s from its side of the socket).
+                let deadline = Instant::now() + OPERATION_TIMEOUT;
+                client_gone.store(false, Ordering::SeqCst);
                 let result = match request.as_ref() {
-                    Ok(value) => validate_request(value, uid, gid).and_then(run_operation),
+                    Ok(value) => validate_request(value, uid, gid)
+                        .and_then(|spec| run_operation_bounded(spec, deadline, &client_gone)),
                     Err(error) => Err(error.to_string()),
                 };
                 let (ok, detail) = match result {
@@ -668,8 +818,9 @@ mod tests {
 
     use super::display_detail;
     use super::{
-        drain_capped, is_flatpak_mutation, parse_wheel_gid, redact_request_detail, run_operation,
-        validate_request, ExecSpec,
+        acquire_flatpak_lock, drain_capped, is_flatpak_mutation, parse_wheel_gid,
+        redact_request_detail, run_operation, run_operation_bounded, validate_request, ExecSpec,
+        FLATPAK_OP_LOCK,
     };
 
     #[test]
@@ -855,6 +1006,71 @@ mod tests {
         let detail = redact_request_detail(&request, "mount failed password=share-secret");
         assert!(!detail.contains("share-secret"));
         assert!(detail.contains("password=<redacted>"));
+    }
+
+    #[test]
+    fn firmware_update_uses_the_shared_noninteractive_argv() {
+        // fwupdmgr prompts without --assume-yes, and daemon children get
+        // stdin /dev/null, so the bare `fwupdmgr update` shape aborted on
+        // EOF at the first prompt. Pin the daemon to the shared helper's
+        // flag set (with the daemon's absolute-path convention).
+        let request =
+            validate_request(&json!({"operation":"firmware_update"}), 1000, 1000).unwrap();
+        assert_eq!(
+            request.argv,
+            [
+                "/usr/bin/fwupdmgr",
+                "update",
+                "--assume-yes",
+                "--no-reboot-check"
+            ]
+        );
+        assert!(request.stdin.is_none());
+    }
+
+    #[test]
+    fn client_disconnect_mid_operation_kills_the_child() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let gone = Arc::new(AtomicBool::new(false));
+        let thread_gone = Arc::clone(&gone);
+        let started = std::time::Instant::now();
+        let handle = std::thread::spawn(move || {
+            run_operation_bounded(
+                ExecSpec {
+                    argv: vec!["sleep".to_string(), "60".to_string()],
+                    stdin: None,
+                },
+                std::time::Instant::now() + std::time::Duration::from_secs(120),
+                &thread_gone,
+            )
+        });
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        gone.store(true, Ordering::SeqCst);
+        let result = handle.join().expect("operation thread panicked");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(10),
+            "disconnect must kill promptly, took {:?}",
+            started.elapsed()
+        );
+        let error = result.unwrap_err();
+        assert!(error.contains("client disconnected"), "{error}");
+    }
+
+    #[test]
+    fn flatpak_lock_wait_respects_the_operation_deadline() {
+        use std::time::{Duration, Instant};
+        // Hold the lock: acquisition with a 300 ms budget must give up
+        // with the queueing error, not wait for the holder — the wait used
+        // to be unbounded and outside the operation timeout entirely.
+        let _held = FLATPAK_OP_LOCK.lock().unwrap();
+        let never_gone = std::sync::atomic::AtomicBool::new(false);
+        let started = Instant::now();
+        match acquire_flatpak_lock(Instant::now() + Duration::from_millis(300), &never_gone) {
+            Ok(_) => panic!("lock acquisition must time out while the lock is held"),
+            Err(error) => assert!(error.contains("timed out waiting"), "{error}"),
+        }
+        assert!(started.elapsed() < Duration::from_secs(5));
     }
 
     #[test]

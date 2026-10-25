@@ -24,7 +24,7 @@ export function VpnSection({ section }: { section: HubSection }) {
   const [job, setJob] = useState<string | null>(() => getInFlightJob("vpn") ?? null);
   const [jobStatus, setJobStatus] = useState<string | null>(null);
   const [protection, setProtection] = useState<VpnProtectionStatus | null>(null);
-  const { status, busy, run } = useSectionAction("hub-action");
+  const { status, busy, run, runCancel } = useSectionAction("vpn");
   // Mount fetch as a named refresh so a reconnect can re-run it: the
   // summary/profile rendered from a stale offline read would otherwise
   // sit unchanged until manual navigation.
@@ -97,6 +97,11 @@ export function VpnSection({ section }: { section: HubSection }) {
     void poll();
     return () => { cancelled = true; if (timer !== undefined) window.clearTimeout(timer); };
   }, [job, gateway]);
+  // Corrupt /etc/kyth/network.toml: the backend enforces fail-closed and
+  // reports preset_corrupt alongside it. The toggles must not present
+  // that enforced state as a deliberate user choice, and saves are
+  // unavailable until the file is repaired.
+  const presetCorrupt = (protection as { preset_corrupt?: boolean } | null)?.preset_corrupt === true;
   return (
     <LiveSectionCard section={section} live={summary !== null}>
       {summary ? (
@@ -130,7 +135,7 @@ export function VpnSection({ section }: { section: HubSection }) {
               })
             }
           />
-          <RecipeButton recipe="setup-tailscale" label="Set up Tailscale" busy={busy} run={run} />
+          <RecipeButton recipe="setup-tailscale" label="Set up Tailscale" busy={busy} run={run} runCancel={runCancel} />
           <ActionButton
             label={busy === "open-vpn" ? "Opening…" : "Open full VPN connection"}
             disabled={busy !== null}
@@ -163,20 +168,25 @@ export function VpnSection({ section }: { section: HubSection }) {
             setPassword("");
           }})} />
           {job && <ActionButton label="Disconnect" disabled={busy !== null} onClick={() => run("disconnect", "Disconnecting VPN…", async () => { const detail = await disconnectVpnConnection(job); setJobStatus(detail); setSummary((value) => value ? { ...value, vpnConnected: false, vpnName: "" } : value); setJob(null); return detail; })} />}
-          {job && !summary?.vpnConnected && <ActionButton label={busy === "cancel" ? "Cancelling…" : "Cancel"} disabled={busy !== null} onClick={() => run("cancel", "Cancelling VPN…", async () => { const detail = await cancelVpnConnection(); setJobStatus(detail); setJob(null); return detail; })} />}
+          {job && !summary?.vpnConnected && <ActionButton label={busy === "cancel" ? "Cancelling…" : "Cancel"} disabled={busy !== null} onClick={() => runCancel("cancel", "Cancelling VPN…", async () => { const detail = await cancelVpnConnection(); setJobStatus(detail); setJob(null); return detail; })} />}
         </div>
         <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
           VPN profiles, openconnect, and SAML sign-in are handled by native Rust commands. Credentials and authentication tokens are never shown in status text.
         </p>
         <div style={{ marginTop: 12, borderTop: "1px solid var(--hairline)", paddingTop: 12 }}>
           <p className="card-copy" style={{ fontSize: 13, fontWeight: 600 }}>VPN protection</p>
+          {presetCorrupt && (
+            <p className="card-copy" role="alert" style={{ fontSize: 12, marginTop: 8 }}>
+              Protection settings file is corrupt — fail-closed is being enforced. Saving protection settings is unavailable until it&apos;s repaired.
+            </p>
+          )}
           {protection ? (
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginTop: 8 }}>
               <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 12 }}>
                 <input
                   type="checkbox"
                   checked={protection.vpn_fail_closed}
-                  disabled={busy !== null}
+                  disabled={busy !== null || presetCorrupt}
                   onChange={() => {
                     const next = { vpnFailClosed: !protection.vpn_fail_closed, vpnDnsExclusive: protection.vpn_dns_exclusive };
                     void run("vpn-protection", "Saving VPN protection…", async () => {
@@ -192,7 +202,7 @@ export function VpnSection({ section }: { section: HubSection }) {
                 <input
                   type="checkbox"
                   checked={protection.vpn_dns_exclusive}
-                  disabled={busy !== null}
+                  disabled={busy !== null || presetCorrupt}
                   onChange={() => {
                     const next = { vpnFailClosed: protection.vpn_fail_closed, vpnDnsExclusive: !protection.vpn_dns_exclusive };
                     void run("vpn-protection", "Saving VPN protection…", async () => {

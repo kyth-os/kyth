@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import {
   cancelAppUpdate,
@@ -44,6 +44,13 @@ export function useSectionAction(trackedDomain?: JobDomain | readonly JobDomain[
   // ids means a genuinely new job — one that isn't the one already
   // accounted for — still gets surfaced.
   const [dismissedJob, setDismissedJob] = useState<string | null>(null);
+  // Action keys whose primary run() has lost ownership of the status
+  // line to a cancel (see runCancel). run() checks this when its action
+  // settles and suppresses its own terminal write for a cancelled key —
+  // otherwise the primary's result (or its "Failed:") lands after the
+  // cancel's "Cancelled." and reads as if the cancel never happened.
+  // A fresh run() under the same key clears the flag when it starts.
+  const cancelOwnedKeys = useRef(new Set<string>());
   const trackedDomains =
     trackedDomain === undefined ? [] : Array.isArray(trackedDomain) ? trackedDomain : [trackedDomain];
   const trackedEntry = trackedDomains
@@ -59,13 +66,20 @@ export function useSectionAction(trackedDomain?: JobDomain | readonly JobDomain[
 
   async function run(id: string, pendingLabel: string, action: () => Promise<string>) {
     setDismissedJob(trackedJobKey);
+    cancelOwnedKeys.current.delete(id);
     setBusy(id);
     setStatus(pendingLabel);
     try {
-      setStatus(await action());
+      const result = await action();
+      // A cancel taken while this ran owns the status line now; the
+      // primary's terminal write (success or failure) must not land
+      // after it and overwrite the cancel's outcome.
+      if (!cancelOwnedKeys.current.has(id)) setStatus(result);
     } catch (err) {
-      // Tauri rejects a Result::Err with the bare string, not an Error.
-      setStatus(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+      if (!cancelOwnedKeys.current.has(id)) {
+        // Tauri rejects a Result::Err with the bare string, not an Error.
+        setStatus(`Failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
     } finally {
       setBusy(null);
     }
@@ -76,9 +90,18 @@ export function useSectionAction(trackedDomain?: JobDomain | readonly JobDomain[
    * a primary action holds `busy` (that's the state that shows the Cancel
    * button); routing it through run() overwrote busy — the running card's
    * spinner and Cancel affordance vanished mid-flight — and its finally
-   * then cleared the primary action's busy early. */
+   * then cleared the primary action's busy early.
+   *
+   * It also takes ownership of the status line from the primary: the
+   * primary's key is recorded BEFORE the cancel runs, and run()
+   * suppresses that primary's terminal write when it settles, so the
+   * cancel's outcome is the last word on the line. The key is the
+   * `busy` id the primary is holding (exact, whatever its shape) plus
+   * the `cancel-`-prefix convention cancel ids follow
+   * (`cancel-<primary id>`) — either match is enough. */
   async function runCancel(id: string, pendingLabel: string, action: () => Promise<string>) {
-    void id;
+    if (busy) cancelOwnedKeys.current.add(busy);
+    if (id.startsWith("cancel-")) cancelOwnedKeys.current.add(id.slice("cancel-".length));
     setStatus(pendingLabel);
     try {
       setStatus(await action());

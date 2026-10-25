@@ -59,6 +59,46 @@ pub(crate) fn take_flatpak_slot() -> Result<FlatpakSlot, String> {
         })
 }
 
+/// Process-wide single-flight for MUTATING Hub actions (`run_hub_action`:
+/// installs, firmware updates, mode switches, enrollments). Two recipes
+/// running at once stack sudo prompts and race on the same system state —
+/// a hub-action firmware update could even run concurrently with a
+/// slot-held bootc stage from the Updates page. Read-only recipes
+/// (status/audit/check listings) never claim this slot, so a long install
+/// cannot block a status read; the classification lives on the action
+/// enum in updates.rs and defaults to mutating.
+static HUB_ACTION_MUTATING: AtomicBool = AtomicBool::new(false);
+
+/// RAII handle for the hub-action slot: dropping it frees the slot,
+/// including on panic/early-return paths inside a job worker.
+#[derive(Debug)]
+pub(crate) struct HubActionSlot;
+
+impl Drop for HubActionSlot {
+    fn drop(&mut self) {
+        HUB_ACTION_MUTATING.store(false, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+/// Claim the hub-action mutation slot, or explain which action must
+/// finish first. Callers claim BEFORE starting their job and move the
+/// guard into the worker so it is held for the job's whole life.
+pub(crate) fn take_hub_action_slot() -> Result<HubActionSlot, String> {
+    HUB_ACTION_MUTATING
+        .compare_exchange(
+            false,
+            true,
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+        )
+        .map(|_| HubActionSlot)
+        .map_err(|_| {
+            "Another Hub action is already in progress. \
+             Wait for it to finish before starting another."
+                .to_string()
+        })
+}
+
 /// Ensure the per-user Flathub remote exists before an install. Runs
 /// inside the tracked, cancellable workflow (never on a command thread):
 /// `flatpak install flathub …` fails outright when the remote is missing,
@@ -250,6 +290,47 @@ pub(crate) fn spawn_task_job(
     });
 }
 
+/// [`spawn_task_job`] with a job-level deadline, for workflows whose
+/// steps are individually bounded but whose SEQUENCE is not (the
+/// dev-tools wizard chains 1800s + 1800s + N×600s bounded steps, so the
+/// whole job could previously run for ~90 minutes with nothing but the
+/// user's Cancel to stop it).
+///
+/// The deadline is enforced by a watchdog thread: when it passes with
+/// the job still running, the watchdog trips the job's cancellation flag
+/// — tasks poll it in their bounded subprocess steps, so they abort
+/// promptly — and publishes the terminal timeout failure itself, so
+/// pollers stop waiting even if the task is wedged in a step that never
+/// checks the flag (this process cannot kill another thread). A task
+/// that ignores the flag and later finishes anyway overwrites the
+/// timeout verdict with its own genuine outcome via the store's normal
+/// finish path; deadline callers should treat the bound as
+/// abort-and-report, not kill -9.
+pub(crate) fn spawn_task_job_with_deadline(
+    job: String,
+    deadline: Duration,
+    task: impl FnOnce(String, Arc<AtomicBool>) -> (String, String) + Send + 'static,
+) {
+    let watchdog_job = job.clone();
+    spawn_task_job(job, task);
+    std::thread::spawn(move || {
+        std::thread::sleep(deadline);
+        if jobs()
+            .status(&watchdog_job)
+            .is_some_and(|(state, _)| state == kyth_shared::system::jobs::STATE_RUNNING)
+        {
+            if let Some(cancel) = cancel_flag(&watchdog_job) {
+                cancel.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+            finish_job(
+                watchdog_job,
+                "failed",
+                "Task took too long and was stopped.".to_string(),
+            );
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -294,6 +375,87 @@ mod tests {
             jobs().status(&job),
             Some(("cancelled".into(), "Cancelled.".into()))
         );
+    }
+
+    #[test]
+    fn hub_action_slot_is_single_flight_until_dropped() {
+        let first = take_hub_action_slot().expect("first claim succeeds");
+        let second = take_hub_action_slot();
+        assert!(
+            second.is_err(),
+            "a second mutating hub action must be rejected while one runs"
+        );
+        assert!(second.unwrap_err().contains("already in progress"));
+        drop(first);
+        assert!(
+            take_hub_action_slot().is_ok(),
+            "dropping the guard frees the slot"
+        );
+    }
+
+    #[test]
+    fn task_job_deadline_fails_a_task_that_ignores_cancellation() {
+        let job = new_job_id("test-deadline");
+        let (job, cancel) = jobs().start(&job, "pending".to_string());
+        let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+        let watchdog_job = job.clone();
+        spawn_task_job_with_deadline(
+            job,
+            Duration::from_millis(50),
+            move |_worker_job, _cancel| {
+                // Park past the deadline without ever polling the flag:
+                // the watchdog must still resolve the job for pollers.
+                let _ = release_rx.recv_timeout(Duration::from_secs(30));
+                ("complete".into(), "finished late".into())
+            },
+        );
+
+        let deadline_at = std::time::Instant::now() + Duration::from_secs(5);
+        loop {
+            let status = jobs().status(&watchdog_job).expect("job stays tracked");
+            if status.0 == "failed" {
+                assert!(
+                    status.1.contains("took too long"),
+                    "deadline failure explains itself: {}",
+                    status.1
+                );
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline_at,
+                "deadline never fired; job still {status:?}"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            cancel.load(std::sync::atomic::Ordering::SeqCst),
+            "the watchdog trips the cancellation flag so polling steps abort"
+        );
+        release_tx.send(()).unwrap();
+    }
+
+    #[test]
+    fn task_job_with_deadline_lets_a_fast_task_finish_untouched() {
+        let job = new_job_id("test-deadline-fast");
+        let (job, _) = jobs().start(&job, "pending".to_string());
+        spawn_task_job_with_deadline(job.clone(), Duration::from_secs(30), |_job, _cancel| {
+            ("complete".into(), "done".into())
+        });
+
+        let deadline_at = std::time::Instant::now() + Duration::from_secs(2);
+        loop {
+            if jobs()
+                .status(&job)
+                .is_some_and(|(state, _)| state == "complete")
+            {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline_at,
+                "job stayed running"
+            );
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     #[test]

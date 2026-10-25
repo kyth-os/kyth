@@ -6,7 +6,7 @@
 //! `kyth_shared::system::gaming_tools`, `gaming_perf`, and `gaming_per_game`.
 
 use std::process::Command;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::Serialize;
@@ -98,7 +98,7 @@ pub(crate) fn gaming_tool_install(flatpak_id: String) -> Result<GamingActionLaun
         command.arg(flatpak_id);
         match kyth_shared::system::process::run_bounded_command_cancel(
             command,
-            timeout_for(JobTimeoutClass::ToolInstall),
+            timeout_for(JobTimeoutClass::FlatpakTransfer),
             &cancel,
         ) {
             Ok(output) if output.status.success() => {
@@ -199,38 +199,81 @@ pub(crate) fn gaming_job_cancel(job: String) -> crate::InstallStatus {
     super::job::cancel_job(job)
 }
 
-/// One-shot Flatpak permission repairs — bounded, `--user`-scoped, no sudo.
-/// Fast enough to run synchronously rather than as a background job, same
-/// as `apply_pipewire_quantum`/`apply_plasma_preset`. The 10s bound below
-/// is the one intentional exception to the `JobTimeoutClass` tiers: a
-/// synchronous UI-blocking call must stay well under every background tier.
-/// (See the tier contract on `kyth_shared::system::jobs::timeout_for`.)
-fn run_capture_fix(action: &str, argv: Vec<String>) -> Result<String, String> {
-    let mut command = Command::new(&argv[0]);
-    command.args(&argv[1..]);
-    match kyth_shared::system::process::run_bounded_command(command, Duration::from_secs(10)) {
-        Ok(output) if output.status.success() => {
-            Ok(format!("{action} applied. Restart the app to take effect."))
-        }
-        Ok(output) => Err(failure_detail(action, &output)),
-        Err(err) => Err(format!("Could not run {action}: {err}")),
+/// Single-flight for the Gaming page's quick mutations that are not
+/// flatpak installs: sched-ext changes and the capture fixes below. Two
+/// `scx` jobs racing make completion order — not click order — decide
+/// the final scheduler, and double-clicked capture fixes used to run
+/// concurrent `flatpak override`s. Same AtomicBool + RAII shape as the
+/// flatpak slot in `job.rs`.
+static GAMING_CHANGE_MUTATING: AtomicBool = AtomicBool::new(false);
+
+/// RAII handle for the gaming change slot: dropping it frees the slot,
+/// including on panic paths inside a worker.
+#[derive(Debug)]
+struct GamingChangeSlot;
+
+impl Drop for GamingChangeSlot {
+    fn drop(&mut self) {
+        GAMING_CHANGE_MUTATING.store(false, Ordering::SeqCst);
     }
 }
 
+/// Claim the gaming change slot, or explain what must finish first.
+/// Callers claim BEFORE starting work and hold the guard until it ends.
+fn take_gaming_change_slot() -> Result<GamingChangeSlot, String> {
+    GAMING_CHANGE_MUTATING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .map(|_| GamingChangeSlot)
+        .map_err(|_| {
+            "Another scheduler or capture change is already in progress. \
+             Wait for it to finish before starting another."
+                .to_string()
+        })
+}
+
+/// One-shot Flatpak permission repairs — bounded, `--user`-scoped, no sudo.
+/// The 10s bound below is the one intentional exception to the
+/// `JobTimeoutClass` tiers: a quick one-shot call must stay well under
+/// every background tier. (See the tier contract on
+/// `kyth_shared::system::jobs::timeout_for`.) They run on the blocking
+/// pool rather than the command thread, and the gaming change slot
+/// serializes them against scheduler changes and each other.
+async fn run_capture_fix(action: &str, argv: Vec<String>) -> Result<String, String> {
+    let slot = take_gaming_change_slot()?;
+    let action = action.to_string();
+    let worker_action = action.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _slot = slot;
+        let mut command = Command::new(&argv[0]);
+        command.args(&argv[1..]);
+        match kyth_shared::system::process::run_bounded_command(command, Duration::from_secs(10)) {
+            Ok(output) if output.status.success() => Ok(format!(
+                "{worker_action} applied. Restart the app to take effect."
+            )),
+            Ok(output) => Err(failure_detail(&worker_action, &output)),
+            Err(err) => Err(format!("Could not run {worker_action}: {err}")),
+        }
+    })
+    .await
+    .map_err(|err| format!("{action} failed: {err}"))?
+}
+
 #[tauri::command]
-pub(crate) fn fix_discord_screenshare() -> Result<String, String> {
+pub(crate) async fn fix_discord_screenshare() -> Result<String, String> {
     run_capture_fix(
         "Discord screen share repair",
         gaming_tools::discord_screenshare_fix_command(),
     )
+    .await
 }
 
 #[tauri::command]
-pub(crate) fn fix_obs_pipewire() -> Result<String, String> {
+pub(crate) async fn fix_obs_pipewire() -> Result<String, String> {
     run_capture_fix(
         "OBS capture repair",
         gaming_tools::obs_pipewire_fix_command(),
     )
+    .await
 }
 
 /// Opens one of the two well-known game-data folders in the desktop file
@@ -323,24 +366,28 @@ pub(crate) fn scx_set_scheduler(scheduler: String) -> Result<String, String> {
     if !matches!(scheduler.as_str(), "rusty" | "lavd" | "bpfland" | "stop") {
         return Err("unknown scheduler".to_string());
     }
+    let slot = take_gaming_change_slot()?;
     let argv = gaming_perf::scx_scheduler_command(&scheduler);
     let job = start_job("scx", &format!("Setting scheduler: {scheduler}…"))?;
     spawn_argv_job(
         job.clone(),
         argv,
         timeout_for(JobTimeoutClass::SchedulerApply),
-        |result| match result {
-            Ok(output) if output.status.success() => {
-                ("complete".to_string(), "sched-ext updated.".to_string())
+        move |result| {
+            let _slot = slot;
+            match result {
+                Ok(output) if output.status.success() => {
+                    ("complete".to_string(), "sched-ext updated.".to_string())
+                }
+                Ok(output) => (
+                    "failed".to_string(),
+                    failure_detail("sched-ext update", &output),
+                ),
+                Err(err) => (
+                    "failed".to_string(),
+                    format!("Could not start sched-ext update: {err}"),
+                ),
             }
-            Ok(output) => (
-                "failed".to_string(),
-                failure_detail("sched-ext update", &output),
-            ),
-            Err(err) => (
-                "failed".to_string(),
-                format!("Could not start sched-ext update: {err}"),
-            ),
         },
     );
     Ok(job)
@@ -438,13 +485,29 @@ pub(crate) fn save_per_game_profile(
 
 #[cfg(test)]
 mod tests {
-    use super::scheduler_probe;
+    use super::{scheduler_probe, take_gaming_change_slot};
     use std::os::unix::fs::PermissionsExt;
     use std::time::{Duration, Instant};
 
     fn executable(path: &std::path::Path, body: &str) {
         std::fs::write(path, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    #[test]
+    fn gaming_change_slot_is_single_flight_until_dropped() {
+        let first = take_gaming_change_slot().expect("first claim succeeds");
+        let second = take_gaming_change_slot();
+        assert!(
+            second.is_err(),
+            "a second scheduler/capture change must be rejected while one runs"
+        );
+        assert!(second.unwrap_err().contains("already in progress"));
+        drop(first);
+        assert!(
+            take_gaming_change_slot().is_ok(),
+            "dropping the guard frees the slot"
+        );
     }
 
     #[test]

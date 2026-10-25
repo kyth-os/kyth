@@ -1,5 +1,5 @@
 import { lazy, Suspense, Component, type ReactNode } from "react";
-import { Route, Routes, useLocation } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { Sidebar } from "./components/Sidebar";
 import { Topbar } from "./components/Topbar";
 import { OfflineBanner } from "./components/OfflineBanner";
@@ -36,6 +36,19 @@ class RouteErrorBoundary extends Component<{ children: ReactNode }, { failed: bo
   }
 }
 
+/** Friendly landing for an unknown path (stale deep link, mistyped
+ * hash route): an explanation inside the shell instead of a blank
+ * page under a "Home" crumb. */
+function PageNotFound() {
+  const navigate = useNavigate();
+  return (
+    <div className="glass dashboard-card card-copy" role="alert">
+      <p>This Hub page doesn&apos;t exist — the address may be stale or mistyped.</p>
+      <button className="primary" onClick={() => navigate("/")}>Go to Home</button>
+    </div>
+  );
+}
+
 const crumbFor: Record<string, string> = {
   "/": "Home",
   "/play": "Play",
@@ -49,7 +62,7 @@ const crumbFor: Record<string, string> = {
 
 export function App() {
   const location = useLocation();
-  const crumb = crumbFor[location.pathname] ?? "Home";
+  const crumb = crumbFor[location.pathname] ?? "Not found";
 
   return (
     <>
@@ -72,6 +85,7 @@ export function App() {
               <Route path="/move-in" element={<MoveIn />} />
               <Route path="/vpn" element={<Vpn />} />
               <Route path="/updates" element={<Updates />} />
+              <Route path="*" element={<PageNotFound />} />
             </Routes>
           </Suspense>
           </RouteErrorBoundary>

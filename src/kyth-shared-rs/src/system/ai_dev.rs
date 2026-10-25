@@ -21,6 +21,10 @@ pub const DEFAULT_IMAGE: &str = "registry.fedoraproject.org/fedora-toolbox:45";
 pub const DEFAULT_MODEL: &str = "qwen2.5-coder";
 pub const DEFAULT_MODEL_DIR_SUFFIX: &str = ".local/share/kyth-ai/models";
 pub const COMMAND_TIMEOUT: Duration = Duration::from_secs(120);
+/// Bound for the `nvidia-smi -L` existence probe in [`gpu_kind`]. It used
+/// to run unbounded, so a wedged driver stack could hang any status read
+/// that asked for the GPU kind.
+pub const GPU_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 pub const PROVISION_TIMEOUT: Duration = Duration::from_secs(900);
 
 /// The developer-box package/export policy. It is data owned by the Rust
@@ -208,10 +212,7 @@ pub fn box_exists(config: &Config) -> io::Result<bool> {
 
 pub fn gpu_kind() -> GpuKind {
     if host_command_exists("nvidia-smi")
-        && Command::new("nvidia-smi")
-            .arg("-L")
-            .output()
-            .is_ok_and(|out| out.status.success())
+        && run(&["nvidia-smi", "-L"], GPU_PROBE_TIMEOUT).is_ok_and(|out| out.status.success())
     {
         return GpuKind::Nvidia;
     }

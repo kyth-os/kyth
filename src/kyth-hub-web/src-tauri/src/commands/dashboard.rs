@@ -64,14 +64,19 @@ pub(crate) struct HardwareResponse {
 }
 
 #[tauri::command]
-pub(crate) async fn hardware_snapshot() -> HardwareResponse {
+pub(crate) async fn hardware_snapshot() -> Result<HardwareResponse, String> {
+    // A panicked worker used to collapse to `gpu_line: None`, the same
+    // value as "no GPU found": the JoinError now surfaces as an error,
+    // the probe_backend discipline. (A failed lspci inside the worker
+    // still reads as no GPU — the shared probe returns an empty list
+    // for both, and cannot tell them apart.)
     tauri::async_runtime::spawn_blocking(|| HardwareResponse {
         gpu_line: kyth_shared::system::gpu::lspci_gpu_lines()
             .into_iter()
             .next(),
     })
     .await
-    .unwrap_or(HardwareResponse { gpu_line: None })
+    .map_err(|error| format!("Could not read the graphics hardware: {error}"))
 }
 
 #[derive(Serialize)]
@@ -107,7 +112,10 @@ pub(crate) struct BootRuntimeCheckResponse {
 }
 
 #[tauri::command]
-pub(crate) async fn boot_runtime_checks() -> Vec<BootRuntimeCheckResponse> {
+pub(crate) async fn boot_runtime_checks() -> Result<Vec<BootRuntimeCheckResponse>, String> {
+    // A panicked worker used to return an empty list, which Diagnostics
+    // renders like a clean sweep; the JoinError now surfaces as an
+    // error instead.
     tauri::async_runtime::spawn_blocking(|| {
         kyth_shared::system::boot_runtime::boot_runtime_checks()
             .into_iter()
@@ -119,7 +127,7 @@ pub(crate) async fn boot_runtime_checks() -> Vec<BootRuntimeCheckResponse> {
             .collect()
     })
     .await
-    .unwrap_or_default()
+    .map_err(|error| format!("Could not run the boot runtime checks: {error}"))
 }
 
 #[derive(Serialize)]
@@ -135,17 +143,35 @@ pub(crate) struct RecoveryStatusResponse {
 }
 
 #[tauri::command]
-pub(crate) fn recovery_status() -> RecoveryStatusResponse {
-    let status = kyth_shared::system::recovery_status::get_recovery_status();
-    let banner = kyth_shared::system::recovery_status::recovery_banner(&status);
-    RecoveryStatusResponse {
-        has_staged: status.has_staged,
-        has_rollback: status.has_rollback,
-        quarantined_digest: status.quarantined_digest,
-        quarantine_detail: status.quarantine_detail,
-        watcher_staged: status.watcher_staged,
-        clear_quarantine_cmd: status.clear_quarantine_cmd,
-        last_rollback_error: status.last_rollback_error,
-        banner,
-    }
+pub(crate) async fn recovery_status() -> RecoveryStatusResponse {
+    // get_recovery_status shells out to bootc with multi-second
+    // per-attempt bounds and the Dashboard polls this: it belongs on
+    // the blocking pool, not a command worker.
+    tauri::async_runtime::spawn_blocking(|| {
+        let status = kyth_shared::system::recovery_status::get_recovery_status();
+        let banner = kyth_shared::system::recovery_status::recovery_banner(&status);
+        RecoveryStatusResponse {
+            has_staged: status.has_staged,
+            has_rollback: status.has_rollback,
+            quarantined_digest: status.quarantined_digest,
+            quarantine_detail: status.quarantine_detail,
+            watcher_staged: status.watcher_staged,
+            clear_quarantine_cmd: status.clear_quarantine_cmd,
+            last_rollback_error: status.last_rollback_error,
+            banner,
+        }
+    })
+    .await
+    .unwrap_or_else(|_| RecoveryStatusResponse {
+        has_staged: false,
+        has_rollback: false,
+        quarantined_digest: String::new(),
+        quarantine_detail: String::new(),
+        watcher_staged: false,
+        clear_quarantine_cmd: String::new(),
+        last_rollback_error: String::new(),
+        // The banner names the failure so a dead worker cannot read as
+        // "nothing staged, no rollback, all clear".
+        banner: "Recovery status could not be read.".to_string(),
+    })
 }

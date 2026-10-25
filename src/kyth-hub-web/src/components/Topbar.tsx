@@ -16,8 +16,10 @@ export function Topbar({ crumb }: { crumb: string }) {
   // pending recommendations are the one real "needs your attention" count,
   // so the dot now means that and nothing else: no pending items, no dot.
   const [pendingCount, setPendingCount] = useState<number | null>(null);
+  const [bellFailed, setBellFailed] = useState(false);
 
   const results: SearchResult[] = open ? rankSearchResults(query) : [];
+
 
   // Results route through routeForPage, the same resolver the --page
   // deep-link contract uses, so a section reached by search and the same
@@ -46,13 +48,27 @@ export function Topbar({ crumb }: { crumb: string }) {
     }
   };
 
+  // Refetch on an interval: a one-shot fetch at shell mount would show
+  // a stale attention count for the Hub's whole life. A failed read is
+  // its own state — the last known count stays, labelled as such.
   useEffect(() => {
     let cancelled = false;
-    fetchGuardianSnapshot().then((snapshot) => {
-      if (!cancelled) setPendingCount(snapshot ? snapshot.pendingCount : null);
-    });
+    const load = () => {
+      fetchGuardianSnapshot().then((snapshot) => {
+        if (cancelled) return;
+        if (snapshot) {
+          setPendingCount(snapshot.pendingCount);
+          setBellFailed(false);
+        } else {
+          setBellFailed(true);
+        }
+      });
+    };
+    load();
+    const timer = window.setInterval(load, 60_000);
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -159,10 +175,14 @@ export function Topbar({ crumb }: { crumb: string }) {
           className="glass icon-button"
           aria-label={
             pendingCount === null
-              ? "Guardian: checking"
-              : pendingCount
-              ? `Guardian: ${pendingCount} item${pendingCount === 1 ? "" : "s"} need attention`
-              : "Guardian: nothing needs attention"
+              ? bellFailed
+                ? "Guardian: couldn't check"
+                : "Guardian: checking"
+              : bellFailed
+                ? `Guardian: ${pendingCount} item${pendingCount === 1 ? "" : "s"} need attention (last known — the latest check failed)`
+                : pendingCount
+                  ? `Guardian: ${pendingCount} item${pendingCount === 1 ? "" : "s"} need attention`
+                  : "Guardian: nothing needs attention"
           }
           onClick={() => navigate(routeForPage("Guardian"))}
           style={{ width: 40, height: 40, display: "grid", placeItems: "center", cursor: "pointer", position: "relative" }}

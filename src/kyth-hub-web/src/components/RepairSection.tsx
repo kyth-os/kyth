@@ -8,6 +8,7 @@ import {
   fetchRecoveryStatus,
   fetchSnapshotCount,
   fetchSnapshotTimeline,
+  getInFlightJob,
   waitInstallJob,
   cancelInstall,
   cancelUpdateJob,
@@ -50,7 +51,7 @@ export function RepairSection({ section }: { section: HubSection }) {
   const [btrfs, setBtrfs] = useState<{ status: string; detail: string } | null>(null);
   const [memory, setMemory] = useState<{ status: string; detail: string } | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction(["update", "install", "hub-action"]);
+  const { status, busy, run, runCancel } = useSectionAction(["update", "install", "hub-action"]);
 
   async function installBackup(): Promise<string> {
     const detail = await waitInstallJob(await installFlatpak("org.gnome.World.PikaBackup"));
@@ -188,7 +189,7 @@ export function RepairSection({ section }: { section: HubSection }) {
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
           <ActionButton
             label={busy === "rollback" ? "Rolling back…" : "Roll back to previous"}
-            disabled={busy !== null || !hasRollback}
+            disabled={!hasRollback || busy === "rollback" || getInFlightJob("update") !== undefined}
             onClick={() =>
               run("rollback", "Rolling back…", async () => {
                 try {
@@ -204,13 +205,13 @@ export function RepairSection({ section }: { section: HubSection }) {
             }
           />
           {busy === "rollback" && (
-            <ActionButton label="Cancel" onClick={() => run("cancel-rollback", "Cancelling…", cancelUpdateJob)} />
+            <ActionButton label="Cancel" onClick={() => runCancel("cancel-rollback", "Cancelling…", cancelUpdateJob)} />
           )}
-          <RecipeButton recipe="update-health" label="Update health report" busy={busy} run={run} />
-          <RecipeButton recipe="resume-check" label="Check suspend/resume" busy={busy} run={run} />
-          <RecipeButton recipe="device-info" label="Collect device info" busy={busy} run={run} />
-          <RecipeButton recipe="startup-apps" label="Review startup apps" busy={busy} run={run} />
-          <RecipeButton recipe="firmware-update" label="Check firmware updates" busy={busy} run={run} />
+          <RecipeButton recipe="update-health" label="Update health report" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="resume-check" label="Check suspend/resume" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="device-info" label="Collect device info" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="startup-apps" label="Review startup apps" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="firmware-update" label="Check firmware updates" busy={busy} run={run} runCancel={runCancel} />
           <ActionButton
             label={busy === "windows-verify" ? "Checking Windows migration…" : "Verify Windows migration"}
             disabled={busy !== null}
@@ -243,7 +244,7 @@ export function RepairSection({ section }: { section: HubSection }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
             <ActionButton label={busy === "install-backup" ? "Installing…" : "Install Pika Backup"} disabled={busy !== null} onClick={() => run("install-backup", "Installing Pika Backup…", installBackup)} />
             {busy === "install-backup" && (
-              <ActionButton label="Cancel" onClick={() => run("cancel-install", "Cancelling…", cancelInstall)} />
+              <ActionButton label="Cancel" onClick={() => runCancel("cancel-install", "Cancelling…", cancelInstall)} />
             )}
             <ActionButton label={busy === "open-backup" ? "Opening…" : "Open Pika Backup"} disabled={busy !== null} onClick={() => run("open-backup", "Opening Pika Backup…", openBackupApp)} />
           </div>
@@ -252,9 +253,9 @@ export function RepairSection({ section }: { section: HubSection }) {
           <p className="card-copy" style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.6 }}>Quick fixes</p>
           <p className="card-copy" style={{ fontSize: 12, marginTop: 6 }}>Run bounded, reversible maintenance actions without opening a terminal. Guardian remains the automatic path for symptom-based repair.</p>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-            <RecipeButton recipe="health-check" label="Run system health check" busy={busy} run={run} />
-            <RecipeButton recipe="firmware-update" label="Refresh firmware metadata" busy={busy} run={run} />
-            <RecipeButton recipe="gaming-stack-status" label="Check gaming stack" busy={busy} run={run} />
+            <RecipeButton recipe="health-check" label="Run system health check" busy={busy} run={run} runCancel={runCancel} />
+            <RecipeButton recipe="firmware-update" label="Refresh firmware metadata" busy={busy} run={run} runCancel={runCancel} />
+            <RecipeButton recipe="gaming-stack-status" label="Check gaming stack" busy={busy} run={run} runCancel={runCancel} />
           </div>
         </div>
         <ActionStatus status={status} />

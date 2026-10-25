@@ -17,6 +17,7 @@ import {
   type UpdateReleaseSummary,
   type UpdatesSnapshot,
 } from "../services/liveData";
+import { isCancelledResult } from "../services/jobResults";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 import { friendlyActionError, friendlyActionNextStep, friendlyActionResult, friendlyAvailabilityDetail, friendlyAvailabilityNextStep, friendlyAvailabilityResult } from "./updateMessages";
 
@@ -124,6 +125,12 @@ export function UpdatesOverview() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const releaseSummaryRequest = useRef(0);
   const [lastAvailableDigest, setLastAvailableDigest] = useState<string | null>(null);
+  // The update job (if any) that was already in flight when this page
+  // mounted — reattached from storage after a full Hub reload. It has no
+  // local run() promise, so the watch effect below owns its resolution.
+  const mountJobRef = useRef<string | undefined>(getInFlightJob("update"));
+  const [reattachDone, setReattachDone] = useState(false);
+  const [watchNote, setWatchNote] = useState<string | null>(null);
 
   // While a stage runs, poll the live byte/layer progress for the
   // determinate bar. The backend-tracked job survives a frontend reload
@@ -150,6 +157,49 @@ export function UpdatesOverview() {
     return () => { stopped = true; window.clearInterval(timer); };
   }, [stagePollActive, busy, updateTracked, readings.status?.staged, stagedLatch]);
 
+  // Watch the mount-reattached job until the backend says it settled.
+  // Without this, updateTracked never clears after a reload: the
+  // guidance claims an update is running forever, the 1s progress poll
+  // above never stops, and Cancel targets a job that already finished.
+  // Bounded at ~60 minutes; on giving up it says so instead of polling
+  // forever on a phantom.
+  useEffect(() => {
+    if (busy !== null || !updateTracked || reattachDone) return;
+    const jobId = mountJobRef.current;
+    if (!jobId || getInFlightJob("update") !== jobId) return;
+    let stopped = false;
+    let ticks = 0;
+    let settledTicks = 0;
+    const resolveWatch = (note: string) => {
+      setReattachDone(true);
+      setUpdateTracked(false);
+      setWatchNote(note);
+      void refresh().catch(() => undefined);
+    };
+    const tick = async () => {
+      if (stopped) return;
+      ticks += 1;
+      if (getInFlightJob("update") !== jobId) {
+        resolveWatch("The update that was running has finished. The status above is refreshed.");
+        return;
+      }
+      const [progress, snapshot] = await Promise.all([fetchStageProgress(), fetchUpdatesSnapshot()]);
+      if (stopped) return;
+      const progressSettled = progress === null || progress.active !== true;
+      const snapshotSettled = snapshot.status?.check_state !== "busy";
+      settledTicks = progressSettled ? settledTicks + 1 : 0;
+      // Both signals settled, or progress has read settled for several
+      // consecutive ticks (the snapshot read can lag behind the job).
+      if ((progressSettled && snapshotSettled) || settledTicks >= 3) {
+        resolveWatch("The update that was running has finished. The status above is refreshed.");
+      } else if (ticks >= 1800) {
+        resolveWatch("Stopped watching the earlier update after an hour — reopen Updates to check its status.");
+      }
+    };
+    const timer = window.setInterval(() => void tick(), 2000);
+    return () => { stopped = true; window.clearInterval(timer); };
+  }, [busy, updateTracked, reattachDone]);
+
   function syncTrackedJobs(): void {
     setUpdateTracked(getInFlightJob("update") !== undefined);
   }
@@ -157,6 +207,7 @@ export function UpdatesOverview() {
   function startAction(id: string, pendingLabel: string, action: () => Promise<string>): void {
     setLastAction(id);
     setCancelNote(null);
+    setWatchNote(null);
     if (id === "stage" || id === "apply" || id === "rollback") setUpdateTracked(true);
     void run(id, pendingLabel, action).finally(syncTrackedJobs);
   }
@@ -294,6 +345,16 @@ export function UpdatesOverview() {
         }
       } catch { /* keep the original stage error; its detail is more useful */ }
       throw new Error(friendlyActionError("stage", error));
+    }
+    if (isCancelledResult(detail)) {
+      // Declined at the confirm or cancelled mid-download: the wrapper
+      // resolves "Cancelled." instead of throwing, and nothing new was
+      // staged by this attempt — the latch must not invent a
+      // restart-ready update. (friendlyActionResult already carries the
+      // honest "part may already be staged" caveat for prior content.)
+      setStageProgress(null);
+      await refresh().catch(() => undefined);
+      return friendlyActionResult("stage", detail);
     }
     // The stage job itself succeeded. Do not reclassify it as failed if the
     // follow-up status refresh is temporarily unavailable; the latch keeps
@@ -646,6 +707,7 @@ export function UpdatesOverview() {
   // running — including a job reattached after a reload, which has no local
   // `busy` anymore.
   const showUpdateCancel = busy === "stage" || busy === "apply" || busy === "rollback" || (busy === null && updateTracked);
+  const opInFlight = updateTracked && !stagedEffective;
 
   return (
     <section className="updates-overview" aria-label="Updates overview">
@@ -754,20 +816,20 @@ export function UpdatesOverview() {
           <ActionButton
             primary
             label={primaryAction.label}
-            disabled={busy !== null || !loaded}
+            disabled={busy !== null || !loaded || (opInFlight && primaryAction.id !== "apply")}
             onClick={() => startAction(primaryAction.id, primaryAction.pending, primaryAction.action)}
           />
           {canStage && primaryAction.id !== "stage" && (
             <ActionButton
               label={busy === "stage" ? "Downloading…" : "Download and stage"}
-              disabled={busy !== null || !loaded}
+              disabled={busy !== null || !loaded || opInFlight}
               onClick={() => startAction("stage", "Downloading and staging…", stage)}
             />
           )}
           {canRollback && (
             <ActionButton
               label={busy === "rollback" ? "Rolling back…" : "Roll back"}
-              disabled={busy !== null || !loaded}
+              disabled={busy !== null || !loaded || opInFlight}
               onClick={() => startAction("rollback", "Preparing rollback…", rollback)}
             />
           )}
@@ -779,7 +841,7 @@ export function UpdatesOverview() {
             />
           )}
         </div>
-        <ActionStatus status={cancelNote ?? status} />
+        <ActionStatus status={cancelNote ?? watchNote ?? status} />
       </div>
 
       <section className="updates-history-card" aria-labelledby="updates-history-heading">

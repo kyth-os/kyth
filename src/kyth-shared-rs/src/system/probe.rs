@@ -61,6 +61,10 @@ pub const NETWORKED_SECTIONS: &[&str] = &["flatpak-updates", "network-summary"];
 /// carries a `00000000` destination, or `/proc/net/ipv6_route` a zero prefix
 /// with a non-loopback next hop. Pure over the two proc files so tests can
 /// inject fixtures; [`has_default_route`] reads the live files.
+///
+/// Only the v4 file has a header line to skip: `/proc/net/ipv6_route` is
+/// headerless, so skipping its first line would never examine the first
+/// v6 route entry (which can be the default route itself).
 pub fn has_default_route_in(route_v4: &str, route_v6: &str) -> bool {
     for line in route_v4.lines().skip(1) {
         let fields: Vec<&str> = line.split_whitespace().collect();
@@ -68,7 +72,7 @@ pub fn has_default_route_in(route_v4: &str, route_v6: &str) -> bool {
             return true;
         }
     }
-    for line in route_v6.lines().skip(1) {
+    for line in route_v6.lines() {
         let fields: Vec<&str> = line.split_whitespace().collect();
         if fields.len() >= 5
             && fields[0].chars().all(|char| char == '0')
@@ -176,10 +180,35 @@ pub fn default_write_path(system: bool) -> PathBuf {
     }
 }
 
+/// File mode the cache at `path` must carry once written, or `None` to
+/// leave the process-default mode. The SYSTEM cache is the exception: the
+/// root `kyth-probe.service` runs under `UMask=0077`, so a plain
+/// `File::create` lands mode 0600 root — and the user-session readers the
+/// system cache exists for (the Hub, the user timer's
+/// [`fresh_system_sections`]) then get EACCES, which `load_cache_file`
+/// treats exactly like a missing file. The system cache therefore gets an
+/// explicit 0644 (its contents are world-readable probe data by design).
+/// User caches keep the default (0600 under the user unit's umask).
+fn cache_file_mode(path: &Path) -> Option<u32> {
+    if path == system_cache_path() {
+        Some(0o644)
+    } else {
+        None
+    }
+}
+
 /// Atomically replace a cache document.  Cache readers can therefore never
 /// observe a partially serialized probe result, even when a service timeout
 /// overlaps a Hub refresh.
 pub fn write_cache_file(path: &Path, document: &Value) -> std::io::Result<()> {
+    write_cache_file_with_mode(path, document, cache_file_mode(path))
+}
+
+fn write_cache_file_with_mode(
+    path: &Path,
+    document: &Value,
+    mode: Option<u32>,
+) -> std::io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
         std::io::Error::new(std::io::ErrorKind::InvalidInput, "cache path has no parent")
     })?;
@@ -231,6 +260,13 @@ pub fn write_cache_file(path: &Path, document: &Value) -> std::io::Result<()> {
         use std::io::Write;
         file.write_all(&payload)?;
         file.sync_all()?;
+        if let Some(mode) = mode {
+            // Set the mode on the temp file so the rename publishes the
+            // cache with its final permissions atomically — readers never
+            // observe the restrictive umask default first.
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(std::fs::Permissions::from_mode(mode))?;
+        }
         std::fs::rename(&tmp, path)?;
         Ok::<(), std::io::Error>(())
     })();
@@ -306,9 +342,17 @@ fn collect_flatpak_apps() -> Value {
 }
 
 fn flatpak_updates_for_scope(scope: &'static str) -> Option<i64> {
+    // `--app` mirrors update_availability::remote_ls_updates_argv: without
+    // it, remote-ls also lists updatable runtimes, inflating the app count.
     command_output(
         "flatpak",
-        &["remote-ls", "--updates", scope, "--columns=application"],
+        &[
+            "remote-ls",
+            "--updates",
+            "--app",
+            scope,
+            "--columns=application",
+        ],
         30,
     )
     .map(|output| {
@@ -331,11 +375,12 @@ fn collect_flatpak_updates() -> Value {
             user_handle.join().unwrap_or(None),
         )
     });
+    // The section value is a bare count and cannot express "one scope
+    // failed": folding a failed scope in as 0 would silently under-report.
+    // A partial read is therefore a miss (Null), exactly like both failing.
     match (system, user) {
-        (None, None) => Value::Null,
-        (system_count, user_count) => {
-            Value::from(system_count.unwrap_or(0) + user_count.unwrap_or(0))
-        }
+        (Some(system_count), Some(user_count)) => Value::from(system_count + user_count),
+        _ => Value::Null,
     }
 }
 
@@ -390,6 +435,21 @@ pub fn collect_snapshot() -> serde_json::Map<String, Value> {
 /// A panicking section only drops its own keys — consistent with the
 /// collector's "failure is JSON null" contract.
 pub fn collect_snapshot_skipping(skip: &[&str]) -> serde_json::Map<String, Value> {
+    collect_snapshot_streaming(skip, &mut |_| {})
+}
+
+/// [`collect_snapshot_skipping`], invoking `on_sections` with each worker
+/// group's sections the moment that group completes (before the remaining
+/// groups finish). The probe binary persists each batch via
+/// [`update_sections`] as it arrives: collection is otherwise all-or-nothing
+/// under the service's 120 s `TimeoutStartSec`, so a slow machine whose run
+/// is killed mid-cycle would leave its cache unrefreshed forever — with
+/// streaming persistence, the sections that did complete are durable, and
+/// only the unfinished groups stay stale for the next cycle.
+pub fn collect_snapshot_streaming(
+    skip: &[&str],
+    on_sections: &mut dyn FnMut(&serde_json::Map<String, Value>),
+) -> serde_json::Map<String, Value> {
     let skipped = |key: &str| skip.contains(&key);
     // One active-operation (`ps`) scan shared by both bootc fetches, and one
     // default-route check shared by the networked sections (P2).
@@ -526,9 +586,16 @@ pub fn collect_snapshot_skipping(skip: &[&str]) -> serde_json::Map<String, Value
         }
 
         for handle in handles {
-            for (key, value) in handle.join().unwrap_or_default() {
+            let completed = handle.join().unwrap_or_default();
+            if completed.is_empty() {
+                continue;
+            }
+            let mut batch = serde_json::Map::new();
+            for (key, value) in completed {
+                batch.insert(key.clone(), value.clone());
                 sections.insert(key, value);
             }
+            on_sections(&batch);
         }
     });
     sections
@@ -880,6 +947,95 @@ mod tests {
             written["sections"]["network-summary"]["data"]["vpn_connected"],
             false
         );
+    }
+
+    #[test]
+    fn default_route_found_in_v4_table() {
+        let v4 = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n\
+                  eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\n";
+        assert!(has_default_route_in(v4, ""));
+    }
+
+    #[test]
+    fn v4_header_alone_is_not_a_default_route() {
+        let v4 = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n\
+                  eth0\t0001A8C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\n";
+        assert!(!has_default_route_in(v4, ""));
+    }
+
+    #[test]
+    fn default_route_found_as_first_v6_entry() {
+        // /proc/net/ipv6_route has NO header: the default route can be the
+        // very first line. The old .skip(1) on the v6 table never examined
+        // it and reported offline on v6-only-default machines.
+        let v6 = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 \
+                  fe800000000000000000000000000001 000000c0 00000000 00000000 00000001 eth0\n";
+        assert!(has_default_route_in("", v6));
+    }
+
+    #[test]
+    fn v6_default_route_after_other_entries_is_found() {
+        let v6 = "fe800000000000000000000000000000 40 00000000000000000000000000000000 00 \
+                  00000000000000000000000000000000 000000c0 00000000 00000000 00000001 eth0\n\
+                  00000000000000000000000000000000 00 00000000000000000000000000000000 00 \
+                  fe800000000000000000000000000001 000000c0 00000000 00000000 00000001 eth0\n";
+        assert!(has_default_route_in("", v6));
+    }
+
+    #[test]
+    fn v6_zero_prefix_with_loopback_next_hop_is_not_a_default_route() {
+        let v6 = "00000000000000000000000000000000 00 00000000000000000000000000000000 00 \
+                  00000000000000000000000000000000 000000c0 00000000 00000000 00000001 lo\n";
+        assert!(!has_default_route_in("", v6));
+    }
+
+    #[test]
+    fn only_the_system_cache_path_gets_the_world_readable_mode() {
+        // S-H2: the root probe service writes under UMask=0077; the system
+        // cache must be forced to 0644 or user-session readers get EACCES.
+        // User caches keep the default mode (None = leave as created).
+        assert_eq!(cache_file_mode(&system_cache_path()), Some(0o644));
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(cache_file_mode(&dir.path().join("probe-cache.json")), None);
+    }
+
+    #[test]
+    fn write_cache_file_with_mode_applies_the_mode_before_publishing() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("probe-cache.json");
+        let document = json!({"sections":{"bootc-branch":{"ts":1,"data":"testing"}}});
+        write_cache_file_with_mode(&path, &document, Some(0o644)).unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o644);
+        assert_eq!(load_cache_file(&path), Some(document));
+    }
+
+    #[test]
+    fn streaming_collection_reports_each_completed_group() {
+        // F6: the streamed batches must partition exactly the sections the
+        // collection returns, so probe_bin's incremental persistence can
+        // neither lose nor invent a section relative to the final write.
+        let mut batches: Vec<serde_json::Map<String, Value>> = Vec::new();
+        let sections = collect_snapshot_streaming(deferred_system_sections(), &mut |batch| {
+            batches.push(batch.clone())
+        });
+        assert!(!sections.contains_key("flatpak-updates"));
+        assert!(!batches.is_empty(), "live collection produced no batches");
+        let streamed: Vec<&String> = batches.iter().flat_map(|batch| batch.keys()).collect();
+        assert_eq!(
+            streamed.len(),
+            sections.len(),
+            "each section must be streamed exactly once"
+        );
+        for key in &streamed {
+            assert!(sections.contains_key(*key), "streamed unknown key {key}");
+            assert_eq!(
+                batches.iter().find_map(|batch| batch.get(*key)).unwrap(),
+                &sections[*key],
+                "streamed value for {key} differs from the returned section"
+            );
+        }
     }
 
     /// A prior writer killed by SIGKILL/SIGABRT (e.g. a systemd unit hitting

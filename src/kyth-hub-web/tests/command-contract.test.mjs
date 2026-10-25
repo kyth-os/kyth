@@ -644,7 +644,7 @@ test("Updates page renders a working Cancel wired to the update job", () => {
   assert.match(updatesOverview, /await cancelUpdateJob\(\)/, "Cancel must invoke the update cancel path");
   // Cancel must stay enabled exactly when the mutating buttons disable.
   assert.match(updatesOverview, /disabled=\{cancelling \|\| !loaded\}/, "Cancel must not share the busy-disabled gate");
-  assert.match(updatesOverview, /<ActionStatus status=\{cancelNote \?\? status\}/, "cancel progress must surface in the status row");
+  assert.match(updatesOverview, /<ActionStatus status=\{cancelNote \?\? watchNote \?\? status\}/, "cancel progress must surface in the status row, ahead of the reattach-watch note and the action status");
 });
 
 test("a cancelled stage warns that staged content may still be pending", () => {

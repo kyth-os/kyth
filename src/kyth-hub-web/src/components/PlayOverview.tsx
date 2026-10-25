@@ -113,6 +113,9 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
     : null;
   const latestSession = readings.sessions?.[0] ?? null;
   const hasReadings = Object.values(readings).some((value) => value !== null);
+  // After the first load settles, a null reading means the read failed —
+  // "Checking…" would claim work is still in flight when it is not.
+  const checkLabel = loaded ? "Couldn't check" : "Checking…";
 
   const readinessDetail = useMemo(() => {
     if (!loaded) return "Reading launchers, controllers, and gaming support…";
@@ -151,23 +154,23 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
   const setupComplete = setupSteps.every((step) => step.optional || step.done === true);
 
   const launchersValue = installedLaunchers === null
-    ? "Checking…"
+    ? checkLabel
     : installedLaunchers.length === 0
       ? "No launcher yet"
       : `${installedLaunchers.length} installed`;
   const launchersDetail = gameCount !== null && gameCount > 0
     ? `${gameCount} game${gameCount === 1 ? "" : "s"} across your libraries.`
     : "Steam, Heroic, Lutris, Bottles, and more are ready to set up.";
-  const controllerValue = controllerCount === null ? "Checking…" : controllerCount === 0 ? "No controller found" : `${controllerCount} connected`;
+  const controllerValue = controllerCount === null ? checkLabel : controllerCount === 0 ? "No controller found" : `${controllerCount} connected`;
   const controllerDetail = driverCount === null
-    ? "Checking USB devices and controller drivers."
+    ? loaded ? "Controller readings couldn't be checked." : "Checking USB devices and controller drivers."
     : `${driverCount} controller driver${driverCount === 1 ? "" : "s"} loaded · pair and rescan in Controllers.`;
-  const performanceValue = readings.audit?.master ? String(readings.audit.master) : readings.performance ? "Ready to tune" : "Checking…";
+  const performanceValue = readings.audit?.master ? String(readings.audit.master) : readings.performance ? "Ready to tune" : checkLabel;
   const performanceDetail = overlayCount === null
-    ? "Gaming profile and overlay status are being checked."
+    ? loaded ? "Gaming profile and overlay status couldn't be checked." : "Gaming profile and overlay status are being checked."
     : `${overlayCount}/3 gaming overlays installed · adjust profiles in Performance.`;
   const compatibilityValue = supportedGames === null
-    ? "Checking…"
+    ? checkLabel
     : readings.compatibility?.length === 0
       ? "No titles listed"
       : `${supportedGames}/${readings.compatibility?.length ?? 0} workable`;
@@ -176,7 +179,7 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
     : blockedGames > 0
       ? `${blockedGames} title${blockedGames === 1 ? "" : "s"} currently blocked by compatibility limits.`
       : "No blocked titles in the bundled compatibility matrix.";
-  const sessionValue = latestSession?.game_name || (readings.sessions ? "No sessions yet" : "Checking…");
+  const sessionValue = latestSession?.game_name || (readings.sessions ? "No sessions yet" : checkLabel);
   const sessionDetail = latestSession?.avg_fps != null
     ? `${Math.round(latestSession.avg_fps)} FPS average · recent play telemetry.`
     : "Play a game to see performance history here.";
@@ -216,10 +219,10 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
         </div>
         {setupComplete ? (
         <div className="play-actions">
-          <ActionButton label="Install a launcher" disabled={busy !== null} onClick={() => openSection("Gaming")} />
-          <ActionButton label="Tune performance" disabled={busy !== null} onClick={() => openSection("Performance")} />
-          <ActionButton label="Pair a controller" disabled={busy !== null} onClick={() => openSection("Controllers")} />
-          <ActionButton label="Check a game" disabled={busy !== null} onClick={() => openSection("Compatibility")} />
+          <ActionButton label="Install a launcher" onClick={() => openSection("Gaming")} />
+          <ActionButton label="Tune performance" onClick={() => openSection("Performance")} />
+          <ActionButton label="Pair a controller" onClick={() => openSection("Controllers")} />
+          <ActionButton label="Check a game" onClick={() => openSection("Compatibility")} />
           <ActionButton label={busy === "play-refresh" ? "Refreshing…" : "Refresh status"} disabled={busy !== null} onClick={() => void run("play-refresh", "Refreshing Play status…", refresh)} />
         </div>
         ) : (
@@ -231,7 +234,7 @@ export function PlayOverview({ onTelemetryLoaded }: { onTelemetryLoaded?: (sessi
                 <strong>{step.label}</strong>
                 <p>{step.hint}</p>
               </div>
-              {!step.done && <ActionButton label={step.action} disabled={busy !== null} onClick={() => openSection(step.section)} />}
+              {!step.done && <ActionButton label={step.action} onClick={() => openSection(step.section)} />}
             </li>
           ))}
         </ol>

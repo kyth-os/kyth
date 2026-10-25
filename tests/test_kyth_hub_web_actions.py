@@ -395,7 +395,7 @@ class HubWebUpdateActionTests(unittest.TestCase):
         self.assertIn('"update_flatpaks"', live_data)
         self.assertIn('args(["update", "--user", "-y"])', MAIN_RS)
         self.assertIn('"flatpak_update" => Ok(json!({ "operation": "flatpak_update" }))', privilege)
-        self.assertIn('vec!["/usr/bin/flatpak", "update", "--system", "-y"]', shared_privilege)
+        self.assertIn('argv_of(&["/usr/bin/flatpak", "update", "--system", "-y"])', shared_privilege)
 
     def test_flatpak_update_verifies_no_updates_remain_before_reporting_success(self):
         # A successful `flatpak update` exit code alone is not proof that the

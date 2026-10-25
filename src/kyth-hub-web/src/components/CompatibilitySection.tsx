@@ -9,6 +9,7 @@ import {
   fetchSecurebootState,
   type MokStatus,
   type CompatibilityGame,
+  cancelPrivilegedAction,
   runPrivilegedAction,
 } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
@@ -32,7 +33,7 @@ export function CompatibilitySection({ section }: { section: HubSection }) {
   const [gameFilter, setGameFilter] = useState<"all" | "works" | "tweaks" | "blocked">("all");
   const [gameQuery, setGameQuery] = useState("");
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("privileged");
+  const { status, busy, run, runCancel } = useSectionAction("privileged");
 
   useEffect(() => {
     let c = false;
@@ -184,6 +185,7 @@ export function CompatibilitySection({ section }: { section: HubSection }) {
             }
           />
           <ActionButton label={busy === "enroll" ? "Enrolling…" : "Enroll KythOS key"} disabled={busy !== null} onClick={() => run("enroll", "Enrolling KythOS Secure Boot key…", () => runPrivilegedAction("secureboot_enroll"))} />
+          {busy === "enroll" && <ActionButton label="Cancel" onClick={() => runCancel("cancel-enroll", "Cancelling…", cancelPrivilegedAction)} />}
           <ActionButton
             label={busy === "mesa" ? "Testing…" : "Test Mesa overlay"}
             disabled={busy !== null}

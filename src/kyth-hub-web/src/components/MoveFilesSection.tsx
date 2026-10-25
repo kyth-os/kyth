@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import { fetchMigrationReadiness, fetchNtfsDevices, fetchNtfsDrives, openMoveFilesApp, runPrivilegedAction, type MigrationReadiness, type NtfsDevice, type NtfsDrive } from "../services/liveData";
+import { inTauriShell } from "../services/tauriEnv";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionButton, ActionStatus, ProgressRing, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -35,7 +36,7 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
   const [loaded, setLoaded] = useState(false);
   const [unlockDevice, setUnlockDevice] = useState<NtfsDrive | null>(null);
   const [unlockKey, setUnlockKey] = useState("");
-  const { status, busy, run } = useSectionAction("privileged");
+  const { status, busy, run, runCancel } = useSectionAction("privileged");
   useEffect(() => {
     let cancelled = false;
     Promise.all([fetchNtfsDrives(), fetchMigrationReadiness()]).then(([d, migration]) => {
@@ -92,7 +93,7 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
             onClick={() =>
               run("rescan", "Running lsblk…", async () => {
                 const devices = await fetchNtfsDevices();
-                if (!devices) return "Not available outside the Hub shell.";
+                if (!devices) return inTauriShell() ? "Couldn't read the drive list — the scan failed. Try Rescan again." : "Not available outside the Hub shell.";
                 const found = ntfsPartitions(devices);
                 setDrives(found);
                 return found.length > 0 ? `${found.length} Windows partition(s) found.` : "No NTFS partitions found.";
@@ -105,22 +106,22 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
             onClick={() =>
               run("windows-verify", "Checking Windows install…", async () => {
                 const migration = await fetchMigrationReadiness();
+                if (!migration) return inTauriShell() ? "Windows migration readiness couldn't be checked — the read failed." : "Windows migration readiness is unavailable outside the Hub shell.";
                 setReadiness(migration);
-                if (!migration) return "Windows migration readiness is unavailable outside the Hub shell.";
                 return `Windows migration: ${migration.parity}. Drives ${migration.drives}; files ${migration.files}; bookmarks ${migration.bookmarks}; cloud ${migration.onedrive}; ${migration.pwa}.`;
               })
             }
           />
-          <RecipeButton recipe="fix-dualboot-clock" label="Fix dual-boot clock" busy={busy} run={run} />
-          <RecipeButton recipe="setup-boot-windows-steam" label="Prepare Windows + Steam" busy={busy} run={run} />
+          <RecipeButton recipe="fix-dualboot-clock" label="Fix dual-boot clock" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="setup-boot-windows-steam" label="Prepare Windows + Steam" busy={busy} run={run} runCancel={runCancel} />
           {/* "This PC" with no ?section= renders no section content at all
               (HubPage there is mounted without defaultToFirstSection), so a
               bare "/this-pc" landed on a blank overview with nothing about
               reclaiming space. Repair is the closest section that actually
               covers disk space recovery. */}
           <ActionButton label="Reclaim Windows space" disabled={busy !== null} onClick={() => { window.location.hash = "/this-pc?section=Repair"; }} />
-          <RecipeButton recipe="install-ludusavi" label="Install save migration" busy={busy} run={run} />
-          <RecipeButton recipe="install-ms-fonts" label="Install Microsoft fonts" busy={busy} run={run} />
+          <RecipeButton recipe="install-ludusavi" label="Install save migration" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="install-ms-fonts" label="Install Microsoft fonts" busy={busy} run={run} runCancel={runCancel} />
         </div>
         <p className="card-copy" style={{ fontSize: 12, marginTop: 12 }}>
           The full workflow includes verified file-copy previews, bookmarks, save locations, and migration readiness checks.
@@ -130,7 +131,7 @@ export function MoveFilesSection({ section }: { section: HubSection }) {
           <p className="card-copy" style={{ fontSize: 12, marginTop: 5 }}>The key is sent only to the local privileged service and is not logged.</p>
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <input type="password" value={unlockKey} onChange={(event) => setUnlockKey(event.target.value)} placeholder="BitLocker password or recovery key" style={{ flex: 1, padding: "8px 12px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)" }} />
-            <ActionButton label="Unlock" disabled={busy !== null || unlockKey.length < 8} onClick={() => run("unlock", "Unlocking BitLocker volume…", async () => { try { return await runPrivilegedAction("bitlocker_unlock", { device: unlockDevice.dev, key: unlockKey }); } finally { setUnlockDevice(null); setUnlockKey(""); } })} />
+            <ActionButton label="Unlock" disabled={busy !== null || unlockKey.length < 8} onClick={() => run("unlock", "Unlocking BitLocker volume…", async () => { try { const detail = await runPrivilegedAction("bitlocker_unlock", { device: unlockDevice.dev, key: unlockKey }); if (detail !== "Cancelled.") { const devices = await fetchNtfsDevices(); if (devices) setDrives(ntfsPartitions(devices)); else { const cached = await fetchNtfsDrives(); if (cached) setDrives(cached); } } return detail; } finally { setUnlockDevice(null); setUnlockKey(""); } })} />
             <ActionButton label="Cancel" disabled={busy !== null} onClick={() => setUnlockDevice(null)} />
           </div>
         </div>}

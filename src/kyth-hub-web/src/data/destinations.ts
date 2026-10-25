@@ -31,8 +31,8 @@ const sectionsByDestination: Record<string, HubSection[]> = {
   Updates: UPDATES_SECTIONS,
 };
 
-export const DESTINATIONS: Destination[] = routeManifest.destinations.map(({ key, route }) => ({
-  key,
-  route,
-  sections: sectionsByDestination[key],
-}));
+export const DESTINATIONS: Destination[] = routeManifest.destinations.map(({ key, route }) => {
+  const sections = sectionsByDestination[key];
+  if (!sections) console.error(`Hub destination "${key}" has no sections entry; rendering it empty.`);
+  return { key, route, sections: sections ?? [] };
+});

@@ -14,6 +14,7 @@ use std::io::Write;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use kyth_shared::system::jobs::{timeout_for, JobStore, JobTimeoutClass};
@@ -44,6 +45,51 @@ fn app_installs() -> &'static JobStore {
 static GUARDIAN_CHECKS: OnceLock<JobStore> = OnceLock::new();
 fn guardian_checks() -> &'static JobStore {
     GUARDIAN_CHECKS.get_or_init(JobStore::default)
+}
+
+/// RAII single-flight guard for Hub operations that must not overlap,
+/// mirroring `commands::job`'s flatpak slot: claimed before the job
+/// exists, moved into the worker, and dropped when the worker returns —
+/// including on panic paths, so a wedged caller can never hold the slot
+/// forever.
+struct OpSlot(&'static AtomicBool);
+
+impl Drop for OpSlot {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
+    }
+}
+
+fn take_op_slot(flag: &'static AtomicBool, busy: &str) -> Result<OpSlot, String> {
+    flag.compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .map(|_| OpSlot(flag))
+        .map_err(|_| busy.to_string())
+}
+
+static GUARDIAN_OP_RUNNING: AtomicBool = AtomicBool::new(false);
+static CLOUD_SYNC_RUNNING: AtomicBool = AtomicBool::new(false);
+static PST_CONVERT_RUNNING: AtomicBool = AtomicBool::new(false);
+static BOTTLES_OP_RUNNING: AtomicBool = AtomicBool::new(false);
+
+/// Spawn a job worker whose panic still finishes the job. The raw spawns
+/// this replaces had `finish` as their only exit, so a panicking worker
+/// stranded the job in "running" forever (the store prunes only terminal
+/// entries). Same discipline as `commands::job`'s spawners.
+fn spawn_guarded_worker<F, D>(work: F, finish: D)
+where
+    F: FnOnce() -> (String, String) + Send + 'static,
+    D: FnOnce(String, String) + Send + 'static,
+{
+    std::thread::spawn(move || {
+        let (state, detail) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(work))
+            .unwrap_or_else(|_| {
+                (
+                    "failed".to_string(),
+                    "Background command worker panicked.".to_string(),
+                )
+            });
+        finish(state, detail);
+    });
 }
 
 /// A running focus session's inhibitor process plus when it is due to end,
@@ -98,6 +144,42 @@ struct GuardianSnapshotResponse {
     pending_count: usize,
     pending: Vec<GuardianPendingResponse>,
     history: Vec<GuardianHistoryResponse>,
+    enabled: bool,
+    autofix: bool,
+}
+
+/// Guardian's own settings, read from the same file the service reads
+/// (`~/.config/kyth/guardian.json`): `enabled` defaults to true and
+/// `automatic_safe_fixes` to false when the file or key is absent — the
+/// exact defaults `kyth-guardian`'s config loader applies, so the Hub
+/// reports the state the service will actually honor. The snapshot
+/// payload used to carry no trace of either flag, so the section's
+/// Enable/Disable buttons could never show whether a toggle took.
+fn guardian_config_flags() -> (bool, bool) {
+    let defaults = (true, false);
+    let Some(home) = std::env::var_os("HOME") else {
+        return defaults;
+    };
+    let path = PathBuf::from(home).join(".config/kyth/guardian.json");
+    let Ok(raw) = fs::read_to_string(path) else {
+        return defaults;
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return defaults;
+    };
+    if !value.is_object() {
+        return defaults;
+    }
+    (
+        value
+            .get("enabled")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(true),
+        value
+            .get("automatic_safe_fixes")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+    )
 }
 
 /// Guardian's pending-recommendation list + recent history, from disk —
@@ -132,10 +214,13 @@ fn guardian_snapshot() -> GuardianSnapshotResponse {
         })
         .collect();
 
+    let (enabled, autofix) = guardian_config_flags();
     GuardianSnapshotResponse {
         pending_count: pending.len(),
         pending: pending_response,
         history: history_response,
+        enabled,
+        autofix,
     }
 }
 
@@ -149,11 +234,53 @@ struct GuardianActionLaunch {
     state: String,
     detail: String,
 }
+/// Run the Guardian helper for a tracked job: the same HubAction bound
+/// the old `commands::process::output` path used, but through the
+/// cancellable runner with the job's own flag, so
+/// `guardian_check_cancel` actually stops the helper (within one poll
+/// tick) instead of only untracking it in the UI.
+fn guardian_helper_output(
+    args: &[&str],
+    cancel: &AtomicBool,
+) -> Result<std::process::Output, std::io::Error> {
+    let mut command = Command::new("/usr/bin/kyth-guardian");
+    command.args(args);
+    kyth_shared::system::process::run_bounded_command_cancel(
+        command,
+        timeout_for(JobTimeoutClass::HubAction),
+        cancel,
+    )
+}
+
+/// Map a Guardian helper launch/read failure onto the job's terminal
+/// state, preserving the wording the previous runner produced.
+fn guardian_helper_failure(error: std::io::Error) -> (String, String) {
+    match error.kind() {
+        std::io::ErrorKind::Interrupted => ("cancelled".to_string(), "Cancelled.".to_string()),
+        std::io::ErrorKind::NotFound => (
+            "failed".to_string(),
+            format!("Could not start Guardian: could not start command: {error}"),
+        ),
+        _ => (
+            "failed".to_string(),
+            format!("Could not start Guardian: could not read command output: {error}"),
+        ),
+    }
+}
+
 #[tauri::command]
 fn guardian_check(investigate: bool) -> Result<GuardianActionLaunch, String> {
     if !std::path::Path::new("/usr/bin/kyth-guardian").exists() {
         return Err("Guardian service is not installed".to_string());
     }
+    // Check and control share one backend slot: both spawn the same
+    // helper against the same state file, so overlapping runs raced —
+    // and the frontend's per-section busy flags cannot see each other.
+    let slot = take_op_slot(
+        &GUARDIAN_OP_RUNNING,
+        "A Guardian check or settings change is already running. \
+         Wait for it to finish before starting another.",
+    )?;
     let job = format!(
         "guardian-{}",
         std::time::SystemTime::now()
@@ -161,33 +288,37 @@ fn guardian_check(investigate: bool) -> Result<GuardianActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    let (job, _) = guardian_checks().start(&job, "Guardian check is running…".into());
+    let (job, cancel) = guardian_checks().start(&job, "Guardian check is running…".into());
     let job_for_thread = job.clone();
-    std::thread::spawn(move || {
-        let action = if investigate { "investigate" } else { "check" };
-        let result = commands::process::output("/usr/bin/kyth-guardian", &["--json", action]);
-        let (state, detail) = match result {
-            Ok(output) if output.status.success() => {
-                ("complete", "Guardian check complete.".to_string())
+    spawn_guarded_worker(
+        move || {
+            let _slot = slot;
+            let action = if investigate { "investigate" } else { "check" };
+            match guardian_helper_output(&["--json", action], &cancel) {
+                Ok(output) if output.status.success() => (
+                    "complete".to_string(),
+                    "Guardian check complete.".to_string(),
+                ),
+                Ok(output) => {
+                    // An empty stderr would surface as a blank failure in
+                    // the UI; fall back to the exit code like
+                    // guardian_control does.
+                    let detail = commands::process::bounded_text(&output.stderr);
+                    let detail = if detail.is_empty() {
+                        match output.status.code() {
+                            Some(code) => format!("Guardian check failed (exit {code})."),
+                            None => "Guardian check stopped before it could complete.".to_string(),
+                        }
+                    } else {
+                        detail
+                    };
+                    ("failed".to_string(), detail)
+                }
+                Err(error) => guardian_helper_failure(error),
             }
-            Ok(output) => {
-                // An empty stderr would surface as a blank failure in the
-                // UI; fall back to the exit code like guardian_control does.
-                let detail = commands::process::bounded_text(&output.stderr);
-                let detail = if detail.is_empty() {
-                    match output.status.code() {
-                        Some(code) => format!("Guardian check failed (exit {code})."),
-                        None => "Guardian check stopped before it could complete.".to_string(),
-                    }
-                } else {
-                    detail
-                };
-                ("failed", detail)
-            }
-            Err(error) => ("failed", format!("Could not start Guardian: {error}")),
-        };
-        guardian_checks().finish(&job_for_thread, state, detail);
-    });
+        },
+        move |state, detail| guardian_checks().finish(&job_for_thread, &state, detail),
+    );
     Ok(GuardianActionLaunch {
         job,
         state: "running".into(),
@@ -208,8 +339,9 @@ fn guardian_check_status(job: String) -> InstallStatus {
     }
 }
 
-/// Cancel a running Guardian check. The helper itself is already
-/// time-bounded; cancelling stops the UI from tracking it further.
+/// Cancel a running Guardian check or control job (both live in this
+/// store): the store flags the job cancelled and the worker's runner
+/// kills the helper within one poll tick.
 #[tauri::command]
 fn guardian_check_cancel(job: String) -> InstallStatus {
     guardian_checks().cancel(&job);
@@ -225,6 +357,14 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
         "autofix-off" => &["auto-fix", "off"],
         _ => return Err("Guardian control is not allowlisted".to_string()),
     };
+    // Same slot as guardian_check — see there. A settings change the UI
+    // reported as cancelled used to run to completion because the
+    // worker discarded the job's cancel flag; it now feeds the runner.
+    let slot = take_op_slot(
+        &GUARDIAN_OP_RUNNING,
+        "A Guardian check or settings change is already running. \
+         Wait for it to finish before starting another.",
+    )?;
     let job = format!(
         "guardian-control-{}",
         std::time::SystemTime::now()
@@ -232,31 +372,38 @@ fn guardian_control(action: String) -> Result<GuardianActionLaunch, String> {
             .unwrap_or_default()
             .as_nanos()
     );
-    let (job, _) = guardian_checks().start(&job, format!("Running Guardian {action}…"));
+    let pending_detail = format!("Running Guardian {action}…");
+    let (job, cancel) = guardian_checks().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
-    std::thread::spawn(move || {
-        let result = commands::process::output("/usr/bin/kyth-guardian", args);
-        let (state, detail) = match result {
-            Ok(output) if output.status.success() => {
-                ("complete", commands::process::bounded_text(&output.stdout))
-            }
-            Ok(output) => ("failed", commands::process::bounded_text(&output.stderr)),
-            Err(error) => ("failed", format!("Could not start Guardian: {error}")),
-        };
-        guardian_checks().finish(
-            &job_for_thread,
-            state,
-            if detail.is_empty() {
-                "Guardian control complete.".into()
-            } else {
-                detail
-            },
-        );
-    });
+    spawn_guarded_worker(
+        move || {
+            let _slot = slot;
+            let (state, detail) = match guardian_helper_output(args, &cancel) {
+                Ok(output) if output.status.success() => (
+                    "complete".to_string(),
+                    commands::process::bounded_text(&output.stdout),
+                ),
+                Ok(output) => (
+                    "failed".to_string(),
+                    commands::process::bounded_text(&output.stderr),
+                ),
+                Err(error) => guardian_helper_failure(error),
+            };
+            (
+                state,
+                if detail.is_empty() {
+                    "Guardian control complete.".to_string()
+                } else {
+                    detail
+                },
+            )
+        },
+        move |state, detail| guardian_checks().finish(&job_for_thread, &state, detail),
+    );
     Ok(GuardianActionLaunch {
         job,
         state: "running".into(),
-        detail: format!("Running Guardian {action}…"),
+        detail: pending_detail,
     })
 }
 
@@ -475,18 +622,25 @@ fn valid_smb_configured_share(share: &SmbConfiguredShare) -> bool {
         && !share.mount_point.split('/').any(|part| part == "..")
 }
 
-fn load_smb_configured_shares() -> Vec<SmbConfiguredShare> {
-    let Ok(path) = smb_config_path() else {
-        return Vec::new();
+/// Load the saved share list. A missing file is a legitimately empty
+/// list; a file that exists but cannot be read or parsed is an ERROR.
+/// Collapsing corruption to empty made the next save overwrite the
+/// corrupt file with only the newest share, silently discarding the
+/// rest.
+fn load_smb_configured_shares() -> Result<Vec<SmbConfiguredShare>, String> {
+    let path = smb_config_path()?;
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("could not read the saved network shares: {error}")),
     };
-    let Ok(raw) = fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    serde_json::from_str::<Vec<SmbConfiguredShare>>(&raw)
-        .unwrap_or_default()
+    let shares = serde_json::from_str::<Vec<SmbConfiguredShare>>(&raw).map_err(|error| {
+        format!("the saved network share configuration is corrupt, so nothing was changed: {error}")
+    })?;
+    Ok(shares
         .into_iter()
         .filter(valid_smb_configured_share)
-        .collect()
+        .collect())
 }
 
 fn save_smb_configured_shares(shares: &[SmbConfiguredShare]) -> Result<(), String> {
@@ -507,7 +661,7 @@ fn save_smb_configured_shares(shares: &[SmbConfiguredShare]) -> Result<(), Strin
 }
 
 #[tauri::command]
-fn smb_configured_shares() -> Vec<SmbConfiguredShare> {
+fn smb_configured_shares() -> Result<Vec<SmbConfiguredShare>, String> {
     load_smb_configured_shares()
 }
 
@@ -521,7 +675,9 @@ fn smb_save_configured_share(share: SmbConfiguredShare) -> Result<SmbActionResul
     // writer silently wins) and one share definition is lost.
     let path = smb_config_path()?;
     kyth_shared::atomic_io::with_file_lock(&path, || {
-        let mut shares = load_smb_configured_shares();
+        // A corrupt existing file fails the save here: proceeding would
+        // overwrite it with only the new share (see the loader).
+        let mut shares = load_smb_configured_shares()?;
         shares.retain(|existing| existing.name != share.name);
         shares.push(share);
         save_smb_configured_shares(&shares)
@@ -548,7 +704,7 @@ fn smb_remove_configured_share(name: String) -> Result<SmbActionResult, String> 
     // racing this removal would resurrect the deleted share.
     let path = smb_config_path()?;
     kyth_shared::atomic_io::with_file_lock(&path, || {
-        let mut shares = load_smb_configured_shares();
+        let mut shares = load_smb_configured_shares()?;
         shares.retain(|existing| existing.name != name);
         save_smb_configured_shares(&shares)
     })
@@ -650,29 +806,37 @@ fn valid_cloud_sync_remote(name: &str, info: &serde_json::Value) -> Option<Cloud
 }
 
 #[tauri::command]
-fn cloud_sync_remotes() -> Vec<CloudSyncRemote> {
-    let Ok(path) = cloud_sync_config_path() else {
-        return Vec::new();
-    };
+fn cloud_sync_remotes() -> Result<Vec<CloudSyncRemote>, String> {
+    let path = cloud_sync_config_path()?;
     // Do not follow an attacker-controlled link from the user config dir.
-    let Ok(metadata) = fs::symlink_metadata(&path) else {
-        return Vec::new();
+    // A missing file is a legitimately empty list; a config that exists
+    // but is unreadable, oversized, or unparseable is an error — the old
+    // code collapsed all of those to "no remotes", which the page
+    // rendered as "nothing set up yet" in front of a working setup.
+    let metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Could not read cloud sync configuration: {error}")),
     };
-    if !metadata.is_file() || metadata.len() > 128 * 1024 {
-        return Vec::new();
+    if !metadata.is_file() {
+        return Err("Cloud sync configuration is unavailable".to_string());
     }
-    let Ok(raw) = fs::read_to_string(path) else {
-        return Vec::new();
+    if metadata.len() > 128 * 1024 {
+        return Err("Cloud sync configuration is too large".to_string());
+    }
+    let raw = match fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(format!("Could not read cloud sync configuration: {error}")),
     };
-    let Ok(entries) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&raw) else {
-        return Vec::new();
-    };
+    let entries = serde_json::from_str::<HashMap<String, serde_json::Value>>(&raw)
+        .map_err(|_| "Cloud sync configuration is invalid".to_string())?;
     let mut remotes: Vec<_> = entries
         .iter()
         .filter_map(|(name, info)| valid_cloud_sync_remote(name, info))
         .collect();
     remotes.sort_by(|left, right| left.name.cmp(&right.name));
-    remotes
+    Ok(remotes)
 }
 
 #[tauri::command]
@@ -736,6 +900,13 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
         return Err("That cloud remote is invalid".to_string());
     }
     let folder = folder_canonical.to_string_lossy().into_owned();
+    // One sync at a time: two rclone copies into the same folder (and
+    // the same --backup-dir) interleave writes; the job store alone
+    // happily ran both.
+    let slot = take_op_slot(
+        &CLOUD_SYNC_RUNNING,
+        "A cloud sync is already in progress. Wait for it to finish before syncing again.",
+    )?;
     let job = commands::job::start_job("cloud-sync", &format!("Syncing {}…", configured.name))?;
     // `copy`, never `sync`: sync deletes local-only files to mirror the
     // remote, and a green "synced" after deleting saves is data loss.
@@ -762,19 +933,24 @@ fn cloud_sync_now(remote: String) -> Result<String, String> {
         job.clone(),
         argv,
         timeout_for(JobTimeoutClass::LongTransfer),
-        move |result| match result {
-            Ok(output) if output.status.success() => (
-                "complete".to_string(),
-                format!("{} synced to {}.", configured.name, folder),
-            ),
-            Ok(output) => (
-                "failed".to_string(),
-                commands::job::failure_detail("Cloud sync", &output),
-            ),
-            Err(error) => (
-                "failed".to_string(),
-                format!("Could not start cloud sync: {error}"),
-            ),
+        move |result| {
+            // Held until the worker finishes the job (the guard rides
+            // this closure, which the spawner runs inside the worker).
+            let _slot = slot;
+            match result {
+                Ok(output) if output.status.success() => (
+                    "complete".to_string(),
+                    format!("{} synced to {}.", configured.name, folder),
+                ),
+                Ok(output) => (
+                    "failed".to_string(),
+                    commands::job::failure_detail("Cloud sync", &output),
+                ),
+                Err(error) => (
+                    "failed".to_string(),
+                    format!("Could not start cloud sync: {error}"),
+                ),
+            }
         },
     );
     Ok(job)
@@ -992,6 +1168,13 @@ fn convert_pst(path: String) -> Result<String, String> {
     let destination = home.join("Documents/Outlook Import");
     fs::create_dir_all(&destination)
         .map_err(|error| format!("could not create import folder: {error}"))?;
+    // One conversion at a time: every run writes into the same fixed
+    // destination folder, so concurrent readpst runs interleave output.
+    let slot = take_op_slot(
+        &PST_CONVERT_RUNNING,
+        "An Outlook archive conversion is already in progress. \
+         Wait for it to finish before starting another.",
+    )?;
     let job = commands::job::start_job("pst", "Converting Outlook archive…")?;
     // Re-verify containment at use time: the check above and this spawn are
     // not atomic, and a link swapped in between would redirect the read.
@@ -1008,19 +1191,24 @@ fn convert_pst(path: String) -> Result<String, String> {
         job.clone(),
         argv,
         timeout_for(JobTimeoutClass::ExtendedWork),
-        |result| match result {
-            Ok(output) if output.status.success() => (
-                "complete".to_string(),
-                "Outlook archive converted to Documents/Outlook Import.".to_string(),
-            ),
-            Ok(output) => (
-                "failed".to_string(),
-                commands::job::failure_detail("Outlook import", &output),
-            ),
-            Err(error) => (
-                "failed".to_string(),
-                format!("Could not start Outlook import: {error}"),
-            ),
+        move |result| {
+            // Held until the worker finishes the job (the guard rides
+            // this closure, which the spawner runs inside the worker).
+            let _slot = slot;
+            match result {
+                Ok(output) if output.status.success() => (
+                    "complete".to_string(),
+                    "Outlook archive converted to Documents/Outlook Import.".to_string(),
+                ),
+                Ok(output) => (
+                    "failed".to_string(),
+                    commands::job::failure_detail("Outlook import", &output),
+                ),
+                Err(error) => (
+                    "failed".to_string(),
+                    format!("Could not start Outlook import: {error}"),
+                ),
+            }
         },
     );
     Ok(job)
@@ -1055,13 +1243,20 @@ fn focus_start(minutes: u32) -> Result<String, String> {
     // M1: hold the lock across reap + spawn + insert. The previous code
     // dropped the lock before reaping, allowing a concurrent focus_start
     // to reap the just-spawned child before it was inserted into the map.
+    // The inhibitor deliberately outlives the nominal session by a
+    // 60s grace so a slightly late UI stop cannot drop it early.
+    // `ends_at` records the child's REAL end (this same duration):
+    // the two used to disagree by the grace, leaving up to a minute
+    // where status said "done" while the inhibitor — and the
+    // already-running rejection — was still in force.
+    let run_secs = u64::from(minutes) * 60 + 60;
     let child = std::process::Command::new("systemd-inhibit")
         .args([
             "--what=idle:sleep",
             "--why=KythOS Focus Session",
             "--mode=block",
             "sleep",
-            &(minutes * 60 + 60).to_string(),
+            &run_secs.to_string(),
         ])
         .spawn()
         .map_err(|error| format!("could not keep the PC awake: {error}"))?;
@@ -1079,7 +1274,7 @@ fn focus_start(minutes: u32) -> Result<String, String> {
         round += 1;
         id = format!("focus-{nanos}-{round}");
     }
-    let ends_at = std::time::Instant::now() + std::time::Duration::from_secs(minutes as u64 * 60);
+    let ends_at = std::time::Instant::now() + std::time::Duration::from_secs(run_secs);
     sessions.insert(id.clone(), FocusSession { child, ends_at });
     // Kill inhibitors orphaned by a previous Hub process (crash/restart
     // reparents the `sleep` child, which then holds idle:sleep with no UI
@@ -1154,7 +1349,21 @@ fn focus_stop(id: String) -> Result<String, String> {
             }
             _ => {
                 kyth_shared::system::process::kill_process_group(&mut session.child);
-                let _ = session.child.wait();
+                // Bound the final reap too: a child stuck in
+                // uninterruptible sleep must not pin this command
+                // forever. If it still has not exited after a second
+                // grace window, drop the handle unwaited — init reaps
+                // it when it eventually dies.
+                let reap_deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                loop {
+                    match session.child.try_wait() {
+                        Ok(Some(_)) | Err(_) => break,
+                        Ok(None) if std::time::Instant::now() < reap_deadline => {
+                            std::thread::sleep(std::time::Duration::from_millis(25));
+                        }
+                        Ok(None) => break,
+                    }
+                }
                 break;
             }
         }
@@ -1202,22 +1411,24 @@ async fn btrfs_health() -> BtrfsHealthResponse {
     })
 }
 #[tauri::command]
-async fn loaded_kernel_modules() -> Vec<String> {
+async fn loaded_kernel_modules() -> Result<Vec<String>, String> {
+    // A panicked probe task used to read as "no modules loaded": the
+    // JoinError now surfaces as an error, like appstream_search's.
     tauri::async_runtime::spawn_blocking(|| {
         kyth_shared::system::drivers::get_loaded_kernel_modules()
             .into_iter()
             .collect()
     })
     .await
-    .unwrap_or_default()
+    .map_err(|error| format!("Could not read the loaded kernel modules: {error}"))
 }
 #[tauri::command]
-async fn pci_devices_by_class(class: String) -> Vec<String> {
+async fn pci_devices_by_class(class: String) -> Result<Vec<String>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         kyth_shared::system::drivers::get_pci_devices_by_class(&class)
     })
     .await
-    .unwrap_or_default()
+    .map_err(|error| format!("Could not read PCI devices: {error}"))
 }
 
 #[tauri::command]
@@ -1349,12 +1560,13 @@ struct DeploymentInfoResponse {
 }
 
 #[tauri::command]
-async fn gaming_library() -> Vec<kyth_shared::system::gaming_library::LauncherEntry> {
+async fn gaming_library() -> Result<Vec<kyth_shared::system::gaming_library::LauncherEntry>, String>
+{
     // P6: the library scan walks Steam/Heroic/Lutris/Bottles directories and
     // must not sit on an async runtime worker while it does.
     tauri::async_runtime::spawn_blocking(kyth_shared::system::gaming_library::gaming_library_scan)
         .await
-        .unwrap_or_default()
+        .map_err(|error| format!("Could not scan the game library: {error}"))
 }
 
 #[tauri::command]
@@ -1692,12 +1904,12 @@ fn install_cancel(job: String) -> InstallStatus {
 #[tauri::command]
 async fn protondb_lookup_many(
     app_ids: Vec<String>,
-) -> Vec<kyth_shared::system::gaming_compat::ProtonDbResult> {
+) -> Result<Vec<kyth_shared::system::gaming_compat::ProtonDbResult>, String> {
     tauri::async_runtime::spawn_blocking(move || {
         kyth_shared::system::gaming_compat::protondb_lookup_many(&app_ids)
     })
     .await
-    .unwrap_or_default()
+    .map_err(|error| format!("Could not look up ProtonDB ratings: {error}"))
 }
 
 #[tauri::command]
@@ -1726,22 +1938,27 @@ struct CompatibilityBundle {
 /// data in the image-owned JSON means Tauri and Qt show the same title list;
 /// the frontend only owns filtering and presentation.
 #[tauri::command]
-fn compatibility_games() -> Vec<CompatibilityGameResponse> {
-    // Cheap P6 cleanup: parse the bundled JSON once per process instead of
-    // on every invoke.
+fn compatibility_games() -> Result<Vec<CompatibilityGameResponse>, String> {
+    // Cheap P6 cleanup: parse the bundled JSON once per process instead
+    // of on every invoke. Only a successful parse is cached: the old
+    // get_or_init stored the failure fallback (an empty list) for the
+    // life of the process, so one bad bundle hid the whole matrix until
+    // restart, indistinguishable from "no games tracked".
     static PARSED: std::sync::OnceLock<Vec<CompatibilityGameResponse>> = std::sync::OnceLock::new();
-    PARSED
-        .get_or_init(|| {
-            const BUNDLED: &str = include_str!("../../src/data/compat_games.json");
-            serde_json::from_str::<CompatibilityBundle>(BUNDLED)
-                .map(|bundle| bundle.games)
-                .unwrap_or_default()
-        })
-        .clone()
+    if let Some(games) = PARSED.get() {
+        return Ok(games.clone());
+    }
+    const BUNDLED: &str = include_str!("../../src/data/compat_games.json");
+    let games = serde_json::from_str::<CompatibilityBundle>(BUNDLED)
+        .map(|bundle| bundle.games)
+        .map_err(|error| format!("The bundled compatibility list could not be read: {error}"))?;
+    Ok(PARSED.get_or_init(|| games).clone())
 }
 
 #[tauri::command]
-async fn telemetry_recent(limit: Option<u32>) -> Vec<kyth_shared::system::telemetry::SessionRow> {
+async fn telemetry_recent(
+    limit: Option<u32>,
+) -> Result<Vec<kyth_shared::system::telemetry::SessionRow>, String> {
     // The webview supplies the limit; clamp it so a crafted value cannot
     // turn a small chart query into a full-table dump.
     let limit = limit.unwrap_or(15).min(200) as usize;
@@ -1749,7 +1966,7 @@ async fn telemetry_recent(limit: Option<u32>) -> Vec<kyth_shared::system::teleme
         kyth_shared::system::telemetry::recent_sessions(limit)
     })
     .await
-    .unwrap_or_default()
+    .map_err(|error| format!("Could not read recent gaming sessions: {error}"))
 }
 
 #[tauri::command]
@@ -1766,8 +1983,14 @@ fn disk_write_bytes() -> u64 {
 }
 
 #[tauri::command]
-fn firmware_updates_count() -> i32 {
-    kyth_shared::system::firmware::check_firmware_updates(20)
+fn firmware_updates_count() -> Result<i32, String> {
+    // The shared check reports "couldn't determine" as None instead of
+    // collapsing it to 0: a dead or timed-out fwupd must not read as
+    // "no firmware updates" on the Updates page.
+    match kyth_shared::system::firmware::check_firmware_updates(20) {
+        Some(count) => Ok(count as i32),
+        None => Err("Could not check for firmware updates.".to_string()),
+    }
 }
 #[tauri::command]
 fn plasma_presets() -> Vec<String> {
@@ -1862,10 +2085,11 @@ fn vpn_saved_profile() -> Option<VpnSavedProfile> {
 }
 
 #[tauri::command]
-async fn desktop_stack_checks() -> Vec<kyth_shared::system::desktop_stack::StackCheck> {
+async fn desktop_stack_checks(
+) -> Result<Vec<kyth_shared::system::desktop_stack::StackCheck>, String> {
     tauri::async_runtime::spawn_blocking(kyth_shared::system::desktop_stack::desktop_stack_checks)
         .await
-        .unwrap_or_default()
+        .map_err(|error| format!("Could not run the desktop stack checks: {error}"))
 }
 
 /// Opens a prefilled `kyth-os/kyth` issue in the user's browser — the
@@ -1961,7 +2185,16 @@ fn regular_handler_path(path: &str) -> Result<PathBuf, String> {
 }
 
 #[tauri::command]
-fn exe_handler_inspect(path: String) -> Result<ExeHandlerInspection, String> {
+async fn exe_handler_inspect(path: String) -> Result<ExeHandlerInspection, String> {
+    // Inspection hashes the whole installer; on the command thread a
+    // multi-GB file froze the window. The inspection itself is a pure
+    // function of the path, so it moves to the blocking pool unchanged.
+    tauri::async_runtime::spawn_blocking(move || inspect_installer_path(path))
+        .await
+        .map_err(|error| format!("Installer inspection did not respond: {error}"))?
+}
+
+fn inspect_installer_path(path: String) -> Result<ExeHandlerInspection, String> {
     let path = regular_handler_path(&path)?;
     let basename = path
         .file_name()
@@ -2024,7 +2257,15 @@ fn exe_handler_untrust(sha256: String) -> Result<(), String> {
 /// Launch a trusted-or-dialog-approved game executable via umu+Proton.
 /// Fire-and-forget: the game outlives the Hub like a natively launched app.
 #[tauri::command]
-fn exe_handler_launch_umu(path: String) -> Result<(), String> {
+async fn exe_handler_launch_umu(path: String) -> Result<(), String> {
+    // The trust gate hashes the whole file before launching; keep that
+    // read off the command thread (see exe_handler_inspect).
+    tauri::async_runtime::spawn_blocking(move || launch_umu_path(path))
+        .await
+        .map_err(|error| format!("Installer launch did not respond: {error}"))?
+}
+
+fn launch_umu_path(path: String) -> Result<(), String> {
     let path = regular_handler_path(&path)?;
     // Gate on the trust store: only exes explicitly trusted for the umu
     // runner may launch directly. Anything else must go through the dialog.
@@ -2206,13 +2447,19 @@ fn exe_handler_launch_flatpak(app_id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn exe_handler_start_bottles(
+async fn exe_handler_start_bottles(
     path: String,
     allow_unsupported: bool,
 ) -> Result<InstallActionLaunch, String> {
-    let request =
-        kyth_shared::system::windows_installer::inspect_installer(regular_handler_path(&path)?)
-            .map_err(|error| error.message)?;
+    // The pre-launch inspection hashes the whole installer; keep it off
+    // the command thread (see exe_handler_inspect).
+    let request = tauri::async_runtime::spawn_blocking(move || {
+        let path = regular_handler_path(&path)?;
+        kyth_shared::system::windows_installer::inspect_installer(path)
+            .map_err(|error| error.message)
+    })
+    .await
+    .map_err(|error| format!("Installer inspection did not respond: {error}"))??;
     if matches!(
         kyth_shared::system::windows_installer::assess_compatibility(&request).level,
         kyth_shared::system::windows_installer::Compatibility::Unsupported
@@ -2222,6 +2469,15 @@ fn exe_handler_start_bottles(
             "This installer has a known limitation. Confirm before trying it anyway.".into(),
         );
     }
+    // One Bottles setup at a time, in a slot of its own (not the
+    // flatpak slot): these jobs share the APP_INSTALLS store with
+    // flatpak jobs so install_status/install_cancel serve both, but a
+    // Bottles launch is a library call, not a flatpak transaction.
+    let slot = take_op_slot(
+        &BOTTLES_OP_RUNNING,
+        "A Bottles setup is already in progress. \
+         Wait for it to finish before starting another.",
+    )?;
     let job = format!(
         "exe-handler-{}",
         std::time::SystemTime::now()
@@ -2230,24 +2486,36 @@ fn exe_handler_start_bottles(
             .as_nanos()
     );
     let pending_detail = "Preparing an isolated Bottles environment…".to_string();
-    // launch_in_bottles is a library call, not a child process: cancelling
-    // marks the job and its late finish becomes a no-op.
-    let (job, _) = app_installs().start(&job, pending_detail.clone());
+    let (job, cancel) = app_installs().start(&job, pending_detail.clone());
     let job_for_thread = job.clone();
-    std::thread::spawn(move || {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| PathBuf::from("/tmp"));
-        let (state, detail) =
+    spawn_guarded_worker(
+        move || {
+            let _slot = slot;
+            // launch_in_bottles is a library call, not a child process,
+            // so a cancel cannot interrupt it mid-flight — but one that
+            // landed before the launch prevents it entirely, and one
+            // that lands during keeps the job cancelled instead of
+            // completing (the store's finish never overwrites a
+            // cancelled entry anyway).
+            if cancel.load(Ordering::Relaxed) {
+                return ("cancelled".to_string(), "Cancelled.".to_string());
+            }
+            let home = std::env::var_os("HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from("/tmp"));
             match kyth_shared::system::windows_installer::launch_in_bottles(&request, home) {
+                Ok(_) if cancel.load(Ordering::Relaxed) => {
+                    ("cancelled".to_string(), "Cancelled.".to_string())
+                }
                 Ok(_) => (
-                    "complete",
+                    "complete".to_string(),
                     "The Windows installer is opening in its isolated environment.".to_string(),
                 ),
-                Err(error) => ("failed", error.message),
-            };
-        app_installs().finish(&job_for_thread, state, detail);
-    });
+                Err(error) => ("failed".to_string(), error.message),
+            }
+        },
+        move |state, detail| app_installs().finish(&job_for_thread, &state, detail),
+    );
     Ok(InstallActionLaunch {
         job,
         state: "running".into(),

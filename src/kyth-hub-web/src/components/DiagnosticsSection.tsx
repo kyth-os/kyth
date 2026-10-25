@@ -27,7 +27,7 @@ export function DiagnosticsSection({ section }: { section: HubSection }) {
   const [memory, setMemory] = useState<{ status: string; detail: string } | null>(null);
   const [liveSession, setLiveSession] = useState<boolean | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("hub-action");
+  const { status, busy, run, runCancel } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;
@@ -121,9 +121,9 @@ export function DiagnosticsSection({ section }: { section: HubSection }) {
 
       <div style={{ marginTop: 20, borderTop: "1px solid var(--hairline)", paddingTop: 16 }}>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <RecipeButton recipe="system-audit" label="Full system audit" busy={busy} run={run} />
-          <RecipeButton recipe="gaming-audit" label="Gaming stack audit" busy={busy} run={run} />
-          <RecipeButton recipe="update-health" label="Update health" busy={busy} run={run} />
+          <RecipeButton recipe="system-audit" label="Full system audit" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="gaming-audit" label="Gaming stack audit" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="update-health" label="Update health" busy={busy} run={run} runCancel={runCancel} />
         </div>
         <ActionStatus status={status} />
       </div>

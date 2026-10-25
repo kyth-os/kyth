@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { HubSection } from "../data/hubSections";
 import {
   fetchFontsReady,
@@ -42,7 +42,9 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
   const [focusMinutes, setFocusMinutes] = useState(25);
   const [focusId, setFocusId] = useState<string | null>(null);
   const [focusRemaining, setFocusRemaining] = useState(0);
-  const { status, busy, run, runCancel } = useSectionAction("install");
+  const [focusStopError, setFocusStopError] = useState<string | null>(null);
+  const expiryAttempted = useRef<string | null>(null);
+  const { status, busy, run, runCancel } = useSectionAction(["install", "hub-action", "job"]);
 
   useEffect(() => {
     let c = false;
@@ -72,8 +74,15 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
     if (!focusId) return;
     const timer = window.setInterval(() => setFocusRemaining((value) => {
       if (value <= 1) {
-        void stopFocusSession(focusId).catch(() => undefined);
-        setFocusId(null);
+        // Expiry stop is attempted once per session. On failure the
+        // session id is kept (so End session stays available) and the
+        // failure is surfaced instead of silently pretending it ended.
+        if (expiryAttempted.current !== focusId) {
+          expiryAttempted.current = focusId;
+          void stopFocusSession(focusId)
+            .then(() => { setFocusId(null); setFocusStopError(null); })
+            .catch(() => setFocusStopError("The focus timer ended, but Kyth couldn't confirm the session stopped — it may still be keeping the PC awake. Use “End session” to stop it."));
+        }
         return 0;
       }
       return value - 1;
@@ -107,8 +116,8 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
           {(busy?.startsWith("install-") ?? false) && (
             <ActionButton label="Cancel" onClick={() => runCancel("cancel-install", "Cancelling…", cancelInstall)} />
           )}
-          <RecipeButton recipe="install-ms-fonts" label="Install Office fonts" busy={busy} run={run} />
-          <RecipeButton recipe="setup-printer" label="Set up a printer" busy={busy} run={run} />
+          <RecipeButton recipe="install-ms-fonts" label="Install Office fonts" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="setup-printer" label="Set up a printer" busy={busy} run={run} runCancel={runCancel} />
           <ActionButton
             label={busy === "discover" ? "Scanning…" : "Find network printers"}
             disabled={busy !== null}
@@ -136,14 +145,15 @@ export function WorkSetupSection({ section }: { section: HubSection }) {
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
             <ActionButton label={busy === "pst-scan" ? "Scanning…" : "Find Outlook archives"} disabled={busy !== null} onClick={() => run("pst-scan", "Scanning for Outlook archives…", async () => { const files = await fetchPstFiles(); setPstFiles(files); return files ? `${files.length} archive(s) found.` : "Archive scanning is unavailable outside the Hub shell."; })} />
           </div>
-          {pstFiles && (pstFiles.length ? <div style={{ display: "grid", gap: 6, marginTop: 10 }}>{pstFiles.map((path) => <div key={path} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><span className="card-copy" style={{ flex: 1, fontSize: 12 }}>{path}</span><ActionButton label={busy === `pst-${path}` ? "Converting…" : "Convert"} disabled={busy !== null} onClick={() => run(`pst-${path}`, "Converting Outlook archive…", () => convertPst(path))} /></div>)}{(busy?.startsWith("pst-") ?? false) && <div><ActionButton label="Cancel" onClick={() => run("cancel-pst", "Cancelling…", cancelJob)} /></div>}</div> : <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>No archives found in Documents, Downloads, local app data, or mounted user drives.</p>)}
+          {pstFiles && (pstFiles.length ? <div style={{ display: "grid", gap: 6, marginTop: 10 }}>{pstFiles.map((path) => <div key={path} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}><span className="card-copy" style={{ flex: 1, fontSize: 12 }}>{path}</span><ActionButton label={busy === `pst-${path}` ? "Converting…" : "Convert"} disabled={busy !== null} onClick={() => run(`pst-${path}`, "Converting Outlook archive…", () => convertPst(path))} /></div>)}{(busy?.startsWith("pst-") ?? false) && <div><ActionButton label="Cancel" onClick={() => runCancel("cancel-pst", "Cancelling…", cancelJob)} /></div>}</div> : <p className="card-copy" style={{ fontSize: 12, marginTop: 8 }}>No archives found in Documents, Downloads, local app data, or mounted user drives.</p>)}
         </div>
         <div style={{ marginTop: 20, paddingTop: 16, borderTop: "1px solid var(--hairline)" }}>
           <p className="work-setup-copy" style={{ fontWeight: 700 }}>Focus session</p>
           <p className="work-setup-copy">Start a timed work block. Kyth keeps the PC awake until it ends; normal power behavior is restored when you stop or finish.</p>
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 10 }}>
-            {!focusId ? <><select value={focusMinutes} onChange={(event) => setFocusMinutes(Number(event.target.value))} style={{ padding: "7px 10px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)" }}><option value={25}>25 minutes</option><option value={50}>50 minutes</option><option value={90}>90 minutes</option></select><ActionButton label="Start focus session" disabled={busy !== null} onClick={() => run("focus-start", "Starting focus session…", async () => { const id = await startFocusSession(focusMinutes); setFocusId(id); setFocusRemaining(focusMinutes * 60); return `Focus session started for ${focusMinutes} minutes.`; })} /></> : <><span className="pill pill-ok">Active · {formatFocus(focusRemaining)}</span><ActionButton label="End session" disabled={busy !== null} onClick={() => run("focus-stop", "Ending focus session…", async () => { const result = await stopFocusSession(focusId); setFocusId(null); setFocusRemaining(0); return result; })} /></>}
+            {!focusId ? <><select value={focusMinutes} onChange={(event) => setFocusMinutes(Number(event.target.value))} style={{ padding: "7px 10px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)" }}><option value={25}>25 minutes</option><option value={50}>50 minutes</option><option value={90}>90 minutes</option></select><ActionButton label="Start focus session" disabled={busy !== null} onClick={() => run("focus-start", "Starting focus session…", async () => { const id = await startFocusSession(focusMinutes); setFocusId(id); setFocusRemaining(focusMinutes * 60); return `Focus session started for ${focusMinutes} minutes.`; })} /></> : <><span className="pill pill-ok">Active · {formatFocus(focusRemaining)}</span><ActionButton label="End session" disabled={busy !== null} onClick={() => run("focus-stop", "Ending focus session…", async () => { const result = await stopFocusSession(focusId); setFocusId(null); setFocusRemaining(0); setFocusStopError(null); return result; })} /></>}
           </div>
+          {focusStopError && <p className="card-copy" role="alert" style={{ fontSize: 12, marginTop: 8 }}>{focusStopError}</p>}
         </div>
         <ActionStatus status={status} />
       </div>

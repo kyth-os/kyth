@@ -35,6 +35,19 @@ export function ExeHandlerDialog() {
   const [pollEpoch, setPollEpoch] = useState(0);
   const [cancelling, setCancelling] = useState(false);
   const startedAutomatically = useRef(false);
+  const dialogRef = useRef<HTMLElement | null>(null);
+  const dialogOpen = inspection !== null || error !== null;
+
+  useEffect(() => {
+    if (!dialogOpen) return;
+    dialogRef.current?.focus();
+    const onKey = (event: KeyboardEvent) => {
+      // Escape detaches like Close — it never cancels a running job.
+      if (event.key === "Escape") detach();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [dialogOpen]);
 
   useEffect(() => {
     if (!inTauriShell()) return;
@@ -55,24 +68,27 @@ export function ExeHandlerDialog() {
     return () => unlisten?.();
   }, []);
 
-  // Cancel reaches the real backend job (app-installs store): the dialog
-  // stays open showing the outcome instead of orphaning a headless
-  // provisioning run. With no running job the button just closes.
-  const closeOrCancel = async () => {
-    if (job && job.state === "running" && !cancelling) {
-      setCancelling(true);
-      try {
-        const detail = await cancelExeHandlerBottles(job.job);
-        const next = await fetchInstallStatus(job.job).catch(() => null);
-        setJob(next ? { job: next.id, state: next.state, detail: next.detail } : { ...job, state: "cancelled", detail });
-      } catch (reason) {
-        setError(String(reason));
-      } finally {
-        setCancelling(false);
-      }
-      return;
-    }
+  // Close detaches: the dialog goes away but a running job keeps
+  // running and stays tracked under Apps — closing must never silently
+  // kill an install. Cancelling the job is the separate explicit
+  // action below, which keeps the dialog open showing the outcome.
+  const detach = () => {
     setInspection(null);
+    setError(null);
+  };
+
+  const cancelJob = async () => {
+    if (!job || job.state !== "running" || cancelling) return;
+    setCancelling(true);
+    try {
+      const detail = await cancelExeHandlerBottles(job.job);
+      const next = await fetchInstallStatus(job.job).catch(() => null);
+      setJob(next ? { job: next.id, state: next.state, detail: next.detail } : { ...job, state: "cancelled", detail });
+    } catch (reason) {
+      setError(String(reason));
+    } finally {
+      setCancelling(false);
+    }
   };
 
   const startBottles = async (allowUnsupported = false) => {
@@ -125,7 +141,7 @@ export function ExeHandlerDialog() {
       polls += 1;
       if (polls >= MAX_STATUS_POLLS) {
         window.clearInterval(timer);
-        setError("The installer is still running after several minutes. It may finish in the background — keep waiting, or close and re-open the file to resume tracking.");
+        setError("The installer is still running after several minutes. It may finish in the background — keep waiting here, or close this dialog: the install keeps running and stays tracked on the Apps page.");
         return;
       }
       const next = await fetchInstallStatus(jobId);
@@ -144,7 +160,7 @@ export function ExeHandlerDialog() {
   const unsupported = inspection?.compatibility?.level === "unsupported";
   return (
     <div role="dialog" aria-modal="true" aria-label="Installer help" style={{ position: "fixed", inset: 0, zIndex: 50, background: "rgba(8, 12, 20, .72)", display: "grid", placeItems: "center", padding: 24 }}>
-      <section className="glass dashboard-card" style={{ width: "min(620px, 100%)", padding: 28 }}>
+      <section ref={dialogRef} tabIndex={-1} className="glass dashboard-card" style={{ width: "min(620px, 100%)", padding: 28, outline: "none" }}>
         <h2 style={{ marginTop: 0 }}>{inspection?.is_rpm ? "KythOS — Installer Help" : "KythOS — Windows Application"}</h2>
         {inspection && <>
           <p style={{ opacity: .72, overflowWrap: "anywhere" }}>{inspection.basename}</p>
@@ -170,9 +186,11 @@ export function ExeHandlerDialog() {
               else void startExeHandlerFlatpakInstall(inspection.flatpak_id!).then(setJob).catch((reason) => setError(String(reason)));
             }}>{flatpakInstalled ? "Launch Linux Version" : "Install Linux Version"}</button>}
             <button onClick={() => void openExeHandlerFlathub(inspection.search_term).catch((reason) => setError(String(reason)))}>Search Flathub</button>
-            {/* Cancel reaches the backend job while one runs (the dialog stays
-              open showing the outcome); otherwise it just closes. */}
-            <button onClick={() => void closeOrCancel()} disabled={cancelling}>{job?.state === "running" ? (cancelling ? "Cancelling…" : "Cancel") : "Close"}</button>
+            {/* Cancel kills the backend job and keeps the dialog open
+              showing the outcome; Close detaches and leaves a running
+              job tracked under Apps. */}
+            {job?.state === "running" && <button onClick={() => void cancelJob()} disabled={cancelling}>{cancelling ? "Cancelling…" : "Cancel install"}</button>}
+            <button onClick={detach}>Close</button>
           </div>
         </>}
         {error && !inspection && <><p role="alert" style={{ color: "#f48771" }}>{error}</p><button onClick={() => setError(null)}>Close</button></>}

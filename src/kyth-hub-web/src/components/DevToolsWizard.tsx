@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { isCancelledResult } from "../services/jobResults";
 import {
+  cancelDevToolsJob,
   fetchAiDevBoxStatus,
   fetchDevToolsCatalog,
   getInFlightJob,
@@ -29,11 +31,34 @@ function groupByCategory(tools: DevTool[]): { key: string; label: string; tools:
  * closing mid-wizard loses the picks (same as any unsaved form) and a
  * fresh open reseeds from each tool's server-side default. */
 export function DevToolsWizard({ onClose, catalog }: { onClose: () => void; catalog: DevTool[] }) {
-  const [step, setStep] = useState<WizardStep>("welcome");
+  // Reopening during a tracked install lands on the install step with
+  // its live status, not on a fresh welcome that pretends nothing runs.
+  const [step, setStep] = useState<WizardStep>(() => (getInFlightJob("dev-tools") !== undefined ? "install" : "welcome"));
   const [selected, setSelected] = useState<Set<string>>(
     () => new Set(catalog.filter((tool) => tool.default_selected).map((tool) => tool.id)),
   );
-  const { status, run } = useSectionAction("dev-tools");
+  const { status, busy, run, runCancel } = useSectionAction("dev-tools");
+  const startedHere = useRef(false);
+  const [installOutcome, setInstallOutcome] = useState<"idle" | "running" | "ok" | "failed" | "cancelled">("idle");
+  const [resumedFinished, setResumedFinished] = useState(false);
+
+  useEffect(() => {
+    if (installOutcome === "ok") setStep("done");
+  }, [installOutcome]);
+
+  // A resumed install has no local promise to await: poll the tracked
+  // slot and move to done when it clears.
+  useEffect(() => {
+    if (step !== "install" || startedHere.current) return;
+    const timer = window.setInterval(() => {
+      if (getInFlightJob("dev-tools") === undefined) {
+        window.clearInterval(timer);
+        setResumedFinished(true);
+        setStep("done");
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [step]);
   const groups = useMemo(() => groupByCategory(catalog), [catalog]);
   const selectedTools = useMemo(() => catalog.filter((tool) => selected.has(tool.id)), [catalog, selected]);
   const installedIds = useMemo(() => new Set(catalog.filter((tool) => tool.installed).map((tool) => tool.id)), [catalog]);
@@ -48,9 +73,18 @@ export function DevToolsWizard({ onClose, catalog }: { onClose: () => void; cata
   }
 
   function startInstall(): void {
+    startedHere.current = true;
+    setInstallOutcome("running");
     setStep("install");
-    void run("install-dev-tools", "Preparing the dev box…", () => installSelectedDevTools([...selected])).then(() => {
-      setStep("done");
+    void run("install-dev-tools", "Preparing the dev box…", async () => {
+      try {
+        const detail = await installSelectedDevTools([...selected]);
+        setInstallOutcome(isCancelledResult(detail) ? "cancelled" : "ok");
+        return detail;
+      } catch (error) {
+        setInstallOutcome("failed");
+        throw error;
+      }
     });
   }
 
@@ -60,9 +94,7 @@ export function DevToolsWizard({ onClose, catalog }: { onClose: () => void; cata
         <div className="dev-tools-wizard-header">
           <span className="app-eyebrow">Vibe coder setup</span>
           <h2>Set up your dev box</h2>
-          {step !== "install" && (
-            <button className="dev-tools-wizard-close" onClick={onClose} aria-label="Close wizard">×</button>
-          )}
+          <button className="dev-tools-wizard-close" onClick={onClose} aria-label="Close wizard">×</button>
         </div>
 
         {step === "welcome" && (
@@ -150,11 +182,24 @@ export function DevToolsWizard({ onClose, catalog }: { onClose: () => void; cata
         {step === "install" && (
           <div className="dev-tools-wizard-body">
             <div className="app-loading-state hub-progress-inline"><ProgressRing size={30} /> {status ?? "Working…"}</div>
+            <div className="dev-tools-wizard-actions">
+              {(busy !== null || (!startedHere.current && getInFlightJob("dev-tools") !== undefined)) && (
+                <ActionButton label="Cancel setup" onClick={() => void runCancel("cancel-dev-tools", "Cancelling…", cancelDevToolsJob)} />
+              )}
+              {startedHere.current && installOutcome !== "running" && installOutcome !== "ok" && (
+                <>
+                  <ActionButton label="Back to review" onClick={() => setStep("review")} />
+                  <ActionButton label="Retry install" primary onClick={startInstall} />
+                </>
+              )}
+              <ActionButton label="Close" onClick={onClose} />
+            </div>
           </div>
         )}
 
         {step === "done" && (
           <div className="dev-tools-wizard-body">
+            {resumedFinished && <p>The setup that was already running has finished. Close to see the updated tool list.</p>}
             <ActionStatus status={status} />
             <div className="dev-tools-wizard-actions">
               <ActionButton label="Close" primary onClick={onClose} />
@@ -170,6 +215,7 @@ export function DevToolsOverview() {
   const [catalog, setCatalog] = useState<DevTool[] | null>(null);
   const [boxStatus, setBoxStatus] = useState<AiDevBoxStatus | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [loadFailed, setLoadFailed] = useState(false);
   const [wizardOpen, setWizardOpen] = useState(false);
   const resumedInstall = getInFlightJob("dev-tools") !== undefined;
 
@@ -177,6 +223,7 @@ export function DevToolsOverview() {
     const [nextCatalog, nextStatus] = await Promise.all([fetchDevToolsCatalog(), fetchAiDevBoxStatus()]);
     setCatalog(nextCatalog);
     setBoxStatus(nextStatus);
+    setLoadFailed(nextCatalog === null || nextStatus === null);
     setLoaded(true);
   }
 
@@ -200,7 +247,16 @@ export function DevToolsOverview() {
 
       {!loaded && <div className="app-loading-state hub-progress-inline"><ProgressRing size={24} /> Loading Dev Tools status…</div>}
 
-      {loaded && (
+      {loaded && loadFailed && (
+        <section className="app-catalog-section">
+          <p className="app-subsection-copy">Couldn&apos;t check the dev box or the tool catalog — a status read failed, so nothing here can be shown yet. Installed tools and an existing box are unaffected.</p>
+          <div className="dev-tools-wizard-actions">
+            <ActionButton label="Retry" primary onClick={() => void refresh()} />
+          </div>
+        </section>
+      )}
+
+      {loaded && !loadFailed && (
         <>
           <div className="app-stat-row">
             <div><span>Dev box</span><strong>{boxStatus?.exists ? "Ready" : "Not created yet"}</strong></div>

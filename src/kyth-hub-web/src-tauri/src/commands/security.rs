@@ -11,6 +11,7 @@
 
 use kyth_shared::system::jobs::{timeout_for, JobTimeoutClass};
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 
@@ -30,9 +31,53 @@ pub(crate) struct SecurityActionLaunch {
     pub(crate) detail: String,
 }
 
+/// Single-flight for Kali box lifecycle operations (create / export /
+/// remove). Create is destructive on mismatch (stop / remove / recreate)
+/// and remove force-removes, so two lifecycle jobs at once — a
+/// double-clicked Create, a Remove racing a Create — must not both run:
+/// the second caller is rejected up front instead of racing the same box.
+/// Same AtomicBool + RAII shape as the flatpak slot in `job.rs`.
+static KALI_MUTATING: AtomicBool = AtomicBool::new(false);
+
+/// RAII handle for the Kali lifecycle slot: dropping it frees the slot,
+/// including on panic paths inside a job worker.
+#[derive(Debug)]
+pub(crate) struct KaliSlot;
+
+impl Drop for KaliSlot {
+    fn drop(&mut self) {
+        KALI_MUTATING.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Claim the Kali lifecycle slot, or explain what must finish first.
+/// Callers claim BEFORE starting their job and move the guard into the
+/// job's completion closure so it is held for the job's whole life.
+fn take_kali_slot() -> Result<KaliSlot, String> {
+    KALI_MUTATING
+        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+        .map(|_| KaliSlot)
+        .map_err(|_| {
+            "Another Kali box operation (create, export, or remove) is already in progress. \
+             Wait for it to finish before starting another."
+                .to_string()
+        })
+}
+
+/// Async + fallible: the old `-> bool` shape collapsed every probe
+/// failure (podman missing, timeout, daemon down) into `false`, which
+/// the UI reads as "no box" — and the natural response to "no box" is
+/// Create, whose script can delete/recreate a live box. A failed probe
+/// is now an `Err`, and the blocking podman call runs off the command
+/// thread.
 #[tauri::command]
-pub(crate) fn kali_status() -> bool {
-    security_container::is_socket_capable_kali_box(DEFAULT_KALI_BOX)
+pub(crate) async fn kali_status() -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        security_container::probe_kali_box(DEFAULT_KALI_BOX)
+            .map(|info| info.is_some_and(|info| info.socket_capable()))
+    })
+    .await
+    .map_err(|err| format!("Kali status check failed: {err}"))?
 }
 
 #[tauri::command]
@@ -43,26 +88,31 @@ pub(crate) fn kali_create(tier: String) -> Result<SecurityActionLaunch, String> 
         DEFAULT_KALI_IMAGE,
         parsed,
     )?;
+    let slot = take_kali_slot()?;
     let job = start_job("kali-create", "Pulling Kali container image…")?;
     // kali-linux-everything can pull 15-20GB; give it real headroom.
     spawn_argv_job(
         job.clone(),
         argv,
         timeout_for(JobTimeoutClass::ExtendedWork),
-        move |result| match result {
-            Ok(output) if output.status.success() => (
-                "complete".to_string(),
-                if parsed.has_gui() {
-                    "Kali box created. GUI apps exported — check your application menu.".to_string()
-                } else {
-                    "Kali box created. Launch a terminal to start hacking.".to_string()
-                },
-            ),
-            Ok(output) => ("failed".to_string(), failure_detail("Kali setup", &output)),
-            Err(err) => (
-                "failed".to_string(),
-                format!("Could not start Kali setup: {err}"),
-            ),
+        move |result| {
+            let _slot = slot;
+            match result {
+                Ok(output) if output.status.success() => (
+                    "complete".to_string(),
+                    if parsed.has_gui() {
+                        "Kali box created. GUI apps exported — check your application menu."
+                            .to_string()
+                    } else {
+                        "Kali box created. Launch a terminal to start hacking.".to_string()
+                    },
+                ),
+                Ok(output) => ("failed".to_string(), failure_detail("Kali setup", &output)),
+                Err(err) => (
+                    "failed".to_string(),
+                    format!("Could not start Kali setup: {err}"),
+                ),
+            }
         },
     );
     Ok(SecurityActionLaunch {
@@ -75,12 +125,14 @@ pub(crate) fn kali_create(tier: String) -> Result<SecurityActionLaunch, String> 
 #[tauri::command]
 pub(crate) fn kali_export() -> Result<SecurityActionLaunch, String> {
     let argv = security_container::build_kali_export_command(DEFAULT_KALI_BOX)?;
+    let slot = take_kali_slot()?;
     let job = start_job("kali-export", "Scanning Kali container for GUI apps…")?;
     spawn_argv_job(
         job.clone(),
         argv,
         timeout_for(JobTimeoutClass::ContainerScan),
-        |result| {
+        move |result| {
+            let _slot = slot;
             match result {
         Ok(output) if output.status.code() == Some(2) => (
             "complete".to_string(),
@@ -126,20 +178,24 @@ pub(crate) fn kali_export() -> Result<SecurityActionLaunch, String> {
 #[tauri::command]
 pub(crate) fn kali_remove() -> Result<SecurityActionLaunch, String> {
     let argv = security_container::build_kali_remove_command(DEFAULT_KALI_BOX)?;
+    let slot = take_kali_slot()?;
     let job = start_job("kali-remove", "Stopping and removing Kali box…")?;
     spawn_argv_job(
         job.clone(),
         argv,
         timeout_for(JobTimeoutClass::QuickRemove),
-        |result| match result {
-            Ok(output) if output.status.success() => {
-                ("complete".to_string(), "Kali box removed.".to_string())
+        move |result| {
+            let _slot = slot;
+            match result {
+                Ok(output) if output.status.success() => {
+                    ("complete".to_string(), "Kali box removed.".to_string())
+                }
+                Ok(output) => ("failed".to_string(), failure_detail("Removal", &output)),
+                Err(err) => (
+                    "failed".to_string(),
+                    format!("Could not start removal: {err}"),
+                ),
             }
-            Ok(output) => ("failed".to_string(), failure_detail("Removal", &output)),
-            Err(err) => (
-                "failed".to_string(),
-                format!("Could not start removal: {err}"),
-            ),
         },
     );
     Ok(SecurityActionLaunch {
@@ -175,6 +231,11 @@ pub(crate) struct SecHostToolResponse {
     name: String,
     desc: String,
     installed: bool,
+    /// Scopes whose flatpak scan failed during this read (a subset of
+    /// `"user"` / `"system"`); non-empty means `installed` may be
+    /// incomplete and the UI should say "couldn't check" rather than
+    /// trust the flags.
+    scan_failed_scopes: Vec<String>,
 }
 
 /// Async + one scan, same reasoning as `gaming_tools`.
@@ -185,10 +246,19 @@ pub(crate) async fn sec_host_tools() -> Vec<SecHostToolResponse> {
             .iter()
             .map(|tool| tool.flatpak)
             .collect();
-        let flags = kyth_shared::system::software_catalog::installed_flags(
-            &ids,
-            kyth_shared::system::software_catalog::installed_flatpaks,
-        );
+        // The scan-based read, not `installed_flatpaks()`: a failed scope
+        // used to be silently dropped, reporting every tool "not
+        // installed" and inviting a redundant reinstall. The failure is
+        // logged and carried to the UI in `scan_failed_scopes`.
+        let scan = kyth_shared::system::software_catalog::installed_flatpaks_scan();
+        if !scan.failed_scopes.is_empty() {
+            eprintln!(
+                "sec_host_tools: flatpak scan failed for scope(s): {}",
+                scan.failed_scopes.join(", ")
+            );
+        }
+        let scan_failed_scopes = scan.failed_scopes.clone();
+        let flags = kyth_shared::system::software_catalog::installed_flags(&ids, || scan.apps);
         security_container::SEC_HOST_TOOLS
             .iter()
             .zip(flags)
@@ -197,11 +267,15 @@ pub(crate) async fn sec_host_tools() -> Vec<SecHostToolResponse> {
                 name: tool.name.to_string(),
                 desc: tool.desc.to_string(),
                 installed,
+                scan_failed_scopes: scan_failed_scopes.clone(),
             })
             .collect()
     })
     .await
-    .unwrap_or_default()
+    .unwrap_or_else(|err| {
+        eprintln!("sec_host_tools: scan task failed: {err}");
+        Vec::new()
+    })
 }
 
 fn validated_sec_tool(
@@ -243,7 +317,7 @@ pub(crate) fn sec_host_tool_install(flatpak_id: String) -> Result<SecurityAction
         command.args(["install", "--user", "-y", "flathub", "--", &flatpak_id]);
         match kyth_shared::system::process::run_bounded_command_cancel(
             command,
-            timeout_for(JobTimeoutClass::ToolInstall),
+            timeout_for(JobTimeoutClass::FlatpakTransfer),
             &cancel,
         ) {
             Ok(output) if output.status.success() => {
@@ -325,4 +399,25 @@ pub(crate) fn sec_host_tool_launch(flatpak_id: String) -> Result<String, String>
     )
     .map_err(|err| format!("could not launch {}: {err}", tool.name))?;
     Ok(format!("{} launched.", tool.name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn kali_slot_is_single_flight_until_dropped() {
+        let first = take_kali_slot().expect("first claim succeeds");
+        let second = take_kali_slot();
+        assert!(
+            second.is_err(),
+            "a second Kali lifecycle op must be rejected while one runs"
+        );
+        assert!(second.unwrap_err().contains("already in progress"));
+        drop(first);
+        assert!(
+            take_kali_slot().is_ok(),
+            "dropping the guard frees the slot"
+        );
+    }
 }

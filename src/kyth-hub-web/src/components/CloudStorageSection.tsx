@@ -29,7 +29,7 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
   const [oauth, setOauth] = useState<{ ok: boolean; detail: string } | null>(null);
   const [syncRemotes, setSyncRemotes] = useState<CloudSyncRemote[] | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("hub-action");
+  const { status, busy, run, runCancel } = useSectionAction("job");
 
   useEffect(() => {
     let cancelled = false;
@@ -51,14 +51,18 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
     <LiveSectionCard section={section} live={live}>
       {live ? (
         <div style={{ marginTop: 20 }}>
-          {summary && summary.cloudProviders.length > 0 ? (
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              {summary.cloudProviders.map((p) => (
-                <span key={p} className="pill pill-ok">{p}</span>
-              ))}
-            </div>
+          {summary !== null ? (
+            summary.cloudProviders.length > 0 ? (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                {summary.cloudProviders.map((p) => (
+                  <span key={p} className="pill pill-ok">{p}</span>
+                ))}
+              </div>
+            ) : (
+              <p className="card-copy" style={{ fontSize: 13 }}>No cloud storage providers set up yet.</p>
+            )
           ) : (
-            <p className="card-copy" style={{ fontSize: 13 }}>No cloud storage providers set up yet.</p>
+            <p className="card-copy" style={{ fontSize: 13 }}>Couldn&apos;t check cloud storage providers — the status read failed. Use Refresh below to try again.</p>
           )}
           {oauth && (
             <p className="card-copy" style={{ fontSize: 12, marginTop: 10 }}>
@@ -93,7 +97,7 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
                     }
                   />
                   {(busy?.startsWith("sync-") ?? false) && (
-                    <ActionButton label="Cancel" onClick={() => run("cancel-sync", "Cancelling…", cancelJob)} />
+                    <ActionButton label="Cancel" onClick={() => runCancel("cancel-sync", "Cancelling…", cancelJob)} />
                   )}
                 </div>
               ))}
@@ -124,7 +128,8 @@ export function CloudStorageSection({ section }: { section: HubSection }) {
                 if (fresh) setSummary(fresh);
                 if (freshOauth) setOauth(freshOauth);
                 if (freshRemotes) setSyncRemotes(freshRemotes);
-                return `${fresh?.cloudProviders.length ?? 0} provider(s) connected.`;
+                if (fresh) return `${fresh.cloudProviders.length} provider(s) connected.`;
+                return "Sign-in state and saved folders refreshed; the provider list couldn't be re-checked.";
               })
             }
           />

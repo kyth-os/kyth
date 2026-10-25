@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { HubSection } from "../data/hubSections";
-import { fetchNvidiaDetected, runPrivilegedAction } from "../services/liveData";
+import { cancelPrivilegedAction, fetchNvidiaDetected, runPrivilegedAction } from "../services/liveData";
 import { LiveSectionCard, SectionFallbackNote } from "./LiveSectionCard";
 import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 
@@ -9,7 +9,7 @@ import { ActionStatus, RecipeButton, useSectionAction } from "./SectionActions";
 export function NvidiaSection({ section }: { section: HubSection }) {
   const [detected, setDetected] = useState<boolean | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("privileged");
+  const { status, busy, run, runCancel } = useSectionAction("privileged");
 
   useEffect(() => {
     let cancelled = false;
@@ -42,8 +42,9 @@ export function NvidiaSection({ section }: { section: HubSection }) {
             The proprietary driver is layered onto the image, so installing it stages a new deployment and asks for a reboot. Wayland, NVENC capture, suspend/resume, and laptop power management (nvidia-powerd) come with it — no extra setup. On hybrid laptops, per-game profiles offer a PRIME toggle to render on NVIDIA; RTX 20-series and newer can also use the open kernel modules via akmod-nvidia-open instead of akmod-nvidia.
           </p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <RecipeButton recipe="nvidia-status" label="Driver status" busy={busy} run={run} />
+            <RecipeButton recipe="nvidia-status" label="Driver status" busy={busy} run={run} runCancel={runCancel} />
             <button disabled={busy !== null} onClick={() => run("nvidia", "Installing NVIDIA driver…", () => runPrivilegedAction("nvidia_install"))} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600 }}>Install NVIDIA driver</button>
+            {busy === "nvidia" && <button onClick={() => runCancel("cancel-nvidia", "Cancelling…", cancelPrivilegedAction)} style={{ padding: "7px 14px", borderRadius: 999, border: "1px solid var(--hairline)", background: "var(--card)", fontWeight: 600 }}>Cancel</button>}
           </div>
           <ActionStatus status={status} />
         </div>

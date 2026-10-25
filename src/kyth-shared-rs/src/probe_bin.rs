@@ -42,7 +42,23 @@ fn main() -> std::process::ExitCode {
         // the Hub falls back to a live query for a missing section.
         skip.extend(kyth_shared::system::probe::deferred_system_sections());
     }
-    let mut sections = kyth_shared::system::probe::collect_snapshot_skipping(&skip);
+    // F6: persist each completed section group as it lands. Collection is
+    // otherwise all-or-nothing under the service's 120s TimeoutStartSec —
+    // a slow machine killed mid-cycle would never refresh its cache at
+    // all. The final update_sections below still writes the complete,
+    // merged document; the streamed writes only make partial progress
+    // durable. Best-effort: a failed batch write is retried implicitly by
+    // that final write, so errors here are ignored.
+    let mut persist_batch = |batch: &serde_json::Map<String, serde_json::Value>| {
+        let _ = kyth_shared::system::probe::update_sections(batch, None, system);
+    };
+    let mut discard_batch = |_: &serde_json::Map<String, serde_json::Value>| {};
+    let sink: &mut dyn FnMut(&serde_json::Map<String, serde_json::Value>) = if print_only {
+        &mut discard_batch
+    } else {
+        &mut persist_batch
+    };
+    let mut sections = kyth_shared::system::probe::collect_snapshot_streaming(&skip, sink);
     kyth_shared::system::probe::merge_fresh_sections(&mut sections, fresh);
     if print_only {
         println!(

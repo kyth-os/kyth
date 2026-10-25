@@ -7,6 +7,7 @@ import {
   type GuardianSnapshot, type HardwareSnapshot, type BootRuntimeCheck,
   type RecoveryStatus, type DesktopStackCheck,
 } from "../services/liveData";
+import { isCancelledResult } from "../services/jobResults";
 import { ActionButton, ActionStatus, useSectionAction } from "./SectionActions";
 
 type MemoryReading = { status: string; detail: string };
@@ -72,18 +73,19 @@ export function ThisPcOverview() {
   const pending = readings.guardian?.pending.length ?? 0;
   const bootHealthy = bootPassed !== null && bootTotal !== null ? bootPassed === bootTotal : null;
   const memoryHealthy = readings.memory ? readings.memory.status.toLowerCase() === "ok" : null;
-  const overallHealthy = readings.guardian || readings.boot || readings.memory
-    ? pending === 0 && (bootHealthy !== false) && (memoryHealthy !== false)
-    : null;
+  const overallHealthy = readings.guardian === null
+    ? null
+    : pending === 0 && (bootHealthy !== false) && (memoryHealthy !== false);
 
   const healthDetail = useMemo(() => {
     if (!loaded) return "Reading Guardian and boot checks…";
+    if (!readings.guardian) return "Guardian readings are not available yet — overall health can't be confirmed.";
     if (overallHealthy === null) return "Health readings are not available yet.";
     const parts = [`${pending} open recommendation${pending === 1 ? "" : "s"}`];
     if (bootPassed !== null && bootTotal !== null) parts.push(`${bootPassed}/${bootTotal} boot checks`);
     if (readings.memory) parts.push(`memory ${readings.memory.status}`);
     return overallHealthy ? parts.join(" · ") : `${parts.join(" · ")} · review needed`;
-  }, [bootPassed, bootTotal, loaded, overallHealthy, pending, readings.memory]);
+  }, [bootPassed, bootTotal, loaded, overallHealthy, pending, readings.guardian, readings.memory]);
 
   async function refresh(): Promise<string> {
     const next = await readPc();
@@ -94,7 +96,8 @@ export function ThisPcOverview() {
 
   async function guardianCheck(): Promise<string> {
     const job = await runGuardianCheck(false);
-    await waitGuardianCheck(job);
+    const outcome = await waitGuardianCheck(job);
+    if (isCancelledResult(outcome)) return outcome;
     return await refresh();
   }
 

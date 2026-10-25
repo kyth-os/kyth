@@ -568,6 +568,251 @@ pub(crate) fn stage_progress() -> StageProgressSnapshot {
         })
 }
 
+/// How long the stage worker waits for a pipe-reader thread to deliver
+/// its capture after the helper has exited or been killed. Readers
+/// normally deliver the moment their pipe hits EOF; the grace only
+/// matters when a grandchild escaped the process-group kill and keeps
+/// a pipe open — then the worker proceeds without that capture and the
+/// reader detaches (its send fails into a dropped receiver) instead of
+/// wedging `finish()` — and with it the mutating slot — forever.
+const STAGE_READER_JOIN_GRACE: Duration = Duration::from_secs(2);
+
+/// RAII backstop for the stage progress snapshot: dropping it marks the
+/// snapshot inactive. The stage worker clears `active` explicitly before
+/// finishing its job; this guard covers the paths where it cannot (a
+/// panic unwinding the worker), so the Updates page never polls a
+/// phantom "still staging" snapshot until the Hub restarts. The worker
+/// declares it AFTER the mutating slot, so it drops FIRST: the snapshot
+/// reads inactive before the slot frees the next stage launch.
+struct StageProgressGuard;
+
+impl Drop for StageProgressGuard {
+    fn drop(&mut self) {
+        if let Ok(mut snapshot) = stage_progress_cell().lock() {
+            snapshot.active = false;
+        }
+    }
+}
+
+/// Collect one stage pipe reader's capture, waiting at most
+/// [`STAGE_READER_JOIN_GRACE`] for it (see the constant). A missing pipe
+/// resolves to empty immediately.
+fn join_stage_reader(receiver: Option<std::sync::mpsc::Receiver<Vec<u8>>>) -> Vec<u8> {
+    receiver
+        .and_then(|rx| rx.recv_timeout(STAGE_READER_JOIN_GRACE).ok())
+        .unwrap_or_default()
+}
+
+/// Worker body for [`start_stage_job`]: spawn the helper, stream its
+/// progress markers into the snapshot, and resolve the job entry. The
+/// caller wraps this in `catch_unwind` and owns the mutating slot and
+/// the progress guard, so a panic here still finishes the job instead
+/// of wedging it at `running`.
+fn run_stage_worker(
+    job: &str,
+    operation: &str,
+    argv: Vec<String>,
+    timeout: Duration,
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+) {
+    let operation_for_thread = operation.to_string();
+    let progress_activity = std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
+    use std::os::unix::process::CommandExt;
+    let mut command = Command::new(&argv[0]);
+    command.args(&argv[1..]);
+    let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+    let desktop = kyth_shared::commands::environment_for(
+        kyth_shared::commands::EnvironmentPolicy::Desktop,
+        &inherited,
+    );
+    command.env_clear().envs(desktop);
+    if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+        command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+    }
+    command.process_group(0);
+    command.stdin(std::process::Stdio::null());
+    command.stdout(std::process::Stdio::piped());
+    command.stderr(std::process::Stdio::piped());
+    let spawned = command.spawn();
+    let (state, detail) = match spawned {
+        Ok(mut child) => {
+            // Both pipes drain on helper threads from the start: a
+            // chatty helper (>64 KiB on either pipe) must never wedge
+            // the child, and cancel/timeout must preempt mid-download
+            // instead of waiting for EOF. Captures are capped at 1 MiB
+            // each (overflow is truncated and marked). A bounded line
+            // reader also prevents a newline-free child write from
+            // forcing `read_line` to allocate the entire pipe payload.
+            const MAX_STAGE_CAPTURE_BYTES: usize = 1024 * 1024;
+            const MAX_STAGE_LINE_BYTES: usize = 64 * 1024;
+            let stderr_rx = child.stderr.take().map(|stderr| {
+                let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+                std::thread::spawn(move || {
+                    let mut reader = std::io::BufReader::new(stderr);
+                    let collected = collect_bounded_output(&mut reader, MAX_STAGE_CAPTURE_BYTES)
+                        .unwrap_or_default();
+                    // If the join grace already expired, the receiver
+                    // is gone and the capture is simply discarded.
+                    let _ = tx.send(collected);
+                });
+                rx
+            });
+            let stdout_rx = child.stdout.take().map(|stdout| {
+                let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+                let progress_activity = progress_activity.clone();
+                std::thread::spawn(move || {
+                    let mut collected_out = Vec::new();
+                    let mut reader = std::io::BufReader::new(stdout);
+                    let mut line = Vec::new();
+                    let mut truncated = false;
+                    loop {
+                        let line_truncated =
+                            match read_stage_line(&mut reader, &mut line, MAX_STAGE_LINE_BYTES) {
+                                Ok(Some(truncated)) => truncated,
+                                Ok(None) | Err(_) => break,
+                            };
+                        let line_text = String::from_utf8_lossy(&line);
+                        if !line_truncated {
+                            if let Some(snapshot) = parse_stage_marker(line_text.trim()) {
+                                if let Ok(mut cell) = stage_progress_cell().lock() {
+                                    let merged = merge_stage_snapshot(&cell, snapshot);
+                                    *cell = merged;
+                                }
+                                if let Ok(mut last_activity) = progress_activity.lock() {
+                                    *last_activity = std::time::Instant::now();
+                                }
+                                continue;
+                            }
+                        }
+                        if collected_out.len() < MAX_STAGE_CAPTURE_BYTES {
+                            let room = MAX_STAGE_CAPTURE_BYTES - collected_out.len();
+                            collected_out.extend_from_slice(&line[..line.len().min(room)]);
+                        } else if !truncated {
+                            collected_out.extend_from_slice(b"\n...[truncated]");
+                            truncated = true;
+                        }
+                    }
+                    let _ = tx.send(collected_out);
+                });
+                rx
+            });
+            // Mirror run_bounded_command_cancel: poll for exit, kill the
+            // whole process group on cancel or timeout.
+            let started = std::time::Instant::now();
+            let mut last_heartbeat = started;
+            let outcome = loop {
+                match child.try_wait() {
+                    Ok(Some(status)) => break Ok(status),
+                    Ok(None) => {
+                        let quiet_for = progress_activity
+                            .lock()
+                            .map(|last| last.elapsed())
+                            .unwrap_or_default();
+                        if quiet_for >= STAGE_PROGRESS_HEARTBEAT
+                            && last_heartbeat.elapsed() >= STAGE_PROGRESS_HEARTBEAT
+                        {
+                            if let Ok(mut snapshot) = stage_progress_cell().lock() {
+                                if snapshot.active {
+                                    snapshot.detail = match snapshot.phase.as_str() {
+                                        "install" => "Installing the staged image. This can take several minutes…".into(),
+                                        "verify" => "Verifying the staged image and checking its safety policy…".into(),
+                                        "finalize" => "Preparing the staged deployment for the next boot…".into(),
+                                        "download" => "The image download is still running. Waiting for the next layer update…".into(),
+                                        _ => "Preparing the update and checking system readiness…".into(),
+                                    };
+                                }
+                            }
+                            if let Ok(mut last_activity) = progress_activity.lock() {
+                                *last_activity = std::time::Instant::now();
+                            }
+                            last_heartbeat = std::time::Instant::now();
+                        }
+                    }
+                    Err(error) => break Err(error),
+                }
+                if cancel.load(std::sync::atomic::Ordering::Relaxed) {
+                    kyth_shared::system::process::kill_process_group(&mut child);
+                    // Reap the killed child: killpg alone leaves a
+                    // zombie whose exit status nobody collects.
+                    let _ = child.wait();
+                    break Err(std::io::Error::new(
+                        std::io::ErrorKind::Interrupted,
+                        "command was cancelled",
+                    ));
+                }
+                if started.elapsed() > timeout {
+                    kyth_shared::system::process::kill_process_group(&mut child);
+                    // Reap the killed child: killpg alone leaves a
+                    // zombie whose exit status nobody collects.
+                    let _ = child.wait();
+                    break Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "command timed out",
+                    ));
+                }
+                std::thread::sleep(Duration::from_millis(25));
+            };
+            // Pipes close on exit/kill, so both readers normally
+            // deliver at once; the bounded join covers a grandchild
+            // that escaped the group kill and is holding a pipe open.
+            let collected_out = join_stage_reader(stdout_rx);
+            let collected_err = join_stage_reader(stderr_rx);
+            match outcome {
+                Ok(status) => {
+                    let mut detail = String::from_utf8_lossy(&collected_out).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&collected_err).trim().to_string();
+                    if !stderr.is_empty() {
+                        if !detail.is_empty() {
+                            detail.push('\n');
+                        }
+                        detail.push_str(&stderr);
+                    }
+                    let detail: String = kyth_shared::system::process::redact_sensitive_text(
+                        kyth_shared::system::process::strip_ansi(&detail).as_str(),
+                    )
+                    .chars()
+                    .rev()
+                    .take(1200)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect();
+                    let state = if status.success() {
+                        "complete"
+                    } else {
+                        "failed"
+                    };
+                    let detail = if detail.is_empty() {
+                        if status.success() {
+                            format!("{operation_for_thread} complete.")
+                        } else {
+                            format!(
+                                "{operation_for_thread} failed (exit code {}).",
+                                status.code().unwrap_or(-1)
+                            )
+                        }
+                    } else {
+                        detail
+                    };
+                    (state.to_string(), detail)
+                }
+                Err(error) => (
+                    "failed".to_string(),
+                    format!("{operation_for_thread} could not complete: {error}"),
+                ),
+            }
+        }
+        Err(error) => (
+            "failed".to_string(),
+            format!("{operation_for_thread} could not start: {error}"),
+        ),
+    };
+    if let Ok(mut snapshot) = stage_progress_cell().lock() {
+        snapshot.active = false;
+    }
+    update_jobs().finish(job, &state, detail);
+}
+
 /// Stage variant of `start_update_job` that streams the helper's stdout so
 /// progress markers update the Updates page live. Cancel, timeout, and
 /// terminal detail behave exactly like the non-streaming path.
@@ -599,203 +844,45 @@ fn start_stage_job(
     }
     let job_for_thread = job.clone();
     let operation_for_thread = operation.to_string();
-    std::thread::spawn(move || {
+    let thread = std::thread::Builder::new().spawn(move || {
         // Held to the end of the job: the second mutating launch fails at
         // take_mutating_slot instead of racing this one.
         let _slot = slot;
-        let progress_activity =
-            std::sync::Arc::new(std::sync::Mutex::new(std::time::Instant::now()));
-        use std::os::unix::process::CommandExt;
-        let mut command = Command::new(&argv[0]);
-        command.args(&argv[1..]);
-        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
-        let desktop = kyth_shared::commands::environment_for(
-            kyth_shared::commands::EnvironmentPolicy::Desktop,
-            &inherited,
-        );
-        command.env_clear().envs(desktop);
-        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
-            command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
+        // Declared after the slot so it drops FIRST: the snapshot reads
+        // inactive before the slot frees the next stage launch.
+        let _progress_guard = StageProgressGuard;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_stage_worker(&job_for_thread, &operation_for_thread, argv, timeout, cancel);
+        }));
+        if result.is_err() {
+            update_jobs().finish(
+                &job_for_thread,
+                "failed",
+                format!(
+                    "{operation_for_thread} could not complete: the update worker stopped unexpectedly."
+                ),
+            );
         }
-        command.process_group(0);
-        command.stdin(std::process::Stdio::null());
-        command.stdout(std::process::Stdio::piped());
-        command.stderr(std::process::Stdio::piped());
-        let spawned = command.spawn();
-        let (state, detail) = match spawned {
-            Ok(mut child) => {
-                // Both pipes drain on helper threads from the start: a
-                // chatty helper (>64 KiB on either pipe) must never wedge
-                // the child, and cancel/timeout must preempt mid-download
-                // instead of waiting for EOF. Captures are capped at 1 MiB
-                // each (overflow is truncated and marked). A bounded line
-                // reader also prevents a newline-free child write from
-                // forcing `read_line` to allocate the entire pipe payload.
-                const MAX_STAGE_CAPTURE_BYTES: usize = 1024 * 1024;
-                const MAX_STAGE_LINE_BYTES: usize = 64 * 1024;
-                let stderr_handle = child.stderr.take().map(|stderr| {
-                    std::thread::spawn(move || {
-                        let mut reader = std::io::BufReader::new(stderr);
-                        collect_bounded_output(&mut reader, MAX_STAGE_CAPTURE_BYTES)
-                            .unwrap_or_default()
-                    })
-                });
-                let stdout_handle = child.stdout.take().map(|stdout| {
-                    let progress_activity = progress_activity.clone();
-                    std::thread::spawn(move || {
-                        let mut collected_out = Vec::new();
-                        let mut reader = std::io::BufReader::new(stdout);
-                        let mut line = Vec::new();
-                        let mut truncated = false;
-                        loop {
-                            let line_truncated =
-                                match read_stage_line(&mut reader, &mut line, MAX_STAGE_LINE_BYTES)
-                                {
-                                    Ok(Some(truncated)) => truncated,
-                                    Ok(None) | Err(_) => break,
-                                };
-                            let line_text = String::from_utf8_lossy(&line);
-                            if !line_truncated {
-                                if let Some(snapshot) = parse_stage_marker(line_text.trim()) {
-                                    if let Ok(mut cell) = stage_progress_cell().lock() {
-                                        let merged = merge_stage_snapshot(&cell, snapshot);
-                                        *cell = merged;
-                                    }
-                                    if let Ok(mut last_activity) = progress_activity.lock() {
-                                        *last_activity = std::time::Instant::now();
-                                    }
-                                    continue;
-                                }
-                            }
-                            if collected_out.len() < MAX_STAGE_CAPTURE_BYTES {
-                                let room = MAX_STAGE_CAPTURE_BYTES - collected_out.len();
-                                collected_out.extend_from_slice(&line[..line.len().min(room)]);
-                            } else if !truncated {
-                                collected_out.extend_from_slice(b"\n...[truncated]");
-                                truncated = true;
-                            }
-                        }
-                        collected_out
-                    })
-                });
-                // Mirror run_bounded_command_cancel: poll for exit, kill the
-                // whole process group on cancel or timeout.
-                let started = std::time::Instant::now();
-                let mut last_heartbeat = started;
-                let outcome = loop {
-                    match child.try_wait() {
-                        Ok(Some(status)) => break Ok(status),
-                        Ok(None) => {
-                            let quiet_for = progress_activity
-                                .lock()
-                                .map(|last| last.elapsed())
-                                .unwrap_or_default();
-                            if quiet_for >= STAGE_PROGRESS_HEARTBEAT
-                                && last_heartbeat.elapsed() >= STAGE_PROGRESS_HEARTBEAT
-                            {
-                                if let Ok(mut snapshot) = stage_progress_cell().lock() {
-                                    if snapshot.active {
-                                        snapshot.detail = match snapshot.phase.as_str() {
-                                            "install" => "Installing the staged image. This can take several minutes…".into(),
-                                            "verify" => "Verifying the staged image and checking its safety policy…".into(),
-                                            "finalize" => "Preparing the staged deployment for the next boot…".into(),
-                                            "download" => "The image download is still running. Waiting for the next layer update…".into(),
-                                            _ => "Preparing the update and checking system readiness…".into(),
-                                        };
-                                    }
-                                }
-                                if let Ok(mut last_activity) = progress_activity.lock() {
-                                    *last_activity = std::time::Instant::now();
-                                }
-                                last_heartbeat = std::time::Instant::now();
-                            }
-                        }
-                        Err(error) => break Err(error),
-                    }
-                    if cancel.load(std::sync::atomic::Ordering::Relaxed) {
-                        kyth_shared::system::process::kill_process_group(&mut child);
-                        break Err(std::io::Error::new(
-                            std::io::ErrorKind::Interrupted,
-                            "command was cancelled",
-                        ));
-                    }
-                    if started.elapsed() > timeout {
-                        kyth_shared::system::process::kill_process_group(&mut child);
-                        break Err(std::io::Error::new(
-                            std::io::ErrorKind::TimedOut,
-                            "command timed out",
-                        ));
-                    }
-                    std::thread::sleep(Duration::from_millis(25));
-                };
-                // Pipes close on exit/kill, so both readers terminate; join
-                // them for the terminal detail.
-                let collected_out = stdout_handle
-                    .and_then(|handle| handle.join().ok())
-                    .unwrap_or_default();
-                let collected_err = stderr_handle
-                    .and_then(|handle| handle.join().ok())
-                    .unwrap_or_default();
-                match outcome {
-                    Ok(status) => {
-                        let mut detail = String::from_utf8_lossy(&collected_out).trim().to_string();
-                        let stderr = String::from_utf8_lossy(&collected_err).trim().to_string();
-                        if !stderr.is_empty() {
-                            if !detail.is_empty() {
-                                detail.push('\n');
-                            }
-                            detail.push_str(&stderr);
-                        }
-                        let detail: String = kyth_shared::system::process::redact_sensitive_text(
-                            kyth_shared::system::process::strip_ansi(&detail).as_str(),
-                        )
-                        .chars()
-                        .rev()
-                        .take(1200)
-                        .collect::<String>()
-                        .chars()
-                        .rev()
-                        .collect();
-                        let state = if status.success() {
-                            "complete"
-                        } else {
-                            "failed"
-                        };
-                        let detail = if detail.is_empty() {
-                            if status.success() {
-                                format!("{operation_for_thread} complete.")
-                            } else {
-                                format!(
-                                    "{operation_for_thread} failed (exit code {}).",
-                                    status.code().unwrap_or(-1)
-                                )
-                            }
-                        } else {
-                            detail
-                        };
-                        (state.to_string(), detail)
-                    }
-                    Err(error) => (
-                        "failed".to_string(),
-                        format!("{operation_for_thread} could not complete: {error}"),
-                    ),
-                }
-            }
-            Err(error) => (
-                "failed".to_string(),
-                format!("{operation_for_thread} could not start: {error}"),
-            ),
-        };
-        if let Ok(mut snapshot) = stage_progress_cell().lock() {
-            snapshot.active = false;
-        }
-        update_jobs().finish(&job_for_thread, &state, detail);
     });
-    Ok(UpdateActionLaunch {
-        job,
-        state: "running".into(),
-        detail: format!("{operation} is running…"),
-    })
+    match thread {
+        Ok(_) => Ok(UpdateActionLaunch {
+            job,
+            state: "running".into(),
+            detail: format!("{operation} is running…"),
+        }),
+        Err(error) => {
+            // A failed spawn drops the closure — and with it the
+            // mutating slot — but the job entry and the progress
+            // snapshot were already published; resolve both here so
+            // neither is left claiming work that never started.
+            if let Ok(mut snapshot) = stage_progress_cell().lock() {
+                snapshot.active = false;
+            }
+            let detail = format!("{operation} could not start: {error}");
+            update_jobs().finish(&job, "failed", detail.clone());
+            Err(detail)
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -988,6 +1075,33 @@ impl HubAction {
             Self::GamingAudit => "gaming-audit",
         }
     }
+
+    /// Whether running this recipe only reads or reports state: status,
+    /// audit, and check listings, plus the autostart settings opener
+    /// (which changes nothing itself). Everything not listed here is
+    /// treated as MUTATING — installs, firmware updates, mode switches,
+    /// enrollments — so an unclassified future variant fails safe
+    /// (serialized) rather than racing. `run_hub_action` serializes
+    /// mutating recipes behind the backend hub-action slot and lets
+    /// read-only ones run without it, so a long install never blocks a
+    /// status read.
+    fn is_read_only(&self) -> bool {
+        matches!(
+            self,
+            Self::UpdateHealth
+                | Self::ResumeCheck
+                | Self::DeviceInfo
+                | Self::StartupApps
+                | Self::HealthCheck
+                | Self::GamingStackStatus
+                | Self::AiDevStatus
+                | Self::NvidiaStatus
+                | Self::ListPresets
+                | Self::ControllerCheck
+                | Self::SystemAudit
+                | Self::GamingAudit
+        )
+    }
 }
 
 fn start_hub_action_job(action: HubAction) -> Result<HubActionLaunch, String> {
@@ -996,6 +1110,18 @@ fn start_hub_action_job(action: HubAction) -> Result<HubActionLaunch, String> {
         .ok_or_else(|| "Hub action is not allowlisted".to_string())?;
     kyth_shared::commands::normalize_command(&argv)
         .map_err(|_| "recipe produced an invalid command".to_string())?;
+    // Backend single-flight for mutating recipes (B-H1): without it, two
+    // recipes run at once — stacked sudo prompts, racing writes to the
+    // same system state, and cross-races with the Updates page's own
+    // serialization (a hub-action firmware update beside a bootc stage).
+    // Read-only recipes skip the slot so a long install never blocks a
+    // status read. Claimed BEFORE the job exists; the guard moves into
+    // the worker so it is held for the job's whole life.
+    let slot = if action.is_read_only() {
+        None
+    } else {
+        Some(super::job::take_hub_action_slot()?)
+    };
     let job = format!(
         "hub-action-{}",
         std::time::SystemTime::now()
@@ -1006,48 +1132,72 @@ fn start_hub_action_job(action: HubAction) -> Result<HubActionLaunch, String> {
     let (job, cancel) = hub_action_jobs().start(&job, format!("Running {recipe}…"));
     let job_for_thread = job.clone();
     let recipe_for_thread = recipe.to_string();
-    std::thread::spawn(move || {
-        let mut command = Command::new(&argv[0]);
-        command.args(&argv[1..]);
-        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
-        let sanitized = kyth_shared::commands::environment_for(
-            kyth_shared::commands::EnvironmentPolicy::Sanitized,
-            &inherited,
-        );
-        command.env_clear().envs(sanitized);
-        kyth_shared::system::just::configure_command(&mut command);
-        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
-            command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
-        }
-        let result = kyth_shared::system::process::run_bounded_command_cancel(
-            command,
-            timeout_for(JobTimeoutClass::HubAction),
-            &cancel,
-        );
-        let (state, detail) = match result {
-            Ok(output) => {
-                let state = if output.status.success() {
-                    "complete"
-                } else {
-                    "failed"
-                };
-                (
-                    state.to_string(),
-                    just_output_detail(&recipe_for_thread, &output),
-                )
+    let thread = std::thread::Builder::new().spawn(move || {
+        // Held to the end of the job: the next mutating launch fails at
+        // take_hub_action_slot instead of racing this one.
+        let _slot = slot;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut command = Command::new(&argv[0]);
+            command.args(&argv[1..]);
+            let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+            let sanitized = kyth_shared::commands::environment_for(
+                kyth_shared::commands::EnvironmentPolicy::Sanitized,
+                &inherited,
+            );
+            command.env_clear().envs(sanitized);
+            kyth_shared::system::just::configure_command(&mut command);
+            if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+                command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
             }
-            Err(error) => (
+            let result = kyth_shared::system::process::run_bounded_command_cancel(
+                command,
+                timeout_for(JobTimeoutClass::HubAction),
+                &cancel,
+            );
+            match result {
+                Ok(output) => {
+                    let state = if output.status.success() {
+                        "complete"
+                    } else {
+                        "failed"
+                    };
+                    (
+                        state.to_string(),
+                        just_output_detail(&recipe_for_thread, &output),
+                    )
+                }
+                Err(error) => (
+                    "failed".to_string(),
+                    format!("Could not start {recipe_for_thread}: {error}"),
+                ),
+            }
+        }));
+        let (state, detail) = result.unwrap_or_else(|_| {
+            (
                 "failed".to_string(),
-                format!("Could not start {recipe_for_thread}: {error}"),
-            ),
-        };
+                format!(
+                    "Could not complete {recipe_for_thread}: the Hub action worker stopped unexpectedly."
+                ),
+            )
+        });
         hub_action_jobs().finish(&job_for_thread, &state, detail);
     });
-    Ok(HubActionLaunch {
-        job,
-        state: "running".into(),
-        detail: format!("Running {recipe}…"),
-    })
+    match thread {
+        Ok(_) => Ok(HubActionLaunch {
+            job,
+            state: "running".into(),
+            detail: format!("Running {recipe}…"),
+        }),
+        Err(error) => {
+            // A failed spawn drops the closure — and with it the
+            // hub-action slot — but the job entry was already
+            // published; resolve it here so it is not left claiming
+            // work that never started.
+            let detail = format!("Could not start {recipe}: {error}");
+            hub_action_jobs().finish(&job, "failed", detail.clone());
+            Err(detail)
+        }
+    }
 }
 
 /// Start an Updates-page operation as a native Rust-managed job. The command
@@ -1084,74 +1234,96 @@ fn start_update_job(
     let (job, cancel) = update_jobs().start(&job, format!("{operation} is running…"));
     let job_for_thread = job.clone();
     let operation_for_thread = operation.to_string();
-    std::thread::spawn(move || {
+    let thread = std::thread::Builder::new().spawn(move || {
         // Held to the end of the job: the second mutating launch fails at
         // take_mutating_slot instead of racing this one.
         let _slot = slot;
-        let mut command = Command::new(&argv[0]);
-        command.args(&argv[1..]);
-        let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
-        let desktop = kyth_shared::commands::environment_for(
-            kyth_shared::commands::EnvironmentPolicy::Desktop,
-            &inherited,
-        );
-        command.env_clear().envs(desktop);
-        if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
-            command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
-        }
-        let result =
-            kyth_shared::system::process::run_bounded_command_cancel(command, timeout, &cancel);
-        let (state, detail) = match result {
-            Ok(output) => {
-                let mut detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-                if !stderr.is_empty() {
-                    if !detail.is_empty() {
-                        detail.push('\n');
-                    }
-                    detail.push_str(&stderr);
-                }
-                let detail: String = kyth_shared::system::process::redact_sensitive_text(
-                    kyth_shared::system::process::strip_ansi(&detail).as_str(),
-                )
-                .chars()
-                .rev()
-                .take(1200)
-                .collect::<String>()
-                .chars()
-                .rev()
-                .collect();
-                let state = if output.status.success() {
-                    "complete"
-                } else {
-                    "failed"
-                };
-                let detail = if detail.is_empty() {
-                    if output.status.success() {
-                        format!("{operation_for_thread} complete.")
-                    } else {
-                        format!(
-                            "{operation_for_thread} failed (exit code {}).",
-                            output.status.code().unwrap_or(-1)
-                        )
-                    }
-                } else {
-                    detail
-                };
-                (state.to_string(), detail)
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut command = Command::new(&argv[0]);
+            command.args(&argv[1..]);
+            let inherited = std::env::vars().collect::<std::collections::BTreeMap<_, _>>();
+            let desktop = kyth_shared::commands::environment_for(
+                kyth_shared::commands::EnvironmentPolicy::Desktop,
+                &inherited,
+            );
+            command.env_clear().envs(desktop);
+            if std::path::Path::new("/usr/bin/ksshaskpass").exists() {
+                command.env("SUDO_ASKPASS", "/usr/bin/ksshaskpass");
             }
-            Err(error) => (
+            let result =
+                kyth_shared::system::process::run_bounded_command_cancel(command, timeout, &cancel);
+            let (state, detail) = match result {
+                Ok(output) => {
+                    let mut detail = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+                    if !stderr.is_empty() {
+                        if !detail.is_empty() {
+                            detail.push('\n');
+                        }
+                        detail.push_str(&stderr);
+                    }
+                    let detail: String = kyth_shared::system::process::redact_sensitive_text(
+                        kyth_shared::system::process::strip_ansi(&detail).as_str(),
+                    )
+                    .chars()
+                    .rev()
+                    .take(1200)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect();
+                    let state = if output.status.success() {
+                        "complete"
+                    } else {
+                        "failed"
+                    };
+                    let detail = if detail.is_empty() {
+                        if output.status.success() {
+                            format!("{operation_for_thread} complete.")
+                        } else {
+                            format!(
+                                "{operation_for_thread} failed (exit code {}).",
+                                output.status.code().unwrap_or(-1)
+                            )
+                        }
+                    } else {
+                        detail
+                    };
+                    (state.to_string(), detail)
+                }
+                Err(error) => (
+                    "failed".to_string(),
+                    format!("{operation_for_thread} could not complete: {error}"),
+                ),
+            };
+            (state, detail)
+        }));
+        let (state, detail) = result.unwrap_or_else(|_| {
+            (
                 "failed".to_string(),
-                format!("{operation_for_thread} could not complete: {error}"),
-            ),
-        };
+                format!(
+                    "{operation_for_thread} could not complete: the update worker stopped unexpectedly."
+                ),
+            )
+        });
         update_jobs().finish(&job_for_thread, &state, detail);
     });
-    Ok(UpdateActionLaunch {
-        job,
-        state: "running".into(),
-        detail: format!("{operation} is running…"),
-    })
+    match thread {
+        Ok(_) => Ok(UpdateActionLaunch {
+            job,
+            state: "running".into(),
+            detail: format!("{operation} is running…"),
+        }),
+        Err(error) => {
+            // A failed spawn drops the closure — and with it the
+            // mutating slot — but the job entry was already
+            // published; resolve it here so it is not left claiming
+            // work that never started.
+            let detail = format!("{operation} could not start: {error}");
+            update_jobs().finish(&job, "failed", detail.clone());
+            Err(detail)
+        }
+    }
 }
 
 #[tauri::command]
@@ -1246,11 +1418,15 @@ pub(crate) fn bootc_switch_branch(branch: String) -> Result<UpdateActionLaunch, 
     // open the root-only lock file; kyth-bootc-guard takes it for the
     // whole switch.
     let slot = take_mutating_slot()?;
+    // LongTransfer (3600s), not the 300s download-free tier: switching
+    // to a channel whose image is not already cached pulls it — the
+    // same download staging performs — so the short tier killed
+    // legitimate switches mid-pull on slow links.
     start_update_job(
         "switch",
         "Switch channel",
         argv,
-        timeout_for(JobTimeoutClass::UpdateMutating),
+        timeout_for(JobTimeoutClass::LongTransfer),
         slot,
     )
 }
@@ -1898,6 +2074,131 @@ mod tests {
             ..current.clone()
         };
         assert_eq!(super::merge_stage_snapshot(&current, advanced).pct, 61);
+    }
+
+    #[test]
+    fn hub_action_read_only_classification_is_explicit() {
+        // Read-only recipes (status/audit/check) skip the hub-action
+        // slot; mutating ones — including any variant added later,
+        // which is mutating until classified — take it.
+        for action in [
+            HubAction::UpdateHealth,
+            HubAction::ResumeCheck,
+            HubAction::DeviceInfo,
+            HubAction::StartupApps,
+            HubAction::HealthCheck,
+            HubAction::GamingStackStatus,
+            HubAction::AiDevStatus,
+            HubAction::NvidiaStatus,
+            HubAction::ListPresets,
+            HubAction::ControllerCheck,
+            HubAction::SystemAudit,
+            HubAction::GamingAudit,
+        ] {
+            assert!(
+                action.is_read_only(),
+                "{} must stay read-only",
+                action.recipe()
+            );
+        }
+        for action in [
+            HubAction::FirmwareUpdate,
+            HubAction::ReclaimWindows,
+            HubAction::RemoveWaydroid,
+            HubAction::EnrollSecureboot,
+            HubAction::InstallSteam,
+            HubAction::GamingMode,
+            HubAction::SetupPrinter,
+            HubAction::AiDevSetup,
+        ] {
+            assert!(
+                !action.is_read_only(),
+                "{} mutates and must take the slot",
+                action.recipe()
+            );
+        }
+    }
+
+    #[test]
+    fn mutating_hub_actions_claim_the_slot_before_the_job_exists() {
+        // B-H1 pin: the claim must stay ahead of the job start in
+        // start_hub_action_job, and read-only actions must stay exempt.
+        // The behavioral single-flight test lives with the slot itself
+        // in commands::job.
+        let source = include_str!("updates.rs");
+        let start = source
+            .find("fn start_hub_action_job(")
+            .expect("hub action launcher");
+        let tail = &source[start..];
+        let end = tail.find("#[tauri::command]").unwrap_or(tail.len());
+        let body = &tail[..end];
+        let claim = body
+            .find("take_hub_action_slot()")
+            .expect("slot claim present");
+        let job_start = body
+            .find("hub_action_jobs().start(")
+            .expect("job start present");
+        assert!(
+            claim < job_start,
+            "slot must be claimed before the job exists"
+        );
+        assert!(
+            body.contains("action.is_read_only()"),
+            "read-only actions must bypass the slot"
+        );
+    }
+
+    #[test]
+    fn switch_branch_uses_the_long_transfer_timeout_tier() {
+        // M3 pin: `bootc switch` pulls an uncached channel image, so it
+        // belongs in the same 3600s tier as staging, not the 300s
+        // download-free tier that killed slow-link switches mid-pull.
+        let source = include_str!("updates.rs");
+        let start = source
+            .find("pub(crate) fn bootc_switch_branch(")
+            .expect("switch launcher");
+        let tail = &source[start..];
+        let end = tail.find("#[tauri::command]").unwrap_or(tail.len());
+        let body = &tail[..end];
+        assert!(body.contains("JobTimeoutClass::LongTransfer"));
+    }
+
+    #[test]
+    fn stage_cancel_reaps_the_child_clears_progress_and_releases_the_slot() {
+        let _serial = SLOT_TEST_LOCK.lock().unwrap();
+        let slot = take_mutating_slot().expect("take update slot");
+        let launch = start_stage_job(
+            "stage-cancel-test",
+            "Test stage cancel",
+            vec!["/bin/sh".into(), "-c".into(), "sleep 30".into()],
+            std::time::Duration::from_secs(30),
+            slot,
+        )
+        .expect("start fake update helper");
+        assert!(stage_progress().active);
+        assert!(update_jobs().cancel(&launch.job));
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            let snapshot = stage_progress();
+            // Probe-and-release: Ok means the worker dropped the slot on
+            // its way out (the temporary guard drops at the semicolon).
+            let slot_free = take_mutating_slot().is_ok();
+            if !snapshot.active && slot_free {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "cancelled stage wedged: active={}, slot_free={slot_free}",
+                snapshot.active
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let status = update_jobs()
+            .status(&launch.job)
+            .expect("job stays tracked");
+        assert_eq!(status.0, "cancelled");
+        super::UPDATE_MUTATING.store(false, std::sync::atomic::Ordering::SeqCst);
     }
 
     #[test]

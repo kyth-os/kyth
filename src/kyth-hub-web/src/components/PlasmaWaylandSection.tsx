@@ -21,7 +21,7 @@ export function PlasmaWaylandSection({ section }: { section: HubSection }) {
   const [stack, setStack] = useState<DesktopStackCheck[] | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [pendingPreset, setPendingPreset] = useState<string | null>(null);
-  const { status, busy, run } = useSectionAction("hub-action");
+  const { status, busy, run, runCancel } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;
@@ -109,13 +109,14 @@ export function PlasmaWaylandSection({ section }: { section: HubSection }) {
                     run(`preview-${preset}`, `Checking ${preset}…`, async () => {
                       const res = await applyPlasmaPreset(preset, true);
                       if (!res) return "Not available outside the Hub shell.";
-                      if (res.ok) setPendingPreset(preset);
+                      if (!res.ok) return `This preset can't be applied here: ${res.detail}`;
+                      setPendingPreset(preset);
                       return res.detail;
                     })
                   }
                 />
               ))}
-            <RecipeButton recipe="list-presets" label="List all presets" busy={busy} run={run} />
+            <RecipeButton recipe="list-presets" label="List all presets" busy={busy} run={run} runCancel={runCancel} />
             </div>
           {pendingPreset && (
             <div style={{ marginTop: 12, padding: 12, border: "1px solid var(--status-warn)", borderRadius: 10 }}>
@@ -129,8 +130,10 @@ export function PlasmaWaylandSection({ section }: { section: HubSection }) {
                   disabled={busy !== null}
                   onClick={() => run(`apply-${pendingPreset}`, `Applying ${pendingPreset}…`, async () => {
                     const res = await applyPlasmaPreset(pendingPreset, false);
+                    if (!res) return "The preset couldn't be applied — the Hub couldn't reach the display service. The preview stays open so you can retry.";
+                    if (!res.ok) return `The preset was not applied: ${res.detail} The preview stays open so you can retry or pick another preset.`;
                     setPendingPreset(null);
-                    return res?.detail ?? "Not available outside the Hub shell.";
+                    return res.detail;
                   })}
                 />
                 <ActionButton label="Cancel" disabled={busy !== null} onClick={() => setPendingPreset(null)} />

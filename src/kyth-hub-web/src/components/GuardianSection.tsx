@@ -41,7 +41,9 @@ export function GuardianSection({ section }: { section: HubSection }) {
   const [snapshot, setSnapshot] = useState<GuardianSnapshot | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const { status, busy, run } = useSectionAction("guardian");
+  const { status, busy, run, runCancel } = useSectionAction("guardian");
+  const guardianEnabled = snapshot?.enabled;
+  const guardianAutofix = snapshot?.autofix;
 
   useEffect(() => {
     let cancelled = false;
@@ -171,15 +173,21 @@ export function GuardianSection({ section }: { section: HubSection }) {
               </div>
             </div>
           )}
+          {(guardianEnabled !== undefined || guardianAutofix !== undefined) && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {guardianEnabled !== undefined && <span className={`pill ${guardianEnabled ? "pill-ok" : "pill-dim"}`}>Guardian {guardianEnabled ? "on" : "off"}</span>}
+              {guardianAutofix !== undefined && <span className={`pill ${guardianAutofix ? "pill-ok" : "pill-dim"}`}>Safe auto-fix {guardianAutofix ? "on" : "off"}</span>}
+            </div>
+          )}
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <ActionButton label={busy === "guardian-check" ? "Checking…" : "Run health check"} disabled={busy !== null} onClick={() => run("guardian-check", "Running Guardian health check…", () => refreshGuardian(false))} />
             <ActionButton label={busy === "guardian-investigate" ? "Investigating…" : "Investigate"} disabled={busy !== null} onClick={() => run("guardian-investigate", "Running deeper Guardian investigation…", () => refreshGuardian(true))} />
-            <ActionButton label={busy === "guardian-enable" ? "Enabling…" : "Enable Guardian"} disabled={busy !== null} onClick={() => run("guardian-enable", "Enabling Guardian…", () => controlGuardian("enable"))} />
-            <ActionButton label={busy === "guardian-disable" ? "Disabling…" : "Disable Guardian"} disabled={busy !== null} onClick={() => run("guardian-disable", "Disabling Guardian…", () => controlGuardian("disable"))} />
-            <ActionButton label={busy === "guardian-autofix-on" ? "Enabling…" : "Enable safe auto-fix"} disabled={busy !== null} onClick={() => run("guardian-autofix-on", "Enabling safe automatic fixes…", () => controlGuardian("autofix-on"))} />
-            <ActionButton label={busy === "guardian-autofix-off" ? "Disabling…" : "Disable auto-fix"} disabled={busy !== null} onClick={() => run("guardian-autofix-off", "Disabling automatic fixes…", () => controlGuardian("autofix-off"))} />
+            <ActionButton label={busy === "guardian-enable" ? "Enabling…" : guardianEnabled === true ? "Guardian on ✓" : "Enable Guardian"} disabled={busy !== null || guardianEnabled === true} onClick={() => run("guardian-enable", "Enabling Guardian…", () => controlGuardian("enable"))} />
+            <ActionButton label={busy === "guardian-disable" ? "Disabling…" : guardianEnabled === false ? "Guardian off ✓" : "Disable Guardian"} disabled={busy !== null || guardianEnabled === false} onClick={() => run("guardian-disable", "Disabling Guardian…", () => controlGuardian("disable"))} />
+            <ActionButton label={busy === "guardian-autofix-on" ? "Enabling…" : guardianAutofix === true ? "Auto-fix on ✓" : "Enable safe auto-fix"} disabled={busy !== null || guardianAutofix === true} onClick={() => run("guardian-autofix-on", "Enabling safe automatic fixes…", () => controlGuardian("autofix-on"))} />
+            <ActionButton label={busy === "guardian-autofix-off" ? "Disabling…" : guardianAutofix === false ? "Auto-fix off ✓" : "Disable auto-fix"} disabled={busy !== null || guardianAutofix === false} onClick={() => run("guardian-autofix-off", "Disabling automatic fixes…", () => controlGuardian("autofix-off"))} />
             {(busy?.startsWith("guardian-") ?? false) && (
-              <ActionButton label="Cancel" onClick={() => run("cancel-guardian", "Cancelling…", cancelGuardianCheck)} />
+              <ActionButton label="Cancel" onClick={() => runCancel("cancel-guardian", "Cancelling…", cancelGuardianCheck)} />
             )}
           </div>
         </div>

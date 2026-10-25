@@ -54,9 +54,7 @@ export function MoveInOverview() {
   const providerCount = readings.network?.cloudProviders.length ?? 0;
   const networkKnown = readings.network !== null;
   const vpnConnected = readings.network?.vpnConnected ?? null;
-  const overallReady = readings.readiness || readings.drives || readings.network
-    ? ready || (driveCount !== null && driveCount > 0)
-    : null;
+  const overallReady = readings.readiness ? ready : null;
 
   const readinessDetail = useMemo(() => {
     if (!loaded) return "Checking Windows volumes and migration paths…";
@@ -66,9 +64,20 @@ export function MoveInOverview() {
 
   async function refresh(): Promise<string> {
     const next = await readMoveIn();
-    setReadings(next);
+    setReadings((current) => ({
+      readiness: next.readiness ?? current.readiness,
+      drives: next.drives ?? current.drives,
+      network: next.network ?? current.network,
+      cloud: next.cloud ?? current.cloud,
+      shares: next.shares ?? current.shares,
+      vpnProfile: next.vpnProfile ?? current.vpnProfile,
+    }));
     setLoaded(true);
-    return "Move In status refreshed.";
+    const failed = [next.readiness, next.drives, next.network, next.cloud].filter((value) => value === null).length;
+    if (failed === 4) throw new Error("Couldn't refresh Move In status — every read failed. The values shown may be stale.");
+    return failed > 0
+      ? "Move In status refreshed — some readings couldn't be updated, so a few values show their last known state."
+      : "Move In status refreshed.";
   }
 
   const filesValue = driveCount === null ? "Not scanned" : driveCount === 0 ? "No Windows volume" : `${driveCount} Windows volume${driveCount === 1 ? "" : "s"}`;
@@ -81,9 +90,9 @@ export function MoveInOverview() {
   const vpnDetail = readings.vpnProfile ? `Saved profile · ${readings.vpnProfile.gateway}` : "Use the VPN connection app for saved work profiles and sign-in.";
 
   return <section className="move-in-overview" aria-label="Move In overview">
-    <div className="move-in-hero"><div><span className="move-in-eyebrow">Migration center</span><h1>Bring your digital life with you</h1><p>Move files, settings, accounts, and connected resources into KythOS from one place.</p></div><div className={`move-in-ready-chip ${overallReady === true ? "move-in-ready-ok" : overallReady === false ? "move-in-ready-warn" : "move-in-ready-unknown"}`}><span />{overallReady === true ? "Ready to move in" : overallReady === false ? "Needs preparation" : "Checking readiness"}</div></div>
+    <div className="move-in-hero"><div><span className="move-in-eyebrow">Migration center</span><h1>Bring your digital life with you</h1><p>Move files, settings, accounts, and connected resources into KythOS from one place.</p></div><div className={`move-in-ready-chip ${overallReady === true ? "move-in-ready-ok" : overallReady === false ? "move-in-ready-warn" : "move-in-ready-unknown"}`}><span />{overallReady === true ? "Ready to move in" : overallReady === false ? "Needs preparation" : loaded ? "Couldn't check readiness" : "Checking readiness"}</div></div>
     <div className="move-in-card-grid">
-      <MoveCard icon="⇢" label="Migration readiness" value={overallReady === true ? "Ready" : overallReady === false ? "Needs preparation" : "Checking…"} detail={readinessDetail} status={overallReady} />
+      <MoveCard icon="⇢" label="Migration readiness" value={overallReady === true ? "Ready" : overallReady === false ? "Needs preparation" : loaded ? "Couldn't check" : "Checking…"} detail={readinessDetail} status={overallReady} />
       <MoveCard icon="▤" label="Windows volumes" value={filesValue} detail={filesDetail} status={driveCount === null ? null : driveCount > 0} />
       <MoveCard icon="☁" label="Cloud storage" value={cloudValue} detail={cloudDetail} status={readings.network || readings.cloud ? providerCount > 0 || readings.cloud?.ok === true : null} />
       {/* Every sibling card's status dot reflects the actual data (drive

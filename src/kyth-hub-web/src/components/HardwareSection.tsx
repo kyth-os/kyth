@@ -37,10 +37,10 @@ const NOTABLE_MODULES = [
 export function HardwareSection({ section }: { section: HubSection }) {
   const [snapshot, setSnapshot] = useState<HardwareSnapshot | null>(null);
   const [modules, setModules] = useState<string[] | null>(null);
-  const [pci, setPci] = useState<Array<[string, string[]]> | null>(null);
+  const [pci, setPci] = useState<Array<[string, string[] | null]> | null>(null);
   const [firmware, setFirmware] = useState<number | null>(null);
   const [loaded, setLoaded] = useState(false);
-  const { status, busy, run } = useSectionAction("hub-action");
+  const { status, busy, run, runCancel } = useSectionAction("hub-action");
 
   useEffect(() => {
     let cancelled = false;
@@ -90,7 +90,9 @@ export function HardwareSection({ section }: { section: HubSection }) {
               {pci.map(([label, devices]) => (
                 <div key={label} style={{ marginTop: 8 }}>
                   <p style={{ margin: 0, fontSize: 12, fontWeight: 700 }}>{label}</p>
-                  {devices.length > 0 ? (
+                  {devices === null ? (
+                    <p className="card-copy" style={{ fontSize: 12, marginTop: 2 }}>couldn&apos;t check — the scan for this device class failed</p>
+                  ) : devices.length > 0 ? (
                     devices.map((device) => (
                       <p key={device} className="card-copy" style={{ fontSize: 12, marginTop: 2 }}>{device}</p>
                     ))
@@ -147,7 +149,7 @@ export function HardwareSection({ section }: { section: HubSection }) {
                   const present = new Set(loadedModules);
                   setModules(NOTABLE_MODULES.filter((mod) => present.has(mod)));
                 }
-                setPci(PCI_CLASSES.map(([, label], i) => [label, classes[i] ?? []] as [string, string[]]));
+                setPci(PCI_CLASSES.map(([, label], i) => [label, classes[i]] as [string, string[] | null]));
                 return "Hardware re-scanned.";
               })
             }
@@ -164,9 +166,9 @@ export function HardwareSection({ section }: { section: HubSection }) {
               })
             }
           />
-          <RecipeButton recipe="firmware-update" label="Apply firmware updates" busy={busy} run={run} />
-          <RecipeButton recipe="enroll-secureboot" label="Enroll Secure Boot key" busy={busy} run={run} />
-          <RecipeButton recipe="device-info" label="Full device report" busy={busy} run={run} />
+          <RecipeButton recipe="firmware-update" label="Apply firmware updates" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="enroll-secureboot" label="Enroll Secure Boot key" busy={busy} run={run} runCancel={runCancel} />
+          <RecipeButton recipe="device-info" label="Full device report" busy={busy} run={run} runCancel={runCancel} />
         </div>
         <ActionStatus status={status} />
       </div>

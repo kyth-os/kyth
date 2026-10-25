@@ -111,6 +111,45 @@ pub fn is_socket_capable_kali_box(name: &str) -> bool {
     inspect_kali_box(name).is_some_and(|info| info.socket_capable())
 }
 
+/// Fallible variant of [`inspect_kali_box`] for callers that must not
+/// disguise a failed probe as "no box": `Err` when podman could not be
+/// run at all (spawn failure, timeout) or answered with an unexpected
+/// failure; `Ok(None)` only when podman answered that the box is absent.
+pub fn probe_kali_box(name: &str) -> Result<Option<KaliContainerInfo>, String> {
+    let output = crate::system::process::run_bounded(&inspect_argv(name), Duration::from_secs(10))
+        .map_err(|err| format!("Could not check for the Kali box: {err}"))?;
+    kali_probe_outcome(
+        output.status.success(),
+        &String::from_utf8_lossy(&output.stdout),
+        &String::from_utf8_lossy(&output.stderr),
+    )
+}
+
+/// Map a finished `podman inspect` to the probe outcome. Split out so the
+/// success / absent / failed discrimination is unit-testable without a
+/// container runtime.
+fn kali_probe_outcome(
+    success: bool,
+    stdout: &str,
+    stderr: &str,
+) -> Result<Option<KaliContainerInfo>, String> {
+    if success {
+        return Ok(Some(parse_kali_inspect_output(stdout)));
+    }
+    // Podman's missing-object error is the one non-zero exit that means
+    // "no box"; every other failure (daemon down, auth, bad state) is a
+    // probe failure the caller must hear about.
+    if stderr.contains("no such object") || stderr.contains("no such container") {
+        return Ok(None);
+    }
+    let detail = stderr.trim();
+    if detail.is_empty() {
+        Err("podman inspect failed without an explanation.".to_string())
+    } else {
+        Err(format!("podman inspect failed: {detail}"))
+    }
+}
+
 /// The three Kali metapackage tiers the create card offers. Fixed set —
 /// never a free-form package name — so the create command stays a bounded
 /// template, not a generic "apt install anything" bridge.
@@ -393,6 +432,38 @@ mod tests {
         assert_eq!(
             info.security_options,
             vec!["label=disable", "seccomp=unconfined"]
+        );
+    }
+
+    #[test]
+    fn probe_outcome_maps_success_to_parsed_info() {
+        let outcome = kali_probe_outcome(
+            true,
+            "docker.io/kalilinux/kali-rolling\ntrue\nlabel=disable seccomp=unconfined \n",
+            "",
+        );
+        let info = outcome.expect("success is Ok").expect("box present");
+        assert!(info.socket_capable());
+    }
+
+    #[test]
+    fn probe_outcome_maps_missing_object_to_no_box() {
+        let outcome = kali_probe_outcome(
+            false,
+            "",
+            "Error: inspecting object: no such object: \"kali\"",
+        );
+        assert_eq!(outcome.expect("missing box is Ok"), None);
+    }
+
+    #[test]
+    fn probe_outcome_maps_other_failures_to_err() {
+        let down = kali_probe_outcome(false, "", "Cannot connect to Podman");
+        assert!(down.is_err(), "daemon failure must not read as no box");
+        let silent = kali_probe_outcome(false, "", "");
+        assert!(
+            silent.is_err(),
+            "unexplained failure must not read as no box"
         );
     }
 

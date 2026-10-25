@@ -105,14 +105,41 @@ fn validated(value: &toml::Value) -> NetworkPreset {
     }
 }
 
+/// Outcome of a checked preset load. The distinction matters for
+/// security decisions: an absent file means the defaults are a
+/// deliberate starting point, but a file that exists and cannot be read
+/// or parsed is corrupt — it cannot prove the user opted out of
+/// anything, so callers making fail-closed decisions must not treat it
+/// as the default preset.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PresetLoad {
+    /// No file at `path`: defaults apply.
+    Missing(NetworkPreset),
+    /// File present and parsed: the validated preset.
+    Loaded(NetworkPreset),
+    /// File present but unreadable or unparseable.
+    Corrupt,
+}
+
+pub fn load_checked(path: impl AsRef<Path>) -> PresetLoad {
+    let raw = match std::fs::read_to_string(path.as_ref()) {
+        Ok(raw) => raw,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return PresetLoad::Missing(NetworkPreset::default());
+        }
+        Err(_) => return PresetLoad::Corrupt,
+    };
+    match raw.parse::<toml::Value>() {
+        Ok(value) => PresetLoad::Loaded(validated(&value)),
+        Err(_) => PresetLoad::Corrupt,
+    }
+}
+
 pub fn load(path: impl AsRef<Path>) -> NetworkPreset {
-    let Ok(raw) = std::fs::read_to_string(path) else {
-        return NetworkPreset::default();
-    };
-    let Ok(value) = raw.parse::<toml::Value>() else {
-        return NetworkPreset::default();
-    };
-    validated(&value)
+    match load_checked(path) {
+        PresetLoad::Missing(preset) | PresetLoad::Loaded(preset) => preset,
+        PresetLoad::Corrupt => NetworkPreset::default(),
+    }
 }
 
 /// Enforce the preset firewall zone as firewalld's default zone, so every
@@ -371,6 +398,32 @@ mod tests {
                 vpn_fail_closed: false,
             }
         );
+    }
+
+    #[test]
+    fn load_checked_distinguishes_missing_valid_and_corrupt() {
+        let dir = tempdir().unwrap();
+        let missing = dir.path().join("network.toml");
+        assert_eq!(
+            load_checked(&missing),
+            PresetLoad::Missing(NetworkPreset::default())
+        );
+        let good = dir.path().join("good.toml");
+        std::fs::write(&good, "dns = \"google\"\nvpn_fail_closed = true\n").unwrap();
+        match load_checked(&good) {
+            PresetLoad::Loaded(preset) => {
+                assert_eq!(preset.dns, "google");
+                assert!(preset.vpn_fail_closed);
+            }
+            other => panic!("expected Loaded, got {other:?}"),
+        }
+        let bad = dir.path().join("bad.toml");
+        std::fs::write(&bad, "dns = [unclosed").unwrap();
+        assert_eq!(load_checked(&bad), PresetLoad::Corrupt);
+        // The unchecked load keeps its historical contract in every case:
+        // defaults for missing and for corrupt alike.
+        assert_eq!(load(&bad), NetworkPreset::default());
+        assert_eq!(load(&missing), NetworkPreset::default());
     }
 
     #[test]
