@@ -27,6 +27,10 @@ inputs:
     description: R2 bucket name.
     required: false
     default: kyth-releases
+  retention-keep:
+    description: Immutable ISO builds to keep per channel; older build sets are purged after upload.
+    required: false
+    default: "5"
 runs:
   using: composite
   steps:
@@ -61,6 +65,9 @@ runs:
           exit 1
         fi
 
+        # Shared with the retention step below.
+        echo "R2_ENDPOINT=${R2_ENDPOINT}" >> "${GITHUB_ENV}"
+
         ISO="${SOURCE_DIR}/${ISO_BASENAME}"
         CHANNEL="${SOURCE_DIR}/${CHANNEL_BASENAME}"
 
@@ -79,3 +86,29 @@ runs:
             --endpoint-url "${R2_ENDPOINT}" \
             --no-progress
         done
+
+    # Retention runs after a successful upload and purges immutable build
+    # sets beyond the newest few per channel (the bucket grew to ~3 TB
+    # before this existed). It must never fail a release: the plan only
+    # ever names strict immutable-build keys, and the step is
+    # continue-on-error so a retention outage cannot block publishing.
+    - name: Purge old ISO builds from R2 (keep newest ${{ inputs.retention-keep }} per channel)
+      shell: bash
+      continue-on-error: true
+      env:
+        AWS_ACCESS_KEY_ID: ${{ inputs.r2-access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.r2-secret-access-key }}
+        BUCKET: ${{ inputs.bucket }}
+        RETENTION_KEEP: ${{ inputs.retention-keep }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "${R2_ENDPOINT:-}" ]]; then
+          echo "::warning::R2_ENDPOINT is unset; skipping R2 retention."
+          exit 0
+        fi
+
+        python3 "${{ github.action_path }}/../../build_files/scripts/r2_retention.py" \
+          --bucket "${BUCKET}" \
+          --endpoint-url "${R2_ENDPOINT}" \
+          --keep "${RETENTION_KEEP}"
