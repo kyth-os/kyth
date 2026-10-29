@@ -1,7 +1,7 @@
 # Pull the upstream Fedora bootc base and apply KythOS branding.
 # Build with: docker build -t localhost/kyth-base:stable build_base/
 # Override the base via: docker build --build-arg BASE_IMAGE=quay.io/fedora/fedora-kinoite:45 build_base/
-ARG BASE_IMAGE=quay.io/fedora/fedora-kinoite:45@sha256:f0f2c99634393e3c73bbc7faae46dbd5ed451032c238564b4c1333eb81bdcaaf
+ARG BASE_IMAGE=quay.io/fedora/fedora-kinoite:45@sha256:28faa6ecfe2dca5ba461900b92c4a85feed0df26f28c1fcbeb23f956b6975c70
 FROM ${BASE_IMAGE}
 
 # testing is the Fedora 45 line. main's build.yml (which GitHub runs for
